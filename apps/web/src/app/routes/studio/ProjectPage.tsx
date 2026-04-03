@@ -1,8 +1,87 @@
+import { useState, useCallback, useRef } from "react";
 import { useParams } from "@tanstack/react-router";
-import { Rocket, FolderTree, MessageSquare, Monitor } from "lucide-react";
+import {
+  Rocket,
+  FolderTree,
+  MessageSquare,
+  Monitor,
+  Play,
+} from "lucide-react";
+import { GenerationTimeline, type TimelineStep } from "../../../components/studio";
+import { getDeferredItems } from "../../../lib/getDeferredItems";
+
+const INITIAL_STEPS: TimelineStep[] = [
+  { label: "Planning", status: "pending" },
+  { label: "Selecting approach", status: "pending" },
+  { label: "Generating files", status: "pending" },
+  { label: "Validating", status: "pending" },
+  { label: "Complete", status: "pending" },
+];
 
 export function ProjectPage() {
   const { id } = useParams({ from: "/studio/project/$id" });
+  const [prompt, setPrompt] = useState("a SaaS dashboard");
+  const [phase, setPhase] = useState(1);
+  const [completedItems, setCompletedItems] = useState<string[]>([]);
+  const [deferredItems, setDeferredItems] = useState<string[]>([]);
+  const [buildSteps, setBuildSteps] = useState<TimelineStep[]>(INITIAL_STEPS);
+  const [isComplete, setIsComplete] = useState(false);
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const deferredPromise = useRef<Promise<string[]> | null>(null);
+
+  const runBuild = useCallback(async () => {
+    if (isBuilding) return;
+    setIsBuilding(true);
+    setIsComplete(false);
+    setBuildSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "pending" })));
+
+    // Fire deferred items API call in parallel (don't await yet)
+    deferredPromise.current = getDeferredItems(prompt);
+
+    // Run steps sequentially at 800ms each
+    for (let i = 0; i < INITIAL_STEPS.length; i++) {
+      setBuildSteps((prev) =>
+        prev.map((s, j) =>
+          j === i ? { ...s, status: "running" } : s
+        )
+      );
+      await new Promise((r) => setTimeout(r, 800));
+      setBuildSteps((prev) =>
+        prev.map((s, j) =>
+          j === i ? { ...s, status: "done" } : s
+        )
+      );
+    }
+
+    // Await deferred items (should be ready by now)
+    try {
+      const items = await deferredPromise.current;
+      setDeferredItems(items);
+    } catch {
+      setDeferredItems([
+        "Advanced settings",
+        "User management",
+        "Analytics dashboard",
+      ]);
+    }
+
+    setIsComplete(true);
+    setIsBuilding(false);
+  }, [isBuilding, prompt]);
+
+  const handleImplement = useCallback(
+    (implementPrompt: string) => {
+      // Extract item name from the prompt pattern "Build X for: Y"
+      const match = implementPrompt.match(/^Build (.+) for:/);
+      if (match) {
+        setCompletedItems((prev) => [...prev, match[1]]);
+      }
+      setPhase((p) => p + 1);
+      setChatInput(implementPrompt);
+    },
+    []
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -37,8 +116,36 @@ export function ProjectPage() {
               Chat
             </div>
           </div>
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-white/20">Start a conversation</p>
+          <div className="flex flex-1 flex-col">
+            <div className="flex-1 p-4">
+              {chatInput && (
+                <div className="rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/70">
+                  {chatInput}
+                </div>
+              )}
+            </div>
+            <div className="border-t border-border p-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput || prompt}
+                  onChange={(e) => {
+                    setChatInput(e.target.value);
+                    setPrompt(e.target.value);
+                  }}
+                  placeholder="Describe what to build..."
+                  className="flex-1 rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:border-orange/50"
+                />
+                <button
+                  onClick={runBuild}
+                  disabled={isBuilding}
+                  className="flex items-center gap-2 rounded-lg bg-orange px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Play size={14} />
+                  {isBuilding ? "Building…" : "Start Build"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -50,8 +157,24 @@ export function ProjectPage() {
               Preview
             </div>
           </div>
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-white/20">No preview available</p>
+          <div className="flex-1 overflow-y-auto">
+            {buildSteps.some((s) => s.status !== "pending") ? (
+              <GenerationTimeline
+                steps={buildSteps}
+                isComplete={isComplete}
+                deferredItems={deferredItems}
+                originalPrompt={prompt}
+                phase={phase}
+                completedItems={completedItems}
+                onImplement={handleImplement}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <p className="text-sm text-white/20">
+                  Click &quot;Start Build&quot; to begin
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
