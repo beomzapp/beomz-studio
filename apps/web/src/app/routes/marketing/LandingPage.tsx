@@ -89,48 +89,43 @@ export function LandingPage() {
   const [annual, setAnnual] = useState(false);
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rafRef = useRef<number>(0);
+  const currentSizeRef = useRef(72);
   const navigate = useNavigate();
 
+  const CHAR_TIERS = [
+    { maxChars: 40, size: 72, weight: 700 },
+    { maxChars: 80, size: 56, weight: 700 },
+    { maxChars: 140, size: 40, weight: 600 },
+    { maxChars: 220, size: 28, weight: 600 },
+    { maxChars: 320, size: 20, weight: 500 },
+    { maxChars: Infinity, size: 16, weight: 400 },
+  ];
+
   const updateFontSize = useCallback(() => {
-    const el = editableRef.current;
-    if (!el) return;
-    const text = el.textContent || "";
-    setHasText(text.length > 0);
-    if (!text.length) {
-      setFontSize(72);
-      setFontWeight(700);
-      return;
-    }
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const el = editableRef.current;
+      if (!el) return;
+      const len = (el.textContent || "").length;
+      setHasText(len > 0);
 
-    // Iteratively find the largest font size that keeps text within target line count
-    const h1 = el.parentElement;
-    if (!h1) return;
-    const prevTransition = h1.style.transition;
-    h1.style.transition = "none";
-
-    const tiers = [
-      { size: 72, weight: 700, maxLines: 2 },
-      { size: 48, weight: 700, maxLines: 3 },
-      { size: 28, weight: 600, maxLines: 5 },
-      { size: 16, weight: 400, maxLines: Infinity },
-    ];
-
-    let chosen = tiers[tiers.length - 1];
-    for (const tier of tiers) {
-      h1.style.fontSize = `${tier.size}px`;
-      const lh = tier.size * 1.4;
-      // Force reflow by reading scrollHeight
-      const lines = Math.max(1, Math.round(el.scrollHeight / lh));
-      if (lines <= tier.maxLines) {
-        chosen = tier;
-        break;
+      if (!len) {
+        currentSizeRef.current = 72;
+        setFontSize(72);
+        setFontWeight(700);
+        return;
       }
-    }
 
-    h1.style.fontSize = `${chosen.size}px`;
-    h1.style.transition = prevTransition;
-    setFontSize(chosen.size);
-    setFontWeight(chosen.weight);
+      const tier = CHAR_TIERS.find((t) => len <= t.maxChars)!;
+
+      // Hysteresis: only update if size differs by more than 2px
+      if (Math.abs(tier.size - currentSizeRef.current) > 2) {
+        currentSizeRef.current = tier.size;
+        setFontSize(tier.size);
+        setFontWeight(tier.weight);
+      }
+    });
   }, []);
 
   const handleKeyDown = useCallback(
