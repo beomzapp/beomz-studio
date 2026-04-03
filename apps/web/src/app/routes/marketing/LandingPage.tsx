@@ -78,7 +78,7 @@ const PLANS = [
 ];
 
 export function LandingPage() {
-  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [sphereScale, setSphereScale] = useState(1);
   const [fontSize, setFontSize] = useState(72);
@@ -132,8 +132,10 @@ export function LandingPage() {
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
         e.preventDefault();
+        const nextIndex = (suggestionIndex + 1) % SUGGESTIONS.length;
+        setSuggestionIndex(nextIndex);
         if (editableRef.current) {
-          editableRef.current.textContent = SUGGESTIONS[suggestionIndex];
+          editableRef.current.textContent = SUGGESTIONS[nextIndex];
           // Place caret at end
           const range = document.createRange();
           const sel = window.getSelection();
@@ -143,7 +145,6 @@ export function LandingPage() {
           sel?.addRange(range);
           updateFontSize();
         }
-        setSuggestionIndex((i) => (i + 1) % SUGGESTIONS.length);
       }
       if (e.key === "Enter" && e.shiftKey) {
         e.preventDefault();
