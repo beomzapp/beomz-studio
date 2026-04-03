@@ -12,6 +12,7 @@ import { ProjectPage } from "./app/routes/studio/ProjectPage";
 import { ImagesPage } from "./app/routes/studio/ImagesPage";
 import { AgentsPage } from "./app/routes/studio/AgentsPage";
 import { SettingsPage } from "./app/routes/studio/SettingsPage";
+import { PricingPage } from "./app/routes/marketing/PricingPage";
 
 const rootRoute = createRootRoute();
 
@@ -19,6 +20,12 @@ const landingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: LandingPage,
+});
+
+const pricingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/pricing",
+  component: PricingPage,
 });
 
 const studioRoute = createRoute({
@@ -67,6 +74,7 @@ const settingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   landingRoute,
+  pricingRoute,
   studioRoute.addChildren([
     studioHomeRoute,
     projectRoute,

@@ -1,9 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import {
-  Check,
-  ToggleLeft,
-  ToggleRight,
   ListChecks,
   Sparkles,
   Loader2,
@@ -13,6 +10,7 @@ import {
 import { cn } from "../../../lib/cn";
 import { DreamItScreen } from "./DreamItScreen";
 import { PlanItScreen } from "./PlanItScreen";
+import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 type Screen = "home" | "dream" | "plan";
 
@@ -31,67 +29,6 @@ const CHAR_TIERS = [
   { maxChars: Infinity, size: 16, weight: 400 },
 ];
 
-const PLANS = [
-  {
-    name: "Free",
-    price: "$0",
-    period: "",
-    features: [
-      "1 project",
-      "Basic templates",
-      "Community support",
-      "500 AI generations/mo",
-    ],
-    cta: "Get Started",
-    popular: false,
-  },
-  {
-    name: "Pro Starter",
-    price: "$19",
-    period: "/mo",
-    features: [
-      "5 projects",
-      "All templates",
-      "Priority support",
-      "2,000 AI generations/mo",
-      "Custom domains",
-    ],
-    cta: "Start Free Trial",
-    popular: false,
-  },
-  {
-    name: "Pro Builder",
-    price: "$39",
-    period: "/mo",
-    features: [
-      "Unlimited projects",
-      "All templates",
-      "Priority support",
-      "10,000 AI generations/mo",
-      "Custom domains",
-      "Team collaboration",
-      "API access",
-    ],
-    cta: "Start Free Trial",
-    popular: true,
-  },
-  {
-    name: "Business",
-    price: "$199",
-    period: "/mo",
-    features: [
-      "Everything in Pro Builder",
-      "Unlimited AI generations",
-      "Dedicated support",
-      "SSO & SAML",
-      "Custom contracts",
-      "SLA guarantee",
-    ],
-    cta: "Contact Sales",
-    popular: false,
-  },
-];
-
 function placeCursorAtEnd(el: HTMLElement) {
   const range = document.createRange();
   const sel = window.getSelection();
@@ -103,7 +40,6 @@ function placeCursorAtEnd(el: HTMLElement) {
 
 export function LandingPage() {
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const [sphereScale, setSphereScale] = useState(1);
   const [fontSize, setFontSize] = useState(72);
   const [fontWeight, setFontWeight] = useState(700);
@@ -112,10 +48,8 @@ export function LandingPage() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [annual, setAnnual] = useState(false);
   const [screen, setScreen] = useState<Screen>("home");
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
-  const [sweeping, setSweeping] = useState(false);
   const [promptForFlow, setPromptForFlow] = useState("");
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -169,17 +103,17 @@ export function LandingPage() {
         const prompt = editableRef.current?.textContent?.trim() ?? "";
 
         if (userMode === "pro" || !planMode) {
-          // Existing behaviour — navigate to studio
-          setIsTransitioning(true);
-          setTimeout(() => navigate({ to: "/studio/home" }), 600);
+          // Navigate to studio
+          navigate({ to: "/studio/home" });
         } else {
-          // Simple mode + Plan ON
+          // Simple mode + Plan ON — scroll to floor 2
           const isVague = prompt.length < 8 || prompt === "";
           setPromptForFlow(prompt);
-          setSweeping(true);
+          setScreen(isVague ? "dream" : "plan");
+          // Smooth scroll to floor 2
           setTimeout(() => {
-            setScreen(isVague ? "dream" : "plan");
-          }, 700);
+            window.scrollTo({ top: window.innerHeight, behavior: "smooth" });
+          }, 50);
         }
       }
     },
@@ -190,7 +124,6 @@ export function LandingPage() {
     setSphereScale(1.05);
     setTimeout(() => setSphereScale(1), 150);
 
-    // Clear pill highlight when field is emptied
     const text = editableRef.current?.textContent?.trim() || "";
     if (!text) {
       setSuggestionIndex(-1);
@@ -233,7 +166,6 @@ export function LandingPage() {
       const data = await res.json();
       const enhanced = data.content[0].text;
 
-      // Typewriter animation
       el.textContent = "";
       updateFontSize();
       const words = enhanced.split(" ");
@@ -272,46 +204,37 @@ export function LandingPage() {
 
   const handleBackToHome = useCallback(() => {
     setScreen("home");
-    setSweeping(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // Dream/Plan screens
-  if (screen === "dream") {
-    return (
-      <>
-        <div className="fixed inset-0 z-20 bg-[#faf9f6]" />
-        <DreamItScreen onBack={handleBackToHome} />
-      </>
-    );
-  }
-  if (screen === "plan") {
-    return (
-      <>
-        <div className="fixed inset-0 z-20 bg-[#faf9f6]" />
-        <PlanItScreen prompt={promptForFlow} onBack={handleBackToHome} />
-      </>
-    );
-  }
-
   return (
-    <div
-      className={cn(
-        "min-h-screen bg-bg transition-transform duration-600 ease-in-out",
-        isTransitioning && "-translate-y-full"
-      )}
-    >
-      {/* Sweep overlay */}
-      <div
-        className={cn(
-          "fixed inset-0 z-20 origin-left bg-[#faf9f6] transition-transform duration-700 ease-[cubic-bezier(.77,0,.18,1)]",
-          sweeping ? "scale-x-100" : "scale-x-0"
-        )}
-      />
+    <div className="h-[200vh] overflow-x-hidden bg-bg">
+      {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
+      <div className="relative h-screen">
+        {/* Top nav */}
+        <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
+          <BeomzLogo className="h-6 w-auto text-white" />
+          <div className="flex items-center gap-6">
+            <Link
+              to="/pricing"
+              className="text-sm text-white/50 transition-colors hover:text-white/80"
+            >
+              Pricing
+            </Link>
+            <a
+              href="https://docs.beomz.com"
+              className="text-sm text-white/50 transition-colors hover:text-white/80"
+            >
+              Docs
+            </a>
+            <button className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/50 transition-colors hover:border-white/20 hover:text-white/80">
+              Sign in
+            </button>
+          </div>
+        </nav>
 
-      {/* Hero */}
-      <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4">
         {/* Simple/Pro mode toggle */}
-        <div className="absolute top-6 right-6 z-10 flex rounded-full border border-border bg-white/5 p-0.5">
+        <div className="absolute top-16 right-6 z-10 flex rounded-full border border-border bg-white/5 p-0.5">
           <button
             onClick={() => setUserMode("simple")}
             className={cn(
@@ -336,269 +259,192 @@ export function LandingPage() {
           </button>
         </div>
 
-        {/* Gradient sphere */}
-        <div
-          className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
-          style={{
-            background:
-              "radial-gradient(circle, var(--color-orange) 0%, var(--color-purple) 60%, transparent 100%)",
-            transform: `scale(${sphereScale})`,
-          }}
-        />
-
-        {/* Attached file pill */}
-        {attachedFile && (
-          <div className="relative z-10 mb-4 flex items-center gap-2 rounded-full border border-border bg-white/5 px-3 py-1.5 text-sm text-white/60">
-            <Paperclip size={14} className="text-orange" />
-            <span className="max-w-[200px] truncate">{attachedFile.name}</span>
-            <button
-              onClick={() => setAttachedFile(null)}
-              className="ml-1 text-white/30 hover:text-white"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        {/* Prompt headline — fully editable */}
-        <h1
-          className="relative z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
-          style={{
-            fontSize: `${fontSize}px`,
-            fontWeight: fontWeight,
-            lineHeight: 1.4,
-            maxHeight: "60vh",
-            transition: "font-size 0.15s ease",
-          }}
-        >
-          <span
-            ref={editableRef}
-            contentEditable
-            suppressContentEditableWarning
-            onKeyDown={handleKeyDown}
-            onInput={handleInput}
-            data-placeholder="Build "
-            className={cn(
-              "outline-none caret-orange inline-block min-w-[1ch] text-center",
-              !hasText &&
-                "before:content-[attr(data-placeholder)] before:text-white/30"
-            )}
-            style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
+        {/* Hero section */}
+        <section className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
+          {/* Gradient sphere */}
+          <div
+            className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
+            style={{
+              background:
+                "radial-gradient(circle, var(--color-orange) 0%, var(--color-purple) 60%, transparent 100%)",
+              transform: `scale(${sphereScale})`,
+            }}
           />
-        </h1>
 
-        {/* Typing toolbar */}
-        <div
-          className={cn(
-            "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
-            hasText ? "opacity-100" : "pointer-events-none opacity-0"
+          {/* Attached file pill */}
+          {attachedFile && (
+            <div className="relative z-10 mb-4 flex items-center gap-2 rounded-full border border-border bg-white/5 px-3 py-1.5 text-sm text-white/60">
+              <Paperclip size={14} className="text-orange" />
+              <span className="max-w-[200px] truncate">
+                {attachedFile.name}
+              </span>
+              <button
+                onClick={() => setAttachedFile(null)}
+                className="ml-1 text-white/30 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            </div>
           )}
-        >
-          {/* Plan mode toggle */}
-          <button
-            onClick={() => setPlanMode(!planMode)}
-            title="Review the build plan before generating"
-            className={cn(
-              "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
-              planMode
-                ? "border-orange/50 bg-orange/10 text-orange"
-                : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
-            )}
-          >
-            <ListChecks size={14} />
-            Plan
-          </button>
 
-          {/* Enhance with AI */}
-          <button
-            onClick={handleEnhance}
-            title="Enhance prompt with AI"
-            disabled={enhancing}
-            className={cn(
-              "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
-              enhanceError
-                ? "border-red-500 text-red-400"
-                : "border-border text-white/40 hover:border-purple/50 hover:text-purple"
-            )}
+          {/* Prompt headline — fully editable */}
+          <h1
+            className="relative z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
+            style={{
+              fontSize: `${fontSize}px`,
+              fontWeight: fontWeight,
+              lineHeight: 1.4,
+              maxHeight: "60vh",
+              transition: "font-size 0.15s ease",
+            }}
           >
-            {enhancing ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Sparkles size={14} />
-            )}
-            Enhance
-          </button>
-
-          {/* File upload */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
-          >
-            <Paperclip size={14} />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,.pdf,.fig"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-        </div>
-
-        {/* Suggestion strip */}
-        <div className="relative z-10 mt-4 flex flex-wrap justify-center gap-3">
-          {SUGGESTIONS.map((s, i) => (
-            <button
-              key={s}
-              onClick={() => {
-                if (editableRef.current) {
-                  if (suggestionIndex === i) {
-                    // Toggle off: clear field, deselect
-                    editableRef.current.textContent = "";
-                    setSuggestionIndex(-1);
-                  } else {
-                    // Toggle on: fill field, select
-                    editableRef.current.textContent = s;
-                    setSuggestionIndex(i);
-                    placeCursorAtEnd(editableRef.current);
-                  }
-                  editableRef.current.focus();
-                  updateFontSize();
-                }
-              }}
+            <span
+              ref={editableRef}
+              contentEditable
+              suppressContentEditableWarning
+              onKeyDown={handleKeyDown}
+              onInput={handleInput}
+              data-placeholder="Build "
               className={cn(
-                "rounded-full border px-4 py-1.5 text-sm transition-all",
-                i === suggestionIndex
+                "outline-none caret-orange inline-block min-w-[1ch] text-center",
+                !hasText &&
+                  "before:content-[attr(data-placeholder)] before:text-white/30"
+              )}
+              style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
+            />
+          </h1>
+
+          {/* Typing toolbar */}
+          <div
+            className={cn(
+              "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
+              hasText ? "opacity-100" : "pointer-events-none opacity-0"
+            )}
+          >
+            {/* Plan mode toggle */}
+            <button
+              onClick={() => setPlanMode(!planMode)}
+              title="Review the build plan before generating"
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                planMode
                   ? "border-orange/50 bg-orange/10 text-orange"
                   : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
               )}
             >
-              {s}
+              <ListChecks size={14} />
+              Plan
             </button>
-          ))}
-        </div>
 
-        <p className="relative z-10 mt-4 text-sm text-white/30">
-          <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
-            Tab
-          </kbd>{" "}
-          to autocomplete ·{" "}
-          <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
-            Enter
-          </kbd>{" "}
-          to build
-        </p>
-      </section>
-
-      {/* Pricing */}
-      <section className="mx-auto max-w-6xl px-4 py-24">
-        <h2 className="mb-4 text-center text-4xl font-bold text-white">
-          Simple, transparent pricing
-        </h2>
-        <p className="mb-8 text-center text-white/50">
-          Start free. Scale when you're ready.
-        </p>
-
-        {/* Annual toggle */}
-        <div className="mb-12 flex items-center justify-center gap-3">
-          <span
-            className={cn("text-sm", !annual ? "text-white" : "text-white/40")}
-          >
-            Monthly
-          </span>
-          <button onClick={() => setAnnual(!annual)} className="text-orange">
-            {annual ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
-          </button>
-          <span
-            className={cn("text-sm", annual ? "text-white" : "text-white/40")}
-          >
-            Annual <span className="text-orange text-xs">Save 20%</span>
-          </span>
-        </div>
-
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {PLANS.map((plan) => (
-            <div
-              key={plan.name}
+            {/* Enhance with AI */}
+            <button
+              onClick={handleEnhance}
+              title="Enhance prompt with AI"
+              disabled={enhancing}
               className={cn(
-                "relative flex flex-col rounded-2xl border p-6",
-                plan.popular
-                  ? "border-orange bg-orange/5"
-                  : "border-border bg-bg-card"
+                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                enhanceError
+                  ? "border-red-500 text-red-400"
+                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple"
               )}
             >
-              {plan.popular && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-orange px-3 py-0.5 text-xs font-semibold text-white">
-                  Most Popular
-                </span>
+              {enhancing ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Sparkles size={14} />
               )}
-              <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
-              <div className="mt-3 mb-6">
-                <span className="text-4xl font-bold text-white">
-                  {plan.price}
-                </span>
-                {plan.period && (
-                  <span className="text-white/40">{plan.period}</span>
-                )}
-              </div>
-              <ul className="mb-8 flex-1 space-y-2">
-                {plan.features.map((f) => (
-                  <li
-                    key={f}
-                    className="flex items-start gap-2 text-sm text-white/60"
-                  >
-                    <Check size={16} className="mt-0.5 shrink-0 text-orange" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
+              Enhance
+            </button>
+
+            {/* File upload */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
+            >
+              <Paperclip size={14} />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.fig"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </div>
+
+          {/* Suggestion strip */}
+          <div className="relative z-10 mt-4 flex flex-wrap justify-center gap-3">
+            {SUGGESTIONS.map((s, i) => (
               <button
+                key={s}
+                onClick={() => {
+                  if (editableRef.current) {
+                    if (suggestionIndex === i) {
+                      editableRef.current.textContent = "";
+                      setSuggestionIndex(-1);
+                    } else {
+                      editableRef.current.textContent = s;
+                      setSuggestionIndex(i);
+                      placeCursorAtEnd(editableRef.current);
+                    }
+                    editableRef.current.focus();
+                    updateFontSize();
+                  }
+                }}
                 className={cn(
-                  "w-full rounded-lg py-2.5 text-sm font-semibold transition-colors",
-                  plan.popular
-                    ? "bg-orange text-white hover:bg-orange/90"
-                    : "border border-border text-white hover:bg-white/5"
+                  "rounded-full border px-4 py-1.5 text-sm transition-all",
+                  i === suggestionIndex
+                    ? "border-orange/50 bg-orange/10 text-orange"
+                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
                 )}
               >
-                {plan.cta}
+                {s}
               </button>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-border px-4 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 sm:flex-row sm:justify-between">
-          <div className="flex flex-wrap justify-center gap-6 text-sm text-white/40">
-            <a
-              href="https://beomz.com"
-              className="hover:text-white transition-colors"
-            >
-              beomz.com
-            </a>
-            <a
-              href="https://crypto.beomz.com"
-              className="hover:text-white transition-colors"
-            >
-              crypto.beomz.com
-            </a>
-            <a
-              href="https://token.beomz.com"
-              className="hover:text-white transition-colors"
-            >
-              token.beomz.com
-            </a>
-            <a
-              href="https://token.beomz.com"
-              className="hover:text-white transition-colors"
-            >
-              $BEOMZ token
-            </a>
+            ))}
           </div>
-          <p className="text-sm text-white/30">&copy; Beomz 2026</p>
+
+          <p className="relative z-10 mt-4 text-sm text-white/30">
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
+              Tab
+            </kbd>{" "}
+            to autocomplete ·{" "}
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
+              Enter
+            </kbd>{" "}
+            to build
+          </p>
+        </section>
+
+        {/* Mini footer pinned to bottom of viewport */}
+        <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-3 text-center">
+          <p className="text-[11px] text-white/20">
+            <a href="https://beomz.com" className="hover:text-white/40 transition-colors">beomz.com</a>
+            {" · "}
+            <a href="https://crypto.beomz.com" className="hover:text-white/40 transition-colors">crypto.beomz.com</a>
+            {" · "}
+            <a href="https://token.beomz.com" className="hover:text-white/40 transition-colors">token.beomz.com</a>
+            {" · "}
+            <a href="https://token.beomz.com" className="hover:text-white/40 transition-colors">$BEOMZ token</a>
+            {" · "}
+            <span>&copy; Beomz 2026</span>
+          </p>
         </div>
-      </footer>
+      </div>
+
+      {/* ===== FLOOR 2: Dream/Plan screen (100vh) ===== */}
+      <div className="h-screen bg-[#faf9f6]">
+        {screen === "dream" && <DreamItScreen onBack={handleBackToHome} />}
+        {screen === "plan" && (
+          <PlanItScreen prompt={promptForFlow} onBack={handleBackToHome} />
+        )}
+        {screen === "home" && (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-[rgba(0,0,0,0.2)]">
+              Enable Plan mode and press Enter to start
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
