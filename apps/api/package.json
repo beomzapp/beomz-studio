@@ -9,7 +9,11 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@beomz-studio/contracts": "workspace:*",
+    "@beomz-studio/operations": "workspace:*",
     "@beomz-studio/studio-db": "workspace:*",
+    "@beomz-studio/templates": "workspace:*",
+    "@beomz-studio/temporal-worker": "workspace:*",
     "@hono/node-server": "^1.13.8",
     "hono": "^4.6.12",
     "jose": "^5.10.0",
