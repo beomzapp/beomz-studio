@@ -5,6 +5,8 @@ import {
   ToggleLeft,
   ToggleRight,
   ListChecks,
+  Sparkles,
+  Loader2,
   Paperclip,
   X,
 } from "lucide-react";
@@ -14,6 +16,15 @@ const SUGGESTIONS = [
   "a SaaS dashboard",
   "a marketing website",
   "a task manager",
+];
+
+const CHAR_TIERS = [
+  { maxChars: 40, size: 72, weight: 700 },
+  { maxChars: 80, size: 56, weight: 700 },
+  { maxChars: 140, size: 40, weight: 600 },
+  { maxChars: 220, size: 28, weight: 600 },
+  { maxChars: 320, size: 20, weight: 500 },
+  { maxChars: Infinity, size: 16, weight: 400 },
 ];
 
 const PLANS = [
@@ -77,78 +88,69 @@ const PLANS = [
   },
 ];
 
+function placeCursorAtEnd(el: HTMLElement) {
+  const range = document.createRange();
+  const sel = window.getSelection();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
 export function LandingPage() {
-  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [sphereScale, setSphereScale] = useState(1);
   const [fontSize, setFontSize] = useState(72);
   const [fontWeight, setFontWeight] = useState(700);
   const [hasText, setHasText] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [annual, setAnnual] = useState(false);
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rafRef = useRef<number>(0);
+  const currentSizeRef = useRef(72);
   const navigate = useNavigate();
 
   const updateFontSize = useCallback(() => {
-    const el = editableRef.current;
-    if (!el) return;
-    const text = el.textContent || "";
-    setHasText(text.length > 0);
-    if (!text.length) {
-      setFontSize(72);
-      setFontWeight(700);
-      return;
-    }
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const el = editableRef.current;
+      if (!el) return;
+      const len = (el.textContent || "").length;
+      setHasText(len > 0);
 
-    // Iteratively find the largest font size that keeps text within target line count
-    const h1 = el.parentElement;
-    if (!h1) return;
-    const prevTransition = h1.style.transition;
-    h1.style.transition = "none";
-
-    const tiers = [
-      { size: 72, weight: 700, maxLines: 2 },
-      { size: 48, weight: 700, maxLines: 3 },
-      { size: 28, weight: 600, maxLines: 5 },
-      { size: 16, weight: 400, maxLines: Infinity },
-    ];
-
-    let chosen = tiers[tiers.length - 1];
-    for (const tier of tiers) {
-      h1.style.fontSize = `${tier.size}px`;
-      const lh = tier.size * 1.4;
-      // Force reflow by reading scrollHeight
-      const lines = Math.max(1, Math.round(el.scrollHeight / lh));
-      if (lines <= tier.maxLines) {
-        chosen = tier;
-        break;
+      if (!len) {
+        currentSizeRef.current = 72;
+        setFontSize(72);
+        setFontWeight(700);
+        return;
       }
-    }
 
-    h1.style.fontSize = `${chosen.size}px`;
-    h1.style.transition = prevTransition;
-    setFontSize(chosen.size);
-    setFontWeight(chosen.weight);
+      const tier = CHAR_TIERS.find((t) => len <= t.maxChars)!;
+
+      if (Math.abs(tier.size - currentSizeRef.current) > 2) {
+        currentSizeRef.current = tier.size;
+        setFontSize(tier.size);
+        setFontWeight(tier.weight);
+      }
+    });
   }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
         e.preventDefault();
+        const nextIndex = (suggestionIndex + 1) % SUGGESTIONS.length;
+        setSuggestionIndex(nextIndex);
         if (editableRef.current) {
-          editableRef.current.textContent = SUGGESTIONS[suggestionIndex];
-          // Place caret at end
-          const range = document.createRange();
-          const sel = window.getSelection();
-          range.selectNodeContents(editableRef.current);
-          range.collapse(false);
-          sel?.removeAllRanges();
-          sel?.addRange(range);
+          editableRef.current.textContent = SUGGESTIONS[nextIndex];
+          placeCursorAtEnd(editableRef.current);
           updateFontSize();
         }
-        setSuggestionIndex((i) => (i + 1) % SUGGESTIONS.length);
       }
       if (e.key === "Enter" && e.shiftKey) {
         e.preventDefault();
@@ -166,8 +168,73 @@ export function LandingPage() {
   const handleInput = useCallback(() => {
     setSphereScale(1.05);
     setTimeout(() => setSphereScale(1), 150);
+
+    // Clear pill highlight when field is emptied
+    const text = editableRef.current?.textContent?.trim() || "";
+    if (!text) {
+      setSuggestionIndex(-1);
+    }
+
     updateFontSize();
   }, [updateFontSize]);
+
+  const handleEnhance = useCallback(async () => {
+    const el = editableRef.current;
+    if (!el || enhancing) return;
+    const promptText = el.textContent?.trim();
+    if (!promptText) return;
+
+    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    if (!apiKey) return;
+
+    setEnhancing(true);
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 200,
+          system:
+            "You are a prompt enhancer for an AI app/website builder. Take the user's rough idea and rewrite it as a clear, detailed build prompt in 1-2 sentences. Include the type of app, key features, and target user. Keep it concise but specific. Return ONLY the enhanced prompt, no preamble.",
+          messages: [{ role: "user", content: promptText }],
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+
+      const data = await res.json();
+      const enhanced = data.content[0].text;
+
+      // Typewriter animation
+      el.textContent = "";
+      updateFontSize();
+      const words = enhanced.split(" ");
+      let i = 0;
+      const interval = setInterval(() => {
+        if (i < words.length) {
+          el.textContent += (i > 0 ? " " : "") + words[i];
+          updateFontSize();
+          i++;
+        } else {
+          clearInterval(interval);
+          setEnhancing(false);
+          placeCursorAtEnd(el);
+          el.focus();
+        }
+      }, 40);
+    } catch {
+      setEnhancing(false);
+      setEnhanceError(true);
+      setTimeout(() => setEnhanceError(false), 1000);
+    }
+  }, [enhancing, updateFontSize]);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,6 +331,26 @@ export function LandingPage() {
             Plan
           </button>
 
+          {/* Enhance with AI */}
+          <button
+            onClick={handleEnhance}
+            title="Enhance prompt with AI"
+            disabled={enhancing}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+              enhanceError
+                ? "border-red-500 text-red-400"
+                : "border-border text-white/40 hover:border-purple/50 hover:text-purple"
+            )}
+          >
+            {enhancing ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Sparkles size={14} />
+            )}
+            Enhance
+          </button>
+
           {/* File upload */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -286,9 +373,17 @@ export function LandingPage() {
             <button
               key={s}
               onClick={() => {
-                setSuggestionIndex(i);
                 if (editableRef.current) {
-                  editableRef.current.textContent = s;
+                  if (suggestionIndex === i) {
+                    // Toggle off: clear field, deselect
+                    editableRef.current.textContent = "";
+                    setSuggestionIndex(-1);
+                  } else {
+                    // Toggle on: fill field, select
+                    editableRef.current.textContent = s;
+                    setSuggestionIndex(i);
+                    placeCursorAtEnd(editableRef.current);
+                  }
                   editableRef.current.focus();
                   updateFontSize();
                 }
