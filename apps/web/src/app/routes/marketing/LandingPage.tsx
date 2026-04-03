@@ -1,6 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, ToggleLeft, ToggleRight } from "lucide-react";
+import {
+  Check,
+  ToggleLeft,
+  ToggleRight,
+  ListChecks,
+  Paperclip,
+  X,
+} from "lucide-react";
 import { cn } from "../../../lib/cn";
 
 const SUGGESTIONS = [
@@ -74,29 +81,102 @@ export function LandingPage() {
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [sphereScale, setSphereScale] = useState(1);
+  const [fontSize, setFontSize] = useState(72);
+  const [fontWeight, setFontWeight] = useState(700);
+  const [hasText, setHasText] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [annual, setAnnual] = useState(false);
   const editableRef = useRef<HTMLSpanElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const updateFontSize = useCallback(() => {
+    const el = editableRef.current;
+    if (!el) return;
+    const text = el.textContent || "";
+    setHasText(text.length > 0);
+    if (!text.length) {
+      setFontSize(72);
+      setFontWeight(700);
+      return;
+    }
+
+    // Iteratively find the largest font size that keeps text within target line count
+    const h1 = el.parentElement;
+    if (!h1) return;
+    const prevTransition = h1.style.transition;
+    h1.style.transition = "none";
+
+    const tiers = [
+      { size: 72, weight: 700, maxLines: 2 },
+      { size: 48, weight: 700, maxLines: 3 },
+      { size: 28, weight: 600, maxLines: 5 },
+      { size: 16, weight: 400, maxLines: Infinity },
+    ];
+
+    let chosen = tiers[tiers.length - 1];
+    for (const tier of tiers) {
+      h1.style.fontSize = `${tier.size}px`;
+      const lh = tier.size * 1.4;
+      // Force reflow by reading scrollHeight
+      const lines = Math.max(1, Math.round(el.scrollHeight / lh));
+      if (lines <= tier.maxLines) {
+        chosen = tier;
+        break;
+      }
+    }
+
+    h1.style.fontSize = `${chosen.size}px`;
+    h1.style.transition = prevTransition;
+    setFontSize(chosen.size);
+    setFontWeight(chosen.weight);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
         e.preventDefault();
+        if (editableRef.current) {
+          editableRef.current.textContent = SUGGESTIONS[suggestionIndex];
+          // Place caret at end
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.selectNodeContents(editableRef.current);
+          range.collapse(false);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+          updateFontSize();
+        }
         setSuggestionIndex((i) => (i + 1) % SUGGESTIONS.length);
       }
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        document.execCommand("insertLineBreak");
+        updateFontSize();
+      } else if (e.key === "Enter") {
         e.preventDefault();
         setIsTransitioning(true);
         setTimeout(() => navigate({ to: "/studio/home" }), 600);
       }
     },
-    [navigate]
+    [navigate, suggestionIndex, updateFontSize]
   );
 
   const handleInput = useCallback(() => {
     setSphereScale(1.05);
     setTimeout(() => setSphereScale(1), 150);
-  }, []);
+    updateFontSize();
+  }, [updateFontSize]);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) setAttachedFile(file);
+      e.target.value = "";
+    },
+    []
+  );
 
   useEffect(() => {
     editableRef.current?.focus();
@@ -121,22 +201,87 @@ export function LandingPage() {
           }}
         />
 
-        {/* Prompt headline */}
-        <h1 className="relative z-10 text-center font-sans font-bold text-white leading-tight" style={{ fontSize: "clamp(3rem, 6vw, 5rem)" }}>
-          <span>Build </span>
+        {/* Attached file pill */}
+        {attachedFile && (
+          <div className="relative z-10 mb-4 flex items-center gap-2 rounded-full border border-border bg-white/5 px-3 py-1.5 text-sm text-white/60">
+            <Paperclip size={14} className="text-orange" />
+            <span className="max-w-[200px] truncate">{attachedFile.name}</span>
+            <button
+              onClick={() => setAttachedFile(null)}
+              className="ml-1 text-white/30 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Prompt headline — fully editable */}
+        <h1
+          className="relative z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
+          style={{
+            fontSize: `${fontSize}px`,
+            fontWeight: fontWeight,
+            lineHeight: 1.4,
+            maxHeight: "60vh",
+            transition: "font-size 0.15s ease",
+          }}
+        >
           <span
             ref={editableRef}
             contentEditable
             suppressContentEditableWarning
             onKeyDown={handleKeyDown}
             onInput={handleInput}
-            className="outline-none caret-orange text-white/90"
-            style={{ minWidth: "1ch", display: "inline-block" }}
+            data-placeholder="Build "
+            className={cn(
+              "outline-none caret-orange inline-block min-w-[1ch] text-center",
+              !hasText &&
+                "before:content-[attr(data-placeholder)] before:text-white/30"
+            )}
+            style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
           />
         </h1>
 
+        {/* Typing toolbar */}
+        <div
+          className={cn(
+            "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
+            hasText ? "opacity-100" : "pointer-events-none opacity-0"
+          )}
+        >
+          {/* Plan mode toggle */}
+          <button
+            onClick={() => setPlanMode(!planMode)}
+            title="Review the build plan before generating"
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+              planMode
+                ? "border-orange/50 bg-orange/10 text-orange"
+                : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
+            )}
+          >
+            <ListChecks size={14} />
+            Plan
+          </button>
+
+          {/* File upload */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
+          >
+            <Paperclip size={14} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,.pdf,.fig"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+        </div>
+
         {/* Suggestion strip */}
-        <div className="relative z-10 mt-6 flex flex-wrap justify-center gap-3">
+        <div className="relative z-10 mt-4 flex flex-wrap justify-center gap-3">
           {SUGGESTIONS.map((s, i) => (
             <button
               key={s}
@@ -145,6 +290,7 @@ export function LandingPage() {
                 if (editableRef.current) {
                   editableRef.current.textContent = s;
                   editableRef.current.focus();
+                  updateFontSize();
                 }
               }}
               className={cn(
@@ -160,7 +306,14 @@ export function LandingPage() {
         </div>
 
         <p className="relative z-10 mt-4 text-sm text-white/30">
-          Press <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">Tab</kbd> to cycle suggestions · <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">Enter</kbd> to start building
+          <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
+            Tab
+          </kbd>{" "}
+          to autocomplete ·{" "}
+          <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
+            Enter
+          </kbd>{" "}
+          to build
         </p>
       </section>
 
@@ -175,11 +328,17 @@ export function LandingPage() {
 
         {/* Annual toggle */}
         <div className="mb-12 flex items-center justify-center gap-3">
-          <span className={cn("text-sm", !annual ? "text-white" : "text-white/40")}>Monthly</span>
+          <span
+            className={cn("text-sm", !annual ? "text-white" : "text-white/40")}
+          >
+            Monthly
+          </span>
           <button onClick={() => setAnnual(!annual)} className="text-orange">
             {annual ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
           </button>
-          <span className={cn("text-sm", annual ? "text-white" : "text-white/40")}>
+          <span
+            className={cn("text-sm", annual ? "text-white" : "text-white/40")}
+          >
             Annual <span className="text-orange text-xs">Save 20%</span>
           </span>
         </div>
@@ -202,14 +361,19 @@ export function LandingPage() {
               )}
               <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
               <div className="mt-3 mb-6">
-                <span className="text-4xl font-bold text-white">{plan.price}</span>
+                <span className="text-4xl font-bold text-white">
+                  {plan.price}
+                </span>
                 {plan.period && (
                   <span className="text-white/40">{plan.period}</span>
                 )}
               </div>
               <ul className="mb-8 flex-1 space-y-2">
                 {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-sm text-white/60">
+                  <li
+                    key={f}
+                    className="flex items-start gap-2 text-sm text-white/60"
+                  >
                     <Check size={16} className="mt-0.5 shrink-0 text-orange" />
                     {f}
                   </li>
@@ -234,10 +398,30 @@ export function LandingPage() {
       <footer className="border-t border-border px-4 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 sm:flex-row sm:justify-between">
           <div className="flex flex-wrap justify-center gap-6 text-sm text-white/40">
-            <a href="https://beomz.com" className="hover:text-white transition-colors">beomz.com</a>
-            <a href="https://crypto.beomz.com" className="hover:text-white transition-colors">crypto.beomz.com</a>
-            <a href="https://token.beomz.com" className="hover:text-white transition-colors">token.beomz.com</a>
-            <a href="https://token.beomz.com" className="hover:text-white transition-colors">$BEOMZ token</a>
+            <a
+              href="https://beomz.com"
+              className="hover:text-white transition-colors"
+            >
+              beomz.com
+            </a>
+            <a
+              href="https://crypto.beomz.com"
+              className="hover:text-white transition-colors"
+            >
+              crypto.beomz.com
+            </a>
+            <a
+              href="https://token.beomz.com"
+              className="hover:text-white transition-colors"
+            >
+              token.beomz.com
+            </a>
+            <a
+              href="https://token.beomz.com"
+              className="hover:text-white transition-colors"
+            >
+              $BEOMZ token
+            </a>
           </div>
           <p className="text-sm text-white/30">&copy; Beomz 2026</p>
         </div>
