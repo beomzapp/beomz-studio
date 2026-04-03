@@ -1,0 +1,23 @@
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+
+import { apiConfig } from "./config.js";
+import authLoginRoute from "./routes/auth/login.js";
+import authMeRoute from "./routes/auth/me.js";
+
+const app = new Hono();
+
+app.get("/health", (c) => c.json({ ok: true }));
+app.route("/auth/login", authLoginRoute);
+app.route("/auth/me", authMeRoute);
+
+serve(
+  {
+    fetch: app.fetch,
+    port: apiConfig.PORT,
+  },
+  (info) => {
+    // eslint-disable-next-line no-console
+    console.log(`Beomz Studio API listening on http://localhost:${info.port}`);
+  },
+);
