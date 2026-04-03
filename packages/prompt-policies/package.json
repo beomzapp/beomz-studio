@@ -1,5 +1,5 @@
 {
-  "name": "@beomz-studio/studio-db",
+  "name": "@beomz-studio/prompt-policies",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,9 +9,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@beomz-studio/contracts": "workspace:*",
-    "@supabase/supabase-js": "^2.57.0",
-    "zod": "^3.24.1"
+    "@beomz-studio/contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -3,6 +3,12 @@ import {
   type PostgrestSingleResponse,
   type SupabaseClient,
 } from "@supabase/supabase-js";
+import type {
+  GenerationStatus,
+  ProjectStatus,
+  StudioFile,
+  TemplateId,
+} from "@beomz-studio/contracts";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -39,10 +45,28 @@ export interface ProjectRow extends Record<string, unknown> {
   id: string;
   org_id: string;
   name: string;
-  template: string;
-  status: string;
+  template: TemplateId;
+  status: ProjectStatus;
   created_at: string;
   updated_at: string;
+}
+
+export interface GenerationRow extends Record<string, unknown> {
+  id: string;
+  project_id: string;
+  template_id: TemplateId;
+  operation_id: string;
+  status: GenerationStatus;
+  prompt: string;
+  started_at: string;
+  completed_at: string | null;
+  output_paths: readonly string[];
+  summary: string | null;
+  error: string | null;
+  preview_entry_path: string | null;
+  warnings: readonly string[];
+  files: readonly StudioFile[];
+  metadata: Record<string, unknown>;
 }
 
 export interface UserInsert extends Record<string, unknown> {
@@ -90,8 +114,8 @@ export interface ProjectInsert extends Record<string, unknown> {
   id?: string;
   org_id: string;
   name: string;
-  template: string;
-  status: string;
+  template: TemplateId;
+  status: ProjectStatus;
   created_at?: string;
   updated_at?: string;
 }
@@ -99,10 +123,45 @@ export interface ProjectInsert extends Record<string, unknown> {
 export interface ProjectUpdate extends Record<string, unknown> {
   org_id?: string;
   name?: string;
-  template?: string;
-  status?: string;
+  template?: TemplateId;
+  status?: ProjectStatus;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface GenerationInsert extends Record<string, unknown> {
+  id?: string;
+  project_id: string;
+  template_id: TemplateId;
+  operation_id: string;
+  status: GenerationStatus;
+  prompt: string;
+  started_at?: string;
+  completed_at?: string | null;
+  output_paths?: readonly string[];
+  summary?: string | null;
+  error?: string | null;
+  preview_entry_path?: string | null;
+  warnings?: readonly string[];
+  files?: readonly StudioFile[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface GenerationUpdate extends Record<string, unknown> {
+  project_id?: string;
+  template_id?: TemplateId;
+  operation_id?: string;
+  status?: GenerationStatus;
+  prompt?: string;
+  started_at?: string;
+  completed_at?: string | null;
+  output_paths?: readonly string[];
+  summary?: string | null;
+  error?: string | null;
+  preview_entry_path?: string | null;
+  warnings?: readonly string[];
+  files?: readonly StudioFile[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface StudioDatabase {
@@ -128,6 +187,12 @@ export interface StudioDatabase {
         Row: ProjectRow;
         Insert: ProjectInsert;
         Update: ProjectUpdate;
+        Relationships: [];
+      };
+      generations: {
+        Row: GenerationRow;
+        Insert: GenerationInsert;
+        Update: GenerationUpdate;
         Relationships: [];
       };
       users: {
@@ -244,6 +309,83 @@ export class StudioDbClient {
     }
 
     return response.data;
+  }
+
+  async createProject(
+    input: ProjectInsert,
+  ): Promise<ProjectRow> {
+    const response = await this.client
+      .from("projects")
+      .insert(input)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async findProjectById(id: string): Promise<ProjectRow | null> {
+    const response = await this.client
+      .from("projects")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async updateProject(id: string, patch: ProjectUpdate): Promise<ProjectRow> {
+    const response = await this.client
+      .from("projects")
+      .update({
+        ...patch,
+        updated_at: patch.updated_at ?? new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async createGeneration(
+    input: GenerationInsert,
+  ): Promise<GenerationRow> {
+    const response = await this.client
+      .from("generations")
+      .insert(input)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async findGenerationById(id: string): Promise<GenerationRow | null> {
+    const response = await this.client
+      .from("generations")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async updateGeneration(id: string, patch: GenerationUpdate): Promise<GenerationRow> {
+    const response = await this.client
+      .from("generations")
+      .update(patch)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
   }
 }
 

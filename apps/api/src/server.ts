@@ -4,12 +4,16 @@ import { Hono } from "hono";
 import { apiConfig } from "./config.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
+import buildsStartRoute from "./routes/builds/start.js";
+import buildsStatusRoute from "./routes/builds/status.js";
 
 const app = new Hono();
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);
+app.route("/builds/start", buildsStartRoute);
+app.route("/builds/:id/status", buildsStatusRoute);
 
 serve(
   {
