@@ -12,14 +12,14 @@ const envSchema = z.object({
 
 const studioDbConfig = envSchema.parse(process.env);
 
-export interface UserRow {
+export interface UserRow extends Record<string, unknown> {
   id: string;
   platform_user_id: string;
   email: string;
   created_at: string;
 }
 
-export interface OrgRow {
+export interface OrgRow extends Record<string, unknown> {
   id: string;
   owner_id: string;
   name: string;
@@ -28,14 +28,14 @@ export interface OrgRow {
   created_at: string;
 }
 
-export interface OrgMembershipRow {
+export interface OrgMembershipRow extends Record<string, unknown> {
   org_id: string;
   user_id: string;
   role: string;
   created_at: string;
 }
 
-export interface ProjectRow {
+export interface ProjectRow extends Record<string, unknown> {
   id: string;
   org_id: string;
   name: string;
@@ -45,19 +45,19 @@ export interface ProjectRow {
   updated_at: string;
 }
 
-export interface UserInsert {
+export interface UserInsert extends Record<string, unknown> {
   id?: string;
   email: string;
   platform_user_id: string;
   created_at?: string;
 }
 
-export interface UserUpdate {
+export interface UserUpdate extends Record<string, unknown> {
   email?: string;
   platform_user_id?: string;
 }
 
-export interface OrgInsert {
+export interface OrgInsert extends Record<string, unknown> {
   id?: string;
   owner_id: string;
   name: string;
@@ -66,27 +66,27 @@ export interface OrgInsert {
   created_at?: string;
 }
 
-export interface OrgUpdate {
+export interface OrgUpdate extends Record<string, unknown> {
   owner_id?: string;
   name?: string;
   plan?: string;
   credits?: number;
 }
 
-export interface OrgMembershipInsert {
+export interface OrgMembershipInsert extends Record<string, unknown> {
   org_id: string;
   user_id: string;
   role: string;
   created_at?: string;
 }
 
-export interface OrgMembershipUpdate {
+export interface OrgMembershipUpdate extends Record<string, unknown> {
   org_id?: string;
   user_id?: string;
   role?: string;
 }
 
-export interface ProjectInsert {
+export interface ProjectInsert extends Record<string, unknown> {
   id?: string;
   org_id: string;
   name: string;
@@ -96,7 +96,7 @@ export interface ProjectInsert {
   updated_at?: string;
 }
 
-export interface ProjectUpdate {
+export interface ProjectUpdate extends Record<string, unknown> {
   org_id?: string;
   name?: string;
   template?: string;

@@ -19,3 +19,10 @@ export interface OrgContext {
   org: OrgRow;
   user: UserRow;
 }
+
+declare module "hono" {
+  interface ContextVariableMap {
+    orgContext: OrgContext;
+    platformJwt: PlatformJwtPayload;
+  }
+}
