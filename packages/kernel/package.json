@@ -1,0 +1,21 @@
+{
+  "name": "@beomz-studio/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@beomz-studio/contracts": "workspace:*",
+    "@beomz-studio/templates": "workspace:*",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.14",
+    "typescript": "^5.7.2"
+  }
+}
