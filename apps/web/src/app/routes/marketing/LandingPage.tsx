@@ -11,6 +11,10 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
+import { DreamItScreen } from "./DreamItScreen";
+import { PlanItScreen } from "./PlanItScreen";
+
+type Screen = "home" | "dream" | "plan";
 
 const SUGGESTIONS = [
   "a SaaS dashboard",
@@ -109,6 +113,10 @@ export function LandingPage() {
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [annual, setAnnual] = useState(false);
+  const [screen, setScreen] = useState<Screen>("home");
+  const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
+  const [sweeping, setSweeping] = useState(false);
+  const [promptForFlow, setPromptForFlow] = useState("");
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rafRef = useRef<number>(0);
@@ -158,11 +166,24 @@ export function LandingPage() {
         updateFontSize();
       } else if (e.key === "Enter") {
         e.preventDefault();
-        setIsTransitioning(true);
-        setTimeout(() => navigate({ to: "/studio/home" }), 600);
+        const prompt = editableRef.current?.textContent?.trim() ?? "";
+
+        if (userMode === "pro" || !planMode) {
+          // Existing behaviour — navigate to studio
+          setIsTransitioning(true);
+          setTimeout(() => navigate({ to: "/studio/home" }), 600);
+        } else {
+          // Simple mode + Plan ON
+          const isVague = prompt.length < 8 || prompt === "";
+          setPromptForFlow(prompt);
+          setSweeping(true);
+          setTimeout(() => {
+            setScreen(isVague ? "dream" : "plan");
+          }, 700);
+        }
       }
     },
-    [navigate, suggestionIndex, updateFontSize]
+    [navigate, suggestionIndex, updateFontSize, userMode, planMode]
   );
 
   const handleInput = useCallback(() => {
@@ -249,6 +270,29 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
+  const handleBackToHome = useCallback(() => {
+    setScreen("home");
+    setSweeping(false);
+  }, []);
+
+  // Dream/Plan screens
+  if (screen === "dream") {
+    return (
+      <>
+        <div className="fixed inset-0 z-20 bg-[#faf9f6]" />
+        <DreamItScreen onBack={handleBackToHome} />
+      </>
+    );
+  }
+  if (screen === "plan") {
+    return (
+      <>
+        <div className="fixed inset-0 z-20 bg-[#faf9f6]" />
+        <PlanItScreen prompt={promptForFlow} onBack={handleBackToHome} />
+      </>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -256,8 +300,42 @@ export function LandingPage() {
         isTransitioning && "-translate-y-full"
       )}
     >
+      {/* Sweep overlay */}
+      <div
+        className={cn(
+          "fixed inset-0 z-20 origin-left bg-[#faf9f6] transition-transform duration-700 ease-[cubic-bezier(.77,0,.18,1)]",
+          sweeping ? "scale-x-100" : "scale-x-0"
+        )}
+      />
+
       {/* Hero */}
       <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4">
+        {/* Simple/Pro mode toggle */}
+        <div className="absolute top-6 right-6 z-10 flex rounded-full border border-border bg-white/5 p-0.5">
+          <button
+            onClick={() => setUserMode("simple")}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-medium transition-all",
+              userMode === "simple"
+                ? "bg-orange text-white"
+                : "text-white/40 hover:text-white/60"
+            )}
+          >
+            Simple
+          </button>
+          <button
+            onClick={() => setUserMode("pro")}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-medium transition-all",
+              userMode === "pro"
+                ? "bg-orange text-white"
+                : "text-white/40 hover:text-white/60"
+            )}
+          >
+            Pro
+          </button>
+        </div>
+
         {/* Gradient sphere */}
         <div
           className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
