@@ -81,7 +81,8 @@ export function LandingPage() {
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [sphereScale, setSphereScale] = useState(1);
-  const [fontSize, setFontSize] = useState(80);
+  const [fontSize, setFontSize] = useState(72);
+  const [fontWeight, setFontWeight] = useState(700);
   const [hasText, setHasText] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -91,10 +92,45 @@ export function LandingPage() {
   const navigate = useNavigate();
 
   const updateFontSize = useCallback(() => {
-    const text = editableRef.current?.textContent || "";
-    const newSize = Math.max(36, 80 - text.length * 0.22);
-    setFontSize(newSize);
+    const el = editableRef.current;
+    if (!el) return;
+    const text = el.textContent || "";
     setHasText(text.length > 0);
+    if (!text.length) {
+      setFontSize(72);
+      setFontWeight(700);
+      return;
+    }
+
+    // Iteratively find the largest font size that keeps text within target line count
+    const h1 = el.parentElement;
+    if (!h1) return;
+    const prevTransition = h1.style.transition;
+    h1.style.transition = "none";
+
+    const tiers = [
+      { size: 72, weight: 700, maxLines: 2 },
+      { size: 48, weight: 700, maxLines: 3 },
+      { size: 28, weight: 600, maxLines: 5 },
+      { size: 16, weight: 400, maxLines: Infinity },
+    ];
+
+    let chosen = tiers[tiers.length - 1];
+    for (const tier of tiers) {
+      h1.style.fontSize = `${tier.size}px`;
+      const lh = tier.size * 1.4;
+      // Force reflow by reading scrollHeight
+      const lines = Math.max(1, Math.round(el.scrollHeight / lh));
+      if (lines <= tier.maxLines) {
+        chosen = tier;
+        break;
+      }
+    }
+
+    h1.style.fontSize = `${chosen.size}px`;
+    h1.style.transition = prevTransition;
+    setFontSize(chosen.size);
+    setFontWeight(chosen.weight);
   }, []);
 
   const handleKeyDown = useCallback(
@@ -114,7 +150,11 @@ export function LandingPage() {
         }
         setSuggestionIndex((i) => (i + 1) % SUGGESTIONS.length);
       }
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        document.execCommand("insertLineBreak");
+        updateFontSize();
+      } else if (e.key === "Enter") {
         e.preventDefault();
         setIsTransitioning(true);
         setTimeout(() => navigate({ to: "/studio/home" }), 600);
@@ -177,9 +217,12 @@ export function LandingPage() {
 
         {/* Prompt headline — fully editable */}
         <h1
-          className="relative z-10 max-w-4xl text-center font-sans font-bold leading-tight text-white"
+          className="relative z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
           style={{
             fontSize: `${fontSize}px`,
+            fontWeight: fontWeight,
+            lineHeight: 1.4,
+            maxHeight: "60vh",
             transition: "font-size 0.15s ease",
           }}
         >
@@ -191,10 +234,11 @@ export function LandingPage() {
             onInput={handleInput}
             data-placeholder="Build "
             className={cn(
-              "outline-none caret-orange inline-block min-w-[1ch]",
+              "outline-none caret-orange inline-block min-w-[1ch] text-center",
               !hasText &&
                 "before:content-[attr(data-placeholder)] before:text-white/30"
             )}
+            style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
           />
         </h1>
 
