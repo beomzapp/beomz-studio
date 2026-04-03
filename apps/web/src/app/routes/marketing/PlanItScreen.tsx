@@ -143,7 +143,6 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   }, [inputText, phase, handleChipClick, scrollToBottom]);
 
   // Thought bubbles for answered questions
-  const answeredCount = messages.filter((m) => m.role === "user").length;
   const BUBBLE_POSITIONS = [
     { pos: "top-20 right-8", bg: "#fff4ee", text: "#e8580a" },
     { pos: "bottom-28 left-8", bg: "#f0f7ff", text: "#388bfd" },
