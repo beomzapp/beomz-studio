@@ -1,0 +1,17 @@
+import { z } from "zod";
+
+const envSchema = z.object({
+  PLATFORM_JWKS_URL: z
+    .string()
+    .url()
+    .default(
+      "https://srflynvdrsdazxvcxmzb.supabase.co/auth/v1/.well-known/jwks.json",
+    ),
+  STUDIO_SUPABASE_URL: z.string().url(),
+  STUDIO_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  PORT: z.coerce.number().int().positive().default(3001),
+});
+
+export type ApiConfig = z.infer<typeof envSchema>;
+
+export const apiConfig: ApiConfig = envSchema.parse(process.env);
