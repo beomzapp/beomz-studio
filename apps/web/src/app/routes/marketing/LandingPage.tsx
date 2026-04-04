@@ -6,8 +6,11 @@ import {
   Loader2,
   Paperclip,
   X,
+  LogOut,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
+import { useAuth } from "../../../lib/useAuth";
+import { supabase } from "../../../lib/supabase";
 import { DreamItScreen } from "./DreamItScreen";
 import { PlanItScreen } from "./PlanItScreen";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
@@ -53,6 +56,7 @@ export function LandingPage() {
   const [promptForFlow, setPromptForFlow] = useState("");
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);
   const navigate = useNavigate();
@@ -227,9 +231,31 @@ export function LandingPage() {
             >
               Docs
             </a>
-            <button className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/50 transition-colors hover:border-white/20 hover:text-white/80">
-              Sign in
-            </button>
+            {session ? (
+              <div className="flex items-center gap-3">
+                <Link
+                  to="/studio/home"
+                  className="rounded-lg bg-orange px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-orange/90"
+                >
+                  Go to studio
+                </Link>
+                <button
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                  }}
+                  className="flex items-center gap-1.5 text-sm text-white/40 transition-colors hover:text-white/70"
+                >
+                  <LogOut size={14} />
+                </button>
+              </div>
+            ) : (
+              <Link
+                to="/auth/login"
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/50 transition-colors hover:border-white/20 hover:text-white/80"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </nav>
 

@@ -13,6 +13,9 @@ import { ImagesPage } from "./app/routes/studio/ImagesPage";
 import { AgentsPage } from "./app/routes/studio/AgentsPage";
 import { SettingsPage } from "./app/routes/studio/SettingsPage";
 import { PricingPage } from "./app/routes/marketing/PricingPage";
+import { LoginPage } from "./app/routes/auth/login";
+import { SignupPage } from "./app/routes/auth/signup";
+import { AuthCallback } from "./app/routes/auth/callback";
 
 const rootRoute = createRootRoute();
 
@@ -28,6 +31,24 @@ const pricingRoute = createRoute({
   component: PricingPage,
 });
 
+const authLoginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/auth/login",
+  component: LoginPage,
+});
+
+const authSignupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/auth/signup",
+  component: SignupPage,
+});
+
+const authCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/auth/callback",
+  component: AuthCallback,
+});
+
 const studioRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/studio",
@@ -37,7 +58,7 @@ const studioRoute = createRoute({
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) {
-      throw redirect({ to: "/" });
+      throw redirect({ to: "/auth/login" });
     }
   },
 });
@@ -75,6 +96,9 @@ const settingsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   landingRoute,
   pricingRoute,
+  authLoginRoute,
+  authSignupRoute,
+  authCallbackRoute,
   studioRoute.addChildren([
     studioHomeRoute,
     projectRoute,
