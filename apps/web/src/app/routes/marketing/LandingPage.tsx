@@ -63,10 +63,23 @@ export function LandingPage() {
 
   // Floor management
   const [currentFloor, setCurrentFloor] = useState<Floor>("home");
+  const [slideAnim, setSlideAnim] = useState<"slide-down" | "slide-up" | null>(null);
   const [promptForBuild, setPromptForBuild] = useState("");
   const [planTasks, setPlanTasks] = useState<PlanTask[]>([]);
   const [planLoading, setPlanLoading] = useState(false);
   const [approvedTasks, setApprovedTasks] = useState<PlanTask[] | undefined>();
+  const nextFloorRef = useRef<Floor | null>(null);
+
+  // Animate floor transition: show animation overlay, then swap floor
+  const transitionToFloor = useCallback((target: Floor, direction: "down" | "up") => {
+    nextFloorRef.current = target;
+    setSlideAnim(direction === "down" ? "slide-down" : "slide-up");
+    setTimeout(() => {
+      setCurrentFloor(target);
+      setSlideAnim(null);
+      nextFloorRef.current = null;
+    }, 500);
+  }, []);
 
   const updateFontSize = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -117,13 +130,11 @@ export function LandingPage() {
         setPromptForBuild(prompt);
 
         if (userMode === "pro" || !planMode) {
-          // Skip plan — go straight to builder
-          setCurrentFloor("builder");
           setApprovedTasks(undefined);
+          transitionToFloor("builder", "down");
         } else {
-          // Plan mode — show plan page
-          setCurrentFloor("plan");
           setPlanLoading(true);
+          transitionToFloor("plan", "down");
           getTaskBreakdown(prompt).then((tasks) => {
             setPlanTasks(tasks);
             setPlanLoading(false);
@@ -131,22 +142,24 @@ export function LandingPage() {
         }
       }
     },
-    [suggestionIndex, updateFontSize, userMode, planMode],
+    [suggestionIndex, updateFontSize, userMode, planMode, transitionToFloor],
   );
 
   const handleBackToHome = useCallback(() => {
-    setCurrentFloor("home");
-    setPlanTasks([]);
-    setPlanLoading(false);
-    setApprovedTasks(undefined);
-  }, []);
+    transitionToFloor("home", "up");
+    setTimeout(() => {
+      setPlanTasks([]);
+      setPlanLoading(false);
+      setApprovedTasks(undefined);
+    }, 550);
+  }, [transitionToFloor]);
 
   const handlePlanApprove = useCallback(
     (tasks: PlanTask[]) => {
       setApprovedTasks(tasks);
-      setCurrentFloor("builder");
+      transitionToFloor("builder", "down");
     },
-    [],
+    [transitionToFloor],
   );
 
   const handleInput = useCallback(() => {
@@ -231,64 +244,33 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
-  // Determine what to render
-  const showPlanFloor = currentFloor === "plan";
-  const showBuilderFloor = currentFloor === "builder";
-
-  // When on plan or builder floor, render ONLY that floor (no scroll back to home)
-  if (showPlanFloor) {
-    return (
-      <div className="h-screen overflow-hidden bg-[#faf9f6]">
-        <section className="relative flex h-full flex-col items-center justify-center">
-          {/* Close / back to home */}
-          <button
-            onClick={handleBackToHome}
-            className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
-            title="Back to home"
-          >
-            <X size={16} />
-          </button>
-
-          <div className="mb-6 text-center">
-            <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-              HERE&apos;S MY PLAN
-            </p>
-            <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
-              {promptForBuild}
-            </p>
-            <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
-              Review the steps below. Edit, reorder, or add your own before I start building.
-            </p>
-          </div>
-          <TaskPlanEditor
-            tasks={planTasks}
-            onTasksChange={setPlanTasks}
-            onApprove={handlePlanApprove}
-            isLoading={planLoading}
-          />
-        </section>
-      </div>
-    );
-  }
-
-  if (showBuilderFloor) {
-    return (
-      <div className="h-screen overflow-hidden bg-[#faf9f6]">
-        <BuilderView
-          initialPrompt={promptForBuild}
-          planTasks={approvedTasks}
-          light
-        />
-      </div>
-    );
-  }
-
-  // Home floor
   return (
-    <div
-      ref={containerRef}
-      className="h-screen overflow-hidden bg-bg"
-    >
+    <div className="relative h-screen overflow-hidden">
+      {/* Slide animation overlay */}
+      {slideAnim && (
+        <div
+          className={cn(
+            "absolute inset-0 z-50",
+            slideAnim === "slide-down" && "animate-[slideDown_500ms_ease-in-out_forwards]",
+            slideAnim === "slide-up" && "animate-[slideUp_500ms_ease-in-out_forwards]",
+          )}
+        >
+          {/* Show the TARGET floor in the overlay */}
+          {nextFloorRef.current === "plan" && (
+            <div className="h-full bg-[#faf9f6]" />
+          )}
+          {nextFloorRef.current === "builder" && (
+            <div className="h-full bg-[#faf9f6]" />
+          )}
+          {nextFloorRef.current === "home" && (
+            <div className="h-full bg-bg" />
+          )}
+        </div>
+      )}
+
+      {/* Current floor content */}
+      {currentFloor === "home" && (
+        <div ref={containerRef} className="h-screen overflow-hidden bg-bg">
       {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
       <section className="relative h-screen snap-start bg-bg">
         {/* Top nav */}
@@ -532,7 +514,61 @@ export function LandingPage() {
           </p>
         </div>
       </section>
+        </div>
+      )}
 
+      {currentFloor === "plan" && (
+        <div className="h-screen overflow-hidden bg-[#faf9f6]">
+          <section className="relative flex h-full flex-col items-center justify-center">
+            <button
+              onClick={handleBackToHome}
+              className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+              title="Back to home"
+            >
+              <X size={16} />
+            </button>
+            <div className="mb-6 text-center">
+              <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
+                HERE&apos;S MY PLAN
+              </p>
+              <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
+                {promptForBuild}
+              </p>
+              <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
+                Review the steps below. Edit, reorder, or add your own before I start building.
+              </p>
+            </div>
+            <TaskPlanEditor
+              tasks={planTasks}
+              onTasksChange={setPlanTasks}
+              onApprove={handlePlanApprove}
+              isLoading={planLoading}
+            />
+          </section>
+        </div>
+      )}
+
+      {currentFloor === "builder" && (
+        <div className="h-screen overflow-hidden bg-[#faf9f6]">
+          <BuilderView
+            initialPrompt={promptForBuild}
+            planTasks={approvedTasks}
+            light
+          />
+        </div>
+      )}
+
+      {/* Slide animation keyframes */}
+      <style>{`
+        @keyframes slideDown {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
+        }
+        @keyframes slideUp {
+          from { transform: translateY(-100%); }
+          to { transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
