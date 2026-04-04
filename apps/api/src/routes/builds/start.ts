@@ -117,12 +117,16 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     });
   } catch (error) {
     const errorMessage = toErrorMessage(error);
+    const failureReason = errorMessage.includes("timeout")
+      ? "GENERATION_TIMEOUT" as const
+      : "ANTHROPIC_ERROR" as const;
 
     await orgContext.db.updateGeneration(buildId, {
       completed_at: new Date().toISOString(),
       error: errorMessage,
       metadata: {
         ...initialMetadata,
+        failureReason,
         phase: "failed",
         resultSource: "error",
         startError: errorMessage,
@@ -135,8 +139,9 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
     return c.json(
       {
+        error: "Failed to start build workflow.",
+        failureReason,
         details: errorMessage,
-        error: "Failed to start the Temporal build workflow.",
       },
       500,
     );
