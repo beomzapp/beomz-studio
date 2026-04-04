@@ -1,17 +1,16 @@
 @import "tailwindcss";
-@import "@fontsource/geist-sans/400.css";
-@import "@fontsource/geist-sans/500.css";
-@import "@fontsource/geist-sans/600.css";
-@import "@fontsource/geist-sans/700.css";
 
 @theme {
-  --font-sans: "Geist Sans", system-ui, sans-serif;
+  --font-sans: "DM Sans", sans-serif;
   --color-bg: #060612;
   --color-bg-card: #0d0d1f;
   --color-bg-sidebar: #0a0a1a;
   --color-orange: #F97316;
   --color-purple: #a855f7;
   --color-border: #1e1e3a;
+  --color-cream: #faf9f6;
+  --color-cream-text: #1a1a1a;
+  --color-cream-accent: #e8580a;
 }
 
 body {
