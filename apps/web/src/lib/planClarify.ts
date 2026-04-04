@@ -22,9 +22,45 @@ export interface PlanBullet {
   description: string;
 }
 
+const FALLBACK_QUESTIONS: ClarifyQuestion[] = [
+  {
+    id: "fallback-1",
+    question: "What type of app is this?",
+    type: "single",
+    options: [
+      { label: "Dashboard / Analytics", description: "Charts, metrics, data tables, admin panels" },
+      { label: "Marketplace / E-commerce", description: "Products, listings, cart, checkout" },
+      { label: "Productivity / Tasks", description: "To-dos, kanban boards, project management" },
+      { label: "Social / Community", description: "Profiles, feeds, messaging, groups" },
+    ],
+  },
+  {
+    id: "fallback-2",
+    question: "Who will use this?",
+    type: "single",
+    options: [
+      { label: "Just me", description: "Personal use, single-user dashboard" },
+      { label: "My team", description: "Small team with shared access and roles" },
+      { label: "My customers", description: "Public-facing app with user accounts" },
+    ],
+  },
+  {
+    id: "fallback-3",
+    question: "What matters most for the first version?",
+    type: "multi",
+    options: [
+      { label: "Clean design", description: "Polished UI, good typography, modern look" },
+      { label: "Core functionality", description: "Get the main feature working first" },
+      { label: "Mobile-friendly", description: "Responsive layout that works on phones" },
+      { label: "Authentication", description: "Sign up, login, protected pages" },
+    ],
+  },
+];
+
 /**
  * Ask AI whether the prompt needs clarification.
  * Returns 0 questions for clear prompts, 2-4 for ambiguous ones.
+ * Times out after 15s and falls back to default questions.
  */
 export async function getClarifyQuestions(
   prompt: string,
@@ -58,12 +94,14 @@ Example for "a tracker":
 [{"id":"q1","question":"What are you tracking?","type":"single","options":[{"label":"Financial assets","description":"Stocks, crypto, investments, portfolio tracking"},{"label":"Fitness & health","description":"Workouts, calories, body measurements, habits"},{"label":"Tasks & projects","description":"To-dos, deadlines, team assignments, kanban boards"},{"label":"Inventory","description":"Products, stock levels, orders, warehouse management"}]},{"id":"q2","question":"Who will use this?","type":"single","options":[{"label":"Just me","description":"Personal use, single-user dashboard"},{"label":"My team","description":"Small team with shared access and roles"},{"label":"My customers","description":"Public-facing app with user accounts"}]}]`,
         messages: [{ role: "user", content: prompt }],
       }),
+      signal: AbortSignal.timeout(15_000),
     });
     const data = await res.json();
     const text = data.content[0].text.trim();
     return JSON.parse(text) as ClarifyQuestion[];
   } catch {
-    return [];
+    // Timeout or API error — show fallback questions so user isn't stuck
+    return FALLBACK_QUESTIONS;
   }
 }
 
@@ -104,6 +142,7 @@ Return ONLY a JSON array of objects with "label" and "description" fields.`,
           },
         ],
       }),
+      signal: AbortSignal.timeout(15_000),
     });
     const data = await res.json();
     return JSON.parse(data.content[0].text.trim()) as PlanBullet[];
