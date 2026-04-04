@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   ListChecks,
   Sparkles,
@@ -11,11 +11,11 @@ import {
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
 import { supabase } from "../../../lib/supabase";
-import { DreamItScreen } from "./DreamItScreen";
-import { PlanItScreen } from "./PlanItScreen";
+import { getTaskBreakdown } from "../../../lib/getTaskBreakdown";
+import type { PlanTask } from "../../../lib/getTaskBreakdown";
+import { TaskPlanEditor } from "../../../components/studio/TaskPlanEditor";
+import { BuilderView } from "../../../components/studio/BuilderView";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
-
-type Screen = "home" | "dream" | "plan";
 
 const SUGGESTIONS = [
   "a SaaS dashboard",
@@ -41,6 +41,8 @@ function placeCursorAtEnd(el: HTMLElement) {
   sel?.addRange(range);
 }
 
+type Floor = "home" | "plan" | "builder";
+
 export function LandingPage() {
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const [sphereScale, setSphereScale] = useState(1);
@@ -51,15 +53,27 @@ export function LandingPage() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [screen, setScreen] = useState<Screen>("home");
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
-  const [promptForFlow, setPromptForFlow] = useState("");
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);
-  const navigate = useNavigate();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Floor management
+  const [currentFloor, setCurrentFloor] = useState<Floor>("home");
+  const [promptForBuild, setPromptForBuild] = useState("");
+  const [planTasks, setPlanTasks] = useState<PlanTask[]>([]);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [approvedTasks, setApprovedTasks] = useState<PlanTask[] | undefined>();
+
+  const scrollToFloor = useCallback((floor: number) => {
+    containerRef.current?.scrollTo({
+      top: floor * window.innerHeight,
+      behavior: "smooth",
+    });
+  }, []);
 
   const updateFontSize = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -105,23 +119,38 @@ export function LandingPage() {
       } else if (e.key === "Enter") {
         e.preventDefault();
         const prompt = editableRef.current?.textContent?.trim() ?? "";
+        if (!prompt) return;
+
+        setPromptForBuild(prompt);
 
         if (userMode === "pro" || !planMode) {
-          // Navigate to studio
-          navigate({ to: "/studio/home" });
+          // Skip plan — go straight to builder
+          setCurrentFloor("builder");
+          setApprovedTasks(undefined);
+          scrollToFloor(1);
         } else {
-          // Simple mode + Plan ON — scroll to floor 2
-          const isVague = prompt.length < 8 || prompt === "";
-          setPromptForFlow(prompt);
-          setScreen(isVague ? "dream" : "plan");
-          // Smooth scroll to floor 2
-          setTimeout(() => {
-            window.scrollTo({ top: window.innerHeight, behavior: "smooth" });
-          }, 50);
+          // Plan mode — scroll to plan floor
+          setCurrentFloor("plan");
+          setPlanLoading(true);
+          scrollToFloor(1);
+          getTaskBreakdown(prompt).then((tasks) => {
+            setPlanTasks(tasks);
+            setPlanLoading(false);
+          });
         }
       }
     },
-    [navigate, suggestionIndex, updateFontSize, userMode, planMode]
+    [suggestionIndex, updateFontSize, userMode, planMode, scrollToFloor],
+  );
+
+  const handlePlanApprove = useCallback(
+    (tasks: PlanTask[]) => {
+      setApprovedTasks(tasks);
+      setCurrentFloor("builder");
+      // Scroll to floor 2 (builder is after plan)
+      scrollToFloor(2);
+    },
+    [scrollToFloor],
   );
 
   const handleInput = useCallback(() => {
@@ -199,22 +228,24 @@ export function LandingPage() {
       if (file) setAttachedFile(file);
       e.target.value = "";
     },
-    []
+    [],
   );
 
   useEffect(() => {
     editableRef.current?.focus();
   }, []);
 
-  const handleBackToHome = useCallback(() => {
-    setScreen("home");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  // Determine how many floors to render
+  const showPlanFloor = currentFloor === "plan" || (currentFloor === "builder" && approvedTasks);
+  const showBuilderFloor = currentFloor === "builder" || currentFloor === "plan";
 
   return (
-    <div className="h-[200vh] overflow-x-hidden bg-bg">
+    <div
+      ref={containerRef}
+      className="h-screen snap-y snap-mandatory overflow-y-auto overflow-x-hidden scroll-smooth"
+    >
       {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
-      <div className="relative h-screen">
+      <section className="relative h-screen snap-start bg-bg">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
           <BeomzLogo className="h-6 w-auto text-white" />
@@ -267,7 +298,7 @@ export function LandingPage() {
               "rounded-full px-3 py-1 text-xs font-medium transition-all",
               userMode === "simple"
                 ? "bg-orange text-white"
-                : "text-white/40 hover:text-white/60"
+                : "text-white/40 hover:text-white/60",
             )}
           >
             Simple
@@ -278,7 +309,7 @@ export function LandingPage() {
               "rounded-full px-3 py-1 text-xs font-medium transition-all",
               userMode === "pro"
                 ? "bg-orange text-white"
-                : "text-white/40 hover:text-white/60"
+                : "text-white/40 hover:text-white/60",
             )}
           >
             Pro
@@ -286,7 +317,7 @@ export function LandingPage() {
         </div>
 
         {/* Hero section */}
-        <section className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
+        <div className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
           {/* Gradient sphere */}
           <div
             className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
@@ -334,7 +365,7 @@ export function LandingPage() {
               className={cn(
                 "outline-none caret-orange inline-block min-w-[1ch] text-center",
                 !hasText &&
-                  "before:content-[attr(data-placeholder)] before:text-white/30"
+                  "before:content-[attr(data-placeholder)] before:text-white/30",
               )}
               style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
             />
@@ -344,7 +375,7 @@ export function LandingPage() {
           <div
             className={cn(
               "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
-              hasText ? "opacity-100" : "pointer-events-none opacity-0"
+              hasText ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           >
             {/* Plan mode toggle */}
@@ -355,7 +386,7 @@ export function LandingPage() {
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 planMode
                   ? "border-orange/50 bg-orange/10 text-orange"
-                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
+                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
               )}
             >
               <ListChecks size={14} />
@@ -371,7 +402,7 @@ export function LandingPage() {
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 enhanceError
                   ? "border-red-500 text-red-400"
-                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple"
+                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple",
               )}
             >
               {enhancing ? (
@@ -421,7 +452,7 @@ export function LandingPage() {
                   "rounded-full border px-4 py-1.5 text-sm transition-all",
                   i === suggestionIndex
                     ? "border-orange/50 bg-orange/10 text-orange"
-                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
+                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
                 )}
               >
                 {s}
@@ -439,7 +470,7 @@ export function LandingPage() {
             </kbd>{" "}
             to build
           </p>
-        </section>
+        </div>
 
         {/* Mini footer pinned to bottom of viewport */}
         <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-3 text-center">
@@ -455,22 +486,38 @@ export function LandingPage() {
             <span>&copy; Beomz 2026</span>
           </p>
         </div>
-      </div>
+      </section>
 
-      {/* ===== FLOOR 2: Dream/Plan screen (100vh) ===== */}
-      <div className="h-screen bg-[#faf9f6]">
-        {screen === "dream" && <DreamItScreen onBack={handleBackToHome} />}
-        {screen === "plan" && (
-          <PlanItScreen prompt={promptForFlow} onBack={handleBackToHome} />
-        )}
-        {screen === "home" && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-[rgba(0,0,0,0.2)]">
-              Enable Plan mode and press Enter to start
+      {/* ===== FLOOR 2: Plan page (conditional) ===== */}
+      {showPlanFloor && currentFloor !== "builder" && (
+        <section className="flex h-screen snap-start flex-col items-center justify-center bg-[#faf9f6]">
+          <div className="mb-8 text-center">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
+              YOUR PROMPT
+            </p>
+            <p className="mt-2 max-w-lg text-sm font-semibold text-[#1a1a1a]">
+              {promptForBuild}
             </p>
           </div>
-        )}
-      </div>
+          <TaskPlanEditor
+            tasks={planTasks}
+            onTasksChange={setPlanTasks}
+            onApprove={handlePlanApprove}
+            isLoading={planLoading}
+          />
+        </section>
+      )}
+
+      {/* ===== FLOOR 2/3: Builder page ===== */}
+      {showBuilderFloor && currentFloor === "builder" && (
+        <section className="h-screen snap-start bg-[#faf9f6]">
+          <BuilderView
+            initialPrompt={promptForBuild}
+            planTasks={approvedTasks}
+            light
+          />
+        </section>
+      )}
     </div>
   );
 }
