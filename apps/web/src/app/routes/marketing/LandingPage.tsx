@@ -86,8 +86,21 @@ export function LandingPage() {
     const target = document.getElementById(id);
     if (!container || !target) return;
 
-    // Snap-scroll to the target floor
-    container.scrollTo({ top: target.offsetTop, behavior: "instant" });
+    // Disable snap, scroll smooth, then re-enable snap and nudge to target
+    container.style.scrollSnapType = "none";
+    container.scrollTo({ top: target.offsetTop, behavior: "smooth" });
+
+    const settle = () => {
+      container.removeEventListener("scrollend", settle);
+      // Re-enable snap and nudge to ensure we land on the snap point
+      container.style.scrollSnapType = "";
+      container.scrollTo({ top: target.offsetTop, behavior: "instant" });
+    };
+    container.addEventListener("scrollend", settle);
+
+    // Fallback if scrollend not supported
+    const timer = setTimeout(settle, 1500);
+    return () => { clearTimeout(timer); container.removeEventListener("scrollend", settle); };
   }, [scrollTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateFontSize = useCallback(() => {
@@ -157,6 +170,25 @@ export function LandingPage() {
     },
     [suggestionIndex, updateFontSize, userMode, planMode, scrollToSection],
   );
+
+  const handleBackToHome = useCallback(() => {
+    setCurrentFloor("home");
+    setPlanTasks([]);
+    setPlanLoading(false);
+    setApprovedTasks(undefined);
+    const container = containerRef.current;
+    if (container) {
+      container.style.scrollSnapType = "none";
+      container.scrollTo({ top: 0, behavior: "smooth" });
+      const settle = () => {
+        container.removeEventListener("scrollend", settle);
+        container.style.scrollSnapType = "";
+        container.scrollTo({ top: 0, behavior: "instant" });
+      };
+      container.addEventListener("scrollend", settle);
+      setTimeout(settle, 1500);
+    }
+  }, []);
 
   const handlePlanApprove = useCallback(
     (tasks: PlanTask[]) => {
@@ -505,7 +537,16 @@ export function LandingPage() {
 
       {/* ===== FLOOR 2: Plan page (conditional) ===== */}
       {showPlanFloor && currentFloor !== "builder" && (
-        <section id="floor-next" className="flex h-screen snap-start flex-col items-center justify-center bg-[#faf9f6]">
+        <section id="floor-next" className="relative flex h-screen snap-start flex-col items-center justify-center bg-[#faf9f6]">
+          {/* Close / back to home */}
+          <button
+            onClick={handleBackToHome}
+            className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+            title="Back to home"
+          >
+            <X size={16} />
+          </button>
+
           <div className="mb-8 text-center">
             <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
               YOUR PROMPT
