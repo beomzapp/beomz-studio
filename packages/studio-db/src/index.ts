@@ -71,6 +71,7 @@ export interface GenerationRow extends Record<string, unknown> {
   warnings: readonly string[];
   files: readonly StudioFile[];
   metadata: Record<string, unknown>;
+  vfs_snapshot?: unknown;
 }
 
 export interface PreviewRow extends Record<string, unknown> {
@@ -475,6 +476,20 @@ export class StudioDbClient {
     }
 
     return response.data;
+  }
+
+  async findGenerationsByProjectId(projectId: string): Promise<readonly GenerationRow[]> {
+    const response = await this.client
+      .from("generations")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("started_at", { ascending: false });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data ?? [];
   }
 
   async updateGeneration(id: string, patch: GenerationUpdate): Promise<GenerationRow> {

@@ -20,6 +20,9 @@ importers:
       '@beomz-studio/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@beomz-studio/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@beomz-studio/operations':
         specifier: workspace:*
         version: link:../../packages/operations
