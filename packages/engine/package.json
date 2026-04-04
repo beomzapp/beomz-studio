@@ -1,5 +1,25 @@
 {
   "name": "@beomz-studio/engine",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@beomz-studio/contracts": "workspace:*",
+    "@beomz-studio/operations": "workspace:*",
+    "@beomz-studio/prompt-policies": "workspace:*",
+    "@beomz-studio/studio-db": "workspace:*",
+    "@beomz-studio/templates": "workspace:*",
+    "@beomz-studio/validators": "workspace:*",
+    "minimatch": "^10.1.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
 }
