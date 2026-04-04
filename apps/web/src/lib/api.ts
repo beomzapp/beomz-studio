@@ -41,6 +41,38 @@ export interface BuildStatusResponse {
   } | null;
 }
 
+export interface SessionMessageContent {
+  type: "text";
+  text: string;
+}
+
+export interface SessionMessage {
+  content: readonly SessionMessageContent[];
+  role: "assistant" | "user";
+}
+
+export interface SessionSnapshotFile {
+  content: string;
+  path: string;
+}
+
+export interface ProjectSessionResponse {
+  build: BuildPayload | null;
+  project: Project;
+  result: BuildStatusResponse["result"];
+  session: {
+    messages: readonly SessionMessage[];
+    parentId: string | null;
+    remainingCreditsUsd: number | null;
+    sessionId: string;
+    snapshot: {
+      files: readonly SessionSnapshotFile[];
+      version: number;
+    };
+    totalCostUsd: number;
+  } | null;
+}
+
 export interface StartBuildResponse {
   build: BuildPayload;
   project: Project;
@@ -102,6 +134,12 @@ export function startBuild(body: {
 
 export function getBuildStatus(buildId: string): Promise<BuildStatusResponse> {
   return requestJson<BuildStatusResponse>(`/builds/${buildId}/status`, {
+    method: "GET",
+  });
+}
+
+export function getProjectSession(projectId: string): Promise<ProjectSessionResponse> {
+  return requestJson<ProjectSessionResponse>(`/projects/${projectId}/session`, {
     method: "GET",
   });
 }

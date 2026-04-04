@@ -19,6 +19,8 @@ const envSchema = z.object({
 
 const studioDbConfig = envSchema.parse(process.env);
 
+type Json = null | boolean | number | string | { [key: string]: Json | undefined } | Json[];
+
 export interface UserRow extends Record<string, unknown> {
   id: string;
   platform_user_id: string;
@@ -32,6 +34,7 @@ export interface OrgRow extends Record<string, unknown> {
   name: string;
   plan: string;
   credits: number;
+  credits_balance: number;
   created_at: string;
 }
 
@@ -67,6 +70,9 @@ export interface GenerationRow extends Record<string, unknown> {
   preview_entry_path: string | null;
   warnings: readonly string[];
   files: readonly StudioFile[];
+  session_events: readonly Record<string, unknown>[];
+  credits_used: number;
+  total_cost_usd: number;
   metadata: Record<string, unknown>;
 }
 
@@ -99,6 +105,7 @@ export interface OrgInsert extends Record<string, unknown> {
   name: string;
   plan?: string;
   credits?: number;
+  credits_balance?: number;
   created_at?: string;
 }
 
@@ -107,6 +114,7 @@ export interface OrgUpdate extends Record<string, unknown> {
   name?: string;
   plan?: string;
   credits?: number;
+  credits_balance?: number;
 }
 
 export interface OrgMembershipInsert extends Record<string, unknown> {
@@ -156,6 +164,9 @@ export interface GenerationInsert extends Record<string, unknown> {
   preview_entry_path?: string | null;
   warnings?: readonly string[];
   files?: readonly StudioFile[];
+  session_events?: readonly Record<string, unknown>[];
+  credits_used?: number;
+  total_cost_usd?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -173,6 +184,9 @@ export interface GenerationUpdate extends Record<string, unknown> {
   preview_entry_path?: string | null;
   warnings?: readonly string[];
   files?: readonly StudioFile[];
+  session_events?: readonly Record<string, unknown>[];
+  credits_used?: number;
+  total_cost_usd?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -200,7 +214,22 @@ export interface PreviewUpdate extends Record<string, unknown> {
 export interface StudioDatabase {
   public: {
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      append_generation_session_event: {
+        Args: {
+          next_event: Json;
+          target_generation_id: string;
+        };
+        Returns: void;
+      };
+      deduct_org_credits_balance: {
+        Args: {
+          requested_cost: number;
+          target_org_id: string;
+        };
+        Returns: number;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
     Tables: {
@@ -441,6 +470,37 @@ export class StudioDbClient {
       .single();
 
     return unwrapSingle(response);
+  }
+
+  async appendGenerationSessionEvent(
+    id: string,
+    nextEvent: unknown,
+  ): Promise<void> {
+    const response = await this.client.rpc("append_generation_session_event", {
+      next_event: nextEvent as Json,
+      target_generation_id: id,
+    });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+  }
+
+  async deductOrgCreditsBalance(id: string, requestedCost: number): Promise<number> {
+    const response = await this.client.rpc("deduct_org_credits_balance", {
+      requested_cost: requestedCost,
+      target_org_id: id,
+    });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    if (typeof response.data !== "number") {
+      throw new Error("Expected deduct_org_credits_balance to return a numeric balance.");
+    }
+
+    return response.data;
   }
 
   async createPreview(

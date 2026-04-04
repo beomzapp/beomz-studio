@@ -140,9 +140,9 @@ export function createSupabaseCreditGuard(input: {
       const db = await resolveDb();
 
       try {
-        const org = await db.deductOrgCreditsBalance(orgId, requestedUsd);
+        const balanceUsd = await db.deductOrgCreditsBalance(orgId, requestedUsd);
         return {
-          balanceUsd: org.credits_balance,
+          balanceUsd,
           deductedUsd: requestedUsd,
           orgId,
         };

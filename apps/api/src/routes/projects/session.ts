@@ -40,17 +40,16 @@ projectSessionRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     db: orgContext.db,
   });
   const session = await sessionStore.resume(generationRow.id);
+  const build = mapGenerationRowToBuildPayload(generationRow);
 
   return c.json({
-    build: mapGenerationRowToBuildPayload(generationRow),
+    build,
     project: mapProjectRowToProject(projectRow),
     result: buildInitialBuildOutput(generationRow),
     session: {
       messages: session.messages,
       parentId: session.parentId ?? null,
-      remainingCreditsUsd:
-        mapGenerationRowToBuildPayload(generationRow).remainingCreditsUsd
-        ?? orgContext.org.credits_balance,
+      remainingCreditsUsd: build.remainingCreditsUsd ?? orgContext.org.credits_balance,
       sessionId: session.sessionId,
       snapshot: session.snapshot,
       totalCostUsd: generationRow.total_cost_usd,

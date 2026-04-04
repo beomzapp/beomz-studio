@@ -7,6 +7,7 @@ import authMeRoute from "./routes/auth/me.js";
 import buildsStartRoute from "./routes/builds/start.js";
 import buildsStatusRoute from "./routes/builds/status.js";
 import previewsSessionRoute from "./routes/previews/session.js";
+import projectSessionRoute from "./routes/projects/session.js";
 
 const app = new Hono();
 
@@ -16,6 +17,7 @@ app.route("/auth/me", authMeRoute);
 app.route("/builds/start", buildsStartRoute);
 app.route("/builds/:id/status", buildsStatusRoute);
 app.route("/previews/session", previewsSessionRoute);
+app.route("/projects/:id/session", projectSessionRoute);
 
 serve(
   {
