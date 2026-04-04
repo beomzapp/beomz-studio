@@ -68,41 +68,6 @@ export function LandingPage() {
   const [planLoading, setPlanLoading] = useState(false);
   const [approvedTasks, setApprovedTasks] = useState<PlanTask[] | undefined>();
 
-  const pendingScrollRef = useRef<string | null>(null);
-  const [scrollTick, setScrollTick] = useState(0);
-
-  const scrollToSection = useCallback((sectionId: string) => {
-    pendingScrollRef.current = sectionId;
-    // Trigger a re-render so the useEffect fires after the floor is in the DOM
-    setScrollTick((t) => t + 1);
-  }, []);
-
-  // Scroll after React commits the new floor to the DOM
-  useEffect(() => {
-    const id = pendingScrollRef.current;
-    if (!id) return;
-    pendingScrollRef.current = null;
-    const container = containerRef.current;
-    const target = document.getElementById(id);
-    if (!container || !target) return;
-
-    // Disable snap, scroll smooth, then re-enable snap and nudge to target
-    container.style.scrollSnapType = "none";
-    container.scrollTo({ top: target.offsetTop, behavior: "smooth" });
-
-    const settle = () => {
-      container.removeEventListener("scrollend", settle);
-      // Re-enable snap and nudge to ensure we land on the snap point
-      container.style.scrollSnapType = "";
-      container.scrollTo({ top: target.offsetTop, behavior: "instant" });
-    };
-    container.addEventListener("scrollend", settle);
-
-    // Fallback if scrollend not supported
-    const timer = setTimeout(settle, 1500);
-    return () => { clearTimeout(timer); container.removeEventListener("scrollend", settle); };
-  }, [scrollTick]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const updateFontSize = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
@@ -155,12 +120,10 @@ export function LandingPage() {
           // Skip plan — go straight to builder
           setCurrentFloor("builder");
           setApprovedTasks(undefined);
-          scrollToSection("floor-next");
         } else {
-          // Plan mode — scroll to plan floor
+          // Plan mode — show plan page
           setCurrentFloor("plan");
           setPlanLoading(true);
-          scrollToSection("floor-next");
           getTaskBreakdown(prompt).then((tasks) => {
             setPlanTasks(tasks);
             setPlanLoading(false);
@@ -168,7 +131,7 @@ export function LandingPage() {
         }
       }
     },
-    [suggestionIndex, updateFontSize, userMode, planMode, scrollToSection],
+    [suggestionIndex, updateFontSize, userMode, planMode],
   );
 
   const handleBackToHome = useCallback(() => {
@@ -176,27 +139,14 @@ export function LandingPage() {
     setPlanTasks([]);
     setPlanLoading(false);
     setApprovedTasks(undefined);
-    const container = containerRef.current;
-    if (container) {
-      container.style.scrollSnapType = "none";
-      container.scrollTo({ top: 0, behavior: "smooth" });
-      const settle = () => {
-        container.removeEventListener("scrollend", settle);
-        container.style.scrollSnapType = "";
-        container.scrollTo({ top: 0, behavior: "instant" });
-      };
-      container.addEventListener("scrollend", settle);
-      setTimeout(settle, 1500);
-    }
   }, []);
 
   const handlePlanApprove = useCallback(
     (tasks: PlanTask[]) => {
       setApprovedTasks(tasks);
       setCurrentFloor("builder");
-      scrollToSection("floor-builder");
     },
-    [scrollToSection],
+    [],
   );
 
   const handleInput = useCallback(() => {
@@ -281,15 +231,63 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
-  // Determine how many floors to render
-  const showPlanFloor = currentFloor === "plan" || (currentFloor === "builder" && !!approvedTasks);
-  const showBuilderFloor = currentFloor === "builder" || currentFloor === "plan";
+  // Determine what to render
+  const showPlanFloor = currentFloor === "plan";
+  const showBuilderFloor = currentFloor === "builder";
 
+  // When on plan or builder floor, render ONLY that floor (no scroll back to home)
+  if (showPlanFloor) {
+    return (
+      <div className="h-screen overflow-hidden bg-[#faf9f6]">
+        <section className="relative flex h-full flex-col items-center justify-center">
+          {/* Close / back to home */}
+          <button
+            onClick={handleBackToHome}
+            className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+            title="Back to home"
+          >
+            <X size={16} />
+          </button>
 
+          <div className="mb-6 text-center">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
+              HERE&apos;S MY PLAN
+            </p>
+            <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
+              {promptForBuild}
+            </p>
+            <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
+              Review the steps below. Edit, reorder, or add your own before I start building.
+            </p>
+          </div>
+          <TaskPlanEditor
+            tasks={planTasks}
+            onTasksChange={setPlanTasks}
+            onApprove={handlePlanApprove}
+            isLoading={planLoading}
+          />
+        </section>
+      </div>
+    );
+  }
+
+  if (showBuilderFloor) {
+    return (
+      <div className="h-screen overflow-hidden bg-[#faf9f6]">
+        <BuilderView
+          initialPrompt={promptForBuild}
+          planTasks={approvedTasks}
+          light
+        />
+      </div>
+    );
+  }
+
+  // Home floor
   return (
     <div
       ref={containerRef}
-      className="h-screen snap-y snap-proximity overflow-y-auto overflow-x-hidden scroll-smooth"
+      className="h-screen overflow-hidden bg-bg"
     >
       {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
       <section className="relative h-screen snap-start bg-bg">
@@ -535,45 +533,6 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ===== FLOOR 2: Plan page (conditional) ===== */}
-      {showPlanFloor && currentFloor !== "builder" && (
-        <section id="floor-next" className="relative flex h-screen snap-start flex-col items-center justify-center bg-[#faf9f6]">
-          {/* Close / back to home */}
-          <button
-            onClick={handleBackToHome}
-            className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
-            title="Back to home"
-          >
-            <X size={16} />
-          </button>
-
-          <div className="mb-8 text-center">
-            <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-              YOUR PROMPT
-            </p>
-            <p className="mt-2 max-w-lg text-sm font-semibold text-[#1a1a1a]">
-              {promptForBuild}
-            </p>
-          </div>
-          <TaskPlanEditor
-            tasks={planTasks}
-            onTasksChange={setPlanTasks}
-            onApprove={handlePlanApprove}
-            isLoading={planLoading}
-          />
-        </section>
-      )}
-
-      {/* ===== FLOOR 2/3: Builder page ===== */}
-      {showBuilderFloor && currentFloor === "builder" && (
-        <section id={approvedTasks ? "floor-builder" : "floor-next"} className="h-screen snap-start bg-[#faf9f6]">
-          <BuilderView
-            initialPrompt={promptForBuild}
-            planTasks={approvedTasks}
-            light
-          />
-        </section>
-      )}
     </div>
   );
 }
