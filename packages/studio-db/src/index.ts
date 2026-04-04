@@ -5,6 +5,7 @@ import {
 } from "@supabase/supabase-js";
 import type {
   GenerationStatus,
+  PreviewSessionStatus,
   ProjectStatus,
   StudioFile,
   TemplateId,
@@ -67,6 +68,17 @@ export interface GenerationRow extends Record<string, unknown> {
   warnings: readonly string[];
   files: readonly StudioFile[];
   metadata: Record<string, unknown>;
+}
+
+export interface PreviewRow extends Record<string, unknown> {
+  id: string;
+  generation_id: string;
+  sandbox_id: string | null;
+  status: PreviewSessionStatus;
+  preview_url: string | null;
+  started_at: string;
+  expires_at: string | null;
+  error: string | null;
 }
 
 export interface UserInsert extends Record<string, unknown> {
@@ -164,6 +176,27 @@ export interface GenerationUpdate extends Record<string, unknown> {
   metadata?: Record<string, unknown>;
 }
 
+export interface PreviewInsert extends Record<string, unknown> {
+  id?: string;
+  generation_id: string;
+  sandbox_id?: string | null;
+  status: PreviewSessionStatus;
+  preview_url?: string | null;
+  started_at?: string;
+  expires_at?: string | null;
+  error?: string | null;
+}
+
+export interface PreviewUpdate extends Record<string, unknown> {
+  generation_id?: string;
+  sandbox_id?: string | null;
+  status?: PreviewSessionStatus;
+  preview_url?: string | null;
+  started_at?: string;
+  expires_at?: string | null;
+  error?: string | null;
+}
+
 export interface StudioDatabase {
   public: {
     Views: Record<string, never>;
@@ -193,6 +226,12 @@ export interface StudioDatabase {
         Row: GenerationRow;
         Insert: GenerationInsert;
         Update: GenerationUpdate;
+        Relationships: [];
+      };
+      previews: {
+        Row: PreviewRow;
+        Insert: PreviewInsert;
+        Update: PreviewUpdate;
         Relationships: [];
       };
       users: {
@@ -377,9 +416,76 @@ export class StudioDbClient {
     return response.data;
   }
 
+  async findLatestGenerationByProjectId(projectId: string): Promise<GenerationRow | null> {
+    const response = await this.client
+      .from("generations")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
   async updateGeneration(id: string, patch: GenerationUpdate): Promise<GenerationRow> {
     const response = await this.client
       .from("generations")
+      .update(patch)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async createPreview(
+    input: PreviewInsert,
+  ): Promise<PreviewRow> {
+    const response = await this.client
+      .from("previews")
+      .insert(input)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async findPreviewById(id: string): Promise<PreviewRow | null> {
+    const response = await this.client
+      .from("previews")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async findPreviewByGenerationId(generationId: string): Promise<PreviewRow | null> {
+    const response = await this.client
+      .from("previews")
+      .select("*")
+      .eq("generation_id", generationId)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async updatePreview(id: string, patch: PreviewUpdate): Promise<PreviewRow> {
+    const response = await this.client
+      .from("previews")
       .update(patch)
       .eq("id", id)
       .select("*")
