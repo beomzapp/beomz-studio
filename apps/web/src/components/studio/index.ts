@@ -1,6 +1,7 @@
 export { BuildLog } from "./BuildLog";
 export { ContinuationCard } from "./ContinuationCard";
 export { GenerationTimeline } from "./GenerationTimeline";
+export { HistoryPanel } from "./HistoryPanel";
 export { LogEntry } from "./LogEntry";
 export { PlanStepButton } from "./PlanStepButton";
 export { PlanStepIcon } from "./PlanStepIcon";
