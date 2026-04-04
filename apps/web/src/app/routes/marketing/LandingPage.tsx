@@ -68,12 +68,27 @@ export function LandingPage() {
   const [planLoading, setPlanLoading] = useState(false);
   const [approvedTasks, setApprovedTasks] = useState<PlanTask[] | undefined>();
 
-  const scrollToFloor = useCallback((floor: number) => {
-    containerRef.current?.scrollTo({
-      top: floor * window.innerHeight,
-      behavior: "smooth",
-    });
+  const pendingScrollRef = useRef<string | null>(null);
+  const [scrollTick, setScrollTick] = useState(0);
+
+  const scrollToSection = useCallback((sectionId: string) => {
+    pendingScrollRef.current = sectionId;
+    // Trigger a re-render so the useEffect fires after the floor is in the DOM
+    setScrollTick((t) => t + 1);
   }, []);
+
+  // Scroll after React commits the new floor to the DOM
+  useEffect(() => {
+    const id = pendingScrollRef.current;
+    if (!id) return;
+    pendingScrollRef.current = null;
+    const container = containerRef.current;
+    const target = document.getElementById(id);
+    if (!container || !target) return;
+
+    // Snap-scroll to the target floor
+    container.scrollTo({ top: target.offsetTop, behavior: "instant" });
+  }, [scrollTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateFontSize = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -127,12 +142,12 @@ export function LandingPage() {
           // Skip plan — go straight to builder
           setCurrentFloor("builder");
           setApprovedTasks(undefined);
-          scrollToFloor(1);
+          scrollToSection("floor-next");
         } else {
           // Plan mode — scroll to plan floor
           setCurrentFloor("plan");
           setPlanLoading(true);
-          scrollToFloor(1);
+          scrollToSection("floor-next");
           getTaskBreakdown(prompt).then((tasks) => {
             setPlanTasks(tasks);
             setPlanLoading(false);
@@ -140,17 +155,16 @@ export function LandingPage() {
         }
       }
     },
-    [suggestionIndex, updateFontSize, userMode, planMode, scrollToFloor],
+    [suggestionIndex, updateFontSize, userMode, planMode, scrollToSection],
   );
 
   const handlePlanApprove = useCallback(
     (tasks: PlanTask[]) => {
       setApprovedTasks(tasks);
       setCurrentFloor("builder");
-      // Scroll to floor 2 (builder is after plan)
-      scrollToFloor(2);
+      scrollToSection("floor-builder");
     },
-    [scrollToFloor],
+    [scrollToSection],
   );
 
   const handleInput = useCallback(() => {
@@ -236,13 +250,14 @@ export function LandingPage() {
   }, []);
 
   // Determine how many floors to render
-  const showPlanFloor = currentFloor === "plan" || (currentFloor === "builder" && approvedTasks);
+  const showPlanFloor = currentFloor === "plan" || (currentFloor === "builder" && !!approvedTasks);
   const showBuilderFloor = currentFloor === "builder" || currentFloor === "plan";
+
 
   return (
     <div
       ref={containerRef}
-      className="h-screen snap-y snap-mandatory overflow-y-auto overflow-x-hidden scroll-smooth"
+      className="h-screen snap-y snap-proximity overflow-y-auto overflow-x-hidden scroll-smooth"
     >
       {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
       <section className="relative h-screen snap-start bg-bg">
@@ -490,7 +505,7 @@ export function LandingPage() {
 
       {/* ===== FLOOR 2: Plan page (conditional) ===== */}
       {showPlanFloor && currentFloor !== "builder" && (
-        <section className="flex h-screen snap-start flex-col items-center justify-center bg-[#faf9f6]">
+        <section id="floor-next" className="flex h-screen snap-start flex-col items-center justify-center bg-[#faf9f6]">
           <div className="mb-8 text-center">
             <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
               YOUR PROMPT
@@ -510,7 +525,7 @@ export function LandingPage() {
 
       {/* ===== FLOOR 2/3: Builder page ===== */}
       {showBuilderFloor && currentFloor === "builder" && (
-        <section className="h-screen snap-start bg-[#faf9f6]">
+        <section id={approvedTasks ? "floor-builder" : "floor-next"} className="h-screen snap-start bg-[#faf9f6]">
           <BuilderView
             initialPrompt={promptForBuild}
             planTasks={approvedTasks}
