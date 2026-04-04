@@ -349,7 +349,7 @@ export function LandingPage() {
           >
             {/* Plan mode toggle */}
             <button
-              onClick={() => setPlanMode(!planMode)}
+              onMouseDown={(e) => { e.preventDefault(); setPlanMode(!planMode); }}
               title="Review the build plan before generating"
               className={cn(
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
@@ -364,7 +364,7 @@ export function LandingPage() {
 
             {/* Enhance with AI */}
             <button
-              onClick={handleEnhance}
+              onMouseDown={(e) => { e.preventDefault(); handleEnhance(); }}
               title="Enhance prompt with AI"
               disabled={enhancing}
               className={cn(
@@ -384,7 +384,7 @@ export function LandingPage() {
 
             {/* File upload */}
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onMouseDown={(e) => { e.preventDefault(); fileInputRef.current?.click(); }}
               className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
             >
               <Paperclip size={14} />
