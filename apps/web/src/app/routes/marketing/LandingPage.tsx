@@ -74,11 +74,15 @@ export function LandingPage() {
   const transitionToFloor = useCallback((target: Floor, direction: "down" | "up") => {
     nextFloorRef.current = target;
     setSlideAnim(direction === "down" ? "slide-down" : "slide-up");
+    // Swap floor slightly before animation ends so the static floor
+    // is already painted underneath — eliminates end-of-animation flash
     setTimeout(() => {
       setCurrentFloor(target);
+    }, 550);
+    setTimeout(() => {
       setSlideAnim(null);
       nextFloorRef.current = null;
-    }, 600);
+    }, 620);
   }, []);
 
   const updateFontSize = useCallback(() => {
@@ -554,8 +558,8 @@ export function LandingPage() {
         <div
           className={cn(
             "absolute inset-x-0",
-            slideAnim === "slide-down" && "animate-[pushUp_600ms_ease-in-out_forwards]",
-            slideAnim === "slide-up" && "animate-[pushDown_600ms_ease-in-out_forwards]",
+            slideAnim === "slide-down" && "animate-[pushUp_600ms_cubic-bezier(0.4,0,0.2,1)_forwards]",
+            slideAnim === "slide-up" && "animate-[pushDown_600ms_cubic-bezier(0.4,0,0.2,1)_forwards]",
           )}
           style={{ top: slideAnim === "slide-up" ? "-100vh" : "0" }}
         >
@@ -584,7 +588,8 @@ export function LandingPage() {
           from { transform: translateY(0); }
           to { transform: translateY(100vh); }
         }
-      `}</style>
+      `}
+      </style>
     </div>
   );
 }
