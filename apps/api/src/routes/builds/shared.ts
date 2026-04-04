@@ -1,7 +1,9 @@
-import type { InitialBuildOutput, Project } from "@beomz-studio/contracts";
+import type { BuildPlanContext, InitialBuildOutput, Project } from "@beomz-studio/contracts";
 import type { GenerationRow, ProjectRow } from "@beomz-studio/studio-db";
 import { getTemplateDefinition } from "@beomz-studio/templates";
 import { z } from "zod";
+
+import { buildPlanContextSchema } from "../plan/shared.js";
 
 export const FAILURE_REASONS = [
   "SHELL_VIOLATION",
@@ -18,7 +20,10 @@ export type FailureReasonCode = (typeof FAILURE_REASONS)[number];
 export const startBuildRequestSchema = z.object({
   prompt: z.string().trim().min(8).max(4000),
   projectName: z.string().trim().min(1).max(120).optional(),
-});
+}).merge(buildPlanContextSchema) satisfies z.ZodType<{
+  prompt: string;
+  projectName?: string;
+} & BuildPlanContext>;
 
 const buildMetadataSchema = z
   .object({
@@ -26,9 +31,15 @@ const buildMetadataSchema = z
     fallbackReason: z.string().optional(),
     phase: z.string().optional(),
     planKeywords: z.array(z.string()).optional(),
+    planSessionId: z.string().optional(),
+    planSteps: z.array(z.object({
+      description: z.string(),
+      title: z.string(),
+    })).optional(),
     planSummary: z.string().optional(),
     resultSource: z.enum(["ai", "fallback", "error"]).optional(),
     selectedTemplateId: z.string().optional(),
+    sourcePrompt: z.string().optional(),
     startError: z.string().optional(),
     templateReason: z.string().optional(),
     templateScores: z.record(z.number()).optional(),

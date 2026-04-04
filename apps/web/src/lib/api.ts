@@ -1,10 +1,16 @@
 import type {
+  BuildPlanContext,
+  CreatePlanSessionRequest,
+  CreatePlanSessionResponse,
   CreatePreviewSessionRequest,
   CreatePreviewSessionResponse,
+  GetLatestActivePlanSessionResponse,
+  GetPlanSessionResponse,
   GenerationStatus,
   Project,
   StudioFile,
   TemplateDefinition,
+  UpdatePlanSessionRequest,
 } from "@beomz-studio/contracts";
 
 import { supabase } from "./supabase";
@@ -55,7 +61,7 @@ export function getApiBaseUrl(): string {
   return (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
 }
 
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   if (!accessTokenPromise) {
     accessTokenPromise = supabase.auth
       .getSession()
@@ -116,10 +122,41 @@ async function requestJson<TResponse>(
 export function startBuild(body: {
   prompt: string;
   projectName?: string;
-}): Promise<StartBuildResponse> {
+} & BuildPlanContext): Promise<StartBuildResponse> {
   return requestJson<StartBuildResponse>("/builds/start", {
     body: JSON.stringify(body),
     method: "POST",
+  });
+}
+
+export function createPlanSession(
+  body: CreatePlanSessionRequest,
+): Promise<CreatePlanSessionResponse> {
+  return requestJson<CreatePlanSessionResponse>("/plan/session", {
+    body: JSON.stringify(body),
+    method: "POST",
+  });
+}
+
+export function updatePlanSession(
+  sessionId: string,
+  body: UpdatePlanSessionRequest,
+): Promise<GetPlanSessionResponse> {
+  return requestJson<GetPlanSessionResponse>(`/plan/session/${sessionId}`, {
+    body: JSON.stringify(body),
+    method: "PATCH",
+  });
+}
+
+export function getPlanSession(sessionId: string): Promise<GetPlanSessionResponse> {
+  return requestJson<GetPlanSessionResponse>(`/plan/session/${sessionId}`, {
+    method: "GET",
+  });
+}
+
+export function getLatestActivePlanSession(): Promise<GetLatestActivePlanSessionResponse> {
+  return requestJson<GetLatestActivePlanSessionResponse>("/plan/session/latest/active", {
+    method: "GET",
   });
 }
 

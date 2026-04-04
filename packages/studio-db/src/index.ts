@@ -4,7 +4,10 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 import type {
+  ClarifyQuestion,
   GenerationStatus,
+  PlanPhase,
+  PlanStep,
   PreviewSessionStatus,
   ProjectStatus,
   StudioFile,
@@ -79,6 +82,19 @@ export interface PreviewRow extends Record<string, unknown> {
   started_at: string;
   expires_at: string | null;
   error: string | null;
+}
+
+export interface PlanSessionRow extends Record<string, unknown> {
+  id: string;
+  user_id: string;
+  prompt: string;
+  phase: PlanPhase;
+  questions: readonly ClarifyQuestion[] | null;
+  answers: Record<string, string>;
+  summary: string | null;
+  steps: readonly PlanStep[] | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface UserInsert extends Record<string, unknown> {
@@ -197,6 +213,29 @@ export interface PreviewUpdate extends Record<string, unknown> {
   error?: string | null;
 }
 
+export interface PlanSessionInsert extends Record<string, unknown> {
+  id?: string;
+  user_id: string;
+  prompt: string;
+  phase?: PlanPhase;
+  questions?: readonly ClarifyQuestion[] | null;
+  answers?: Record<string, string>;
+  summary?: string | null;
+  steps?: readonly PlanStep[] | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PlanSessionUpdate extends Record<string, unknown> {
+  prompt?: string;
+  phase?: PlanPhase;
+  questions?: readonly ClarifyQuestion[] | null;
+  answers?: Record<string, string>;
+  summary?: string | null;
+  steps?: readonly PlanStep[] | null;
+  updated_at?: string;
+}
+
 export interface StudioDatabase {
   public: {
     Views: Record<string, never>;
@@ -232,6 +271,12 @@ export interface StudioDatabase {
         Row: PreviewRow;
         Insert: PreviewInsert;
         Update: PreviewUpdate;
+        Relationships: [];
+      };
+      plan_sessions: {
+        Row: PlanSessionRow;
+        Insert: PlanSessionInsert;
+        Update: PlanSessionUpdate;
         Relationships: [];
       };
       users: {
@@ -487,6 +532,71 @@ export class StudioDbClient {
     const response = await this.client
       .from("previews")
       .update(patch)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async createPlanSession(
+    input: PlanSessionInsert,
+  ): Promise<PlanSessionRow> {
+    const response = await this.client
+      .from("plan_sessions")
+      .insert(input)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async findPlanSessionById(id: string): Promise<PlanSessionRow | null> {
+    const response = await this.client
+      .from("plan_sessions")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async findLatestActivePlanSessionByUserId(
+    userId: string,
+    maxAgeMinutes = 30,
+  ): Promise<PlanSessionRow | null> {
+    const cutoff = new Date(Date.now() - maxAgeMinutes * 60_000).toISOString();
+    const response = await this.client
+      .from("plan_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .not("phase", "in", '("approved","idle")')
+      .gt("updated_at", cutoff)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async updatePlanSession(
+    id: string,
+    patch: PlanSessionUpdate,
+  ): Promise<PlanSessionRow> {
+    const response = await this.client
+      .from("plan_sessions")
+      .update({
+        ...patch,
+        updated_at: patch.updated_at ?? new Date().toISOString(),
+      })
       .eq("id", id)
       .select("*")
       .single();
