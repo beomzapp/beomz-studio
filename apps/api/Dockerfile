@@ -13,16 +13,8 @@ COPY apps/api/ ./apps/api/
 # Install all dependencies
 RUN pnpm install --frozen-lockfile
 
-# Build dependency packages first, then api
-RUN pnpm --filter @beomz-studio/studio-db build || true
-RUN pnpm --filter @beomz-studio/contracts build || true
-RUN pnpm --filter @beomz-studio/templates build || true
-RUN pnpm --filter @beomz-studio/operations build || true
-RUN pnpm --filter @beomz-studio/prompt-policies build || true
-RUN pnpm --filter @beomz-studio/kernel build || true
-RUN pnpm --filter @beomz-studio/preview-e2b build || true
-RUN pnpm --filter @beomz-studio/temporal-worker build || true
-RUN pnpm --filter @beomz-studio/api build
+# Build api and all workspace dependencies in topological order
+RUN pnpm --filter "@beomz-studio/api..." build
 
 WORKDIR /app/apps/api
 EXPOSE 3001
