@@ -6,9 +6,10 @@
 interface PlanStepIconProps {
   status: "pending" | "running" | "done" | "error";
   size?: number;
+  light?: boolean;
 }
 
-export function PlanStepIcon({ status, size = 16 }: PlanStepIconProps) {
+export function PlanStepIcon({ status, size = 16, light }: PlanStepIconProps) {
   return (
     <span
       className="relative inline-flex shrink-0 items-center justify-center"
@@ -30,7 +31,7 @@ export function PlanStepIcon({ status, size = 16 }: PlanStepIconProps) {
           fill="none"
           stroke="currentColor"
           strokeWidth="1.5"
-          className="text-white"
+          className={light ? "text-[#1a1a1a]" : "text-white"}
         />
       </svg>
 
