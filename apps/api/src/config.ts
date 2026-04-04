@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+
 const envSchema = z.object({
   PLATFORM_JWKS_URL: z
     .string()
@@ -9,9 +11,12 @@ const envSchema = z.object({
     ),
   STUDIO_SUPABASE_URL: z.string().url(),
   STUDIO_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  PORT: z.coerce.number().int().positive().default(3001),
+  PORT: z.number().int().positive(),
 });
 
 export type ApiConfig = z.infer<typeof envSchema>;
 
-export const apiConfig: ApiConfig = envSchema.parse(process.env);
+export const apiConfig: ApiConfig = envSchema.parse({
+  ...process.env,
+  PORT: Number.isFinite(port) ? port : 3001,
+});
