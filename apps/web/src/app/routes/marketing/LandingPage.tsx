@@ -70,7 +70,7 @@ export function LandingPage() {
   const [approvedTasks, setApprovedTasks] = useState<PlanTask[] | undefined>();
   const nextFloorRef = useRef<Floor | null>(null);
 
-  // Animate floor transition: show animation overlay, then swap floor
+  // Animate floor transition: push both floors together
   const transitionToFloor = useCallback((target: Floor, direction: "down" | "up") => {
     nextFloorRef.current = target;
     setSlideAnim(direction === "down" ? "slide-down" : "slide-up");
@@ -78,7 +78,7 @@ export function LandingPage() {
       setCurrentFloor(target);
       setSlideAnim(null);
       nextFloorRef.current = null;
-    }, 500);
+    }, 600);
   }, []);
 
   const updateFontSize = useCallback(() => {
@@ -151,8 +151,14 @@ export function LandingPage() {
       setPlanTasks([]);
       setPlanLoading(false);
       setApprovedTasks(undefined);
+      // Restore cursor and placeholder in editable span
+      const el = editableRef.current;
+      if (el) {
+        el.focus();
+        updateFontSize();
+      }
     }, 550);
-  }, [transitionToFloor]);
+  }, [transitionToFloor, updateFontSize]);
 
   const handlePlanApprove = useCallback(
     (tasks: PlanTask[]) => {
@@ -244,33 +250,9 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
-  return (
-    <div className="relative h-screen overflow-hidden">
-      {/* Slide animation overlay */}
-      {slideAnim && (
-        <div
-          className={cn(
-            "absolute inset-0 z-50",
-            slideAnim === "slide-down" && "animate-[slideDown_500ms_ease-in-out_forwards]",
-            slideAnim === "slide-up" && "animate-[slideUp_500ms_ease-in-out_forwards]",
-          )}
-        >
-          {/* Show the TARGET floor in the overlay */}
-          {nextFloorRef.current === "plan" && (
-            <div className="h-full bg-[#faf9f6]" />
-          )}
-          {nextFloorRef.current === "builder" && (
-            <div className="h-full bg-[#faf9f6]" />
-          )}
-          {nextFloorRef.current === "home" && (
-            <div className="h-full bg-bg" />
-          )}
-        </div>
-      )}
-
-      {/* Current floor content */}
-      {currentFloor === "home" && (
-        <div ref={containerRef} className="h-screen overflow-hidden bg-bg">
+  // Build floor JSX elements
+  const homeFloor = (
+    <div ref={containerRef} className="h-screen overflow-hidden bg-bg">
       {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
       <section className="relative h-screen snap-start bg-bg">
         {/* Top nav */}
@@ -405,9 +387,12 @@ export function LandingPage() {
               hasText ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           >
-            {/* Plan mode toggle */}
+            {/* Plan mode toggle — onMouseDown + preventDefault keeps focus on editable span */}
             <button
-              onClick={() => setPlanMode(!planMode)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setPlanMode(!planMode);
+              }}
               title="Review the build plan before generating"
               className={cn(
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
@@ -422,7 +407,7 @@ export function LandingPage() {
 
             {/* Enhance with AI */}
             <button
-              onClick={handleEnhance}
+              onMouseDown={(e) => { e.preventDefault(); handleEnhance(); }}
               title="Enhance prompt with AI"
               disabled={enhancing}
               className={cn(
@@ -442,7 +427,7 @@ export function LandingPage() {
 
             {/* File upload */}
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onMouseDown={(e) => { e.preventDefault(); fileInputRef.current?.click(); }}
               className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
             >
               <Paperclip size={14} />
@@ -514,59 +499,90 @@ export function LandingPage() {
           </p>
         </div>
       </section>
+    </div>
+  );
+
+  const planFloor = (
+    <div className="h-screen overflow-hidden bg-[#faf9f6]">
+      <section className="relative flex h-full flex-col items-center justify-center">
+        <button
+          onClick={handleBackToHome}
+          className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+          title="Back to home"
+        >
+          <X size={16} />
+        </button>
+        <div className="mb-6 text-center">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
+            HERE&apos;S MY PLAN
+          </p>
+          <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
+            {promptForBuild}
+          </p>
+          <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
+            Review the steps below. Edit, reorder, or add your own before I start building.
+          </p>
         </div>
+        <TaskPlanEditor
+          tasks={planTasks}
+          onTasksChange={setPlanTasks}
+          onApprove={handlePlanApprove}
+          isLoading={planLoading}
+        />
+      </section>
+    </div>
+  );
+
+  const builderFloor = (
+    <div className="h-screen overflow-hidden bg-[#faf9f6]">
+      <BuilderView
+        initialPrompt={promptForBuild}
+        planTasks={approvedTasks}
+        light
+      />
+    </div>
+  );
+
+  const floors: Record<Floor, React.ReactNode> = { home: homeFloor, plan: planFloor, builder: builderFloor };
+  const isPushing = slideAnim !== null;
+  const nextFloor = nextFloorRef.current;
+
+  return (
+    <div className="relative h-screen overflow-hidden">
+      {isPushing && nextFloor ? (
+        /* Push transition: current + next stacked, container slides */
+        <div
+          className={cn(
+            "absolute inset-x-0",
+            slideAnim === "slide-down" && "animate-[pushUp_600ms_ease-in-out_forwards]",
+            slideAnim === "slide-up" && "animate-[pushDown_600ms_ease-in-out_forwards]",
+          )}
+          style={{ top: slideAnim === "slide-up" ? "-100vh" : "0" }}
+        >
+          {slideAnim === "slide-down" ? (
+            <>
+              <div className="h-screen">{floors[currentFloor]}</div>
+              <div className="h-screen">{floors[nextFloor]}</div>
+            </>
+          ) : (
+            <>
+              <div className="h-screen">{floors[nextFloor]}</div>
+              <div className="h-screen">{floors[currentFloor]}</div>
+            </>
+          )}
+        </div>
+      ) : (
+        floors[currentFloor]
       )}
 
-      {currentFloor === "plan" && (
-        <div className="h-screen overflow-hidden bg-[#faf9f6]">
-          <section className="relative flex h-full flex-col items-center justify-center">
-            <button
-              onClick={handleBackToHome}
-              className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
-              title="Back to home"
-            >
-              <X size={16} />
-            </button>
-            <div className="mb-6 text-center">
-              <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-                HERE&apos;S MY PLAN
-              </p>
-              <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
-                {promptForBuild}
-              </p>
-              <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
-                Review the steps below. Edit, reorder, or add your own before I start building.
-              </p>
-            </div>
-            <TaskPlanEditor
-              tasks={planTasks}
-              onTasksChange={setPlanTasks}
-              onApprove={handlePlanApprove}
-              isLoading={planLoading}
-            />
-          </section>
-        </div>
-      )}
-
-      {currentFloor === "builder" && (
-        <div className="h-screen overflow-hidden bg-[#faf9f6]">
-          <BuilderView
-            initialPrompt={promptForBuild}
-            planTasks={approvedTasks}
-            light
-          />
-        </div>
-      )}
-
-      {/* Slide animation keyframes */}
       <style>{`
-        @keyframes slideDown {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
+        @keyframes pushUp {
+          from { transform: translateY(0); }
+          to { transform: translateY(-100vh); }
         }
-        @keyframes slideUp {
-          from { transform: translateY(-100%); }
-          to { transform: translateY(0); }
+        @keyframes pushDown {
+          from { transform: translateY(0); }
+          to { transform: translateY(100vh); }
         }
       `}</style>
     </div>
