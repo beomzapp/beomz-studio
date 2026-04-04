@@ -20,6 +20,7 @@ app.route("/previews/session", previewsSessionRoute);
 serve(
   {
     fetch: app.fetch,
+    hostname: "0.0.0.0",
     port: apiConfig.PORT,
   },
   (info) => {
