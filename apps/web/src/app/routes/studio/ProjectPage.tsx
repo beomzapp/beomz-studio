@@ -10,9 +10,11 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import {
   GenerationTimeline,
+  PlanStepButton,
   PreviewPane,
   type TimelineStep,
 } from "../../../components/studio";
+import type { PlanStep } from "../../../components/studio/PlanStepButton";
 import {
   getBuildStatus,
   startBuild,
@@ -40,7 +42,10 @@ export function ProjectPage() {
   const [deferredItems, setDeferredItems] = useState<string[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+  const [activeStepId, setActiveStepId] = useState<string | null>(null);
   const deferredPromise = useRef<Promise<string[]> | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const runBuild = useCallback(async () => {
     if (isBuilding) return;
@@ -89,6 +94,28 @@ export function ProjectPage() {
     []
   );
 
+  const handleStepClick = useCallback(
+    (step: PlanStep) => {
+      if (step.status === "done") {
+        document.getElementById(step.id)?.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+      // Fire this step as next generation
+      const buildPrompt = `Build ${step.label} for: ${prompt}`;
+      setActiveStepId(step.id);
+      setPlanSteps((prev) =>
+        prev.map((s) =>
+          s.id === step.id ? { ...s, status: "running" as const } : s
+        )
+      );
+      setPrompt(buildPrompt);
+      setChatInput(buildPrompt);
+      // handleImplement already increments phase and tracks completed items
+      handleImplement(buildPrompt);
+    },
+    [prompt, handleImplement]
+  );
+
   useEffect(() => {
     setActiveProjectId(id);
   }, [id]);
@@ -104,21 +131,42 @@ export function ProjectPage() {
         setBuild(response.build);
 
         if (response.build.status === "completed") {
+          let items: string[];
           try {
-            const items = await deferredPromise.current;
-            setDeferredItems(
-              items ?? [
-                "Advanced settings",
-                "User management",
-                "Analytics dashboard",
-              ],
-            );
-          } catch {
-            setDeferredItems([
+            items = (await deferredPromise.current) ?? [
               "Advanced settings",
               "User management",
               "Analytics dashboard",
-            ]);
+            ];
+          } catch {
+            items = [
+              "Advanced settings",
+              "User management",
+              "Analytics dashboard",
+            ];
+          }
+
+          setDeferredItems(items);
+          setPlanSteps((prev) => {
+            // Preserve done status for already-completed steps
+            const doneIds = new Set(prev.filter((s) => s.status === "done").map((s) => s.id));
+            return items.map((label) => ({
+              id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
+              label,
+              status: doneIds.has(`step-${label.toLowerCase().replace(/\s+/g, "-")}`)
+                ? "done" as const
+                : "pending" as const,
+            }));
+          });
+
+          // Mark the step that just finished building as done
+          if (activeStepId) {
+            setPlanSteps((prev) =>
+              prev.map((s) =>
+                s.id === activeStepId ? { ...s, status: "done" as const } : s
+              )
+            );
+            setActiveStepId(null);
           }
 
           setIsBuilding(false);
@@ -225,17 +273,32 @@ export function ProjectPage() {
             </div>
           </div>
           <div className="flex flex-1 flex-col">
-            <div className="flex-1 p-4">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4">
               {chatInput && (
-                <div className="rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/70">
+                <div id="chat-user-prompt" className="rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/70">
                   {chatInput}
                 </div>
               )}
               {build?.summary && (
                 <div
+                  id="chat-ai-response"
                   className={`mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55${isBuilding ? " streaming-shimmer" : ""}`}
                 >
                   {build.summary}
+                </div>
+              )}
+              {planSteps.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-white/30">
+                    Plan
+                  </p>
+                  {planSteps.map((step) => (
+                    <PlanStepButton
+                      key={step.id}
+                      step={step}
+                      onClick={handleStepClick}
+                    />
+                  ))}
                 </div>
               )}
               {buildError && (
