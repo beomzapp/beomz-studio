@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 
 import { apiConfig } from "./config.js";
 import authLoginRoute from "./routes/auth/login.js";
@@ -9,6 +10,14 @@ import buildsStatusRoute from "./routes/builds/status.js";
 import previewsSessionRoute from "./routes/previews/session.js";
 
 const app = new Hono();
+
+app.use(
+  "*",
+  cors({
+    origin: ["https://beomz.ai", "http://localhost:5173"],
+    credentials: true,
+  }),
+);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth/login", authLoginRoute);
