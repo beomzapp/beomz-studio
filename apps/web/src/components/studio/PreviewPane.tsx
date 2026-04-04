@@ -11,6 +11,10 @@ interface PreviewPaneProps {
   projectId?: string | null;
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function buildInlineFallbackDoc(message: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -94,7 +98,10 @@ export function PreviewPane({
   }, [response]);
 
   const requestPreviewSession = useEffectEvent(async () => {
-    if (!projectId) {
+    if (!projectId || !isUuid(projectId)) {
+      setError(null);
+      setHasFirstFrame(false);
+      setIsLoading(false);
       setResponse(null);
       return;
     }

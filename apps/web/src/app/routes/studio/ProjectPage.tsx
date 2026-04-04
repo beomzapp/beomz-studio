@@ -52,7 +52,9 @@ const INITIAL_STEPS: TimelineStep[] = [
 export function ProjectPage() {
   const navigate = useNavigate();
   const { id } = useParams({ from: "/studio/project/$id" });
-  const [activeProjectId, setActiveProjectId] = useState(id);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+    id === "new" ? null : id,
+  );
   const [build, setBuild] = useState<BuildPayload | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("a SaaS dashboard");
@@ -140,7 +142,7 @@ export function ProjectPage() {
   );
 
   useEffect(() => {
-    setActiveProjectId(id);
+    setActiveProjectId(id === "new" ? null : id);
   }, [id]);
 
   useEffect(() => {

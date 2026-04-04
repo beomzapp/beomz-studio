@@ -49,21 +49,29 @@ export interface StartBuildResponse {
 }
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
+let accessTokenPromise: Promise<string> | null = null;
 
 export function getApiBaseUrl(): string {
   return (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
 }
 
 async function getAccessToken(): Promise<string> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  if (!accessTokenPromise) {
+    accessTokenPromise = supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (!session?.access_token) {
+          throw new Error("A valid platform session is required.");
+        }
 
-  if (!session?.access_token) {
-    throw new Error("A valid platform session is required.");
+        return session.access_token;
+      })
+      .finally(() => {
+        accessTokenPromise = null;
+      });
   }
 
-  return session.access_token;
+  return accessTokenPromise;
 }
 
 async function requestJson<TResponse>(
