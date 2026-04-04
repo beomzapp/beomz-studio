@@ -193,7 +193,7 @@ export function QuestionsCard({
                 key={opt.label}
                 onClick={() => toggleOption(current.id, opt.label, current.type)}
                 className={cn(
-                  "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all",
+                  "flex w-full items-start gap-3 rounded-lg border px-3 py-2 text-left transition-all",
                   isSelected
                     ? "border-[#F97316]/40 bg-[rgba(249,115,22,0.06)]"
                     : "border-[#e5e7eb] bg-white hover:border-[rgba(0,0,0,0.15)] hover:bg-[rgba(0,0,0,0.01)]",
@@ -257,7 +257,7 @@ export function QuestionsCard({
           {/* Other text field */}
           <div
             className={cn(
-              "flex items-start gap-3 rounded-xl border px-4 py-3 transition-all",
+              "flex items-start gap-3 rounded-lg border px-3 py-2 transition-all",
               (otherText[current.id] ?? "").trim()
                 ? "border-[#F97316]/40 bg-[rgba(249,115,22,0.06)]"
                 : "border-[#e5e7eb]",

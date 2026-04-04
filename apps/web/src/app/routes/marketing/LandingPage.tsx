@@ -507,15 +507,22 @@ export function LandingPage() {
         )}
 
         <div className="flex min-h-screen flex-col items-center justify-center px-6 py-16">
-          {/* Prompt echo */}
+          {/* Intro message — fades in before questions */}
           {flowStep !== "home" && (
-            <div className="mb-6 text-center">
-              <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-                YOUR PROMPT
-              </p>
-              <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
-                {promptForFlow}
-              </p>
+            <div className="mb-6 max-w-xl text-center animate-[fadeIn_400ms_ease-out]">
+              {flowStep === "questions" ? (
+                <p className="text-sm text-[#1a1a1a]">
+                  Got it — <span className="font-semibold">{promptForFlow}</span>. Let me ask a few quick questions.
+                </p>
+              ) : flowStep === "plan-ready" ? (
+                <p className="text-sm text-[#1a1a1a]">
+                  Here&apos;s the plan for <span className="font-semibold">{promptForFlow}</span>
+                </p>
+              ) : (
+                <p className="text-sm text-[rgba(0,0,0,0.4)]">
+                  {promptForFlow}
+                </p>
+              )}
             </div>
           )}
 
