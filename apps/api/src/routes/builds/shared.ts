@@ -3,6 +3,18 @@ import type { GenerationRow, ProjectRow } from "@beomz-studio/studio-db";
 import { getTemplateDefinition } from "@beomz-studio/templates";
 import { z } from "zod";
 
+export const FAILURE_REASONS = [
+  "SHELL_VIOLATION",
+  "INVALID_OUTPUT",
+  "PREVIEW_FAILED",
+  "GENERATION_TIMEOUT",
+  "ANTHROPIC_ERROR",
+  "TEMPLATE_NOT_FOUND",
+  "FALLBACK_USED",
+] as const;
+
+export type FailureReasonCode = (typeof FAILURE_REASONS)[number];
+
 export const startBuildRequestSchema = z.object({
   prompt: z.string().trim().min(8).max(4000),
   projectName: z.string().trim().min(1).max(120).optional(),
@@ -10,6 +22,7 @@ export const startBuildRequestSchema = z.object({
 
 const buildMetadataSchema = z
   .object({
+    failureReason: z.enum(FAILURE_REASONS).optional(),
     fallbackReason: z.string().optional(),
     phase: z.string().optional(),
     planKeywords: z.array(z.string()).optional(),
