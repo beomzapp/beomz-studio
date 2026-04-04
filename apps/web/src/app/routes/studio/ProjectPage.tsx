@@ -189,6 +189,7 @@ export function ProjectPage() {
   }, [build]);
 
   const isComplete = build?.status === "completed";
+  const isThinking = isBuilding && (!build?.phase || build.phase === "planner");
 
   return (
     <div className="flex h-full flex-col">
@@ -231,7 +232,9 @@ export function ProjectPage() {
                 </div>
               )}
               {build?.summary && (
-                <div className="mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55">
+                <div
+                  className={`mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55${isBuilding ? " streaming-shimmer" : ""}`}
+                >
                   {build.summary}
                 </div>
               )}
@@ -285,6 +288,7 @@ export function ProjectPage() {
               <GenerationTimeline
                 steps={buildSteps}
                 isComplete={isComplete}
+                isThinking={isThinking}
                 deferredItems={deferredItems}
                 originalPrompt={prompt}
                 phase={phase}

@@ -1,5 +1,6 @@
-import { CheckCircle, Circle, Loader2, XCircle } from "lucide-react";
 import { ContinuationCard } from "./ContinuationCard";
+import { PlanStepIcon } from "./PlanStepIcon";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 
 export interface TimelineStep {
   label: string;
@@ -9,6 +10,7 @@ export interface TimelineStep {
 interface GenerationTimelineProps {
   steps: TimelineStep[];
   isComplete: boolean;
+  isThinking: boolean;
   deferredItems: string[];
   originalPrompt: string;
   phase: number;
@@ -16,16 +18,17 @@ interface GenerationTimelineProps {
   onImplement: (prompt: string) => void;
 }
 
-const STATUS_ICON = {
-  pending: <Circle size={16} className="text-white/20" />,
-  running: <Loader2 size={16} className="animate-spin text-orange" />,
-  done: <CheckCircle size={16} className="text-green-400" />,
-  error: <XCircle size={16} className="text-red-400" />,
-} as const;
+const LABEL_CLASS: Record<TimelineStep["status"], string> = {
+  done: "text-sm text-white/70",
+  running: "text-sm font-medium text-white",
+  error: "text-sm text-red-400",
+  pending: "text-sm text-white/30",
+};
 
 export function GenerationTimeline({
   steps,
   isComplete,
+  isThinking,
   deferredItems,
   originalPrompt,
   phase,
@@ -34,21 +37,13 @@ export function GenerationTimeline({
 }: GenerationTimelineProps) {
   return (
     <div className="p-6">
+      <ThinkingIndicator visible={isThinking} />
+
       <ul className="space-y-3">
         {steps.map((step, i) => (
           <li key={i} className="flex items-center gap-3">
-            {STATUS_ICON[step.status]}
-            <span
-              className={
-                step.status === "done"
-                  ? "text-sm text-white/70"
-                  : step.status === "running"
-                    ? "text-sm font-medium text-white"
-                    : step.status === "error"
-                      ? "text-sm text-red-400"
-                      : "text-sm text-white/30"
-              }
-            >
+            <PlanStepIcon status={step.status} />
+            <span className={LABEL_CLASS[step.status]}>
               {step.label}
             </span>
           </li>
