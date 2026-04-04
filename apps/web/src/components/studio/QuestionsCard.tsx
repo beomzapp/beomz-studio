@@ -288,40 +288,41 @@ export function QuestionsCard({
         </div>
 
         {/* Bottom navigation */}
-        <div className="mt-5 flex items-center justify-between border-t border-[#e5e7eb] pt-4">
-          {/* Left: arrows */}
-          <div className="flex items-center gap-1">
+        <div className="mt-4 flex items-center justify-between border-t border-[#e5e7eb] pt-3">
+          {/* Left: back + counter */}
+          <div className="flex items-center gap-2">
             <button
               onClick={goBack}
               disabled={currentIndex === 0}
-              className="rounded-lg p-1.5 text-[#6b7280] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#1a1a1a] disabled:invisible"
+              className="rounded-lg p-1 text-[#9ca3af] transition-colors hover:text-[#6b7280] disabled:invisible"
             >
               <ChevronLeft size={16} />
             </button>
-            <button
-              onClick={goNext}
-              className="rounded-lg p-1.5 text-[#6b7280] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#1a1a1a]"
-            >
-              <ChevronRight size={16} />
-            </button>
-            <span className="ml-2 text-[10px] tabular-nums text-[#9ca3af]">
+            <span className="text-[10px] tabular-nums text-[#9ca3af]">
               {currentIndex + 1} / {questions.length}
             </span>
           </div>
 
-          {/* Right: skip buttons */}
-          <div className="flex items-center gap-2">
+          {/* Right: skip (muted) + next (prominent) */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onSkipAll}
+              className="text-[10px] text-[#c4c4c4] transition-colors hover:text-[#9ca3af]"
+            >
+              Skip all
+            </button>
             <button
               onClick={skip}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#1a1a1a]"
+              className="text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
             >
               {isLast ? "Review" : "Skip"}
             </button>
             <button
-              onClick={onSkipAll}
-              className="rounded-lg border border-[#e5e7eb] px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[#1a1a1a]"
+              onClick={goNext}
+              className="flex items-center gap-1 rounded-lg bg-[#F97316] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10]"
             >
-              Skip all
+              {isLast ? "Review" : "Next"}
+              <ChevronRight size={14} />
             </button>
           </div>
         </div>

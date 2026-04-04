@@ -230,6 +230,7 @@ export function LandingPage() {
 
   const handleQuestionsSubmit = useCallback(
     (answers: Record<string, string[]>) => {
+      setQuestions([]); // Clear questions so card can't re-render
       setFlowStep("planning");
       generatePlan(promptForFlow, answers).then((bullets) => {
         setPlanBullets(bullets);
@@ -248,8 +249,9 @@ export function LandingPage() {
   }, [promptForFlow]);
 
   return (
-    <div className="h-[200vh] overflow-x-hidden bg-bg">
-      {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
+    <div className="h-screen overflow-hidden bg-bg">
+      {flowStep === "home" ? (
+      /* ===== FLOOR 1: Hero — locked, no scroll ===== */
       <div className="relative h-screen">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
@@ -492,23 +494,19 @@ export function LandingPage() {
           </p>
         </div>
       </div>
-
-      {/* ===== FLOOR 2: Questions / Plan flow ===== */}
-      <div className="relative min-h-screen bg-[#faf9f6]">
-        {/* Close button */}
-        {flowStep !== "home" && (
-          <button
-            onClick={handleBackToHome}
-            className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
-            title="Back to home"
-          >
+      ) : (
+      /* ===== FLOOR 2: Questions / Plan flow — only when not home ===== */
+      <div className="relative h-screen overflow-y-auto bg-[#faf9f6]">
+        <button
+          onClick={handleBackToHome}
+          className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+          title="Back to home"
+        >
             <X size={16} />
-          </button>
-        )}
+        </button>
 
-        <div className="flex min-h-screen flex-col items-center justify-center px-6 py-16">
+        <div className="flex min-h-full flex-col items-center justify-center px-6 py-16">
           {/* Intro message — fades in before questions */}
-          {flowStep !== "home" && (
             <div className="mb-6 max-w-xl text-center animate-[fadeIn_400ms_ease-out]">
               {flowStep === "questions" ? (
                 <p className="text-sm text-[#1a1a1a]">
@@ -524,7 +522,6 @@ export function LandingPage() {
                 </p>
               )}
             </div>
-          )}
 
           {/* Thinking state */}
           {(flowStep === "thinking" || flowStep === "planning") && (
@@ -576,7 +573,7 @@ export function LandingPage() {
                 </div>
                 <div className="mt-5 border-t border-[#e5e7eb] pt-4">
                   <button
-                    onClick={() => navigate({ to: "/studio/home" })}
+                    onClick={() => navigate({ to: "/studio/project/$id", params: { id: "new" } })}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
                   >
                     Start building
@@ -586,14 +583,9 @@ export function LandingPage() {
             </div>
           )}
 
-          {/* Empty home state for floor 2 */}
-          {flowStep === "home" && (
-            <p className="text-sm text-[rgba(0,0,0,0.2)]">
-              Enable Plan mode and press Enter to start
-            </p>
-          )}
         </div>
       </div>
+      )}
     </div>
   );
 }
