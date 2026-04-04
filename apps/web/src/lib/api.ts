@@ -71,14 +71,29 @@ async function requestJson<TResponse>(
   init: RequestInit,
 ): Promise<TResponse> {
   const accessToken = await getAccessToken();
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
+  const url = `${getApiBaseUrl()}${path}`;
+  const headers = {
+    authorization: `Bearer ${accessToken}`,
+    "content-type": "application/json",
+    ...(init.headers ?? {}),
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, headers });
+  } catch {
+    // Network error, CORS block, DNS failure — do NOT retry
+    throw new Error("Generation failed — please try again");
+  }
+
+  // Retry once on transient 5xx
+  if (response.status >= 500 && response.status < 600) {
+    try {
+      response = await fetch(url, { ...init, headers });
+    } catch {
+      throw new Error("Generation failed — please try again");
+    }
+  }
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null) as
