@@ -27,6 +27,14 @@ export type GenerationStatus =
   | "failed"
   | "cancelled";
 
+export type PlanPhase =
+  | "idle"
+  | "streaming_intro"
+  | "awaiting_answers"
+  | "streaming_summary"
+  | "ready"
+  | "approved";
+
 export type AssetKind = "image" | "icon" | "document" | "video";
 
 export interface Project {
@@ -66,6 +74,89 @@ export interface Generation {
   outputPaths: readonly string[];
   summary?: string;
   error?: string;
+}
+
+export interface ClarifyOption {
+  label: string;
+  hint: string | null;
+}
+
+export interface ClarifyQuestion {
+  id: string;
+  text: string;
+  options: readonly ClarifyOption[];
+}
+
+export interface ClarifyResponse {
+  intro: string;
+  questions: readonly ClarifyQuestion[];
+}
+
+export interface PlanStep {
+  title: string;
+  description: string;
+}
+
+export interface PlanResponse {
+  summary: string;
+  steps: readonly PlanStep[];
+}
+
+export interface PlanAnswer {
+  questionId: string;
+  answer: string;
+}
+
+export interface BuildPlanContext {
+  planSessionId?: string;
+  summary?: string;
+  steps?: readonly PlanStep[];
+}
+
+export interface PlanSession {
+  id: string;
+  userId: string;
+  prompt: string;
+  phase: PlanPhase;
+  questions: readonly ClarifyQuestion[];
+  answers: Record<string, string>;
+  summary: string | null;
+  steps: readonly PlanStep[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanClarifyRequest {
+  prompt: string;
+}
+
+export interface PlanGenerateRequest {
+  prompt: string;
+  answers: readonly PlanAnswer[];
+}
+
+export interface CreatePlanSessionRequest {
+  prompt: string;
+}
+
+export interface CreatePlanSessionResponse {
+  sessionId: string;
+}
+
+export interface UpdatePlanSessionRequest {
+  phase?: PlanPhase;
+  questions?: readonly ClarifyQuestion[];
+  answers?: Record<string, string>;
+  summary?: string | null;
+  steps?: readonly PlanStep[];
+}
+
+export interface GetPlanSessionResponse {
+  session: PlanSession;
+}
+
+export interface GetLatestActivePlanSessionResponse {
+  session: PlanSession | null;
 }
 
 export interface Asset {

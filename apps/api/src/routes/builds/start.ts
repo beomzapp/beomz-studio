@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { initialBuildOperation } from "@beomz-studio/operations";
+import type { PlanStep } from "@beomz-studio/contracts";
 import {
   INITIAL_BUILD_WORKFLOW_TYPE,
   buildInitialBuildWorkflowId,
@@ -24,6 +25,40 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown API error.";
 }
 
+function buildPlanContextPrompt(
+  prompt: string,
+  summary: string | undefined,
+  steps: readonly PlanStep[] | undefined,
+): string {
+  if (!summary || !steps || steps.length === 0) {
+    return prompt;
+  }
+
+  const stepsBlock = steps
+    .map((step, index) => `${index + 1}. ${step.title} — ${step.description}`)
+    .join("\n");
+
+  return `${prompt}
+
+Approved build plan:
+Summary: ${summary}
+Steps:
+${stepsBlock}`;
+}
+
+function derivePlanKeywords(steps: readonly PlanStep[] | undefined): string[] | undefined {
+  if (!steps || steps.length === 0) {
+    return undefined;
+  }
+
+  return steps
+    .flatMap((step) => step.title.split(/[^a-zA-Z0-9]+/))
+    .map((keyword) => keyword.trim().toLowerCase())
+    .filter((keyword) => keyword.length >= 3)
+    .filter((keyword, index, items) => items.indexOf(keyword) === index)
+    .slice(0, 12);
+}
+
 const buildsStartRoute = new Hono();
 
 buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
@@ -42,7 +77,27 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   const prompt = parsedBody.data.prompt.trim();
-  const selection = selectInitialBuildTemplate({ prompt });
+  const sourcePrompt = prompt;
+  let planSessionId = parsedBody.data.planSessionId;
+  let planSummary = parsedBody.data.summary;
+  let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
+
+  if (planSessionId) {
+    const planSession = await orgContext.db.findPlanSessionById(planSessionId);
+    if (!planSession || planSession.user_id !== orgContext.user.id) {
+      return c.json({ error: "Approved plan session not found." }, 404);
+    }
+
+    if (planSession.phase !== "approved") {
+      return c.json({ error: "Plan session is not approved yet." }, 409);
+    }
+
+    planSummary = planSession.summary ?? planSummary;
+    planSteps = planSession.steps ?? planSteps;
+  }
+
+  const effectivePrompt = buildPlanContextPrompt(prompt, planSummary, planSteps);
+  const selection = selectInitialBuildTemplate({ prompt: effectivePrompt });
   const projectName =
     parsedBody.data.projectName?.trim()
     || buildProjectNameFromPrompt(prompt, selection.template.defaultProjectName);
@@ -53,7 +108,12 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   const initialMetadata = {
     phase: "queued",
+    planKeywords: derivePlanKeywords(planSteps),
+    planSessionId,
+    planSteps: planSteps ? [...planSteps] : undefined,
+    planSummary,
     resultSource: undefined,
+    sourcePrompt,
     templateReason: selection.reason,
     templateScores: selection.scores,
     workflowId,
@@ -77,10 +137,12 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     output_paths: [],
     preview_entry_path: selection.template.previewEntryPath,
     project_id: projectId,
-    prompt,
+    prompt: effectivePrompt,
     started_at: requestedAt,
     status: "queued",
-    summary: `Queued ${selection.template.name} initial build.`,
+    summary: planSummary
+      ? `Queued ${selection.template.name} initial build from approved plan.`
+      : `Queued ${selection.template.name} initial build.`,
     template_id: selection.template.id,
     warnings: [],
   });
@@ -107,7 +169,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
           existingFiles: [],
           projectId,
           projectName,
-          prompt,
+          prompt: effectivePrompt,
           provisionalTemplateId: selection.template.id,
           requestedAt,
         },

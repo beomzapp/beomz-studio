@@ -4,6 +4,7 @@
  * as an embedded floor inside LandingPage.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PlanStep as ApprovedPlanStep } from "@beomz-studio/contracts";
 import {
   Rocket,
   FolderTree,
@@ -25,7 +26,8 @@ import {
   PreviewPane,
   type TimelineStep,
 } from ".";
-import type { PlanStep } from "./PlanStepButton";
+import { ConversationalPlanPanel } from "./ConversationalPlanPanel";
+import type { PlanStep as DeferredPlanStep } from "./PlanStepButton";
 import type { LogEntryData } from "./LogEntry";
 import {
   getBuildStatus,
@@ -33,10 +35,8 @@ import {
   type BuildPayload,
 } from "../../lib/api";
 import { getDeferredItems } from "../../lib/getDeferredItems";
-import type { PlanTask } from "../../lib/getTaskBreakdown";
-import { getTaskBreakdown } from "../../lib/getTaskBreakdown";
 import { serializeTaskPlan } from "../../lib/serializeTaskPlan";
-import { TaskPlanEditor } from "./TaskPlanEditor";
+import { useConversationalPlanMode } from "../../lib/useConversationalPlanMode";
 
 const PHASE_LOG: Record<string, { label: string; icon: React.ReactNode }> = {
   planner: { label: "Planning architecture", icon: <Brain size={12} /> },
@@ -58,8 +58,12 @@ const INITIAL_STEPS: TimelineStep[] = [
 interface BuilderViewProps {
   /** Initial prompt — e.g. from LandingPage or plan approval */
   initialPrompt: string;
-  /** Pre-approved plan tasks — if provided, generation starts immediately with serialized plan */
-  planTasks?: PlanTask[];
+  /** Approved plan context — if provided, generation starts immediately with serialized plan */
+  approvedPlan?: {
+    planSessionId?: string;
+    summary?: string;
+    steps?: readonly ApprovedPlanStep[];
+  };
   /** Project id — "new" for fresh project */
   projectId?: string;
   /** Use light (off-white) theme */
@@ -68,7 +72,7 @@ interface BuilderViewProps {
 
 export function BuilderView({
   initialPrompt,
-  planTasks: incomingPlanTasks,
+  approvedPlan: incomingApprovedPlan,
   projectId: initialProjectId,
   light,
 }: BuilderViewProps) {
@@ -83,7 +87,7 @@ export function BuilderView({
   const [deferredItems, setDeferredItems] = useState<string[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+  const [planSteps, setPlanSteps] = useState<DeferredPlanStep[]>([]);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
   const [logEntries, setLogEntries] = useState<LogEntryData[]>([]);
   const lastLoggedPhase = useRef<string | null>(null);
@@ -92,9 +96,7 @@ export function BuilderView({
 
   // Plan mode state (for direct builder entry without pre-approved plan)
   const [planModeActive, setPlanModeActive] = useState(false);
-  const [showPlanEditor, setShowPlanEditor] = useState(false);
-  const [editorTasks, setEditorTasks] = useState<PlanTask[]>([]);
-  const [planLoading, setPlanLoading] = useState(false);
+  const planMode = useConversationalPlanMode();
 
   // Theming helpers
   const border = light ? "border-[rgba(0,0,0,0.07)]" : "border-border";
@@ -106,14 +108,14 @@ export function BuilderView({
   const inputBg = light ? "bg-white" : "bg-white/[0.02]";
   const inputText = light ? "text-[#1a1a1a] placeholder-[rgba(0,0,0,0.3)]" : "text-white placeholder-white/20";
 
-  const seedLogFromTasks = useCallback((tasks: PlanTask[]) => {
+  const seedLogFromTasks = useCallback((tasks: readonly ApprovedPlanStep[]) => {
     const now = new Date();
     const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
     setLogEntries(
       tasks.map((t, i) => ({
-        id: `log-task-${t.id}`,
+        id: `log-task-${i}-${t.title.toLowerCase().replace(/\s+/g, "-")}`,
         icon: <ListChecks size={12} />,
-        label: t.label,
+        label: t.title,
         detail: t.description,
         timestamp: ts,
         status: i === 0 ? ("running" as const) : ("pending" as const),
@@ -122,20 +124,32 @@ export function BuilderView({
   }, []);
 
   const runBuild = useCallback(
-    async (overridePrompt?: string) => {
+    async (input?: {
+      approvedPlan?: {
+        sessionId?: string;
+        summary?: string;
+        steps?: readonly ApprovedPlanStep[];
+      };
+      overridePrompt?: string;
+    }) => {
       if (isBuilding) return;
-      const buildPrompt = overridePrompt ?? prompt;
+      const buildPrompt = input?.overridePrompt ?? prompt;
       setIsBuilding(true);
       setBuild(null);
       setBuildError(null);
       setDeferredItems([]);
-      if (!overridePrompt) setLogEntries([]);
+      if (!input?.overridePrompt) setLogEntries([]);
       lastLoggedPhase.current = null;
 
       deferredPromise.current = getDeferredItems(buildPrompt);
 
       try {
-        const response = await startBuild({ prompt: buildPrompt });
+        const response = await startBuild({
+          planSessionId: input?.approvedPlan?.sessionId,
+          prompt: buildPrompt,
+          steps: input?.approvedPlan?.steps,
+          summary: input?.approvedPlan?.summary,
+        });
         setActiveProjectId(response.project.id);
         setBuild(response.build);
         setChatInput(buildPrompt);
@@ -149,45 +163,53 @@ export function BuilderView({
     [isBuilding, prompt],
   );
 
-  // Auto-start build if incoming plan tasks are provided
+  // Auto-start build if approved plan context is provided
   const autoStarted = useRef(false);
   useEffect(() => {
     if (autoStarted.current) return;
-    if (incomingPlanTasks && incomingPlanTasks.length > 0) {
+    if (incomingApprovedPlan?.steps && incomingApprovedPlan.steps.length > 0) {
       autoStarted.current = true;
-      const serialized = serializeTaskPlan(initialPrompt, incomingPlanTasks);
+      const serialized = serializeTaskPlan(initialPrompt, incomingApprovedPlan.steps);
       setPrompt(serialized);
       setChatInput(initialPrompt);
-      seedLogFromTasks(incomingPlanTasks);
-      runBuild(serialized);
+      seedLogFromTasks(incomingApprovedPlan.steps);
+      void runBuild({
+        approvedPlan: {
+          sessionId: incomingApprovedPlan.planSessionId,
+          steps: incomingApprovedPlan.steps,
+          summary: incomingApprovedPlan.summary,
+        },
+        overridePrompt: serialized,
+      });
     }
-  }, [incomingPlanTasks, initialPrompt, runBuild, seedLogFromTasks]);
+  }, [incomingApprovedPlan, initialPrompt, runBuild, seedLogFromTasks]);
 
   const handlePlanApprove = useCallback(
-    (tasks: PlanTask[]) => {
-      const serialized = serializeTaskPlan(prompt, tasks);
-      setShowPlanEditor(false);
-      seedLogFromTasks(tasks);
+    async () => {
+      const approved = await planMode.approve();
+      if (!approved) return;
+
+      const serialized = serializeTaskPlan(approved.prompt, approved.steps);
+      seedLogFromTasks(approved.steps);
       setPrompt(serialized);
-      runBuild(serialized);
+      setChatInput(approved.prompt);
+      void runBuild({
+        approvedPlan: approved,
+        overridePrompt: serialized,
+      });
     },
-    [prompt, runBuild, seedLogFromTasks],
+    [planMode, runBuild, seedLogFromTasks],
   );
 
   const handleStartClick = useCallback(async () => {
-    if (planModeActive && !showPlanEditor) {
-      setPlanLoading(true);
-      setShowPlanEditor(true);
-      try {
-        const tasks = await getTaskBreakdown(prompt);
-        setEditorTasks(tasks);
-      } finally {
-        setPlanLoading(false);
+    if (planModeActive) {
+      if (planMode.state.phase === "idle") {
+        await planMode.start(prompt);
       }
       return;
     }
-    runBuild();
-  }, [planModeActive, showPlanEditor, prompt, runBuild]);
+    void runBuild();
+  }, [planMode, planModeActive, prompt, runBuild]);
 
   const handleImplement = useCallback(
     (implementPrompt: string) => {
@@ -202,7 +224,7 @@ export function BuilderView({
   );
 
   const handleStepClick = useCallback(
-    (step: PlanStep) => {
+    (step: DeferredPlanStep) => {
       if (step.status === "done") {
         document.getElementById(step.id)?.scrollIntoView({ behavior: "smooth" });
         return;
@@ -430,19 +452,34 @@ export function BuilderView({
           </div>
           <div className="flex flex-1 flex-col">
             <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4">
-              {/* Plan editor (when plan mode active before build) */}
-              {showPlanEditor && (
+              {planMode.state.phase !== "idle" && (
                 <div className="mb-4">
-                  <TaskPlanEditor
-                    tasks={editorTasks}
-                    onTasksChange={setEditorTasks}
-                    onApprove={handlePlanApprove}
-                    isLoading={planLoading}
+                  <ConversationalPlanPanel
+                    answers={planMode.state.answers}
+                    error={planMode.state.error}
+                    intro={planMode.state.intro}
+                    light={light}
+                    onAnswer={(questionId, answer) => {
+                      void planMode.answerQuestion(questionId, answer);
+                    }}
+                    onApprove={() => {
+                      void handlePlanApprove();
+                    }}
+                    onRevise={() => {
+                      void planMode.revise();
+                    }}
+                    onStepsChange={planMode.setSteps}
+                    phase={planMode.state.phase}
+                    questions={planMode.state.questions}
+                    steps={planMode.state.steps}
+                    streamingText={planMode.state.streamingText}
+                    summary={planMode.state.summary}
+                    visibleUpTo={planMode.state.visibleUpTo}
                   />
                 </div>
               )}
 
-              {chatInput && !showPlanEditor && (
+              {chatInput && planMode.state.phase === "idle" && (
                 <div
                   id="chat-user-prompt"
                   className={`rounded-lg border ${border} ${bgCard} p-3 text-sm ${light ? "text-[rgba(0,0,0,0.6)]" : "text-white/70"}`}
@@ -484,8 +521,13 @@ export function BuilderView({
                 {/* Plan mode toggle */}
                 <button
                   onClick={() => {
-                    setPlanModeActive((v) => !v);
-                    if (showPlanEditor) setShowPlanEditor(false);
+                    setPlanModeActive((value) => {
+                      const nextValue = !value;
+                      if (!nextValue) {
+                        planMode.reset();
+                      }
+                      return nextValue;
+                    });
                   }}
                   title="Review build plan before generating"
                   className={
@@ -509,11 +551,14 @@ export function BuilderView({
                 />
                 <button
                   onClick={handleStartClick}
-                  disabled={isBuilding}
+                  disabled={
+                    isBuilding
+                    || (planModeActive && planMode.state.phase !== "idle")
+                  }
                   className="flex items-center gap-2 rounded-lg bg-orange px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange/90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Play size={14} />
-                  {isBuilding ? "Building\u2026" : showPlanEditor ? "Plan" : "Start Build"}
+                  {isBuilding ? "Building\u2026" : planModeActive ? "Plan" : "Start Build"}
                 </button>
               </div>
             </div>

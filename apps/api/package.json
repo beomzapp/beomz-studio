@@ -9,6 +9,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.58.0",
     "@beomz-studio/contracts": "workspace:*",
     "@beomz-studio/operations": "workspace:*",
     "@beomz-studio/preview-e2b": "workspace:*",

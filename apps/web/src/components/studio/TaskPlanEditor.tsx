@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef } from "react";
 import { ChevronUp, ChevronDown, Trash2, Plus, Rocket } from "lucide-react";
-import type { PlanTask } from "../../lib/getTaskBreakdown";
+import {
+  createEmptyEditablePlanStep,
+  type EditablePlanStep,
+} from "../../lib/planSteps";
 
 interface TaskPlanEditorProps {
-  tasks: PlanTask[];
-  onTasksChange: (tasks: PlanTask[]) => void;
-  onApprove: (tasks: PlanTask[]) => void;
+  tasks: EditablePlanStep[];
+  onTasksChange: (tasks: EditablePlanStep[]) => void;
+  onApprove?: (tasks: EditablePlanStep[]) => void;
   isLoading?: boolean;
+  showApproveButton?: boolean;
+  summary?: string;
 }
 
 export function TaskPlanEditor({
@@ -14,11 +19,13 @@ export function TaskPlanEditor({
   onTasksChange,
   onApprove,
   isLoading,
+  showApproveButton = true,
+  summary,
 }: TaskPlanEditorProps) {
   const newTaskRef = useRef<HTMLInputElement>(null);
 
   const updateTask = useCallback(
-    (id: string, field: "label" | "description", value: string) => {
+    (id: string, field: "title" | "description", value: string) => {
       onTasksChange(
         tasks.map((t) => (t.id === id ? { ...t, [field]: value } : t)),
       );
@@ -46,12 +53,7 @@ export function TaskPlanEditor({
   );
 
   const addTask = useCallback(() => {
-    const newTask: PlanTask = {
-      id: `task-new-${Date.now()}`,
-      label: "",
-      description: "",
-    };
-    onTasksChange([...tasks, newTask]);
+    onTasksChange([...tasks, createEmptyEditablePlanStep()]);
     // Focus the new input after render
     setTimeout(() => newTaskRef.current?.focus(), 50);
   }, [tasks, onTasksChange]);
@@ -59,7 +61,7 @@ export function TaskPlanEditor({
   // Keep ref pointed at last task's input
   const lastInputRef = useCallback(
     (el: HTMLInputElement | null) => {
-      (newTaskRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
+      newTaskRef.current = el;
     },
     [],
   );
@@ -109,13 +111,20 @@ export function TaskPlanEditor({
     <div className="mx-auto w-full max-w-2xl px-6">
       <div className="rounded-2xl border border-[rgba(0,0,0,0.07)] bg-white p-6 shadow-sm">
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-[#1a1a1a]">
-            Your build plan
-          </h3>
-          <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-0.5 text-xs text-[rgba(0,0,0,0.4)]">
-            {tasks.length} step{tasks.length !== 1 ? "s" : ""}
-          </span>
+        <div className="mb-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-[#1a1a1a]">
+              Your build plan
+            </h3>
+            <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-0.5 text-xs text-[rgba(0,0,0,0.4)]">
+              {tasks.length} step{tasks.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          {summary && (
+            <p className="rounded-2xl bg-[rgba(232,88,10,0.08)] px-4 py-3 text-sm leading-6 text-[rgba(26,26,26,0.72)]">
+              {summary}
+            </p>
+          )}
         </div>
 
         {/* Task list */}
@@ -136,8 +145,8 @@ export function TaskPlanEditor({
                   id={`task-label-${task.id}`}
                   ref={index === tasks.length - 1 ? lastInputRef : undefined}
                   type="text"
-                  value={task.label}
-                  onChange={(e) => updateTask(task.id, "label", e.target.value)}
+                  value={task.title}
+                  onChange={(e) => updateTask(task.id, "title", e.target.value)}
                   placeholder="Task name..."
                   className="w-full bg-transparent text-sm font-medium text-[#1a1a1a] outline-none placeholder:text-[rgba(0,0,0,0.25)]"
                 />
@@ -192,14 +201,16 @@ export function TaskPlanEditor({
             <Plus size={14} />
             Add step
           </button>
-          <button
-            onClick={() => onApprove(tasks)}
-            disabled={tasks.length === 0 || tasks.every((t) => !t.label.trim())}
-            className="flex items-center gap-2 rounded-xl bg-[#e8580a] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#d14e09] disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Rocket size={14} />
-            Build this plan
-          </button>
+          {showApproveButton && onApprove && (
+            <button
+              onClick={() => onApprove(tasks)}
+              disabled={tasks.length === 0 || tasks.every((t) => !t.title.trim())}
+              className="flex items-center gap-2 rounded-xl bg-[#e8580a] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#d14e09] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Rocket size={14} />
+              Build this plan
+            </button>
+          )}
         </div>
       </div>
     </div>

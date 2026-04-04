@@ -11,10 +11,11 @@ import {
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
 import { supabase } from "../../../lib/supabase";
-import { getTaskBreakdown } from "../../../lib/getTaskBreakdown";
-import type { PlanTask } from "../../../lib/getTaskBreakdown";
-import { TaskPlanEditor } from "../../../components/studio/TaskPlanEditor";
+import type { PlanSession, PlanStep } from "@beomz-studio/contracts";
 import { BuilderView } from "../../../components/studio/BuilderView";
+import { ConversationalPlanPanel } from "../../../components/studio/ConversationalPlanPanel";
+import { getLatestActivePlanSession, getPlanSession } from "../../../lib/api";
+import { useConversationalPlanMode } from "../../../lib/useConversationalPlanMode";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 const SUGGESTIONS = [
@@ -65,10 +66,14 @@ export function LandingPage() {
   const [currentFloor, setCurrentFloor] = useState<Floor>("home");
   const [slideAnim, setSlideAnim] = useState<"slide-down" | "slide-up" | null>(null);
   const [promptForBuild, setPromptForBuild] = useState("");
-  const [planTasks, setPlanTasks] = useState<PlanTask[]>([]);
-  const [planLoading, setPlanLoading] = useState(false);
-  const [approvedTasks, setApprovedTasks] = useState<PlanTask[] | undefined>();
+  const [approvedPlan, setApprovedPlan] = useState<{
+    planSessionId?: string;
+    summary?: string;
+    steps?: readonly PlanStep[];
+  }>();
+  const [resumablePlan, setResumablePlan] = useState<PlanSession | null>(null);
   const nextFloorRef = useRef<Floor | null>(null);
+  const planConversation = useConversationalPlanMode();
 
   // Animate floor transition: push both floors together
   const transitionToFloor = useCallback((target: Floor, direction: "down" | "up") => {
@@ -134,27 +139,45 @@ export function LandingPage() {
         setPromptForBuild(prompt);
 
         if (userMode === "pro" || !planMode) {
-          setApprovedTasks(undefined);
+          planConversation.reset();
+          setApprovedPlan(undefined);
           transitionToFloor("builder", "down");
         } else {
-          setPlanLoading(true);
+          setApprovedPlan(undefined);
           transitionToFloor("plan", "down");
-          getTaskBreakdown(prompt).then((tasks) => {
-            setPlanTasks(tasks);
-            setPlanLoading(false);
-          });
+          void planConversation.start(prompt);
         }
       }
     },
-    [suggestionIndex, updateFontSize, userMode, planMode, transitionToFloor],
+    [suggestionIndex, updateFontSize, userMode, planMode, transitionToFloor, planConversation],
   );
 
   const handleBackToHome = useCallback(() => {
     transitionToFloor("home", "up");
     setTimeout(() => {
-      setPlanTasks([]);
-      setPlanLoading(false);
-      setApprovedTasks(undefined);
+      if (
+        planConversation.state.sessionId
+        && planConversation.state.phase !== "approved"
+        && planConversation.state.prompt
+      ) {
+        setResumablePlan({
+          answers: planConversation.state.answers,
+          createdAt: new Date().toISOString(),
+          id: planConversation.state.sessionId,
+          phase: planConversation.state.phase === "idle" ? "awaiting_answers" : planConversation.state.phase,
+          prompt: planConversation.state.prompt,
+          questions: planConversation.state.questions,
+          steps: planConversation.state.steps.map(({ description, title }) => ({ description, title })),
+          summary:
+            planConversation.state.phase === "awaiting_answers"
+            ? planConversation.state.intro
+            : planConversation.state.summary,
+          updatedAt: new Date().toISOString(),
+          userId: "local",
+        });
+      }
+      planConversation.reset();
+      setApprovedPlan(undefined);
       // Restore cursor and placeholder in editable span
       const el = editableRef.current;
       if (el) {
@@ -162,14 +185,22 @@ export function LandingPage() {
         updateFontSize();
       }
     }, 550);
-  }, [transitionToFloor, updateFontSize]);
+  }, [transitionToFloor, updateFontSize, planConversation]);
 
   const handlePlanApprove = useCallback(
-    (tasks: PlanTask[]) => {
-      setApprovedTasks(tasks);
+    async () => {
+      const approved = await planConversation.approve();
+      if (!approved) return;
+
+      setApprovedPlan({
+        planSessionId: approved.sessionId,
+        summary: approved.summary,
+        steps: approved.steps,
+      });
+      setResumablePlan(null);
       transitionToFloor("builder", "down");
     },
-    [transitionToFloor],
+    [planConversation, transitionToFloor],
   );
 
   const handleInput = useCallback(() => {
@@ -252,6 +283,26 @@ export function LandingPage() {
 
   useEffect(() => {
     editableRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getLatestActivePlanSession()
+      .then((response) => {
+        if (!cancelled) {
+          setResumablePlan(response.session);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResumablePlan(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Build floor JSX elements
@@ -486,6 +537,39 @@ export function LandingPage() {
             </kbd>{" "}
             to build
           </p>
+
+          {resumablePlan && (
+            <div className="relative z-10 mt-6 w-full max-w-2xl rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/35">
+                Resume your plan
+              </p>
+              <p className="mt-2 text-sm text-white/75">
+                {resumablePlan.prompt}
+              </p>
+              <div className="mt-4 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    transitionToFloor("plan", "down");
+                    setPromptForBuild(resumablePlan.prompt);
+                    void getPlanSession(resumablePlan.id)
+                      .then((response) => planConversation.hydrate(response.session))
+                      .catch(() => planConversation.reset());
+                  }}
+                  className="rounded-xl bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6a0c]"
+                >
+                  Resume
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResumablePlan(null)}
+                  className="rounded-xl border border-white/10 px-4 py-2 text-sm font-medium text-white/60 transition-colors hover:border-white/25 hover:text-white/85"
+                >
+                  Start fresh
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Mini footer pinned to bottom of viewport */}
@@ -518,21 +602,39 @@ export function LandingPage() {
         </button>
         <div className="mb-6 text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-            HERE&apos;S MY PLAN
+            CONVERSATIONAL PLAN MODE
           </p>
           <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
             {promptForBuild}
           </p>
           <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
-            Review the steps below. Edit, reorder, or add your own before I start building.
+            I&apos;ll ask the right questions first, then turn your answers into an editable build plan.
           </p>
         </div>
-        <TaskPlanEditor
-          tasks={planTasks}
-          onTasksChange={setPlanTasks}
-          onApprove={handlePlanApprove}
-          isLoading={planLoading}
-        />
+        <div className="w-full max-w-3xl px-6">
+          <ConversationalPlanPanel
+            answers={planConversation.state.answers}
+            error={planConversation.state.error}
+            intro={planConversation.state.intro}
+            light
+            onAnswer={(questionId, answer) => {
+              void planConversation.answerQuestion(questionId, answer);
+            }}
+            onApprove={() => {
+              void handlePlanApprove();
+            }}
+            onRevise={() => {
+              void planConversation.revise();
+            }}
+            onStepsChange={planConversation.setSteps}
+            phase={planConversation.state.phase}
+            questions={planConversation.state.questions}
+            steps={planConversation.state.steps}
+            streamingText={planConversation.state.streamingText}
+            summary={planConversation.state.summary}
+            visibleUpTo={planConversation.state.visibleUpTo}
+          />
+        </div>
       </section>
     </div>
   );
@@ -541,7 +643,7 @@ export function LandingPage() {
     <div className="h-screen overflow-hidden bg-[#faf9f6]">
       <BuilderView
         initialPrompt={promptForBuild}
-        planTasks={approvedTasks}
+        approvedPlan={approvedPlan}
         light
       />
     </div>
@@ -587,6 +689,10 @@ export function LandingPage() {
         @keyframes pushDown {
           from { transform: translateY(0); }
           to { transform: translateY(100vh); }
+        }
+        @keyframes blink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0; }
         }
       `}
       </style>
