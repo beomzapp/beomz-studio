@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Link } from "@tanstack/react-router";
+import { useNavigate, Link } from "@tanstack/react-router";
 import {
   ListChecks,
   Sparkles,
@@ -11,12 +11,12 @@ import {
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
 import { supabase } from "../../../lib/supabase";
-import type { PlanSession, PlanStep } from "@beomz-studio/contracts";
-import { BuilderView } from "../../../components/studio/BuilderView";
-import { ConversationalPlanPanel } from "../../../components/studio/ConversationalPlanPanel";
-import { getLatestActivePlanSession, getPlanSession } from "../../../lib/api";
-import { useConversationalPlanMode } from "../../../lib/useConversationalPlanMode";
+import { getClarifyQuestions, generatePlan, type ClarifyQuestion, type PlanBullet } from "../../../lib/planClarify";
+import { QuestionsCard } from "../../../components/studio/QuestionsCard";
+import { ThoughtLabel } from "../../../components/studio/ThoughtLabel";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+
+type FlowStep = "home" | "thinking" | "questions" | "planning" | "plan-ready";
 
 const SUGGESTIONS = [
   "a SaaS dashboard",
@@ -42,8 +42,6 @@ function placeCursorAtEnd(el: HTMLElement) {
   sel?.addRange(range);
 }
 
-type Floor = "home" | "plan" | "builder";
-
 export function LandingPage() {
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const [sphereScale, setSphereScale] = useState(1);
@@ -54,41 +52,17 @@ export function LandingPage() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [flowStep, setFlowStep] = useState<FlowStep>("home");
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
+  const [promptForFlow, setPromptForFlow] = useState("");
+  const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
+  const [planBullets, setPlanBullets] = useState<PlanBullet[]>([]);
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Floor management
-  const [currentFloor, setCurrentFloor] = useState<Floor>("home");
-  const [slideAnim, setSlideAnim] = useState<"slide-down" | "slide-up" | null>(null);
-  const [promptForBuild, setPromptForBuild] = useState("");
-  const [approvedPlan, setApprovedPlan] = useState<{
-    planSessionId?: string;
-    summary?: string;
-    steps?: readonly PlanStep[];
-  }>();
-  const [resumablePlan, setResumablePlan] = useState<PlanSession | null>(null);
-  const nextFloorRef = useRef<Floor | null>(null);
-  const planConversation = useConversationalPlanMode();
-
-  // Animate floor transition: push both floors together
-  const transitionToFloor = useCallback((target: Floor, direction: "down" | "up") => {
-    nextFloorRef.current = target;
-    setSlideAnim(direction === "down" ? "slide-down" : "slide-up");
-    // Swap floor slightly before animation ends so the static floor
-    // is already painted underneath — eliminates end-of-animation flash
-    setTimeout(() => {
-      setCurrentFloor(target);
-    }, 550);
-    setTimeout(() => {
-      setSlideAnim(null);
-      nextFloorRef.current = null;
-    }, 620);
-  }, []);
+  const navigate = useNavigate();
 
   const updateFontSize = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -136,71 +110,33 @@ export function LandingPage() {
         const prompt = editableRef.current?.textContent?.trim() ?? "";
         if (!prompt) return;
 
-        setPromptForBuild(prompt);
+        setPromptForFlow(prompt);
 
         if (userMode === "pro" || !planMode) {
-          planConversation.reset();
-          setApprovedPlan(undefined);
-          transitionToFloor("builder", "down");
+          navigate({ to: "/studio/home" });
         } else {
-          setApprovedPlan(undefined);
-          transitionToFloor("plan", "down");
-          void planConversation.start(prompt);
+          // Plan mode — ask AI for clarifying questions
+          setFlowStep("thinking");
+          setTimeout(() => {
+            window.scrollTo({ top: window.innerHeight, behavior: "smooth" });
+          }, 50);
+          getClarifyQuestions(prompt).then((qs) => {
+            if (qs.length === 0) {
+              // Clear prompt → skip questions, generate plan directly
+              setFlowStep("planning");
+              generatePlan(prompt, {}).then((bullets) => {
+                setPlanBullets(bullets);
+                setFlowStep("plan-ready");
+              });
+            } else {
+              setQuestions(qs);
+              setFlowStep("questions");
+            }
+          });
         }
       }
     },
-    [suggestionIndex, updateFontSize, userMode, planMode, transitionToFloor, planConversation],
-  );
-
-  const handleBackToHome = useCallback(() => {
-    transitionToFloor("home", "up");
-    setTimeout(() => {
-      if (
-        planConversation.state.sessionId
-        && planConversation.state.phase !== "approved"
-        && planConversation.state.prompt
-      ) {
-        setResumablePlan({
-          answers: planConversation.state.answers,
-          createdAt: new Date().toISOString(),
-          id: planConversation.state.sessionId,
-          phase: planConversation.state.phase === "idle" ? "awaiting_answers" : planConversation.state.phase,
-          prompt: planConversation.state.prompt,
-          questions: planConversation.state.questions,
-          steps: planConversation.state.steps.map(({ description, title }) => ({ description, title })),
-          summary:
-            planConversation.state.phase === "awaiting_answers"
-            ? planConversation.state.intro
-            : planConversation.state.summary,
-          updatedAt: new Date().toISOString(),
-          userId: "local",
-        });
-      }
-      planConversation.reset();
-      setApprovedPlan(undefined);
-      // Restore cursor and placeholder in editable span
-      const el = editableRef.current;
-      if (el) {
-        el.focus();
-        updateFontSize();
-      }
-    }, 550);
-  }, [transitionToFloor, updateFontSize, planConversation]);
-
-  const handlePlanApprove = useCallback(
-    async () => {
-      const approved = await planConversation.approve();
-      if (!approved) return;
-
-      setApprovedPlan({
-        planSessionId: approved.sessionId,
-        summary: approved.summary,
-        steps: approved.steps,
-      });
-      setResumablePlan(null);
-      transitionToFloor("builder", "down");
-    },
-    [planConversation, transitionToFloor],
+    [navigate, suggestionIndex, updateFontSize, userMode, planMode]
   );
 
   const handleInput = useCallback(() => {
@@ -278,38 +214,43 @@ export function LandingPage() {
       if (file) setAttachedFile(file);
       e.target.value = "";
     },
-    [],
+    []
   );
 
   useEffect(() => {
     editableRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void getLatestActivePlanSession()
-      .then((response) => {
-        if (!cancelled) {
-          setResumablePlan(response.session);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setResumablePlan(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  const handleBackToHome = useCallback(() => {
+    setFlowStep("home");
+    setQuestions([]);
+    setPlanBullets([]);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // Build floor JSX elements
-  const homeFloor = (
-    <div ref={containerRef} className="h-screen overflow-hidden bg-bg">
+  const handleQuestionsSubmit = useCallback(
+    (answers: Record<string, string[]>) => {
+      setFlowStep("planning");
+      generatePlan(promptForFlow, answers).then((bullets) => {
+        setPlanBullets(bullets);
+        setFlowStep("plan-ready");
+      });
+    },
+    [promptForFlow],
+  );
+
+  const handleSkipAll = useCallback(() => {
+    setFlowStep("planning");
+    generatePlan(promptForFlow, {}).then((bullets) => {
+      setPlanBullets(bullets);
+      setFlowStep("plan-ready");
+    });
+  }, [promptForFlow]);
+
+  return (
+    <div className="h-[200vh] overflow-x-hidden bg-bg">
       {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
-      <section className="relative h-screen snap-start bg-bg">
+      <div className="relative h-screen">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
           <BeomzLogo className="h-6 w-auto text-white" />
@@ -362,7 +303,7 @@ export function LandingPage() {
               "rounded-full px-3 py-1 text-xs font-medium transition-all",
               userMode === "simple"
                 ? "bg-orange text-white"
-                : "text-white/40 hover:text-white/60",
+                : "text-white/40 hover:text-white/60"
             )}
           >
             Simple
@@ -373,7 +314,7 @@ export function LandingPage() {
               "rounded-full px-3 py-1 text-xs font-medium transition-all",
               userMode === "pro"
                 ? "bg-orange text-white"
-                : "text-white/40 hover:text-white/60",
+                : "text-white/40 hover:text-white/60"
             )}
           >
             Pro
@@ -381,7 +322,7 @@ export function LandingPage() {
         </div>
 
         {/* Hero section */}
-        <div className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
+        <section className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
           {/* Gradient sphere */}
           <div
             className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
@@ -429,7 +370,7 @@ export function LandingPage() {
               className={cn(
                 "outline-none caret-orange inline-block min-w-[1ch] text-center",
                 !hasText &&
-                  "before:content-[attr(data-placeholder)] before:text-white/30",
+                  "before:content-[attr(data-placeholder)] before:text-white/30"
               )}
               style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
             />
@@ -439,21 +380,18 @@ export function LandingPage() {
           <div
             className={cn(
               "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
-              hasText ? "opacity-100" : "pointer-events-none opacity-0",
+              hasText ? "opacity-100" : "pointer-events-none opacity-0"
             )}
           >
-            {/* Plan mode toggle — onMouseDown + preventDefault keeps focus on editable span */}
+            {/* Plan mode toggle */}
             <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                setPlanMode(!planMode);
-              }}
+              onMouseDown={(e) => { e.preventDefault(); setPlanMode(!planMode); }}
               title="Review the build plan before generating"
               className={cn(
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 planMode
                   ? "border-orange/50 bg-orange/10 text-orange"
-                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
+                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
               )}
             >
               <ListChecks size={14} />
@@ -469,7 +407,7 @@ export function LandingPage() {
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 enhanceError
                   ? "border-red-500 text-red-400"
-                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple",
+                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple"
               )}
             >
               {enhancing ? (
@@ -519,7 +457,7 @@ export function LandingPage() {
                   "rounded-full border px-4 py-1.5 text-sm transition-all",
                   i === suggestionIndex
                     ? "border-orange/50 bg-orange/10 text-orange"
-                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
+                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
                 )}
               >
                 {s}
@@ -537,40 +475,7 @@ export function LandingPage() {
             </kbd>{" "}
             to build
           </p>
-
-          {resumablePlan && (
-            <div className="relative z-10 mt-6 w-full max-w-2xl rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/35">
-                Resume your plan
-              </p>
-              <p className="mt-2 text-sm text-white/75">
-                {resumablePlan.prompt}
-              </p>
-              <div className="mt-4 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    transitionToFloor("plan", "down");
-                    setPromptForBuild(resumablePlan.prompt);
-                    void getPlanSession(resumablePlan.id)
-                      .then((response) => planConversation.hydrate(response.session))
-                      .catch(() => planConversation.reset());
-                  }}
-                  className="rounded-xl bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6a0c]"
-                >
-                  Resume
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setResumablePlan(null)}
-                  className="rounded-xl border border-white/10 px-4 py-2 text-sm font-medium text-white/60 transition-colors hover:border-white/25 hover:text-white/85"
-                >
-                  Start fresh
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        </section>
 
         {/* Mini footer pinned to bottom of viewport */}
         <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-3 text-center">
@@ -586,116 +491,102 @@ export function LandingPage() {
             <span>&copy; Beomz 2026</span>
           </p>
         </div>
-      </section>
-    </div>
-  );
+      </div>
 
-  const planFloor = (
-    <div className="h-screen overflow-hidden bg-[#faf9f6]">
-      <section className="relative flex h-full flex-col items-center justify-center">
-        <button
-          onClick={handleBackToHome}
-          className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
-          title="Back to home"
-        >
-          <X size={16} />
-        </button>
-        <div className="mb-6 text-center">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-            CONVERSATIONAL PLAN MODE
-          </p>
-          <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
-            {promptForBuild}
-          </p>
-          <p className="mx-auto mt-2 max-w-md text-xs text-[rgba(0,0,0,0.35)]">
-            I&apos;ll ask the right questions first, then turn your answers into an editable build plan.
-          </p>
-        </div>
-        <div className="w-full max-w-3xl px-6">
-          <ConversationalPlanPanel
-            answers={planConversation.state.answers}
-            error={planConversation.state.error}
-            intro={planConversation.state.intro}
-            light
-            onAnswer={(questionId, answer) => {
-              void planConversation.answerQuestion(questionId, answer);
-            }}
-            onApprove={() => {
-              void handlePlanApprove();
-            }}
-            onRevise={() => {
-              void planConversation.revise();
-            }}
-            onStepsChange={planConversation.setSteps}
-            phase={planConversation.state.phase}
-            questions={planConversation.state.questions}
-            steps={planConversation.state.steps}
-            streamingText={planConversation.state.streamingText}
-            summary={planConversation.state.summary}
-            visibleUpTo={planConversation.state.visibleUpTo}
-          />
-        </div>
-      </section>
-    </div>
-  );
+      {/* ===== FLOOR 2: Questions / Plan flow ===== */}
+      <div className="relative min-h-screen bg-[#faf9f6]">
+        {/* Close button */}
+        {flowStep !== "home" && (
+          <button
+            onClick={handleBackToHome}
+            className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+            title="Back to home"
+          >
+            <X size={16} />
+          </button>
+        )}
 
-  const builderFloor = (
-    <div className="h-screen overflow-hidden bg-[#faf9f6]">
-      <BuilderView
-        initialPrompt={promptForBuild}
-        approvedPlan={approvedPlan}
-        light
-      />
-    </div>
-  );
-
-  const floors: Record<Floor, React.ReactNode> = { home: homeFloor, plan: planFloor, builder: builderFloor };
-  const isPushing = slideAnim !== null;
-  const nextFloor = nextFloorRef.current;
-
-  return (
-    <div className="relative h-screen overflow-hidden">
-      {isPushing && nextFloor ? (
-        /* Push transition: current + next stacked, container slides */
-        <div
-          className={cn(
-            "absolute inset-x-0",
-            slideAnim === "slide-down" && "animate-[pushUp_600ms_cubic-bezier(0.4,0,0.2,1)_forwards]",
-            slideAnim === "slide-up" && "animate-[pushDown_600ms_cubic-bezier(0.4,0,0.2,1)_forwards]",
+        <div className="flex min-h-screen flex-col items-center justify-center px-6 py-16">
+          {/* Prompt echo */}
+          {flowStep !== "home" && (
+            <div className="mb-6 text-center">
+              <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
+                YOUR PROMPT
+              </p>
+              <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
+                {promptForFlow}
+              </p>
+            </div>
           )}
-          style={{ top: slideAnim === "slide-up" ? "-100vh" : "0" }}
-        >
-          {slideAnim === "slide-down" ? (
-            <>
-              <div className="h-screen">{floors[currentFloor]}</div>
-              <div className="h-screen">{floors[nextFloor]}</div>
-            </>
-          ) : (
-            <>
-              <div className="h-screen">{floors[nextFloor]}</div>
-              <div className="h-screen">{floors[currentFloor]}</div>
-            </>
+
+          {/* Thinking state */}
+          {(flowStep === "thinking" || flowStep === "planning") && (
+            <ThoughtLabel visible />
+          )}
+
+          {/* Questions card */}
+          {flowStep === "questions" && questions.length > 0 && (
+            <QuestionsCard
+              questions={questions}
+              onSubmit={handleQuestionsSubmit}
+              onSkipAll={handleSkipAll}
+            />
+          )}
+
+          {/* Plan bullets */}
+          {flowStep === "plan-ready" && planBullets.length > 0 && (
+            <div className="mx-auto w-full max-w-xl">
+              <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-[#6b7280]">
+                    Build plan
+                  </h3>
+                  <span className="text-xs text-[#6b7280]">
+                    {planBullets.length} step{planBullets.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {planBullets.map((b, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start gap-3 rounded-xl border border-[rgba(0,0,0,0.05)] bg-[rgba(0,0,0,0.01)] px-4 py-3"
+                    >
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F97316]/10 text-xs font-bold text-[#F97316]">
+                        {i + 1}
+                      </span>
+                      <div>
+                        <span className="text-sm font-semibold text-[#1a1a1a]">
+                          {b.label}
+                        </span>
+                        {b.description && (
+                          <p className="mt-0.5 text-xs text-[#6b7280]">
+                            {b.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-5 border-t border-[#e5e7eb] pt-4">
+                  <button
+                    onClick={() => navigate({ to: "/studio/home" })}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+                  >
+                    Start building
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty home state for floor 2 */}
+          {flowStep === "home" && (
+            <p className="text-sm text-[rgba(0,0,0,0.2)]">
+              Enable Plan mode and press Enter to start
+            </p>
           )}
         </div>
-      ) : (
-        floors[currentFloor]
-      )}
-
-      <style>{`
-        @keyframes pushUp {
-          from { transform: translateY(0); }
-          to { transform: translateY(-100vh); }
-        }
-        @keyframes pushDown {
-          from { transform: translateY(0); }
-          to { transform: translateY(100vh); }
-        }
-        @keyframes blink {
-          0%, 49% { opacity: 1; }
-          50%, 100% { opacity: 0; }
-        }
-      `}
-      </style>
+      </div>
     </div>
   );
 }
