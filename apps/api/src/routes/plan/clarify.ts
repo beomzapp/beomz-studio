@@ -1,17 +1,18 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
-import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import {
   anthropic,
   CLARIFY_SYSTEM_PROMPT,
+  PLAN_CLARIFY_MAX_TOKENS,
+  PLAN_CLARIFY_MODEL,
   planClarifyRequestSchema,
 } from "./shared.js";
 
 const planClarifyRoute = new Hono();
 
-planClarifyRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
+planClarifyRoute.post("/", verifyPlatformJwt, async (c) => {
   const requestBody = await c.req.json().catch(() => null);
   const parsedBody = planClarifyRequestSchema.safeParse(requestBody);
 
@@ -26,14 +27,19 @@ planClarifyRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   const prompt = parsedBody.data.prompt.trim();
-  const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1024,
-    system: CLARIFY_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: `Build: ${prompt}` }],
-  });
 
   return streamSSE(c, async (sse) => {
+    // Flush an immediate frame so proxies/load balancers see activity
+    // quickly even if the model request experiences a cold-start delay.
+    await sse.writeSSE({ event: "open", data: "" });
+
+    const stream = anthropic.messages.stream({
+      model: PLAN_CLARIFY_MODEL,
+      max_tokens: PLAN_CLARIFY_MAX_TOKENS,
+      system: CLARIFY_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: `Build: ${prompt}` }],
+    });
+
     for await (const event of stream) {
       if (
         event.type === "content_block_delta"

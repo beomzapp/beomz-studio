@@ -1,17 +1,18 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
-import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import {
   anthropic,
   GENERATE_SYSTEM_PROMPT,
+  PLAN_GENERATE_MAX_TOKENS,
+  PLAN_GENERATE_MODEL,
   planGenerateRequestSchema,
 } from "./shared.js";
 
 const planGenerateRoute = new Hono();
 
-planGenerateRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
+planGenerateRoute.post("/", verifyPlatformJwt, async (c) => {
   const requestBody = await c.req.json().catch(() => null);
   const parsedBody = planGenerateRequestSchema.safeParse(requestBody);
 
@@ -31,8 +32,8 @@ planGenerateRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     .join("\n");
 
   const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1024,
+    model: PLAN_GENERATE_MODEL,
+    max_tokens: PLAN_GENERATE_MAX_TOKENS,
     system: GENERATE_SYSTEM_PROMPT,
     messages: [
       {

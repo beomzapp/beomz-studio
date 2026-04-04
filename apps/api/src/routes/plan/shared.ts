@@ -89,6 +89,11 @@ export const anthropic = new Anthropic({
   apiKey: apiConfig.ANTHROPIC_API_KEY,
 });
 
+export const PLAN_CLARIFY_MODEL = "claude-haiku-4-5-20251001";
+export const PLAN_CLARIFY_MAX_TOKENS = 512;
+export const PLAN_GENERATE_MODEL = "claude-sonnet-4-20250514";
+export const PLAN_GENERATE_MAX_TOKENS = 1024;
+
 export const CLARIFY_SYSTEM_PROMPT = `You are a planning assistant for Beomz, an AI app builder.
 
 The user has described what they want to build. Ask clarifying questions
