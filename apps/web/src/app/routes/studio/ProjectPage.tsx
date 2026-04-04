@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import {
   Rocket,
@@ -7,7 +7,17 @@ import {
   Monitor,
   Play,
 } from "lucide-react";
-import { GenerationTimeline, type TimelineStep } from "../../../components/studio";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  GenerationTimeline,
+  PreviewPane,
+  type TimelineStep,
+} from "../../../components/studio";
+import {
+  getBuildStatus,
+  startBuild,
+  type BuildPayload,
+} from "../../../lib/api";
 import { getDeferredItems } from "../../../lib/getDeferredItems";
 
 const INITIAL_STEPS: TimelineStep[] = [
@@ -19,13 +29,15 @@ const INITIAL_STEPS: TimelineStep[] = [
 ];
 
 export function ProjectPage() {
+  const navigate = useNavigate();
   const { id } = useParams({ from: "/studio/project/$id" });
+  const [activeProjectId, setActiveProjectId] = useState(id);
+  const [build, setBuild] = useState<BuildPayload | null>(null);
+  const [buildError, setBuildError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("a SaaS dashboard");
   const [phase, setPhase] = useState(1);
   const [completedItems, setCompletedItems] = useState<string[]>([]);
   const [deferredItems, setDeferredItems] = useState<string[]>([]);
-  const [buildSteps, setBuildSteps] = useState<TimelineStep[]>(INITIAL_STEPS);
-  const [isComplete, setIsComplete] = useState(false);
   const [isBuilding, setIsBuilding] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const deferredPromise = useRef<Promise<string[]> | null>(null);
@@ -33,41 +45,35 @@ export function ProjectPage() {
   const runBuild = useCallback(async () => {
     if (isBuilding) return;
     setIsBuilding(true);
-    setIsComplete(false);
-    setBuildSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "pending" })));
+    setBuild(null);
+    setBuildError(null);
+    setDeferredItems([]);
 
-    // Fire deferred items API call in parallel (don't await yet)
     deferredPromise.current = getDeferredItems(prompt);
 
-    // Run steps sequentially at 800ms each
-    for (let i = 0; i < INITIAL_STEPS.length; i++) {
-      setBuildSteps((prev) =>
-        prev.map((s, j) =>
-          j === i ? { ...s, status: "running" } : s
-        )
-      );
-      await new Promise((r) => setTimeout(r, 800));
-      setBuildSteps((prev) =>
-        prev.map((s, j) =>
-          j === i ? { ...s, status: "done" } : s
-        )
-      );
-    }
-
-    // Await deferred items (should be ready by now)
     try {
-      const items = await deferredPromise.current;
-      setDeferredItems(items);
-    } catch {
-      setDeferredItems([
-        "Advanced settings",
-        "User management",
-        "Analytics dashboard",
-      ]);
-    }
+      const response = await startBuild({
+        prompt,
+      });
 
-    setIsComplete(true);
-    setIsBuilding(false);
+      setActiveProjectId(response.project.id);
+      setBuild(response.build);
+      setChatInput(prompt);
+
+      if (response.project.id !== id) {
+        await navigate({
+          params: {
+            id: response.project.id,
+          },
+          to: "/studio/project/$id",
+        });
+      }
+    } catch (error) {
+      setBuildError(
+        error instanceof Error ? error.message : "Failed to start the build.",
+      );
+      setIsBuilding(false);
+    }
   }, [isBuilding, prompt]);
 
   const handleImplement = useCallback(
@@ -82,6 +88,107 @@ export function ProjectPage() {
     },
     []
   );
+
+  useEffect(() => {
+    setActiveProjectId(id);
+  }, [id]);
+
+  useEffect(() => {
+    if (!build || build.status === "completed" || build.status === "failed" || build.status === "cancelled") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await getBuildStatus(build.id);
+        setBuild(response.build);
+
+        if (response.build.status === "completed") {
+          try {
+            const items = await deferredPromise.current;
+            setDeferredItems(
+              items ?? [
+                "Advanced settings",
+                "User management",
+                "Analytics dashboard",
+              ],
+            );
+          } catch {
+            setDeferredItems([
+              "Advanced settings",
+              "User management",
+              "Analytics dashboard",
+            ]);
+          }
+
+          setIsBuilding(false);
+          return;
+        }
+
+        if (response.build.status === "failed" || response.build.status === "cancelled") {
+          setIsBuilding(false);
+          setBuildError(response.build.error ?? "The build stopped before completion.");
+        }
+      } catch (error) {
+        setIsBuilding(false);
+        setBuildError(
+          error instanceof Error ? error.message : "Failed to refresh build status.",
+        );
+      }
+    }, 1500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [build]);
+
+  const buildSteps = useMemo<TimelineStep[]>(() => {
+    if (!build) {
+      return INITIAL_STEPS;
+    }
+
+    const steps: TimelineStep[] = INITIAL_STEPS.map((step) => ({ ...step }));
+    const phaseOrder = [
+      "planner",
+      "template-selector",
+      "generate",
+      "validate",
+      "completed",
+      "fallback-completed",
+    ];
+    const activePhaseIndex = build.phase ? phaseOrder.indexOf(build.phase) : -1;
+    const buildFailed = build.status === "failed" || build.status === "cancelled";
+
+    steps.forEach((step, index) => {
+      if (build.status === "completed") {
+        step.status = "done";
+        return;
+      }
+
+      if (activePhaseIndex > index) {
+        step.status = "done";
+        return;
+      }
+
+      if (activePhaseIndex === index || (activePhaseIndex === -1 && index === 0 && build.status !== "queued")) {
+        step.status = buildFailed ? "error" : "running";
+      }
+    });
+
+    if (build.status === "queued") {
+      steps[0] = { ...steps[0], status: "running" };
+    }
+
+    if (buildFailed && activePhaseIndex === -1) {
+      steps[0] = { ...steps[0], status: "error" };
+    }
+
+    if (build.status === "completed") {
+      steps[steps.length - 1] = { ...steps[steps.length - 1], status: "done" };
+    }
+
+    return steps;
+  }, [build]);
+
+  const isComplete = build?.status === "completed";
 
   return (
     <div className="flex h-full flex-col">
@@ -123,6 +230,16 @@ export function ProjectPage() {
                   {chatInput}
                 </div>
               )}
+              {build?.summary && (
+                <div className="mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55">
+                  {build.summary}
+                </div>
+              )}
+              {buildError && (
+                <div className="mt-3 rounded-lg border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">
+                  {buildError}
+                </div>
+              )}
             </div>
             <div className="border-t border-border p-4">
               <div className="flex gap-2">
@@ -157,8 +274,14 @@ export function ProjectPage() {
               Preview
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {buildSteps.some((s) => s.status !== "pending") ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 border-b border-border">
+              <PreviewPane
+                generationId={build?.id}
+                projectId={activeProjectId}
+              />
+            </div>
+            <div className="max-h-[320px] overflow-y-auto">
               <GenerationTimeline
                 steps={buildSteps}
                 isComplete={isComplete}
@@ -168,13 +291,7 @@ export function ProjectPage() {
                 completedItems={completedItems}
                 onImplement={handleImplement}
               />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-white/20">
-                  Click &quot;Start Build&quot; to begin
-                </p>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
