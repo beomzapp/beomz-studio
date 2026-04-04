@@ -11,11 +11,12 @@ import {
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
 import { supabase } from "../../../lib/supabase";
-import { DreamItScreen } from "./DreamItScreen";
-import { PlanItScreen } from "./PlanItScreen";
+import { getClarifyQuestions, generatePlan, type ClarifyQuestion, type PlanBullet } from "../../../lib/planClarify";
+import { QuestionsCard } from "../../../components/studio/QuestionsCard";
+import { ThoughtLabel } from "../../../components/studio/ThoughtLabel";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
-type Screen = "home" | "dream" | "plan";
+type Screen = "home" | "thinking" | "questions" | "planning" | "plan-ready";
 
 const SUGGESTIONS = [
   "a SaaS dashboard",
@@ -54,6 +55,8 @@ export function LandingPage() {
   const [screen, setScreen] = useState<Screen>("home");
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
   const [promptForFlow, setPromptForFlow] = useState("");
+  const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
+  const [planBullets, setPlanBullets] = useState<PlanBullet[]>([]);
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
@@ -89,7 +92,11 @@ export function LandingPage() {
   const [pushAnim, setPushAnim] = useState<"push-up" | "push-down" | null>(null);
   const nextScreenRef = useRef<Screen | null>(null);
 
-  const transitionTo = useCallback((target: Screen) => {
+  const transitionTo = useCallback((target: Screen, immediate?: boolean) => {
+    if (immediate) {
+      setScreen(target);
+      return;
+    }
     nextScreenRef.current = target;
     setPushAnim(target === "home" ? "push-down" : "push-up");
     setTimeout(() => {
@@ -101,7 +108,30 @@ export function LandingPage() {
 
   const handleBackToHome = useCallback(() => {
     transitionTo("home");
+    setTimeout(() => {
+      setQuestions([]);
+      setPlanBullets([]);
+    }, 650);
   }, [transitionTo]);
+
+  const handleQuestionsSubmit = useCallback(
+    (answers: Record<string, string[]>) => {
+      transitionTo("planning", true);
+      generatePlan(promptForFlow, answers).then((bullets) => {
+        setPlanBullets(bullets);
+        transitionTo("plan-ready", true);
+      });
+    },
+    [promptForFlow, transitionTo],
+  );
+
+  const handleSkipAll = useCallback(() => {
+    transitionTo("planning", true);
+    generatePlan(promptForFlow, {}).then((bullets) => {
+      setPlanBullets(bullets);
+      transitionTo("plan-ready", true);
+    });
+  }, [promptForFlow, transitionTo]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -126,9 +156,20 @@ export function LandingPage() {
         if (userMode === "pro" || !planMode) {
           navigate({ to: "/studio/home" });
         } else {
-          const isVague = prompt.length < 8 || prompt === "";
           setPromptForFlow(prompt);
-          transitionTo(isVague ? "dream" : "plan");
+          transitionTo("thinking");
+          getClarifyQuestions(prompt).then((qs) => {
+            if (qs.length === 0) {
+              transitionTo("planning", true);
+              generatePlan(prompt, {}).then((bullets) => {
+                setPlanBullets(bullets);
+                transitionTo("plan-ready", true);
+              });
+            } else {
+              setQuestions(qs);
+              transitionTo("questions", true);
+            }
+          });
         }
       }
     },
@@ -490,12 +531,77 @@ export function LandingPage() {
         </div>
       </div>
       ) : (
-      /* Plan/Dream screen — only mounted after prompt submission */
-      <div className="h-screen bg-[#faf9f6]">
-        {screen === "dream" && <DreamItScreen onBack={handleBackToHome} />}
-        {screen === "plan" && (
-          <PlanItScreen prompt={promptForFlow} onBack={handleBackToHome} />
-        )}
+      /* Questions / Plan screen — only mounted after prompt submission */
+      <div className="relative h-screen overflow-y-auto bg-[#faf9f6]">
+        {/* Close button */}
+        <button
+          onClick={handleBackToHome}
+          className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
+          title="Back to home"
+        >
+          <X size={16} />
+        </button>
+
+        <div className="flex min-h-full flex-col items-center justify-center px-6 py-16">
+          {/* Prompt echo */}
+          <div className="mb-6 text-center">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
+              YOUR PROMPT
+            </p>
+            <p className="mt-2 max-w-lg text-base font-semibold text-[#1a1a1a]">
+              {promptForFlow}
+            </p>
+          </div>
+
+          {/* Thinking state */}
+          {(screen === "thinking" || screen === "planning") && (
+            <ThoughtLabel visible />
+          )}
+
+          {/* Questions card */}
+          {screen === "questions" && questions.length > 0 && (
+            <QuestionsCard
+              questions={questions}
+              onSubmit={handleQuestionsSubmit}
+              onSkipAll={handleSkipAll}
+            />
+          )}
+
+          {/* Plan bullets */}
+          {screen === "plan-ready" && planBullets.length > 0 && (
+            <div className="mx-auto w-full max-w-xl">
+              <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-[#6b7280]">Build plan</h3>
+                  <span className="text-xs text-[#6b7280]">
+                    {planBullets.length} step{planBullets.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {planBullets.map((b, i) => (
+                    <div key={i} className="flex items-start gap-3 rounded-xl border border-[rgba(0,0,0,0.05)] bg-[rgba(0,0,0,0.01)] px-4 py-3">
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F97316]/10 text-xs font-bold text-[#F97316]">
+                        {i + 1}
+                      </span>
+                      <div>
+                        <span className="text-sm font-semibold text-[#1a1a1a]">{b.label}</span>
+                        {b.description && <p className="mt-0.5 text-xs text-[#6b7280]">{b.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-5 border-t border-[#e5e7eb] pt-4">
+                  <button
+                    onClick={() => navigate({ to: "/studio/home" })}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+                  >
+                    Start building
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       )}
 
