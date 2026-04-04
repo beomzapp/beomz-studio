@@ -86,6 +86,23 @@ export function LandingPage() {
     });
   }, []);
 
+  const [pushAnim, setPushAnim] = useState<"push-up" | "push-down" | null>(null);
+  const nextScreenRef = useRef<Screen | null>(null);
+
+  const transitionTo = useCallback((target: Screen) => {
+    nextScreenRef.current = target;
+    setPushAnim(target === "home" ? "push-down" : "push-up");
+    setTimeout(() => {
+      setScreen(target);
+      setPushAnim(null);
+      nextScreenRef.current = null;
+    }, 600);
+  }, []);
+
+  const handleBackToHome = useCallback(() => {
+    transitionTo("home");
+  }, [transitionTo]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
@@ -107,21 +124,15 @@ export function LandingPage() {
         const prompt = editableRef.current?.textContent?.trim() ?? "";
 
         if (userMode === "pro" || !planMode) {
-          // Navigate to studio
           navigate({ to: "/studio/home" });
         } else {
-          // Simple mode + Plan ON — scroll to floor 2
           const isVague = prompt.length < 8 || prompt === "";
           setPromptForFlow(prompt);
-          setScreen(isVague ? "dream" : "plan");
-          // Smooth scroll to floor 2
-          setTimeout(() => {
-            window.scrollTo({ top: window.innerHeight, behavior: "smooth" });
-          }, 50);
+          transitionTo(isVague ? "dream" : "plan");
         }
       }
     },
-    [navigate, suggestionIndex, updateFontSize, userMode, planMode]
+    [navigate, suggestionIndex, updateFontSize, userMode, planMode, transitionTo]
   );
 
   const handleInput = useCallback(() => {
@@ -206,15 +217,37 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
-  const handleBackToHome = useCallback(() => {
-    setScreen("home");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+
 
   return (
-    <div className="h-[200vh] overflow-x-hidden bg-bg">
-      {/* ===== FLOOR 1: Hero (100vh) — UNTOUCHED ===== */}
-      <div className="relative h-screen">
+    <div className="relative h-screen overflow-hidden">
+      {/* Push transition overlay */}
+      {pushAnim && (
+        <div
+          className={cn(
+            "absolute inset-x-0 z-50",
+            pushAnim === "push-up" && "animate-[pushUp_600ms_cubic-bezier(0.4,0,0.2,1)_forwards]",
+            pushAnim === "push-down" && "animate-[pushDown_600ms_cubic-bezier(0.4,0,0.2,1)_forwards]",
+          )}
+          style={{ top: pushAnim === "push-down" ? "-100vh" : "0" }}
+        >
+          {pushAnim === "push-up" ? (
+            <>
+              <div className="h-screen bg-bg" />
+              <div className="h-screen bg-[#faf9f6]" />
+            </>
+          ) : (
+            <>
+              <div className="h-screen bg-bg" />
+              <div className="h-screen bg-[#faf9f6]" />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Active screen */}
+      {screen === "home" ? (
+      <div className="relative h-screen bg-bg">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
           <BeomzLogo className="h-6 w-auto text-white" />
@@ -456,21 +489,27 @@ export function LandingPage() {
           </p>
         </div>
       </div>
-
-      {/* ===== FLOOR 2: Dream/Plan screen (100vh) ===== */}
+      ) : (
+      /* Plan/Dream screen — only mounted after prompt submission */
       <div className="h-screen bg-[#faf9f6]">
         {screen === "dream" && <DreamItScreen onBack={handleBackToHome} />}
         {screen === "plan" && (
           <PlanItScreen prompt={promptForFlow} onBack={handleBackToHome} />
         )}
-        {screen === "home" && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-[rgba(0,0,0,0.2)]">
-              Enable Plan mode and press Enter to start
-            </p>
-          </div>
-        )}
       </div>
+      )}
+
+      {/* Push animation keyframes */}
+      <style>{`
+        @keyframes pushUp {
+          from { transform: translateY(0); }
+          to { transform: translateY(-100vh); }
+        }
+        @keyframes pushDown {
+          from { transform: translateY(0); }
+          to { transform: translateY(100vh); }
+        }
+      `}</style>
     </div>
   );
 }
