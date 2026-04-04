@@ -26,7 +26,6 @@ import {
 import type { PlanStep } from "../../../components/studio/PlanStepButton";
 import type { LogEntryData } from "../../../components/studio/LogEntry";
 import {
-  getProjectSession,
   getBuildStatus,
   startBuild,
   type BuildPayload,
@@ -50,12 +49,6 @@ const INITIAL_STEPS: TimelineStep[] = [
   { label: "Complete", status: "pending" },
 ];
 
-const DEFAULT_DEFERRED_ITEMS = [
-  "Advanced settings",
-  "User management",
-  "Analytics dashboard",
-];
-
 export function ProjectPage() {
   const navigate = useNavigate();
   const { id } = useParams({ from: "/studio/project/$id" });
@@ -68,7 +61,6 @@ export function ProjectPage() {
   const [deferredItems, setDeferredItems] = useState<string[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [sessionFiles, setSessionFiles] = useState<Array<{ path: string; content: string }>>([]);
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
   const [logEntries, setLogEntries] = useState<LogEntryData[]>([]);
@@ -82,7 +74,6 @@ export function ProjectPage() {
     setBuild(null);
     setBuildError(null);
     setDeferredItems([]);
-    setSessionFiles([]);
     setLogEntries([]);
     lastLoggedPhase.current = null;
 
@@ -153,91 +144,6 @@ export function ProjectPage() {
   }, [id]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function restoreProjectSession() {
-      try {
-        const response = await getProjectSession(id);
-
-        if (cancelled) {
-          return;
-        }
-
-        setActiveProjectId(response.project.id);
-        setBuild(response.build);
-        setSessionFiles(response.session?.snapshot.files.map((file) => ({
-          content: file.content,
-          path: file.path,
-        })) ?? []);
-
-        if (!response.build) {
-          setBuildError(null);
-          setChatInput("");
-          setDeferredItems([]);
-          setIsBuilding(false);
-          setPlanSteps([]);
-          setPrompt("a SaaS dashboard");
-          return;
-        }
-
-        setBuildError(response.build.error ?? null);
-        setChatInput(response.build.prompt);
-        setPrompt(response.build.prompt);
-        setIsBuilding(
-          response.build.status !== "completed"
-          && response.build.status !== "failed"
-          && response.build.status !== "cancelled",
-        );
-
-        if (response.build.status !== "completed") {
-          setDeferredItems([]);
-          return;
-        }
-
-        deferredPromise.current = getDeferredItems(response.build.prompt);
-
-        try {
-          const items = await deferredPromise.current;
-          if (cancelled) {
-            return;
-          }
-
-          const nextItems = items ?? DEFAULT_DEFERRED_ITEMS;
-          setDeferredItems(nextItems);
-          setPlanSteps(nextItems.map((label) => ({
-            id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
-            label,
-            status: "pending",
-          })));
-        } catch {
-          if (cancelled) {
-            return;
-          }
-
-          setDeferredItems(DEFAULT_DEFERRED_ITEMS);
-          setPlanSteps(DEFAULT_DEFERRED_ITEMS.map((label) => ({
-            id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
-            label,
-            status: "pending",
-          })));
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setBuildError(
-            error instanceof Error ? error.message : "Failed to restore project session.",
-          );
-        }
-      }
-    }
-
-    void restoreProjectSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
-  useEffect(() => {
     if (!build || build.status === "completed" || build.status === "failed" || build.status === "cancelled") {
       return;
     }
@@ -246,14 +152,6 @@ export function ProjectPage() {
       try {
         const response = await getBuildStatus(build.id);
         setBuild(response.build);
-        if (response.result?.files) {
-          setSessionFiles(
-            response.result.files.map((file) => ({
-              content: file.content,
-              path: file.path,
-            })),
-          );
-        }
 
         // Append log entry when phase changes
         const currentPhase = response.build.phase;
@@ -284,9 +182,17 @@ export function ProjectPage() {
         if (response.build.status === "completed") {
           let items: string[];
           try {
-            items = (await deferredPromise.current) ?? DEFAULT_DEFERRED_ITEMS;
+            items = (await deferredPromise.current) ?? [
+              "Advanced settings",
+              "User management",
+              "Analytics dashboard",
+            ];
           } catch {
-            items = DEFAULT_DEFERRED_ITEMS;
+            items = [
+              "Advanced settings",
+              "User management",
+              "Analytics dashboard",
+            ];
           }
 
           setDeferredItems(items);
@@ -342,7 +248,7 @@ export function ProjectPage() {
     }, 1500);
 
     return () => window.clearTimeout(timeoutId);
-  }, [activeStepId, build]);
+  }, [build]);
 
   const buildSteps = useMemo<TimelineStep[]>(() => {
     if (!build) {
@@ -417,20 +323,7 @@ export function ProjectPage() {
             <FolderTree size={14} />
             Files
           </div>
-          {sessionFiles.length === 0 ? (
-            <p className="mt-8 text-center text-xs text-white/20">No files</p>
-          ) : (
-            <ul className="mt-4 space-y-2 text-xs text-white/45">
-              {sessionFiles.map((file) => (
-                <li
-                  key={file.path}
-                  className="rounded-lg border border-border bg-white/[0.02] px-3 py-2"
-                >
-                  {file.path}
-                </li>
-              ))}
-            </ul>
-          )}
+          <p className="mt-8 text-center text-xs text-white/20">No files</p>
         </div>
 
         {/* Chat panel */}
@@ -454,14 +347,6 @@ export function ProjectPage() {
                   className={`mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55${isBuilding ? " streaming-shimmer" : ""}`}
                 >
                   {build.summary}
-                </div>
-              )}
-              {build && (
-                <div className="mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-xs text-white/45">
-                  Cost ${build.totalCostUsd.toFixed(4)}
-                  {build.remainingCreditsUsd !== null
-                    ? ` • Remaining $${build.remainingCreditsUsd.toFixed(2)}`
-                    : ""}
                 </div>
               )}
               {planSteps.length > 0 && (
