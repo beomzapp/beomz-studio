@@ -9,16 +9,38 @@ import {
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  Brain,
+  Layers,
+  Code,
+  ShieldCheck,
+  CheckCircle,
+  XCircle,
+} from "lucide-react";
+import {
+  BuildLog,
   GenerationTimeline,
+  PlanStepButton,
   PreviewPane,
   type TimelineStep,
 } from "../../../components/studio";
+import type { PlanStep } from "../../../components/studio/PlanStepButton";
+import type { LogEntryData } from "../../../components/studio/LogEntry";
 import {
+  getProjectSession,
   getBuildStatus,
   startBuild,
   type BuildPayload,
 } from "../../../lib/api";
 import { getDeferredItems } from "../../../lib/getDeferredItems";
+
+const PHASE_LOG: Record<string, { label: string; icon: React.ReactNode }> = {
+  planner: { label: "Planning architecture", icon: <Brain size={12} /> },
+  "template-selector": { label: "Selecting template", icon: <Layers size={12} /> },
+  generate: { label: "Generating files", icon: <Code size={12} /> },
+  validate: { label: "Validating output", icon: <ShieldCheck size={12} /> },
+  completed: { label: "Generation complete", icon: <CheckCircle size={12} /> },
+  "fallback-completed": { label: "Generation complete (fallback)", icon: <CheckCircle size={12} /> },
+};
 
 const INITIAL_STEPS: TimelineStep[] = [
   { label: "Planning", status: "pending" },
@@ -26,6 +48,12 @@ const INITIAL_STEPS: TimelineStep[] = [
   { label: "Generating files", status: "pending" },
   { label: "Validating", status: "pending" },
   { label: "Complete", status: "pending" },
+];
+
+const DEFAULT_DEFERRED_ITEMS = [
+  "Advanced settings",
+  "User management",
+  "Analytics dashboard",
 ];
 
 export function ProjectPage() {
@@ -40,7 +68,13 @@ export function ProjectPage() {
   const [deferredItems, setDeferredItems] = useState<string[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [sessionFiles, setSessionFiles] = useState<Array<{ path: string; content: string }>>([]);
+  const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
+  const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const [logEntries, setLogEntries] = useState<LogEntryData[]>([]);
+  const lastLoggedPhase = useRef<string | null>(null);
   const deferredPromise = useRef<Promise<string[]> | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const runBuild = useCallback(async () => {
     if (isBuilding) return;
@@ -48,6 +82,9 @@ export function ProjectPage() {
     setBuild(null);
     setBuildError(null);
     setDeferredItems([]);
+    setSessionFiles([]);
+    setLogEntries([]);
+    lastLoggedPhase.current = null;
 
     deferredPromise.current = getDeferredItems(prompt);
 
@@ -89,8 +126,115 @@ export function ProjectPage() {
     []
   );
 
+  const handleStepClick = useCallback(
+    (step: PlanStep) => {
+      if (step.status === "done") {
+        document.getElementById(step.id)?.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+      // Fire this step as next generation
+      const buildPrompt = `Build ${step.label} for: ${prompt}`;
+      setActiveStepId(step.id);
+      setPlanSteps((prev) =>
+        prev.map((s) =>
+          s.id === step.id ? { ...s, status: "running" as const } : s
+        )
+      );
+      setPrompt(buildPrompt);
+      setChatInput(buildPrompt);
+      // handleImplement already increments phase and tracks completed items
+      handleImplement(buildPrompt);
+    },
+    [prompt, handleImplement]
+  );
+
   useEffect(() => {
     setActiveProjectId(id);
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreProjectSession() {
+      try {
+        const response = await getProjectSession(id);
+
+        if (cancelled) {
+          return;
+        }
+
+        setActiveProjectId(response.project.id);
+        setBuild(response.build);
+        setSessionFiles(response.session?.snapshot.files.map((file) => ({
+          content: file.content,
+          path: file.path,
+        })) ?? []);
+
+        if (!response.build) {
+          setBuildError(null);
+          setChatInput("");
+          setDeferredItems([]);
+          setIsBuilding(false);
+          setPlanSteps([]);
+          setPrompt("a SaaS dashboard");
+          return;
+        }
+
+        setBuildError(response.build.error ?? null);
+        setChatInput(response.build.prompt);
+        setPrompt(response.build.prompt);
+        setIsBuilding(
+          response.build.status !== "completed"
+          && response.build.status !== "failed"
+          && response.build.status !== "cancelled",
+        );
+
+        if (response.build.status !== "completed") {
+          setDeferredItems([]);
+          return;
+        }
+
+        deferredPromise.current = getDeferredItems(response.build.prompt);
+
+        try {
+          const items = await deferredPromise.current;
+          if (cancelled) {
+            return;
+          }
+
+          const nextItems = items ?? DEFAULT_DEFERRED_ITEMS;
+          setDeferredItems(nextItems);
+          setPlanSteps(nextItems.map((label) => ({
+            id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
+            label,
+            status: "pending",
+          })));
+        } catch {
+          if (cancelled) {
+            return;
+          }
+
+          setDeferredItems(DEFAULT_DEFERRED_ITEMS);
+          setPlanSteps(DEFAULT_DEFERRED_ITEMS.map((label) => ({
+            id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
+            label,
+            status: "pending",
+          })));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBuildError(
+            error instanceof Error ? error.message : "Failed to restore project session.",
+          );
+        }
+      }
+    }
+
+    void restoreProjectSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -102,23 +246,70 @@ export function ProjectPage() {
       try {
         const response = await getBuildStatus(build.id);
         setBuild(response.build);
+        if (response.result?.files) {
+          setSessionFiles(
+            response.result.files.map((file) => ({
+              content: file.content,
+              path: file.path,
+            })),
+          );
+        }
+
+        // Append log entry when phase changes
+        const currentPhase = response.build.phase;
+        if (currentPhase && currentPhase !== lastLoggedPhase.current) {
+          // Mark previous running entry as done
+          setLogEntries((prev) =>
+            prev.map((e) => (e.status === "running" ? { ...e, status: "done" as const } : e))
+          );
+          const meta = PHASE_LOG[currentPhase];
+          if (meta) {
+            const now = new Date();
+            const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+            setLogEntries((prev) => [
+              ...prev,
+              {
+                id: `log-${currentPhase}-${Date.now()}`,
+                icon: meta.icon,
+                label: meta.label,
+                detail: "",
+                timestamp: ts,
+                status: currentPhase === "completed" || currentPhase === "fallback-completed" ? "done" : "running",
+              },
+            ]);
+          }
+          lastLoggedPhase.current = currentPhase;
+        }
 
         if (response.build.status === "completed") {
+          let items: string[];
           try {
-            const items = await deferredPromise.current;
-            setDeferredItems(
-              items ?? [
-                "Advanced settings",
-                "User management",
-                "Analytics dashboard",
-              ],
-            );
+            items = (await deferredPromise.current) ?? DEFAULT_DEFERRED_ITEMS;
           } catch {
-            setDeferredItems([
-              "Advanced settings",
-              "User management",
-              "Analytics dashboard",
-            ]);
+            items = DEFAULT_DEFERRED_ITEMS;
+          }
+
+          setDeferredItems(items);
+          setPlanSteps((prev) => {
+            // Preserve done status for already-completed steps
+            const doneIds = new Set(prev.filter((s) => s.status === "done").map((s) => s.id));
+            return items.map((label) => ({
+              id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
+              label,
+              status: doneIds.has(`step-${label.toLowerCase().replace(/\s+/g, "-")}`)
+                ? "done" as const
+                : "pending" as const,
+            }));
+          });
+
+          // Mark the step that just finished building as done
+          if (activeStepId) {
+            setPlanSteps((prev) =>
+              prev.map((s) =>
+                s.id === activeStepId ? { ...s, status: "done" as const } : s
+              )
+            );
+            setActiveStepId(null);
           }
 
           setIsBuilding(false);
@@ -126,6 +317,19 @@ export function ProjectPage() {
         }
 
         if (response.build.status === "failed" || response.build.status === "cancelled") {
+          const now = new Date();
+          const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
+          setLogEntries((prev) => [
+            ...prev.map((e) => (e.status === "running" ? { ...e, status: "done" as const } : e)),
+            {
+              id: `log-error-${Date.now()}`,
+              icon: <XCircle size={12} />,
+              label: "Error",
+              detail: response.build.error ?? "Build stopped",
+              timestamp: ts,
+              status: "error" as const,
+            },
+          ]);
           setIsBuilding(false);
           setBuildError(response.build.error ?? "The build stopped before completion.");
         }
@@ -138,7 +342,7 @@ export function ProjectPage() {
     }, 1500);
 
     return () => window.clearTimeout(timeoutId);
-  }, [build]);
+  }, [activeStepId, build]);
 
   const buildSteps = useMemo<TimelineStep[]>(() => {
     if (!build) {
@@ -189,6 +393,7 @@ export function ProjectPage() {
   }, [build]);
 
   const isComplete = build?.status === "completed";
+  const isThinking = isBuilding && (!build?.phase || build.phase === "planner");
 
   return (
     <div className="flex h-full flex-col">
@@ -212,7 +417,20 @@ export function ProjectPage() {
             <FolderTree size={14} />
             Files
           </div>
-          <p className="mt-8 text-center text-xs text-white/20">No files</p>
+          {sessionFiles.length === 0 ? (
+            <p className="mt-8 text-center text-xs text-white/20">No files</p>
+          ) : (
+            <ul className="mt-4 space-y-2 text-xs text-white/45">
+              {sessionFiles.map((file) => (
+                <li
+                  key={file.path}
+                  className="rounded-lg border border-border bg-white/[0.02] px-3 py-2"
+                >
+                  {file.path}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {/* Chat panel */}
@@ -224,15 +442,40 @@ export function ProjectPage() {
             </div>
           </div>
           <div className="flex flex-1 flex-col">
-            <div className="flex-1 p-4">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4">
               {chatInput && (
-                <div className="rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/70">
+                <div id="chat-user-prompt" className="rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/70">
                   {chatInput}
                 </div>
               )}
               {build?.summary && (
-                <div className="mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55">
+                <div
+                  id="chat-ai-response"
+                  className={`mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55${isBuilding ? " streaming-shimmer" : ""}`}
+                >
                   {build.summary}
+                </div>
+              )}
+              {build && (
+                <div className="mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-xs text-white/45">
+                  Cost ${build.totalCostUsd.toFixed(4)}
+                  {build.remainingCreditsUsd !== null
+                    ? ` • Remaining $${build.remainingCreditsUsd.toFixed(2)}`
+                    : ""}
+                </div>
+              )}
+              {planSteps.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-white/30">
+                    Plan
+                  </p>
+                  {planSteps.map((step) => (
+                    <PlanStepButton
+                      key={step.id}
+                      step={step}
+                      onClick={handleStepClick}
+                    />
+                  ))}
                 </div>
               )}
               {buildError && (
@@ -285,6 +528,7 @@ export function ProjectPage() {
               <GenerationTimeline
                 steps={buildSteps}
                 isComplete={isComplete}
+                isThinking={isThinking}
                 deferredItems={deferredItems}
                 originalPrompt={prompt}
                 phase={phase}
@@ -292,6 +536,7 @@ export function ProjectPage() {
                 onImplement={handleImplement}
               />
             </div>
+            <BuildLog entries={logEntries} />
           </div>
         </div>
       </div>

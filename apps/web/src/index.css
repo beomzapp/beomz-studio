@@ -11,6 +11,9 @@
   --color-cream: #faf9f6;
   --color-cream-text: #1a1a1a;
   --color-cream-accent: #e8580a;
+  --color-success: #22c55e;
+  --color-surface-highlight: rgba(249, 115, 22, 0.08);
+  --color-thinking: rgba(249, 115, 22, 0.5);
 }
 
 body {
@@ -20,4 +23,47 @@ body {
   color: white;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Beomz animation system (BEO-134) --- */
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes checkmark-pop {
+  0% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes spin-ring {
+  to { transform: rotate(360deg); }
+}
+
+.streaming-shimmer {
+  background: linear-gradient(
+    90deg,
+    currentColor 0%,
+    var(--color-surface-highlight) 50%,
+    currentColor 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streaming-shimmer,
+  .plan-step-icon-spin,
+  .plan-step-icon-pop {
+    animation: none !important;
+  }
+
+  .streaming-shimmer {
+    -webkit-text-fill-color: unset;
+    background: none;
+  }
 }

@@ -1,4 +1,11 @@
+export { BuildLog } from "./BuildLog";
 export { ContinuationCard } from "./ContinuationCard";
 export { GenerationTimeline } from "./GenerationTimeline";
+export { LogEntry } from "./LogEntry";
+export { PlanStepButton } from "./PlanStepButton";
+export { PlanStepIcon } from "./PlanStepIcon";
 export { PreviewPane } from "./PreviewPane";
+export { ThinkingIndicator } from "./ThinkingIndicator";
+export type { LogEntryData } from "./LogEntry";
 export type { TimelineStep } from "./GenerationTimeline";
+export type { PlanStep } from "./PlanStepButton";
