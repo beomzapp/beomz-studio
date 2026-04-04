@@ -10,7 +10,7 @@ import previewsSessionRoute from "./routes/previews/session.js";
 
 const app = new Hono();
 
-app.get("/health", (c) => c.json({ ok: true }));
+app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);
 app.route("/builds/start", buildsStartRoute);
