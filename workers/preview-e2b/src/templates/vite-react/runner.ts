@@ -4,8 +4,8 @@ const cwd = process.env.BEOMZ_PREVIEW_WORKDIR ?? "/workspace";
 const port = process.env.BEOMZ_PREVIEW_PORT ?? "4173";
 
 const child = spawn(
-  "pnpm",
-  ["exec", "vite", "--host", "0.0.0.0", "--port", port, "--strictPort"],
+  "/workspace/node_modules/.bin/vite",
+  ["--host", "0.0.0.0", "--port", port, "--strictPort"],
   {
     cwd,
     env: process.env,
