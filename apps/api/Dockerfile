@@ -18,4 +18,4 @@ RUN pnpm --filter "@beomz-studio/api..." build
 
 WORKDIR /app/apps/api
 EXPOSE 3001
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/bootstrap.js"]

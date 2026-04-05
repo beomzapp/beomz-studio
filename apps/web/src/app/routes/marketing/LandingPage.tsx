@@ -9,6 +9,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
+import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useAuth } from "../../../lib/useAuth";
 import { supabase } from "../../../lib/supabase";
 import { getClarifyQuestions, generatePlan, type ClarifyQuestion, type PlanBullet } from "../../../lib/planClarify";
@@ -113,7 +114,8 @@ export function LandingPage() {
         setPromptForFlow(prompt);
 
         if (userMode === "pro" || !planMode) {
-          navigate({ to: "/studio/home" });
+          saveProjectLaunchIntent({ prompt });
+          navigate({ to: "/studio/project/$id", params: { id: "new" } });
         } else {
           // Plan mode — ask AI for clarifying questions
           setFlowStep("thinking");
@@ -573,7 +575,18 @@ export function LandingPage() {
                 </div>
                 <div className="mt-5 border-t border-[#e5e7eb] pt-4">
                   <button
-                    onClick={() => navigate({ to: "/studio/project/$id", params: { id: "new" } })}
+                    onClick={() => {
+                      saveProjectLaunchIntent({
+                        approvedPlan: {
+                          steps: planBullets.map((bullet) => ({
+                            description: bullet.description,
+                            title: bullet.label,
+                          })),
+                        },
+                        prompt: promptForFlow,
+                      });
+                      navigate({ to: "/studio/project/$id", params: { id: "new" } });
+                    }}
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
                   >
                     Start building
