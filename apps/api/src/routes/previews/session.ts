@@ -108,6 +108,7 @@ function buildStoredPreviewResponse(input: {
 }
 
 const previewsSessionRoute = new Hono();
+const BOOTING_TIMEOUT_MS = 120_000;
 
 previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
@@ -173,7 +174,22 @@ previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   // If no row exists, or the existing row failed (e.g. previous E2B error),
   // start fresh so we attempt a new sandbox instead of reusing a dead one.
-  if (!previewRow || previewRow.status === "failed") {
+  const isStaleBooting =
+    previewRow?.status === "booting"
+    && Date.now() - new Date(previewRow.started_at).getTime() > BOOTING_TIMEOUT_MS;
+
+  // If no row exists, or the existing row failed, or it has been stuck in
+  // "booting" for more than 2 minutes (stale from a crashed API), start fresh.
+  if (!previewRow || previewRow.status === "failed" || isStaleBooting) {
+    if (previewRow && isStaleBooting) {
+      await orgContext.db.updatePreview(previewRow.id, {
+        error: "Preview boot timed out — API restarted mid-boot.",
+        preview_url: null,
+        sandbox_id: null,
+        status: "failed",
+      });
+    }
+
     previewRow = await orgContext.db.createPreview({
       generation_id: generationRow.id,
       status: "booting",
