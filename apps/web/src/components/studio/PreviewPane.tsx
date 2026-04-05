@@ -1,14 +1,17 @@
 import { startTransition, useEffect, useEffectEvent, useMemo, useState } from "react";
-import type { CreatePreviewSessionResponse } from "@beomz-studio/contracts";
-import { Loader2, MonitorSmartphone } from "lucide-react";
+import type { CreatePreviewSessionResponse, Project, StudioFile } from "@beomz-studio/contracts";
+import { Bug, Loader2, MonitorSmartphone } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 import { createOrResumePreviewSession } from "../../lib/api";
-import { supabase } from "../../lib/supabase";
+import { buildStudioPreviewHtml } from "../../lib/studio-preview";
 
 interface PreviewPaneProps {
+  files?: readonly StudioFile[] | null;
   generationId?: string | null;
-  projectId?: string | null;
+  previewEntryPath?: string | null;
+  project?: Pick<Project, "id" | "name" | "templateId"> | null;
+  refreshToken?: number;
 }
 
 function isUuid(value: string): boolean {
@@ -69,102 +72,102 @@ function buildInlineFallbackDoc(message: string): string {
 }
 
 export function PreviewPane({
+  files,
   generationId,
-  projectId,
+  previewEntryPath,
+  project,
+  refreshToken = 0,
 }: PreviewPaneProps) {
-  const [error, setError] = useState<string | null>(null);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [response, setResponse] = useState<CreatePreviewSessionResponse | null>(null);
+  const [previewMode, setPreviewMode] = useState<"inline" | "remote">("inline");
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remoteResponse, setRemoteResponse] = useState<CreatePreviewSessionResponse | null>(null);
 
-  const activeFrame = useMemo(() => {
-    if (response?.session.provider === "e2b" && response.session.url) {
+  const inlineFrame = useMemo(() => {
+    if (!project || !files || files.length === 0) {
+      return null;
+    }
+
+    try {
       return {
-        key: `${response.session.id}:${response.session.url}`,
-        src: response.session.url,
+        error: null,
+        key: `inline:${project.id}:${generationId ?? "draft"}:${refreshToken}`,
+        src: undefined,
+        srcDoc: buildStudioPreviewHtml({
+          files,
+          previewEntryPath,
+          project,
+        }),
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Inline preview failed to render.";
+
+      return {
+        error: message,
+        key: `inline:${project.id}:error:${generationId ?? "draft"}:${refreshToken}`,
+        src: undefined,
+        srcDoc: buildInlineFallbackDoc(message),
+      };
+    }
+  }, [files, generationId, previewEntryPath, project, refreshToken]);
+
+  const remoteFrame = useMemo(() => {
+    if (remoteResponse?.session.provider === "e2b" && remoteResponse.session.url) {
+      return {
+        key: `${remoteResponse.session.id}:${remoteResponse.session.url}`,
+        src: remoteResponse.session.url,
         srcDoc: undefined,
       };
     }
 
-    if (response?.fallbackHtml) {
+    if (remoteResponse?.fallbackHtml) {
       return {
-        key: `${response.session.id}:fallback`,
+        key: `${remoteResponse.session.id}:fallback`,
         src: undefined,
-        srcDoc: response.fallbackHtml,
+        srcDoc: remoteResponse.fallbackHtml,
       };
     }
 
     return null;
-  }, [response]);
+  }, [remoteResponse]);
 
-  const requestPreviewSession = useEffectEvent(async (opts?: { force?: boolean }) => {
-    // Don't re-fire if a request is already in-flight.
+  const activeFrame =
+    previewMode === "remote" && remoteFrame
+      ? remoteFrame
+      : inlineFrame;
+
+  const requestPreviewSession = useEffectEvent(async () => {
     if (isLoading) {
       return;
     }
 
-    // Don't re-fire from realtime events if we already have a resolved session
-    // (E2B URL or local fallback). The realtime subscription writing to the
-    // previews table would otherwise cause an infinite loop.
-    if (!opts?.force && response && (response.session.url || response.fallbackHtml)) {
-      return;
-    }
-
-    if (!projectId || !isUuid(projectId)) {
-      setError(null);
-      setHasFirstFrame(false);
-      setIsLoading(false);
-      setResponse(null);
+    if (!project?.id || !isUuid(project.id)) {
       return;
     }
 
     setIsLoading(true);
-    setError(null);
+    setRemoteError(null);
 
     try {
       const nextResponse = await createOrResumePreviewSession({
         generationId: generationId ?? undefined,
-        projectId,
+        projectId: project.id,
       });
 
       startTransition(() => {
         setHasFirstFrame(false);
-        setResponse(nextResponse);
+        setPreviewMode("remote");
+        setRemoteResponse(nextResponse);
       });
     } catch (requestError) {
       const message =
-        requestError instanceof Error ? requestError.message : "Preview failed to load.";
+        requestError instanceof Error ? requestError.message : "Remote preview failed to load.";
 
       startTransition(() => {
-        setHasFirstFrame(false);
-        setError(message);
-        setResponse({
-          error: message,
-          fallbackHtml: buildInlineFallbackDoc(message),
-          generationId: generationId ?? "local",
-          runtime: {
-            entryPath: "/",
-            mode: "preview",
-            navigation: [],
-            project: {
-              id: projectId,
-              name: "Preview unavailable",
-              templateId: "marketing-website",
-            },
-            provider: "local",
-            routes: [],
-            shell: "website",
-            templateId: "marketing-website",
-          },
-          session: {
-            createdAt: new Date().toISOString(),
-            entryPath: "/",
-            id: `local-${projectId}`,
-            projectId,
-            provider: "local",
-            status: "running",
-          },
-        });
+        setPreviewMode("inline");
+        setRemoteError(message);
       });
     } finally {
       setIsLoading(false);
@@ -172,58 +175,30 @@ export function PreviewPane({
   });
 
   useEffect(() => {
-    void requestPreviewSession({ force: true });
-  }, [generationId, projectId, requestPreviewSession]);
+    setHasFirstFrame(false);
+  }, [activeFrame?.key]);
 
   useEffect(() => {
-    if (!generationId) {
-      return;
-    }
+    setPreviewMode("inline");
+    setRemoteError(null);
+    setRemoteResponse(null);
+    setHasFirstFrame(false);
+  }, [generationId, project?.id]);
 
-    const channel = supabase
-      .channel(`preview-pane-${generationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          filter: `id=eq.${generationId}`,
-          schema: "public",
-          table: "generations",
-        },
-        () => {
-          startTransition(() => {
-            void requestPreviewSession();
-          });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          filter: `generation_id=eq.${generationId}`,
-          schema: "public",
-          table: "previews",
-        },
-        () => {
-          startTransition(() => {
-            void requestPreviewSession();
-          });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [generationId, requestPreviewSession]);
-
-  if (!projectId) {
+  if (!project?.id) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center text-sm text-white/30">
         Start a build to launch the live preview.
       </div>
     );
   }
+
+  const statusMessage =
+    remoteError
+    ?? inlineFrame?.error
+    ?? (previewMode === "remote"
+      ? "Launching remote debug preview."
+      : "Rendering inline studio preview from the validated files.");
 
   return (
     <div className="relative h-full min-h-[340px] overflow-hidden bg-[#050816]">
@@ -241,7 +216,7 @@ export function PreviewPane({
         />
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-white/25">
-          Preparing preview shell…
+          Start a build to see the inline preview.
         </div>
       )}
 
@@ -253,9 +228,37 @@ export function PreviewPane({
       >
         <div className="flex h-full flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(249,115,22,0.18),transparent_40%),linear-gradient(160deg,#050816_0%,#0d1630_48%,#050816_100%)] p-6">
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-orange/80">
-              <MonitorSmartphone size={14} />
-              Preview
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-orange/80">
+                <MonitorSmartphone size={14} />
+                Preview
+              </div>
+              <div className="pointer-events-auto flex items-center gap-2">
+                {previewMode === "remote" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewMode("inline");
+                      setHasFirstFrame(false);
+                    }}
+                    className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75 transition hover:bg-white/[0.12]"
+                  >
+                    Use inline preview
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!generationId || isLoading}
+                    onClick={() => {
+                      void requestPreviewSession();
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75 transition hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Bug size={12} />
+                    Remote debug
+                  </button>
+                )}
+              </div>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
@@ -266,7 +269,7 @@ export function PreviewPane({
 
           <div className="flex items-center gap-3 text-sm text-white/65">
             <Loader2 size={16} className={cn("text-orange", isLoading && "animate-spin")} />
-            <span>{error ?? "Launching the deterministic shell and waiting for the first frame."}</span>
+            <span>{statusMessage}</span>
           </div>
         </div>
       </div>

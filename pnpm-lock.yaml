@@ -65,6 +65,9 @@ importers:
       '@beomz-studio/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@beomz-studio/templates':
+        specifier: workspace:*
+        version: link:../../packages/templates
       '@fontsource/geist-sans':
         specifier: ^5.2.5
         version: 5.2.5

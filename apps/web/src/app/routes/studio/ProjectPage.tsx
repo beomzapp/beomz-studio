@@ -4,7 +4,7 @@
  * Light mode — cream #faf9f6 throughout.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BuilderV3Event } from "@beomz-studio/contracts";
+import type { BuilderV3Event, TemplateId } from "@beomz-studio/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { FolderTree } from "lucide-react";
 import {
@@ -55,6 +55,7 @@ export function ProjectPage() {
   const [build, setBuild] = useState<BuildPayload | null>(null);
   const [buildResult, setBuildResult] = useState<BuildStatusResponse["result"] | null>(null);
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
@@ -338,6 +339,7 @@ export function ProjectPage() {
   }, [setTransport]);
 
   const handleRefreshPreview = useCallback(() => {
+    setPreviewRefreshKey((current) => current + 1);
     if (build?.id) {
       setPreviewGenerationId(build.id);
     }
@@ -581,8 +583,17 @@ export function ProjectPage() {
 
         <div className="min-w-0 flex-1">
           <PreviewPane
+            files={buildResult?.files}
             generationId={previewGenerationId}
-            projectId={previewGenerationId ? projectId : null}
+            previewEntryPath={buildResult?.previewEntryPath ?? null}
+            project={projectId && build?.templateId
+              ? {
+                  id: projectId,
+                  name: projectName,
+                  templateId: build.templateId as TemplateId,
+                }
+              : null}
+            refreshToken={previewRefreshKey}
           />
         </div>
       </div>

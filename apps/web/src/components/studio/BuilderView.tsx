@@ -4,7 +4,7 @@
  * as an embedded floor inside LandingPage.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PlanStep as ApprovedPlanStep } from "@beomz-studio/contracts";
+import type { PlanStep as ApprovedPlanStep, TemplateId } from "@beomz-studio/contracts";
 import {
   Rocket,
   FolderTree,
@@ -576,8 +576,15 @@ export function BuilderView({
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 border-b border-border">
               <PreviewPane
+                files={null}
                 generationId={build?.id}
-                projectId={activeProjectId}
+                project={activeProjectId && build?.templateId
+                  ? {
+                      id: activeProjectId,
+                      name: "Builder Preview",
+                      templateId: build.templateId as TemplateId,
+                    }
+                  : null}
               />
             </div>
             <div className="max-h-[320px] overflow-y-auto">
