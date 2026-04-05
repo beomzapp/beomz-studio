@@ -130,7 +130,9 @@ previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     );
   }
 
-  if (!previewRow) {
+  // If no row exists, or the existing row failed (e.g. previous E2B error),
+  // start fresh so we attempt a new sandbox instead of reusing a dead one.
+  if (!previewRow || previewRow.status === "failed") {
     previewRow = await orgContext.db.createPreview({
       generation_id: generationRow.id,
       status: "booting",
