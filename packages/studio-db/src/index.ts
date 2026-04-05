@@ -533,6 +533,8 @@ export class StudioDbClient {
       .from("previews")
       .select("*")
       .eq("generation_id", generationId)
+      .order("started_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (response.error) {
