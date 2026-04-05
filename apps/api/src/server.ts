@@ -17,7 +17,13 @@ const app = new Hono();
 app.use(
   "*",
   cors({
-    origin: ["https://beomz.ai", "https://www.beomz.ai", "http://localhost:5173"],
+    origin: [
+      "https://beomz.ai",
+      "https://www.beomz.ai",
+      "http://localhost:5173",
+      "http://localhost:5188",
+      "http://localhost:3000",
+    ],
     credentials: true,
   }),
 );
