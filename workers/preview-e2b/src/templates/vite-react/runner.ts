@@ -9,9 +9,12 @@ const child = spawn(
   {
     cwd,
     env: process.env,
-    stdio: "inherit",
+    stdio: ["inherit", "pipe", "pipe"],
   },
 );
+
+child.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
+child.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
@@ -19,6 +22,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-child.on("exit", (code) => {
-  process.exit(code ?? 0);
+child.on("error", (err) => {
+  console.error("[runner] spawn error:", err.message);
+  process.exit(1);
+});
+
+child.on("exit", (code, signal) => {
+  console.error("[runner] vite exited", { code, signal });
+  process.exit(code ?? 1);
 });
