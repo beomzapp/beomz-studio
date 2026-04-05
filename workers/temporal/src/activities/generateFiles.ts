@@ -138,6 +138,7 @@ async function callAnthropic(system: string, userMessage: string) {
 export async function generateFiles(
   input: GenerateFilesActivityInput,
 ): Promise<GeneratedBuildDraft> {
+  const config = getAnthropicRuntimeConfig();
   const policy = getInitialBuildPromptPolicy(input.template.id);
   const rawResponse = await callAnthropic(
     buildSystemPrompt(policy),
@@ -154,9 +155,20 @@ export async function generateFiles(
     throw new Error("Anthropic returned no text content.");
   }
 
-  const parsed = generatedBuildResponseSchema.parse(
-    JSON.parse(extractJsonPayload(text)),
-  );
+  let parsed: z.infer<typeof generatedBuildResponseSchema>;
+  try {
+    parsed = generatedBuildResponseSchema.parse(
+      JSON.parse(extractJsonPayload(text)),
+    );
+  } catch (error) {
+    console.error("Failed to parse Anthropic generation response.", {
+      error: error instanceof Error ? error.message : String(error),
+      maxTokens: config.ANTHROPIC_MAX_TOKENS,
+      model: config.ANTHROPIC_MODEL,
+      rawResponseText: text,
+    });
+    throw error;
+  }
 
   return {
     files: parsed.files.map((file) => ({
