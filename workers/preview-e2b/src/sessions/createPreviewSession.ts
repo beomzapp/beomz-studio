@@ -91,6 +91,7 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
 
   const runnerLogs: string[] = [];
   let readyResolved = false;
+  let runnerReady = false;
   let resolveReady: (() => void) | null = null;
   let rejectReady: ((error: Error) => void) | null = null;
   let bootTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -99,6 +100,7 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     resolveReady = () => {
       if (!readyResolved) {
         readyResolved = true;
+        runnerReady = true;
         resolve();
       }
     };
@@ -167,7 +169,9 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     if (bootTimeout) {
       clearTimeout(bootTimeout);
     }
-    await runnerHandle.disconnect();
+    if (!runnerReady) {
+      await runnerHandle.disconnect();
+    }
   }
 }
 
