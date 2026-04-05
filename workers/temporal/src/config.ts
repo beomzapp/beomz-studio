@@ -25,10 +25,20 @@ const temporalEnvSchema = z
     }
   });
 
+const ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+
 const anthropicEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   ANTHROPIC_BASE_URL: z.string().url().default("https://api.anthropic.com"),
-  ANTHROPIC_MODEL: z.string().min(1).default("claude-haiku-4-5-20251001"),
+  ANTHROPIC_MODEL: z.preprocess((value) => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return ANTHROPIC_DEFAULT_MODEL;
+    }
+
+    return value.trim() === "claude-3-5-sonnet-latest"
+      ? ANTHROPIC_DEFAULT_MODEL
+      : value.trim();
+  }, z.string().min(1)).default(ANTHROPIC_DEFAULT_MODEL),
   ANTHROPIC_MAX_TOKENS: z.coerce.number().int().positive().default(4000),
 });
 
