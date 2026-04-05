@@ -11,6 +11,9 @@ import {
   Globe,
   RefreshCw,
   ExternalLink,
+  FolderTree,
+  Clock,
+  MessageSquare,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
@@ -21,6 +24,12 @@ interface TopBarProps {
   onRefreshPreview?: () => void;
   userMode: "simple" | "pro";
   onUserModeChange: (mode: "simple" | "pro") => void;
+  showFiles: boolean;
+  showHistory: boolean;
+  showChat: boolean;
+  onToggleFiles: () => void;
+  onToggleHistory: () => void;
+  onToggleChat: () => void;
 }
 
 function toast(msg: string) {
@@ -43,6 +52,12 @@ export function TopBar({
   onRefreshPreview,
   userMode,
   onUserModeChange,
+  showFiles,
+  showHistory,
+  showChat,
+  onToggleFiles,
+  onToggleHistory,
+  onToggleChat,
 }: TopBarProps) {
   const navigate = useNavigate();
   const [editingName, setEditingName] = useState(false);
@@ -99,6 +114,30 @@ export function TopBar({
             {projectName}
           </button>
         )}
+
+        <div className="mx-1.5 h-4 w-px bg-[#e5e7eb]" />
+
+        {/* Panel toggles */}
+        {([
+          { key: "files" as const, icon: FolderTree, label: "Files", active: showFiles, toggle: onToggleFiles },
+          { key: "history" as const, icon: Clock, label: "History", active: showHistory, toggle: onToggleHistory },
+          { key: "chat" as const, icon: MessageSquare, label: "Chat", active: showChat, toggle: onToggleChat },
+        ]).map(({ key, icon: Icon, label, active, toggle }) => (
+          <button
+            key={key}
+            onClick={toggle}
+            className={cn(
+              "flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors",
+              active
+                ? "bg-[#F97316]/10 text-[#F97316]"
+                : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
+            )}
+            title={`${active ? "Hide" : "Show"} ${label}`}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* Center — Simple/Pro toggle */}

@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
-import { Clock, FolderTree, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { FolderTree } from "lucide-react";
 import {
   TopBar,
   ChatPanel,
@@ -42,9 +42,20 @@ export function ProjectPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [_previewKey, setPreviewKey] = useState(0);
 
-  // Sidebar
-  const [sidebarTab, setSidebarTab] = useState<"files" | "history">("files");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Panel visibility + widths
+  const [showFiles, setShowFiles] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showChat, setShowChat] = useState(true);
+  const [filesPanelWidth, setFilesPanelWidth] = useState(200);
+  const [historyPanelWidth, setHistoryPanelWidth] = useState(220);
+  const [chatPanelWidth, setChatPanelWidth] = useState(380);
+
+  // Resize drag state
+  const dragRef = useRef<{
+    target: "files" | "history" | "chat";
+    startX: number;
+    startWidth: number;
+  } | null>(null);
 
   // Modals
   const [showShareModal, setShowShareModal] = useState(false);
@@ -170,6 +181,42 @@ export function ProjectPage() {
     setPreviewKey((k) => k + 1);
   }, []);
 
+  // Panel resize handlers
+  const startResize = useCallback(
+    (target: "files" | "history" | "chat", e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth =
+        target === "files" ? filesPanelWidth
+        : target === "history" ? historyPanelWidth
+        : chatPanelWidth;
+      dragRef.current = { target, startX, startWidth };
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current) return;
+        const delta = ev.clientX - dragRef.current.startX;
+        const newWidth = Math.max(150, Math.min(500, dragRef.current.startWidth + delta));
+        if (dragRef.current.target === "files") setFilesPanelWidth(newWidth);
+        else if (dragRef.current.target === "history") setHistoryPanelWidth(newWidth);
+        else setChatPanelWidth(newWidth);
+      };
+
+      const onUp = () => {
+        dragRef.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [filesPanelWidth, historyPanelWidth, chatPanelWidth],
+  );
+
   // Subscribe to preview URL updates
   useEffect(() => {
     if (!projectId) return;
@@ -196,6 +243,15 @@ export function ProjectPage() {
     };
   }, [projectId]);
 
+  // Resize handle component
+  const ResizeHandle = ({ target }: { target: "files" | "history" | "chat" }) => (
+    <div
+      onMouseDown={(e) => startResize(target, e)}
+      className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[#F97316]/20 active:bg-[#F97316]/30"
+      title="Drag to resize"
+    />
+  );
+
   return (
     <div className="flex h-full flex-col bg-[#faf9f6]">
       {/* TopBar */}
@@ -205,82 +261,66 @@ export function ProjectPage() {
         onRefreshPreview={handleRefreshPreview}
         userMode={userMode}
         onUserModeChange={setUserMode}
+        showFiles={showFiles}
+        showHistory={showHistory}
+        showChat={showChat}
+        onToggleFiles={() => setShowFiles((v) => !v)}
+        onToggleHistory={() => setShowHistory((v) => !v)}
+        onToggleChat={() => setShowChat((v) => !v)}
       />
 
-      {/* Main layout: Sidebar + Chat + Preview */}
+      {/* Main layout: [Files?] | [History?] | [Chat?] | Preview */}
       <div className="flex flex-1 min-h-0">
-        {/* Left sidebar — collapsible Files / History tabs */}
-        <div className="relative hidden shrink-0 lg:flex">
-          {/* Panel content — slides in/out */}
-          <div
-            className="flex flex-col border-r border-[#e5e7eb] bg-[#faf9f6] transition-[width] duration-200 ease-in-out overflow-hidden"
-            style={{ width: sidebarCollapsed ? 0 : 200 }}
-          >
-            {/* Tab switcher */}
-            <div className="flex border-b border-[#e5e7eb]" style={{ minWidth: 200 }}>
-              <button
-                onClick={() => setSidebarTab("files")}
-                className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                  sidebarTab === "files"
-                    ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
-                    : "text-[#9ca3af] hover:text-[#6b7280]"
-                }`}
-              >
-                <FolderTree size={12} />
-                Files
-              </button>
-              <button
-                onClick={() => setSidebarTab("history")}
-                className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                  sidebarTab === "history"
-                    ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
-                    : "text-[#9ca3af] hover:text-[#6b7280]"
-                }`}
-              >
-                <Clock size={12} />
-                History
-              </button>
+        {/* Files panel */}
+        <div
+          className="shrink-0 overflow-hidden border-r border-[#e5e7eb] bg-[#faf9f6] transition-[width] duration-200 ease-in-out"
+          style={{ width: showFiles ? filesPanelWidth : 0 }}
+        >
+          <div className="flex h-full flex-col" style={{ minWidth: filesPanelWidth }}>
+            <div className="flex items-center gap-2 border-b border-[#e5e7eb] px-3 py-2.5">
+              <FolderTree size={12} className="text-[#9ca3af]" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#9ca3af]">Files</span>
             </div>
-
-            {/* Tab content */}
-            <div className="flex-1 overflow-hidden" style={{ minWidth: 200 }}>
-              {sidebarTab === "files" ? (
-                <div className="p-4">
-                  <p className="mt-8 text-center text-xs text-[#c4c4c4]">
-                    No files yet
-                  </p>
-                </div>
-              ) : (
-                <HistoryPanel
-                  projectId={projectId}
-                  activeGenerationId={build?.id}
-                />
-              )}
+            <div className="flex-1 overflow-y-auto p-4">
+              <p className="mt-8 text-center text-xs text-[#c4c4c4]">No files yet</p>
             </div>
           </div>
-
-          {/* Collapse/expand toggle — pinned to panel edge */}
-          <button
-            onClick={() => setSidebarCollapsed((v) => !v)}
-            className="flex h-8 w-5 items-center justify-center rounded-r-md border border-l-0 border-[#e5e7eb] bg-[#faf9f6] text-[#9ca3af] transition-colors hover:bg-[rgba(0,0,0,0.02)] hover:text-[#6b7280]"
-            style={{ position: "absolute", right: -20, top: 12, zIndex: 10 }}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
-          </button>
         </div>
+        {showFiles && <ResizeHandle target="files" />}
+
+        {/* History panel */}
+        <div
+          className="shrink-0 overflow-hidden border-r border-[#e5e7eb] bg-[#faf9f6] transition-[width] duration-200 ease-in-out"
+          style={{ width: showHistory ? historyPanelWidth : 0 }}
+        >
+          <div className="h-full" style={{ minWidth: historyPanelWidth }}>
+            <HistoryPanel
+              projectId={projectId}
+              activeGenerationId={build?.id}
+            />
+          </div>
+        </div>
+        {showHistory && <ResizeHandle target="history" />}
 
         {/* Chat panel */}
-        <ChatPanel
-          messages={messages}
-          isStreaming={isStreaming}
-          streamingText={streamingText}
-          onSendMessage={handleSendMessage}
-          onStopStreaming={handleStopStreaming}
-          width={380}
-        />
+        <div
+          className="shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
+          style={{ width: showChat ? chatPanelWidth : 0 }}
+        >
+          <div style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
+            <ChatPanel
+              messages={messages}
+              isStreaming={isStreaming}
+              streamingText={streamingText}
+              onSendMessage={handleSendMessage}
+              onStopStreaming={handleStopStreaming}
+              width={chatPanelWidth}
+            />
+          </div>
+        </div>
+        {showChat && <ResizeHandle target="chat" />}
 
-        {/* Preview panel */}
+        {/* Preview panel — fills remaining space */}
         <PreviewPanel
           previewUrl={previewUrl}
           isLoading={isStreaming && !previewUrl}
