@@ -1,4 +1,5 @@
 FROM node:20-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@9.15.4
 WORKDIR /app
 
