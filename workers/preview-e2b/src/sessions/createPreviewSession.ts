@@ -29,12 +29,16 @@ export interface CreatePreviewSessionResult {
   session: PreviewSession;
 }
 
-const PREVIEW_BOOT_TIMEOUT_MS = 60_000;
+const PREVIEW_BOOT_TIMEOUT_MS = 120_000;
 
 function isRunnerProcess(processInfo: ProcessInfo, runnerPath: string): boolean {
   const command = [processInfo.cmd, ...processInfo.args].join(" ");
 
   return command.includes(runnerPath) || command.includes("pnpm exec vite");
+}
+
+function isPreviewReadyLogLine(line: string): boolean {
+  return line.includes("ready in") || line.includes("Local:");
 }
 
 async function connectOrCreateSandbox(input: CreatePreviewSessionInput) {
@@ -67,30 +71,6 @@ function buildPreviewUrl(sandbox: Sandbox, port: number, entryPath: string): str
   return new URL(entryPath, `https://${sandbox.getHost(port)}`).toString();
 }
 
-async function waitForPreview(url: string): Promise<void> {
-  const deadline = Date.now() + PREVIEW_BOOT_TIMEOUT_MS;
-  let lastError: unknown = null;
-
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        return;
-      }
-
-      lastError = new Error(`Preview responded with ${response.status}.`);
-    } catch (error) {
-      lastError = error;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-
-  const message =
-    lastError instanceof Error ? lastError.message : "Preview server never became reachable.";
-  throw new Error(message);
-}
-
 async function ensureRunner(sandbox: Sandbox): Promise<void> {
   const config = getPreviewRuntimeConfig();
   const processes = await sandbox.commands.list();
@@ -109,15 +89,31 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     throw new Error(`Preview runner prerequisites are unavailable in the sandbox: ${message}`);
   }
 
-  // Run tsx in the foreground for a short window so that any immediate startup
-  // errors are streamed back to Railway logs.  We race it against a 5-second
-  // timer: if it's still alive after 5 s we consider it healthy and move on.
   const runnerLogs: string[] = [];
-  let runnerExitedEarly = false;
+  let readyResolved = false;
+  let resolveReady: (() => void) | null = null;
+  let rejectReady: ((error: Error) => void) | null = null;
+  let bootTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const runnerPromise = sandbox.commands.run(
+  const readyPromise = new Promise<void>((resolve, reject) => {
+    resolveReady = () => {
+      if (!readyResolved) {
+        readyResolved = true;
+        resolve();
+      }
+    };
+    rejectReady = (error) => {
+      if (!readyResolved) {
+        readyResolved = true;
+        reject(error);
+      }
+    };
+  });
+
+  const runnerHandle = await sandbox.commands.run(
     `/usr/local/bin/tsx ${config.E2B_PREVIEW_RUNNER_PATH}`,
     {
+      background: true,
       cwd: config.E2B_PREVIEW_WORKDIR,
       envs: {
         BEOMZ_PREVIEW_PORT: String(config.E2B_PREVIEW_PORT),
@@ -126,6 +122,9 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
       onStdout: (line) => {
         runnerLogs.push(`[runner stdout] ${line}`);
         console.log("[runner stdout]", line);
+        if (isPreviewReadyLogLine(line)) {
+          resolveReady?.();
+        }
       },
       onStderr: (line) => {
         runnerLogs.push(`[runner stderr] ${line}`);
@@ -133,22 +132,42 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
       },
       timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
     },
-  ).then((result) => {
-    runnerExitedEarly = true;
-    console.error("[runner] process exited early", { exitCode: result.exitCode });
-    return result;
+  );
+
+  void runnerHandle.wait().then((result) => {
+    const exitMessage = `Preview runner exited before Vite became ready (exit ${result.exitCode ?? "unknown"}).`;
+    console.error("[runner] process exited", { exitCode: result.exitCode });
+    rejectReady?.(
+      new Error(
+        `${exitMessage} Logs:\n${runnerLogs.join("\n")}`,
+      ),
+    );
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : "Unknown preview runner exit error.";
+    rejectReady?.(
+      new Error(`Preview runner failed before Vite became ready: ${message}\n${runnerLogs.join("\n")}`),
+    );
   });
 
-  // Wait 5 s — if runner exits before that, it failed immediately.
-  await Promise.race([
-    runnerPromise,
-    new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-  ]);
-
-  if (runnerExitedEarly) {
-    throw new Error(
-      `Preview runner exited immediately. Logs:\n${runnerLogs.join("\n")}`,
-    );
+  try {
+    await Promise.race([
+      readyPromise,
+      new Promise<never>((_, reject) => {
+        bootTimeout = setTimeout(async () => {
+          await runnerHandle.kill().catch(() => false);
+          reject(
+            new Error(
+              `Preview runner did not report readiness within ${PREVIEW_BOOT_TIMEOUT_MS}ms. Logs:\n${runnerLogs.join("\n")}`,
+            ),
+          );
+        }, PREVIEW_BOOT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (bootTimeout) {
+      clearTimeout(bootTimeout);
+    }
+    await runnerHandle.disconnect();
   }
 }
 
@@ -203,7 +222,6 @@ export async function createPreviewSession(
   await ensureRunner(sandbox);
 
   const previewUrl = buildPreviewUrl(sandbox, config.E2B_PREVIEW_PORT, runtime.entryPath);
-  await waitForPreview(previewUrl);
 
   const sandboxInfo = await sandbox.getInfo();
 
