@@ -463,7 +463,7 @@ function transformImports(code: string, filePath = "App.tsx"): string {
   nextCode = nextCode.replace(/^[ \t]*import\s+['"]([./][^'"]+)['"]\s*;?[ \t]*\n?/gm, "");
 
   nextCode = nextCode.replace(
-    /^[ \t]*import\s+(\w+)\s*,\s*\{([^}]+)\}\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/)[^'"]*)['"]\s*;?[ \t]*/gm,
+    /^[ \t]*import\s+(\w+)\s*,\s*\{([^}]+)\}\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/|components\/|lib\/|hooks\/|generated\/|app\/|utils\/|theme(?:\.ts|\.tsx)?|data(?:\.ts|\.tsx)?)[^'"]*)['"]\s*;?[ \t]*/gm,
     (_, defaultName, namedStr, importPath) => {
       const resolved = resolvePath(importPath);
       const names = parseNamedImports(namedStr);
@@ -475,18 +475,25 @@ function transformImports(code: string, filePath = "App.tsx"): string {
     },
   );
   nextCode = nextCode.replace(
-    /^[ \t]*import\s+(\w+)\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/)[^'"]*)['"]\s*;?[ \t]*/gm,
+    /^[ \t]*import\s+(\w+)\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/|components\/|lib\/|hooks\/|generated\/|app\/|utils\/|theme(?:\.ts|\.tsx)?|data(?:\.ts|\.tsx)?)[^'"]*)['"]\s*;?[ \t]*/gm,
     (_, name, importPath) => {
       const resolved = resolvePath(importPath);
       return `const __mod_${name} = __getModule(${JSON.stringify(resolved)}); const ${name} = (__mod_${name}.default ?? __mod_${name});`;
     },
   );
   nextCode = nextCode.replace(
-    /^[ \t]*import\s+\{([^}]+)\}\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/)[^'"]*)['"]\s*;?[ \t]*/gm,
+    /^[ \t]*import\s+\{([^}]+)\}\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/|components\/|lib\/|hooks\/|generated\/|app\/|utils\/|theme(?:\.ts|\.tsx)?|data(?:\.ts|\.tsx)?)[^'"]*)['"]\s*;?[ \t]*/gm,
     (_, namesStr, importPath) => {
       const resolved = resolvePath(importPath);
       const names = parseNamedImports(namesStr);
       return names ? `const { ${names} } = __getModule(${JSON.stringify(resolved)});` : "";
+    },
+  );
+  nextCode = nextCode.replace(
+    /^[ \t]*import\s+\*\s+as\s+(\w+)\s+from\s+['"]((?:@\/|src\/|apps\/web\/src\/|components\/|lib\/|hooks\/|generated\/|app\/|utils\/|theme(?:\.ts|\.tsx)?|data(?:\.ts|\.tsx)?)[^'"]*)['"]\s*;?[ \t]*/gm,
+    (_, namespace, importPath) => {
+      const resolved = resolvePath(importPath);
+      return `const ${namespace} = __getModule(${JSON.stringify(resolved)});`;
     },
   );
 
@@ -631,6 +638,81 @@ function bundlePreviewFiles(files: readonly PreviewAppFile[]): string {
 const __modules = {};
 const __moduleLoading = {};
 const __missingModules = {};
+function __createMissingValue(path, exportName) {
+  const label = exportName && exportName !== "default"
+    ? path + "#" + exportName
+    : path;
+  const MissingPreviewDependency = function MissingPreviewDependency() {
+    return React.createElement(
+      "div",
+      {
+        style: {
+          border: "1px solid rgba(249,115,22,0.28)",
+          background: "rgba(249,115,22,0.08)",
+          color: "rgba(255,255,255,0.92)",
+          borderRadius: "20px",
+          padding: "16px",
+          fontFamily: '"Geist Sans", system-ui, sans-serif',
+          boxShadow: "0 18px 40px rgba(0,0,0,0.2)"
+        }
+      },
+      React.createElement(
+        "div",
+        {
+          style: {
+            textTransform: "uppercase",
+            letterSpacing: "0.18em",
+            fontSize: "11px",
+            fontWeight: 700,
+            color: "#fdba74",
+            marginBottom: "8px"
+          }
+        },
+        "Missing preview dependency"
+      ),
+      React.createElement(
+        "code",
+        {
+          style: {
+            display: "block",
+            fontSize: "12px",
+            lineHeight: 1.7,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            color: "rgba(255,255,255,0.82)"
+          }
+        },
+        label
+      )
+    );
+  };
+  return new Proxy(MissingPreviewDependency, {
+    apply: function(_target, _thisArg, args) {
+      if (!args || args.length === 0) {
+        return undefined;
+      }
+      return args.flat ? args.flat(Infinity).filter(Boolean).join(" ") : undefined;
+    },
+    get: function(_target, prop) {
+      if (prop === "__esModule") return true;
+      if (prop === "default") return MissingPreviewDependency;
+      if (prop === "then") return undefined;
+      if (prop === "toString") {
+        return function() { return "[MissingPreviewDependency " + label + "]"; };
+      }
+      return __createMissingValue(path, String(prop));
+    }
+  });
+}
+function __createMissingModule(path) {
+  return new Proxy({}, {
+    get: function(_target, prop) {
+      if (prop === "__esModule") return true;
+      if (prop === "then") return undefined;
+      return __createMissingValue(path, prop === "default" ? "default" : String(prop));
+    }
+  });
+}
 function __getModule(path) {
   if (__modules[path] !== undefined) return __modules[path];
   const factory = __moduleFactories[path];
@@ -651,7 +733,7 @@ function __getModule(path) {
     __missingModules[path] = true;
     console.warn("[Beomz preview] Missing module in inline bundle:", path);
   }
-  return { default: function MissingModule() { return null; } };
+  return __createMissingModule(path);
 }
 ${moduleRegistry.join("\n")}
 ${aliasBlock}
