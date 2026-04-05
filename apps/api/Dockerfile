@@ -5,7 +5,8 @@ WORKDIR /app
 # Copy workspace config
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
 
-# Copy all packages and apps needed
+# Copy workspace sources only. Host node_modules stay out of the build context
+# via .dockerignore so native packages are installed for Linux inside Docker.
 COPY packages/ ./packages/
 COPY workers/ ./workers/
 COPY apps/api/ ./apps/api/

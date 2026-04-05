@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+.pnpm-store
+**/.pnpm-store
+.turbo
+**/.turbo
+.git
+.github
+.DS_Store
