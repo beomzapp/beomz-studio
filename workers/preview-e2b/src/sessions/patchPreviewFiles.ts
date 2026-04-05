@@ -66,7 +66,7 @@ export async function patchPreviewFiles(
   await sandbox.files.write(writes);
 
   const sandboxInfo = await sandbox.getInfo();
-  const previewUrl = new URL(runtime.entryPath, `https://${sandbox.getHost(config.E2B_PREVIEW_PORT)}`).toString();
+  const previewUrl = new URL("/", `https://${sandbox.getHost(config.E2B_PREVIEW_PORT)}`).toString();
 
   return {
     patch: {

@@ -67,8 +67,8 @@ async function connectOrCreateSandbox(input: CreatePreviewSessionInput) {
   });
 }
 
-function buildPreviewUrl(sandbox: Sandbox, port: number, entryPath: string): string {
-  return new URL(entryPath, `https://${sandbox.getHost(port)}`).toString();
+function buildPreviewUrl(sandbox: Sandbox, port: number): string {
+  return new URL("/", `https://${sandbox.getHost(port)}`).toString();
 }
 
 async function ensureRunner(sandbox: Sandbox): Promise<void> {
@@ -225,7 +225,7 @@ export async function createPreviewSession(
   await writePreviewWorkspace(sandbox, runtime, files);
   await ensureRunner(sandbox);
 
-  const previewUrl = buildPreviewUrl(sandbox, config.E2B_PREVIEW_PORT, runtime.entryPath);
+  const previewUrl = buildPreviewUrl(sandbox, config.E2B_PREVIEW_PORT);
 
   const sandboxInfo = await sandbox.getInfo();
 
