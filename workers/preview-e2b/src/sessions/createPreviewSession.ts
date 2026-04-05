@@ -29,7 +29,7 @@ export interface CreatePreviewSessionResult {
   session: PreviewSession;
 }
 
-const PREVIEW_BOOT_TIMEOUT_MS = 30_000;
+const PREVIEW_BOOT_TIMEOUT_MS = 60_000;
 
 function isRunnerProcess(processInfo: ProcessInfo, runnerPath: string): boolean {
   const command = [processInfo.cmd, ...processInfo.args].join(" ");
@@ -118,6 +118,15 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     },
     timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
   });
+
+  // Give tsx a moment to start, then confirm vite is visible in process list.
+  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  const postLaunchProcesses = await sandbox.commands.list();
+  if (!postLaunchProcesses.some((processInfo) => isRunnerProcess(processInfo, config.E2B_PREVIEW_RUNNER_PATH))) {
+    throw new Error(
+      "Preview runner process exited immediately after launch. Check that tsx and vite are installed in the template.",
+    );
+  }
 }
 
 async function writePreviewWorkspace(
