@@ -170,20 +170,19 @@ export function getBuildStatus(buildId: string): Promise<BuildStatusResponse> {
   });
 }
 
+export async function getLatestBuildForProject(
+  projectId: string,
+): Promise<BuildStatusResponse | null> {
+  const response = await requestJson<BuildStatusResponse & { build: BuildPayload | null }>(
+    `/projects/${projectId}/latest-build`,
+    { method: "GET" },
+  );
+  return response.build ? (response as BuildStatusResponse) : null;
+}
+
 export async function getLatestBuildIdForProject(projectId: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("generations")
-    .select("id")
-    .eq("project_id", projectId)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data?.id) {
-    return null;
-  }
-
-  return data.id;
+  const response = await getLatestBuildForProject(projectId);
+  return response?.build?.id ?? null;
 }
 
 export async function streamBuildEvents(args: {

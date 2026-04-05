@@ -477,6 +477,20 @@ export class StudioDbClient {
     return response.data;
   }
 
+  async listGenerationsByProjectId(projectId: string): Promise<GenerationRow[]> {
+    const response = await this.client
+      .from("generations")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("started_at", { ascending: true });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data ?? [];
+  }
+
   async updateGeneration(id: string, patch: GenerationUpdate): Promise<GenerationRow> {
     const response = await this.client
       .from("generations")

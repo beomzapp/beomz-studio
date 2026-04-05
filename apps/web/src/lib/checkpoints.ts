@@ -1,13 +1,11 @@
 /**
  * Checkpoint types and API shim for BEO-76 (Time Travel UI).
  *
- * The backend stores VFS snapshots in the `generations` table's
- * `vfs_snapshot` column. This module provides a thin frontend
- * interface to fetch and restore checkpoints.
+ * Fetches generation history via the API server (service role) rather than
+ * direct Supabase client queries, avoiding RLS policy requirements.
  */
 
-import { getApiBaseUrl } from "./api";
-import { supabase } from "./supabase";
+import { getApiBaseUrl, getAccessToken } from "./api";
 
 export interface Checkpoint {
   id: string;
@@ -27,30 +25,58 @@ export interface CheckpointRestoreResponse {
   restoredAt: string;
 }
 
+async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const accessToken = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${accessToken}`,
+      ...options.headers,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Request failed (${res.status})`);
+  }
+
+  return res.json() as Promise<T>;
+}
+
 /**
- * Fetch all checkpoints for a project from the generations table.
+ * Fetch all checkpoints for a project from the API.
  * Each completed generation turn = one checkpoint.
  */
 export async function getCheckpoints(projectId: string): Promise<Checkpoint[]> {
-  const { data, error } = await supabase
-    .from("generations")
-    .select("id, project_id, prompt, status, summary, started_at, output_paths")
-    .eq("project_id", projectId)
-    .order("started_at", { ascending: true });
+  try {
+    const response = await apiRequest<{
+      builds: Array<{
+        id: string;
+        projectId: string;
+        turn: number;
+        prompt: string;
+        summary: string | null;
+        status: string;
+        fileCount: number;
+        startedAt: string;
+      }>;
+    }>(`/projects/${projectId}/builds`);
 
-  if (error || !data) return [];
-
-  return data.map((row, index) => ({
-    id: row.id,
-    generationId: row.id,
-    projectId: row.project_id,
-    turn: index + 1,
-    prompt: row.prompt ?? "",
-    summary: row.summary ?? null,
-    fileCount: Array.isArray(row.output_paths) ? row.output_paths.length : 0,
-    status: row.status as Checkpoint["status"],
-    createdAt: row.started_at,
-  }));
+    return response.builds.map((b) => ({
+      id: b.id,
+      generationId: b.id,
+      projectId: b.projectId,
+      turn: b.turn,
+      prompt: b.prompt,
+      summary: b.summary,
+      fileCount: b.fileCount,
+      status: b.status as Checkpoint["status"],
+      createdAt: b.startedAt,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -60,23 +86,10 @@ export async function getCheckpoints(projectId: string): Promise<Checkpoint[]> {
 export async function restoreCheckpoint(
   generationId: string,
 ): Promise<CheckpointRestoreResponse> {
-  const accessToken = (await supabase.auth.getSession()).data.session?.access_token;
-  if (!accessToken) throw new Error("Not authenticated");
-
-  const res = await fetch(`${getApiBaseUrl()}/checkpoints/${generationId}/restore`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error ?? `Restore failed (${res.status})`);
-  }
-
-  return res.json();
+  return apiRequest<CheckpointRestoreResponse>(
+    `/checkpoints/${generationId}/restore`,
+    { method: "POST" },
+  );
 }
 
 /**
@@ -87,22 +100,11 @@ export async function forkFromCheckpoint(
   generationId: string,
   prompt: string,
 ): Promise<{ buildId: string; projectId: string }> {
-  const accessToken = (await supabase.auth.getSession()).data.session?.access_token;
-  if (!accessToken) throw new Error("Not authenticated");
-
-  const res = await fetch(`${getApiBaseUrl()}/checkpoints/${generationId}/fork`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
+  return apiRequest<{ buildId: string; projectId: string }>(
+    `/checkpoints/${generationId}/fork`,
+    {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
     },
-    body: JSON.stringify({ prompt }),
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error ?? `Fork failed (${res.status})`);
-  }
-
-  return res.json();
+  );
 }

@@ -16,7 +16,7 @@ import {
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
   getBuildStatus,
-  getLatestBuildIdForProject,
+  getLatestBuildForProject,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -53,6 +53,7 @@ export function ProjectPage() {
   const [streamingText, setStreamingText] = useState("");
   const [lastEventId, setLastEventId] = useState<string | null>(null);
   const [build, setBuild] = useState<BuildPayload | null>(null);
+  const [buildResult, setBuildResult] = useState<BuildStatusResponse["result"] | null>(null);
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
@@ -208,6 +209,10 @@ export function ProjectPage() {
     setProjectId(status.project.id);
     setProjectName(status.project.name);
 
+    if (status.result) {
+      setBuildResult(status.result);
+    }
+
     if (status.trace.previewReady || status.build.status === "completed") {
       setPreviewGenerationId(status.build.id);
     }
@@ -348,14 +353,14 @@ export function ProjectPage() {
 
     void (async () => {
       const restoredState = restoreState();
-      const latestBuildId = restoredState?.buildId ?? await getLatestBuildIdForProject(projectId);
 
-      if (!latestBuildId || controller.signal.aborted) {
-        return;
-      }
+      // Use restoredState buildId → full status fetch, or fall back to latest-build API
+      // (avoids direct Supabase table queries which require RLS policies)
+      const status = restoredState?.buildId
+        ? await getBuildStatus(restoredState.buildId)
+        : await getLatestBuildForProject(projectId);
 
-      const status = await getBuildStatus(latestBuildId);
-      if (controller.signal.aborted) {
+      if (!status || controller.signal.aborted) {
         return;
       }
 
@@ -363,6 +368,9 @@ export function ProjectPage() {
       setBuild(status.build);
       setProjectName(status.project.name);
       setProjectId(status.project.id);
+      if (status.result) {
+        setBuildResult(status.result);
+      }
       setPreviewGenerationId(
         restoredState?.previewGenerationId
           ?? (status.trace.previewReady || status.build.status === "completed"
@@ -514,8 +522,25 @@ export function ProjectPage() {
               <FolderTree size={12} className="text-[#9ca3af]" />
               <span className="text-xs font-semibold uppercase tracking-wider text-[#9ca3af]">Files</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <p className="mt-8 text-center text-xs text-[#c4c4c4]">No files yet</p>
+            <div className="flex-1 overflow-y-auto p-2">
+              {buildResult && buildResult.files.length > 0 ? (
+                <ul className="space-y-0.5">
+                  {buildResult.files.map((file) => (
+                    <li
+                      key={file.path}
+                      className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-[#374151] hover:bg-[#f3f4f6] cursor-default truncate"
+                      title={file.path}
+                    >
+                      <span className="shrink-0 text-[#9ca3af]">
+                        {file.kind === "route" ? "⎇" : "◻"}
+                      </span>
+                      <span className="truncate">{file.path.split("/").pop()}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-8 text-center text-xs text-[#c4c4c4]">No files yet</p>
+              )}
             </div>
           </div>
         </div>
