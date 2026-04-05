@@ -7,6 +7,7 @@ RUN corepack enable \
   && npm install --global tsx@4.20.6
 
 COPY runner.ts /opt/beomz/runner.ts
+RUN chmod 644 /opt/beomz/runner.ts
 
 WORKDIR /workspace
 
