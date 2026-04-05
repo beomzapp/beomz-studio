@@ -97,8 +97,16 @@ export function PreviewPane({
     return null;
   }, [response]);
 
-  const requestPreviewSession = useEffectEvent(async () => {
+  const requestPreviewSession = useEffectEvent(async (opts?: { force?: boolean }) => {
+    // Don't re-fire if a request is already in-flight.
     if (isLoading) {
+      return;
+    }
+
+    // Don't re-fire from realtime events if we already have a resolved session
+    // (E2B URL or local fallback). The realtime subscription writing to the
+    // previews table would otherwise cause an infinite loop.
+    if (!opts?.force && response && (response.session.url || response.fallbackHtml)) {
       return;
     }
 
@@ -164,7 +172,7 @@ export function PreviewPane({
   });
 
   useEffect(() => {
-    void requestPreviewSession();
+    void requestPreviewSession({ force: true });
   }, [generationId, projectId, requestPreviewSession]);
 
   useEffect(() => {
