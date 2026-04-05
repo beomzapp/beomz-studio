@@ -66,6 +66,47 @@ function buildLocalPreviewResponse(input: {
   };
 }
 
+function buildStoredPreviewResponse(input: {
+  generationId: string;
+  previewRow: {
+    id: string;
+    started_at: string;
+    expires_at: string | null;
+    preview_url: string | null;
+    sandbox_id: string | null;
+    status: PreviewSession["status"];
+  };
+  project: {
+    id: string;
+    name: string;
+    templateId: Parameters<typeof getTemplateDefinition>[0];
+  };
+}): CreatePreviewSessionResponse {
+  const session = {
+    createdAt: input.previewRow.started_at,
+    entryPath: getTemplateDefinition(input.project.templateId).previewEntryPath,
+    expiresAt: input.previewRow.expires_at ?? undefined,
+    id: input.previewRow.id,
+    projectId: input.project.id,
+    provider: "e2b",
+    sandboxId: input.previewRow.sandbox_id ?? undefined,
+    status: input.previewRow.status,
+    url: input.previewRow.preview_url ?? undefined,
+  } satisfies PreviewSession;
+  const runtime = createRuntimeContract({
+    mode: "preview",
+    project: input.project,
+    provider: "e2b",
+    session,
+  });
+
+  return {
+    generationId: input.generationId,
+    runtime,
+    session,
+  };
+}
+
 const previewsSessionRoute = new Hono();
 
 previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
@@ -137,6 +178,14 @@ previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       generation_id: generationRow.id,
       status: "booting",
     });
+  } else if (previewRow.status === "booting") {
+    return c.json(
+      buildStoredPreviewResponse({
+        generationId: generationRow.id,
+        previewRow,
+        project,
+      }),
+    );
   }
 
   const currentPreviewRow = previewRow;

@@ -99,7 +99,17 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     return;
   }
 
-  await sandbox.commands.run(`tsx ${config.E2B_PREVIEW_RUNNER_PATH}`, {
+  try {
+    await sandbox.commands.run("which tsx && which pnpm && echo OK", {
+      cwd: config.E2B_PREVIEW_WORKDIR,
+      timeoutMs: 10_000,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown preview runner environment error.";
+    throw new Error(`Preview runner prerequisites are unavailable in the sandbox: ${message}`);
+  }
+
+  await sandbox.commands.run(`/usr/local/bin/tsx ${config.E2B_PREVIEW_RUNNER_PATH}`, {
     background: true,
     cwd: config.E2B_PREVIEW_WORKDIR,
     envs: {
