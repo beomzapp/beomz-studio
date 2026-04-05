@@ -31,6 +31,7 @@ app.use(
   }),
 );
 
+app.get("/", (c) => c.json({ status: "ok" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);

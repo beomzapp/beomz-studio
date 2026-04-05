@@ -30,6 +30,7 @@ function stopWorker(): void {
 function wireShutdownSignals(): void {
   const handleSignal = (signal: NodeJS.Signals) => {
     shuttingDown = true;
+    console.warn(`Beomz Studio API runtime received ${signal}. Shutting down embedded services.`);
     stopWorker();
     process.kill(process.pid, signal);
   };
