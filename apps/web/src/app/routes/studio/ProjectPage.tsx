@@ -195,10 +195,19 @@ export function ProjectPage() {
       const onMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
         const delta = ev.clientX - dragRef.current.startX;
-        const newWidth = Math.max(150, Math.min(500, dragRef.current.startWidth + delta));
-        if (dragRef.current.target === "files") setFilesPanelWidth(newWidth);
-        else if (dragRef.current.target === "history") setHistoryPanelWidth(newWidth);
-        else setChatPanelWidth(newWidth);
+        const raw = dragRef.current.startWidth + delta;
+        // Snap-to-close: if dragged below 100px, close the panel
+        const newWidth = raw < 100 ? 0 : Math.max(150, Math.min(500, raw));
+        if (dragRef.current.target === "files") {
+          setFilesPanelWidth(newWidth || 200);
+          if (newWidth === 0) setShowFiles(false);
+        } else if (dragRef.current.target === "history") {
+          setHistoryPanelWidth(newWidth || 220);
+          if (newWidth === 0) setShowHistory(false);
+        } else {
+          setChatPanelWidth(newWidth || 380);
+          if (newWidth === 0) setShowChat(false);
+        }
       };
 
       const onUp = () => {
