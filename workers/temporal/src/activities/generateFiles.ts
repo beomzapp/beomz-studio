@@ -80,6 +80,61 @@ function extractCodePayload(text: string): string {
   return text.trim();
 }
 
+function isLikelyCodeStartLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  return /^(?:import|export|const|let|var|function|async function|class|type|interface|enum)\b/.test(trimmed)
+    || /^(?:["']use\s+\w+["'];?)$/.test(trimmed)
+    || /^(?:\/\/|\/\*|\*\/|\*)/.test(trimmed)
+    || /^(?:<[A-ZA-Za-z!/]|return\s*\(|return\s*<)/.test(trimmed);
+}
+
+function isLikelyCodeEndLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  return /(?:[;{}])$/.test(trimmed)
+    || /(?:\)|\])$/.test(trimmed)
+    || /\/>$/.test(trimmed)
+    || /^<\/?[A-ZA-z]/.test(trimmed)
+    || /^export default\b/.test(trimmed);
+}
+
+function stripNonTsxEnvelope(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+$/, ""));
+
+  let startIndex = 0;
+  while (startIndex < lines.length && lines[startIndex]?.trim().length === 0) {
+    startIndex += 1;
+  }
+
+  const firstCodeLineIndex = lines.findIndex(isLikelyCodeStartLine);
+  if (firstCodeLineIndex !== -1) {
+    startIndex = Math.max(startIndex, firstCodeLineIndex);
+  }
+
+  let endIndex = lines.length - 1;
+  while (endIndex >= startIndex && lines[endIndex]?.trim().length === 0) {
+    endIndex -= 1;
+  }
+
+  for (let index = endIndex; index >= startIndex; index -= 1) {
+    if (isLikelyCodeEndLine(lines[index] ?? "")) {
+      endIndex = index;
+      break;
+    }
+  }
+
+  return lines.slice(startIndex, endIndex + 1).join("\n").trim();
+}
+
 async function callAnthropic(system: string, userMessage: string) {
   const config = getAnthropicRuntimeConfig();
   if (!config.ANTHROPIC_API_KEY) {
@@ -135,8 +190,15 @@ function parseGeneratedFileContent(input: {
   templateId: GenerateFilesActivityInput["template"]["id"];
   text: string;
 }): string {
-  const content = extractCodePayload(input.text);
+  const extractedContent = extractCodePayload(input.text);
+  const content = stripNonTsxEnvelope(extractedContent);
   if (content.length > 0) {
+    if (content !== extractedContent) {
+      console.warn("Stripped non-TSX envelope from generated page content.", {
+        pageId: input.page.id,
+        templateId: input.templateId,
+      });
+    }
     return content;
   }
 
