@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
-import { Clock, FolderTree } from "lucide-react";
+import { Clock, FolderTree, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import {
   TopBar,
   ChatPanel,
@@ -44,6 +44,7 @@ export function ProjectPage() {
 
   // Sidebar
   const [sidebarTab, setSidebarTab] = useState<"files" | "history">("files");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Modals
   const [showShareModal, setShowShareModal] = useState(false);
@@ -208,49 +209,65 @@ export function ProjectPage() {
 
       {/* Main layout: Sidebar + Chat + Preview */}
       <div className="flex flex-1 min-h-0">
-        {/* Left sidebar — Files / History tabs */}
-        <div className="hidden w-[200px] shrink-0 flex-col border-r border-[#e5e7eb] bg-[#faf9f6] lg:flex">
-          {/* Tab switcher */}
-          <div className="flex border-b border-[#e5e7eb]">
-            <button
-              onClick={() => setSidebarTab("files")}
-              className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                sidebarTab === "files"
-                  ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
-                  : "text-[#9ca3af] hover:text-[#6b7280]"
-              }`}
-            >
-              <FolderTree size={12} />
-              Files
-            </button>
-            <button
-              onClick={() => setSidebarTab("history")}
-              className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                sidebarTab === "history"
-                  ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
-                  : "text-[#9ca3af] hover:text-[#6b7280]"
-              }`}
-            >
-              <Clock size={12} />
-              History
-            </button>
+        {/* Left sidebar — collapsible Files / History tabs */}
+        <div className="relative hidden shrink-0 lg:flex">
+          {/* Panel content — slides in/out */}
+          <div
+            className="flex flex-col border-r border-[#e5e7eb] bg-[#faf9f6] transition-[width] duration-200 ease-in-out overflow-hidden"
+            style={{ width: sidebarCollapsed ? 0 : 200 }}
+          >
+            {/* Tab switcher */}
+            <div className="flex border-b border-[#e5e7eb]" style={{ minWidth: 200 }}>
+              <button
+                onClick={() => setSidebarTab("files")}
+                className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarTab === "files"
+                    ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
+                    : "text-[#9ca3af] hover:text-[#6b7280]"
+                }`}
+              >
+                <FolderTree size={12} />
+                Files
+              </button>
+              <button
+                onClick={() => setSidebarTab("history")}
+                className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                  sidebarTab === "history"
+                    ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
+                    : "text-[#9ca3af] hover:text-[#6b7280]"
+                }`}
+              >
+                <Clock size={12} />
+                History
+              </button>
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-hidden" style={{ minWidth: 200 }}>
+              {sidebarTab === "files" ? (
+                <div className="p-4">
+                  <p className="mt-8 text-center text-xs text-[#c4c4c4]">
+                    No files yet
+                  </p>
+                </div>
+              ) : (
+                <HistoryPanel
+                  projectId={projectId}
+                  activeGenerationId={build?.id}
+                />
+              )}
+            </div>
           </div>
 
-          {/* Tab content */}
-          <div className="flex-1 overflow-hidden">
-            {sidebarTab === "files" ? (
-              <div className="p-4">
-                <p className="mt-8 text-center text-xs text-[#c4c4c4]">
-                  No files yet
-                </p>
-              </div>
-            ) : (
-              <HistoryPanel
-                projectId={projectId}
-                activeGenerationId={build?.id}
-              />
-            )}
-          </div>
+          {/* Collapse/expand toggle — pinned to panel edge */}
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="flex h-8 w-5 items-center justify-center rounded-r-md border border-l-0 border-[#e5e7eb] bg-[#faf9f6] text-[#9ca3af] transition-colors hover:bg-[rgba(0,0,0,0.02)] hover:text-[#6b7280]"
+            style={{ position: "absolute", right: -20, top: 12, zIndex: 10 }}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={12} /> : <PanelLeftClose size={12} />}
+          </button>
         </div>
 
         {/* Chat panel */}

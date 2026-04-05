@@ -22,6 +22,19 @@ export function StudioLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const matchRoute = useMatchRoute();
 
+  // Hide sidebar on builder pages — they have their own TopBar + layout
+  const isProjectPage = !!matchRoute({ to: "/studio/project/$id", fuzzy: true });
+
+  if (isProjectPage) {
+    return (
+      <div className="flex h-screen flex-col">
+        <main className="flex-1 overflow-hidden">
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-bg">
       {/* Mobile overlay */}
