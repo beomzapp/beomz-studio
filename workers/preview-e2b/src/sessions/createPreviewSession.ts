@@ -109,22 +109,45 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     throw new Error(`Preview runner prerequisites are unavailable in the sandbox: ${message}`);
   }
 
-  await sandbox.commands.run(`/usr/local/bin/tsx ${config.E2B_PREVIEW_RUNNER_PATH}`, {
-    background: true,
-    cwd: config.E2B_PREVIEW_WORKDIR,
-    envs: {
-      BEOMZ_PREVIEW_PORT: String(config.E2B_PREVIEW_PORT),
-      BEOMZ_PREVIEW_WORKDIR: config.E2B_PREVIEW_WORKDIR,
+  // Run tsx in the foreground for a short window so that any immediate startup
+  // errors are streamed back to Railway logs.  We race it against a 5-second
+  // timer: if it's still alive after 5 s we consider it healthy and move on.
+  const runnerLogs: string[] = [];
+  let runnerExitedEarly = false;
+
+  const runnerPromise = sandbox.commands.run(
+    `/usr/local/bin/tsx ${config.E2B_PREVIEW_RUNNER_PATH}`,
+    {
+      cwd: config.E2B_PREVIEW_WORKDIR,
+      envs: {
+        BEOMZ_PREVIEW_PORT: String(config.E2B_PREVIEW_PORT),
+        BEOMZ_PREVIEW_WORKDIR: config.E2B_PREVIEW_WORKDIR,
+      },
+      onStdout: (line) => {
+        runnerLogs.push(`[runner stdout] ${line}`);
+        console.log("[runner stdout]", line);
+      },
+      onStderr: (line) => {
+        runnerLogs.push(`[runner stderr] ${line}`);
+        console.error("[runner stderr]", line);
+      },
+      timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
     },
-    timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
+  ).then((result) => {
+    runnerExitedEarly = true;
+    console.error("[runner] process exited early", { exitCode: result.exitCode });
+    return result;
   });
 
-  // Give tsx a moment to start, then confirm vite is visible in process list.
-  await new Promise((resolve) => setTimeout(resolve, 3_000));
-  const postLaunchProcesses = await sandbox.commands.list();
-  if (!postLaunchProcesses.some((processInfo) => isRunnerProcess(processInfo, config.E2B_PREVIEW_RUNNER_PATH))) {
+  // Wait 5 s — if runner exits before that, it failed immediately.
+  await Promise.race([
+    runnerPromise,
+    new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+  ]);
+
+  if (runnerExitedEarly) {
     throw new Error(
-      "Preview runner process exited immediately after launch. Check that tsx and vite are installed in the template.",
+      `Preview runner exited immediately. Logs:\n${runnerLogs.join("\n")}`,
     );
   }
 }
