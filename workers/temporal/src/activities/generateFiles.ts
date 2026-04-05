@@ -6,27 +6,14 @@ import type { TemplatePage } from "@beomz-studio/contracts";
 import { z } from "zod";
 
 import { getAnthropicRuntimeConfig } from "../config.js";
-import { buildGeneratedPageFilePath } from "../shared/paths.js";
+import {
+  buildGeneratedPageComponentName,
+  buildGeneratedPageFilePath,
+} from "../shared/paths.js";
 import type {
   GenerateFilesActivityInput,
   GeneratedBuildDraft,
 } from "../shared/types.js";
-
-const generatedFileSchema = z.object({
-  path: z.string().min(1),
-  kind: z.enum([
-    "route",
-    "component",
-    "layout",
-    "style",
-    "data",
-    "content",
-    "config",
-    "asset-manifest",
-  ]),
-  language: z.string().min(1),
-  content: z.string().min(1),
-});
 
 function buildSystemPrompt(policy: InitialBuildPromptPolicy): string {
   return [
@@ -52,6 +39,7 @@ function buildUserPrompt(
   page: TemplatePage,
 ): string {
   const filePath = buildGeneratedPageFilePath(input.template.id, page.id);
+  const componentName = buildGeneratedPageComponentName(input.template.id, page.id);
 
   return [
     `Project name: ${input.project.name}`,
@@ -68,6 +56,7 @@ function buildUserPrompt(
         pageId: page.id,
         name: page.name,
         filePath,
+        componentName,
         routePath: page.path,
         kind: page.kind,
         summary: page.summary,
@@ -76,34 +65,19 @@ function buildUserPrompt(
       null,
       2,
     ),
-    "Return JSON with this exact shape:",
-    JSON.stringify(
-      {
-        path: filePath,
-        kind: "route",
-        language: "tsx",
-        content: "export default function ExamplePage() { return <div />; }",
-      },
-      null,
-      2,
-    ),
-    "Do not return markdown fences, commentary, or any prose outside the JSON object.",
+    "Output ONLY the complete TSX file contents for that one page.",
+    `The file must default export a React component named ${componentName}.`,
+    "Do not return JSON, markdown fences, explanations, or any prose outside the TSX file.",
   ].join("\n\n");
 }
 
-function extractJsonPayload(text: string): string {
-  const fencedMatch = text.match(/```json\s*([\s\S]*?)```/i);
+function extractCodePayload(text: string): string {
+  const fencedMatch = text.match(/```(?:tsx|ts|jsx|js)?\s*([\s\S]*?)```/i);
   if (fencedMatch?.[1]) {
     return fencedMatch[1].trim();
   }
 
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error("Anthropic response did not include a JSON object.");
-  }
-
-  return text.slice(firstBrace, lastBrace + 1);
+  return text.trim();
 }
 
 async function callAnthropic(system: string, userMessage: string) {
@@ -155,27 +129,25 @@ function extractTextContent(rawResponse: {
     .trim();
 }
 
-function parseGeneratedFileResponse(input: {
+function parseGeneratedFileContent(input: {
   config: ReturnType<typeof getAnthropicRuntimeConfig>;
   page: TemplatePage;
   templateId: GenerateFilesActivityInput["template"]["id"];
   text: string;
-}): z.infer<typeof generatedFileSchema> {
-  try {
-    return generatedFileSchema.parse(
-      JSON.parse(extractJsonPayload(input.text)),
-    );
-  } catch (error) {
-    console.error("Failed to parse Anthropic generation response.", {
-      error: error instanceof Error ? error.message : String(error),
-      maxTokens: input.config.ANTHROPIC_MAX_TOKENS,
-      model: input.config.ANTHROPIC_MODEL,
-      pageId: input.page.id,
-      rawResponseText: input.text,
-      templateId: input.templateId,
-    });
-    throw error;
+}): string {
+  const content = extractCodePayload(input.text);
+  if (content.length > 0) {
+    return content;
   }
+
+  console.error("Anthropic generation response was empty after code extraction.", {
+    maxTokens: input.config.ANTHROPIC_MAX_TOKENS,
+    model: input.config.ANTHROPIC_MODEL,
+    pageId: input.page.id,
+    rawResponseText: input.text,
+    templateId: input.templateId,
+  });
+  throw new Error(`Anthropic returned empty code content for page ${input.page.id}.`);
 }
 
 export async function generateFiles(
@@ -183,7 +155,6 @@ export async function generateFiles(
 ): Promise<GeneratedBuildDraft> {
   const config = getAnthropicRuntimeConfig();
   const policy = getInitialBuildPromptPolicy(input.template.id);
-  const warnings: string[] = [];
   const files = [];
 
   for (const page of input.template.pages) {
@@ -197,32 +168,18 @@ export async function generateFiles(
       throw new Error(`Anthropic returned no text content for page ${page.id}.`);
     }
 
-    const parsed = parseGeneratedFileResponse({
+    const content = parseGeneratedFileContent({
       config,
       page,
       templateId: input.template.id,
       text,
     });
-    const expectedPath = buildGeneratedPageFilePath(input.template.id, page.id);
-
-    if (parsed.path !== expectedPath) {
-      warnings.push(`Model returned unexpected path for ${page.id}; normalized to ${expectedPath}.`);
-    }
-
-    if (parsed.kind !== "route") {
-      warnings.push(`Model returned kind ${parsed.kind} for ${page.id}; normalized to route.`);
-    }
-
-    if (parsed.language.toLowerCase() !== "tsx") {
-      warnings.push(`Model returned language ${parsed.language} for ${page.id}; normalized to tsx.`);
-    }
 
     files.push({
-      ...parsed,
-      path: expectedPath,
+      path: buildGeneratedPageFilePath(input.template.id, page.id),
       kind: "route" as const,
       language: "tsx",
-      content: parsed.content.trim(),
+      content: content.trim(),
       locked: false,
       source: "ai" as const,
     });
@@ -233,6 +190,6 @@ export async function generateFiles(
     previewEntryPath: input.template.previewEntryPath,
     source: "ai",
     summary: `Generated ${input.template.pages.length} route files for ${input.template.name}.`,
-    warnings,
+    warnings: [],
   };
 }
