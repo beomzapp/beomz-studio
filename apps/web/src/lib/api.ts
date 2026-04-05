@@ -54,7 +54,7 @@ export interface StartBuildResponse {
   template: TemplateDefinition;
 }
 
-const DEFAULT_API_BASE_URL = "http://localhost:3001";
+const DEFAULT_API_BASE_URL = "https://beomz-studioapi-production.up.railway.app";
 let accessTokenPromise: Promise<string> | null = null;
 
 export function getApiBaseUrl(): string {
