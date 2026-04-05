@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { apiConfig } from "./config.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
+import buildsEventsRoute from "./routes/builds/events.js";
 import buildsStartRoute from "./routes/builds/start.js";
 import buildsStatusRoute from "./routes/builds/status.js";
 import planClarifyRoute from "./routes/plan/clarify.js";
@@ -31,6 +32,7 @@ app.use(
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);
+app.route("/builds/:id/events", buildsEventsRoute);
 app.route("/builds/start", buildsStartRoute);
 app.route("/builds/:id/status", buildsStatusRoute);
 app.route("/plan/clarify", planClarifyRoute);

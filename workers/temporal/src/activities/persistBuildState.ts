@@ -1,9 +1,34 @@
+import {
+  createEmptyBuilderV3TraceMetadata,
+  type BuilderV3TraceMetadata,
+} from "@beomz-studio/contracts";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 
 import type { PersistBuildStateActivityInput } from "../shared/types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readBuilderTraceMetadata(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
+  const candidate = metadata.builderTrace;
+  if (!isRecord(candidate)) {
+    return createEmptyBuilderV3TraceMetadata();
+  }
+
+  const events = Array.isArray(candidate.events) ? candidate.events : [];
+
+  return {
+    events,
+    lastEventId:
+      typeof candidate.lastEventId === "string" && candidate.lastEventId.length > 0
+        ? candidate.lastEventId
+        : null,
+    previewReady: candidate.previewReady === true,
+    fallbackReason:
+      typeof candidate.fallbackReason === "string" ? candidate.fallbackReason : null,
+    fallbackUsed: candidate.fallbackUsed === true,
+  };
 }
 
 export async function persistBuildState(
@@ -28,12 +53,32 @@ export async function persistBuildState(
     throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
   }
 
+  const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
   const mergedMetadata = input.generationPatch.metadata
     ? {
-        ...(isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {}),
+        ...currentMetadata,
         ...input.generationPatch.metadata,
       }
-    : currentGeneration.metadata;
+    : { ...currentMetadata };
+
+  if (input.generationPatch.builderTracePatch) {
+    const currentTrace = readBuilderTraceMetadata(currentMetadata);
+    const appendedEvents = input.generationPatch.builderTracePatch.appendEvents ?? [];
+    const lastAppendedEvent = appendedEvents.at(-1);
+
+    mergedMetadata.builderTrace = {
+      events: [...currentTrace.events, ...appendedEvents],
+      lastEventId:
+        lastAppendedEvent?.id
+        ?? currentTrace.lastEventId,
+      previewReady:
+        input.generationPatch.builderTracePatch.previewReady ?? currentTrace.previewReady,
+      fallbackReason:
+        input.generationPatch.builderTracePatch.fallbackReason ?? currentTrace.fallbackReason,
+      fallbackUsed:
+        input.generationPatch.builderTracePatch.fallbackUsed ?? currentTrace.fallbackUsed,
+    } satisfies BuilderV3TraceMetadata;
+  }
 
   await db.updateGeneration(input.buildId, {
     completed_at:

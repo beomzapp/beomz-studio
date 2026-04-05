@@ -7,6 +7,7 @@ import {
   buildInitialBuildOutput,
   mapProjectRowToProject,
   readBuildMetadata,
+  readBuildTraceMetadata,
 } from "./shared.js";
 
 const buildsStatusRoute = new Hono();
@@ -30,6 +31,7 @@ buildsStatusRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   const metadata = readBuildMetadata(generationRow.metadata);
+  const trace = readBuildTraceMetadata(generationRow);
 
   return c.json({
     build: {
@@ -48,6 +50,7 @@ buildsStatusRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     },
     project: mapProjectRowToProject(projectRow),
     result: buildInitialBuildOutput(generationRow),
+    trace,
   });
 });
 

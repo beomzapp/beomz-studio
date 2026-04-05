@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { initialBuildOperation } from "@beomz-studio/operations";
-import type { PlanStep } from "@beomz-studio/contracts";
+import type { BuilderV3TraceMetadata, PlanStep } from "@beomz-studio/contracts";
 import {
   INITIAL_BUILD_WORKFLOW_TYPE,
   buildInitialBuildWorkflowId,
@@ -18,6 +18,7 @@ import type { OrgContext } from "../../types.js";
 import {
   mapProjectRowToProject,
   readBuildMetadata,
+  readBuildTraceMetadata,
   startBuildRequestSchema,
 } from "./shared.js";
 
@@ -57,6 +58,28 @@ function derivePlanKeywords(steps: readonly PlanStep[] | undefined): string[] | 
     .filter((keyword) => keyword.length >= 3)
     .filter((keyword, index, items) => items.indexOf(keyword) === index)
     .slice(0, 12);
+}
+
+function createInitialBuilderTrace(
+  requestedAt: string,
+): BuilderV3TraceMetadata {
+  return {
+    events: [
+      {
+        code: "build_queued",
+        id: "1",
+        message: "Build queued. Waiting for the worker to start.",
+        operation: "initial_build",
+        timestamp: requestedAt,
+        type: "status",
+        phase: "queued",
+      },
+    ],
+    lastEventId: "1",
+    previewReady: false,
+    fallbackReason: null,
+    fallbackUsed: false,
+  };
 }
 
 const buildsStartRoute = new Hono();
@@ -105,8 +128,10 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const projectId = randomUUID();
   const requestedAt = new Date().toISOString();
   const workflowId = buildInitialBuildWorkflowId(buildId);
+  const initialBuilderTrace = createInitialBuilderTrace(requestedAt);
 
   const initialMetadata = {
+    builderTrace: initialBuilderTrace,
     phase: "queued",
     planKeywords: derivePlanKeywords(planSteps),
     planSessionId,
@@ -210,6 +235,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   const metadata = readBuildMetadata(generationRow.metadata);
+  const trace = readBuildTraceMetadata(generationRow);
 
   return c.json(
     {
@@ -229,6 +255,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       project: mapProjectRowToProject(projectRow),
       result: null,
       template: selection.template,
+      trace,
     },
     202,
   );

@@ -1,4 +1,5 @@
 import type {
+  BuilderV3TracePatch,
   FileSource,
   GenerationStatus,
   InitialBuildOutput,
@@ -109,6 +110,7 @@ export interface PersistGenerationPatch {
   files?: readonly StudioFile[];
   metadata?: Record<string, unknown>;
   completedAt?: string | null;
+  builderTracePatch?: BuilderV3TracePatch;
 }
 
 export interface PersistBuildStateActivityInput {

@@ -4,6 +4,7 @@
  * Input pinned to bottom with icon toolbar.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
 import {
   Send,
   Square,
@@ -13,6 +14,10 @@ import {
   Check,
   Sparkles,
   ListChecks,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  Wrench,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -21,6 +26,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  traceEntries?: readonly BuilderV3TranscriptEntry[];
 }
 
 interface ChatPanelProps {
@@ -30,6 +36,46 @@ interface ChatPanelProps {
   onSendMessage: (text: string) => void;
   onStopStreaming?: () => void;
   width?: number;
+}
+
+function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
+  const isError = entry.status === "error" || entry.kind === "error";
+  const isSuccess = entry.status === "success" || entry.kind === "done";
+  const isRunning = entry.status === "running" || entry.kind === "tool_use";
+
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-xl border px-2.5 py-2 text-xs",
+        isError
+          ? "border-red-200 bg-red-50 text-red-700"
+          : isSuccess
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-[#ece7df] bg-[#faf9f6] text-[#6b7280]",
+      )}
+    >
+      <span className="mt-0.5 shrink-0">
+        {isRunning ? (
+          <Loader2 size={13} className="animate-spin" />
+        ) : isError ? (
+          <AlertCircle size={13} />
+        ) : isSuccess ? (
+          <CheckCircle2 size={13} />
+        ) : (
+          <Wrench size={13} />
+        )}
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-current">{entry.message}</div>
+        {(entry.toolName || entry.code) && (
+          <div className="mt-1 text-[11px] uppercase tracking-wide text-current/70">
+            {[entry.toolName, entry.code].filter(Boolean).join(" • ")}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -109,6 +155,11 @@ export function ChatPanel({
   );
 
   const hasMessages = messages.length > 0 || isStreaming;
+  const hasAssistantActivity = messages.some(
+    (message) =>
+      message.role === "assistant"
+      && (message.content.trim().length > 0 || (message.traceEntries?.length ?? 0) > 0),
+  );
 
   return (
     <div
@@ -150,6 +201,13 @@ export function ChatPanel({
                   )}
                 >
                   {msg.content}
+                  {msg.traceEntries && msg.traceEntries.length > 0 && (
+                    <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
+                      {msg.traceEntries.map((entry) => (
+                        <TraceEntryRow key={entry.id} entry={entry} />
+                      ))}
+                    </div>
+                  )}
                   {msg.role === "assistant" && (
                     <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <CopyButton text={msg.content} />
@@ -170,7 +228,7 @@ export function ChatPanel({
             )}
 
             {/* Thinking indicator */}
-            {isStreaming && !streamingText && (
+            {isStreaming && !streamingText && !hasAssistantActivity && (
               <div className="flex justify-start">
                 <div className="rounded-2xl rounded-bl-md border border-[#e5e7eb] bg-white px-3.5 py-2.5">
                   <div className="flex gap-1">

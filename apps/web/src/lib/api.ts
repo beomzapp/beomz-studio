@@ -1,5 +1,7 @@
 import type {
   BuildPlanContext,
+  BuilderV3Event,
+  BuilderV3TraceMetadata,
   CreatePlanSessionRequest,
   CreatePlanSessionResponse,
   CreatePreviewSessionRequest,
@@ -45,6 +47,7 @@ export interface BuildStatusResponse {
     previewEntryPath: string;
     warnings: readonly string[];
   } | null;
+  trace: BuilderV3TraceMetadata;
 }
 
 export interface StartBuildResponse {
@@ -52,6 +55,7 @@ export interface StartBuildResponse {
   project: Project;
   result: null;
   template: TemplateDefinition;
+  trace: BuilderV3TraceMetadata;
 }
 
 const DEFAULT_API_BASE_URL = "https://beomz-studioapi-production.up.railway.app";
@@ -164,6 +168,106 @@ export function getBuildStatus(buildId: string): Promise<BuildStatusResponse> {
   return requestJson<BuildStatusResponse>(`/builds/${buildId}/status`, {
     method: "GET",
   });
+}
+
+export async function getLatestBuildIdForProject(projectId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("generations")
+    .select("id")
+    .eq("project_id", projectId)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.id) {
+    return null;
+  }
+
+  return data.id;
+}
+
+export async function streamBuildEvents(args: {
+  buildId: string;
+  lastEventId?: string | null;
+  signal?: AbortSignal;
+  onEvent?: (event: BuilderV3Event) => void;
+}): Promise<void> {
+  const accessToken = await getAccessToken();
+  const query = args.lastEventId
+    ? `?lastEventId=${encodeURIComponent(args.lastEventId)}`
+    : "";
+  const response = await fetch(`${getApiBaseUrl()}/builds/${args.buildId}/events${query}`, {
+    headers: {
+      accept: "text/event-stream",
+      authorization: `Bearer ${accessToken}`,
+    },
+    method: "GET",
+    signal: args.signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errorBody?.error ?? `Request failed with ${response.status}.`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Build events stream is unavailable.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let dataLines: string[] = [];
+
+  const flushEvent = () => {
+    if (dataLines.length === 0) {
+      return;
+    }
+
+    const payload = dataLines.join("\n");
+    dataLines = [];
+
+    try {
+      const event = JSON.parse(payload) as BuilderV3Event;
+      args.onEvent?.(event);
+    } finally {
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      flushEvent();
+      return;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    while (true) {
+      const lineBreakIndex = buffer.indexOf("\n");
+      if (lineBreakIndex === -1) {
+        break;
+      }
+
+      const rawLine = buffer.slice(0, lineBreakIndex);
+      buffer = buffer.slice(lineBreakIndex + 1);
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+
+      if (line.length === 0) {
+        flushEvent();
+        continue;
+      }
+
+      if (line.startsWith("id:") || line.startsWith("event:")) {
+        continue;
+      }
+
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+        continue;
+      }
+    }
+  }
 }
 
 export function createOrResumePreviewSession(

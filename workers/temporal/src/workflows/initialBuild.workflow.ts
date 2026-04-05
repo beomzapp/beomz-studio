@@ -1,3 +1,15 @@
+import type {
+  BuilderV3AssistantDeltaEvent,
+  BuilderV3DoneEvent,
+  BuilderV3ErrorEvent,
+  BuilderV3Event,
+  BuilderV3PreviewReadyEvent,
+  BuilderV3StatusEvent,
+  BuilderV3ToolResultEvent,
+  BuilderV3ToolUseProgressEvent,
+  BuilderV3ToolUseStartedEvent,
+  BuilderV3TracePatch,
+} from "@beomz-studio/contracts";
 import { initialBuildOperation } from "@beomz-studio/operations";
 import { proxyActivities } from "@temporalio/workflow";
 
@@ -30,14 +42,74 @@ export async function initialBuildWorkflow(
   input: InitialBuildWorkflowInput,
 ): Promise<InitialBuildWorkflowResult> {
   const plan = createInitialBuildPlan(input.prompt, input.projectName);
+  let eventSequence = 1;
+  let fallbackReason: string | null = null;
+  let fallbackUsed = false;
   let selectedTemplateId = input.provisionalTemplateId;
   let selectedTemplateReason = "Template not yet selected.";
   let selectedTemplateScores: Record<string, number> = {};
+
+  type BuilderV3EventInput =
+    | Omit<BuilderV3AssistantDeltaEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3DoneEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3ErrorEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3PreviewReadyEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3StatusEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3ToolResultEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3ToolUseProgressEvent, "id" | "operation" | "timestamp">
+    | Omit<BuilderV3ToolUseStartedEvent, "id" | "operation" | "timestamp">;
+
+  const createTraceEvent = (
+    event: BuilderV3EventInput,
+  ): BuilderV3Event => ({
+    ...event,
+    id: String(++eventSequence),
+    operation: "initial_build",
+    timestamp: new Date().toISOString(),
+  });
+
+  const createTracePatch = (
+    events: ReadonlyArray<BuilderV3EventInput>,
+    patch: Omit<BuilderV3TracePatch, "appendEvents"> = {},
+  ): BuilderV3TracePatch => ({
+    ...patch,
+    appendEvents: events.map((event) => createTraceEvent(event)),
+  });
 
   try {
     await persistBuildState({
       buildId: input.buildId,
       generationPatch: {
+        builderTracePatch: createTracePatch([
+          {
+            type: "status",
+            code: "planner_started",
+            message: `Planning initial build for ${plan.projectNameSuggestion}.`,
+            phase: "planner",
+          },
+          {
+            type: "tool_use_started",
+            tool_use_id: "tool-plan-blueprint-1",
+            tool_name: "plan_blueprint",
+            code: "plan_blueprint_started",
+            message: "Creating the initial build blueprint from the prompt.",
+            payload: {
+              keywordCount: plan.keywords.length,
+            },
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "tool-plan-blueprint-1",
+            tool_name: "plan_blueprint",
+            code: "plan_blueprint_completed",
+            message: "Initial build blueprint is ready.",
+            payload: {
+              keywords: [...plan.keywords],
+              suggestedProjectName: plan.projectNameSuggestion,
+            },
+            status: "success",
+          },
+        ]),
         metadata: {
           phase: "planner",
           planKeywords: plan.keywords,
@@ -53,6 +125,35 @@ export async function initialBuildWorkflow(
       },
     });
 
+    await persistBuildState({
+      buildId: input.buildId,
+      generationPatch: {
+        builderTracePatch: createTracePatch([
+          {
+            type: "status",
+            code: "template_selection_started",
+            message: "Selecting the best template for this build.",
+            phase: "template-selector",
+          },
+          {
+            type: "tool_use_started",
+            tool_use_id: "tool-template-select-1",
+            tool_name: "template_select",
+            code: "template_select_started",
+            message: "Evaluating templates against the build plan.",
+            payload: {
+              provisionalTemplateId: input.provisionalTemplateId ?? null,
+            },
+          },
+        ]),
+        metadata: {
+          phase: "template-selector",
+        },
+        summary: "Selecting the best template for the initial build.",
+      },
+      projectId: input.projectId,
+    });
+
     const selection = await templateSelect({
       plan,
       prompt: input.prompt,
@@ -64,6 +165,21 @@ export async function initialBuildWorkflow(
     await persistBuildState({
       buildId: input.buildId,
       generationPatch: {
+        builderTracePatch: createTracePatch([
+          {
+            type: "tool_result",
+            tool_use_id: "tool-template-select-1",
+            tool_name: "template_select",
+            code: "template_select_completed",
+            message: `Selected ${selection.template.name} as the starting template.`,
+            payload: {
+              reason: selection.reason,
+              scores: selection.scores,
+              templateId: selection.template.id,
+            },
+            status: "success",
+          },
+        ]),
         metadata: {
           phase: "template-selector",
           templateReason: selection.reason,
@@ -93,6 +209,24 @@ export async function initialBuildWorkflow(
     await persistBuildState({
       buildId: input.buildId,
       generationPatch: {
+        builderTracePatch: createTracePatch([
+          {
+            type: "status",
+            code: "generation_started",
+            message: `Generating files for ${selection.template.name}.`,
+            phase: "generate",
+          },
+          {
+            type: "tool_use_started",
+            tool_use_id: "tool-generate-files-1",
+            tool_name: "generate_files",
+            code: "generate_files_started",
+            message: "Generating the initial file set with Anthropic.",
+            payload: {
+              templateId: selection.template.id,
+            },
+          },
+        ]),
         metadata: {
           phase: "generate",
         },
@@ -112,13 +246,48 @@ export async function initialBuildWorkflow(
       template: selection.template,
     }).catch(async (error: unknown) => {
       source = "platform";
-      generationWarnings = [
-        `Model generation failed: ${toErrorMessage(error)}`,
-      ];
+      fallbackUsed = true;
+      fallbackReason = toErrorMessage(error);
+      generationWarnings = [`Model generation failed: ${toErrorMessage(error)}`];
 
       await persistBuildState({
         buildId: input.buildId,
         generationPatch: {
+          builderTracePatch: createTracePatch(
+            [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-generate-files-1",
+                tool_name: "generate_files",
+                code: "generate_files_failed",
+                message: "Model generation failed, switching to the fallback scaffold.",
+                payload: {
+                  reason: toErrorMessage(error),
+                },
+                status: "error",
+              },
+              {
+                type: "status",
+                code: "fallback_started",
+                message: "Switching to the fallback scaffold after model generation failed.",
+                phase: "fallback",
+              },
+              {
+                type: "tool_use_started",
+                tool_use_id: "tool-fallback-scaffold-1",
+                tool_name: "fallback_scaffold",
+                code: "fallback_scaffold_started",
+                message: "Creating the deterministic fallback scaffold.",
+                payload: {
+                  reason: toErrorMessage(error),
+                },
+              },
+            ],
+            {
+              fallbackReason,
+              fallbackUsed: true,
+            },
+          ),
           metadata: {
             fallbackReason: toErrorMessage(error),
             phase: "fallback",
@@ -138,19 +307,93 @@ export async function initialBuildWorkflow(
       });
     });
 
-    await persistBuildState({
-      buildId: input.buildId,
-      generationPatch: {
-        metadata: {
-          phase: "validate",
+    if (source === "ai") {
+      await persistBuildState({
+        buildId: input.buildId,
+        generationPatch: {
+          builderTracePatch: createTracePatch([
+            {
+              type: "tool_result",
+              tool_use_id: "tool-generate-files-1",
+              tool_name: "generate_files",
+              code: "generate_files_completed",
+              message: "Initial files generated successfully.",
+              payload: {
+                fileCount: draft.files.length,
+              },
+              status: "success",
+            },
+            {
+              type: "status",
+              code: "validation_started",
+              message: "Validating the generated build output.",
+              phase: "validate",
+            },
+            {
+              type: "tool_use_started",
+              tool_use_id: "tool-validate-build-1",
+              tool_name: "validate_build",
+              code: "validate_build_started",
+              message: "Checking the generated files before preview launch.",
+              payload: {
+                source: "ai",
+              },
+            },
+          ]),
+          metadata: {
+            phase: "validate",
+          },
+          summary: "Validating model-generated build output.",
         },
-        summary:
-          source === "ai"
-            ? "Validating model-generated build output."
-            : "Validating fallback scaffold output.",
-      },
-      projectId: input.projectId,
-    });
+        projectId: input.projectId,
+      });
+    } else {
+      await persistBuildState({
+        buildId: input.buildId,
+        generationPatch: {
+          builderTracePatch: createTracePatch(
+            [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-fallback-scaffold-1",
+                tool_name: "fallback_scaffold",
+                code: "fallback_scaffold_completed",
+                message: "Fallback scaffold is ready for validation.",
+                payload: {
+                  fileCount: draft.files.length,
+                },
+                status: "success",
+              },
+              {
+                type: "status",
+                code: "validation_started",
+                message: "Validating the fallback scaffold output.",
+                phase: "validate",
+              },
+              {
+                type: "tool_use_started",
+                tool_use_id: "tool-validate-build-2",
+                tool_name: "validate_build",
+                code: "validate_build_started",
+                message: "Checking the fallback scaffold before preview launch.",
+                payload: {
+                  source: "fallback",
+                },
+              },
+            ],
+            {
+              fallbackReason,
+              fallbackUsed: true,
+            },
+          ),
+          metadata: {
+            phase: "validate",
+          },
+          summary: "Validating fallback scaffold output.",
+        },
+        projectId: input.projectId,
+      });
+    }
 
     let validation = await validateBuild({
       draft,
@@ -158,7 +401,11 @@ export async function initialBuildWorkflow(
     });
 
     if (!validation.passed) {
+      const failedValidationToolUseId =
+        source === "ai" ? "tool-validate-build-1" : "tool-validate-build-2";
       source = "platform";
+      fallbackUsed = true;
+      fallbackReason = validation.errors.map((error) => error.message).join("; ");
       generationWarnings = [
         ...generationWarnings,
         ...validation.errors.map((error) => error.message),
@@ -167,8 +414,43 @@ export async function initialBuildWorkflow(
       await persistBuildState({
         buildId: input.buildId,
         generationPatch: {
+          builderTracePatch: createTracePatch(
+            [
+              {
+                type: "tool_result",
+                tool_use_id: failedValidationToolUseId,
+                tool_name: "validate_build",
+                code: "validate_build_failed",
+                message: "Validation failed, switching to the fallback scaffold instead.",
+                payload: {
+                  errors: validation.errors.map((error) => error.message),
+                },
+                status: "error",
+              },
+              {
+                type: "status",
+                code: "fallback_started",
+                message: "Validation failed, creating the deterministic fallback scaffold.",
+                phase: "fallback",
+              },
+              {
+                type: "tool_use_started",
+                tool_use_id: "tool-fallback-scaffold-1",
+                tool_name: "fallback_scaffold",
+                code: "fallback_scaffold_started",
+                message: "Creating the deterministic fallback scaffold.",
+                payload: {
+                  reason: validation.errors.map((error) => error.message),
+                },
+              },
+            ],
+            {
+              fallbackReason,
+              fallbackUsed: true,
+            },
+          ),
           metadata: {
-            fallbackReason: validation.errors.map((error) => error.message).join("; "),
+            fallbackReason,
             phase: "fallback",
             resultSource: "fallback",
           },
@@ -181,9 +463,57 @@ export async function initialBuildWorkflow(
         plan,
         project,
         prompt: input.prompt,
-        reason: validation.errors.map((error) => error.message).join("; "),
+        reason: fallbackReason,
         template: selection.template,
       });
+
+      await persistBuildState({
+        buildId: input.buildId,
+        generationPatch: {
+          builderTracePatch: createTracePatch(
+            [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-fallback-scaffold-1",
+                tool_name: "fallback_scaffold",
+                code: "fallback_scaffold_completed",
+                message: "Fallback scaffold is ready for validation.",
+                payload: {
+                  fileCount: draft.files.length,
+                },
+                status: "success",
+              },
+              {
+                type: "status",
+                code: "validation_started",
+                message: "Re-validating the fallback scaffold output.",
+                phase: "validate",
+              },
+              {
+                type: "tool_use_started",
+                tool_use_id: "tool-validate-build-2",
+                tool_name: "validate_build",
+                code: "validate_build_started",
+                message: "Checking the fallback scaffold before preview launch.",
+                payload: {
+                  source: "fallback",
+                },
+              },
+            ],
+            {
+              fallbackReason,
+              fallbackUsed: true,
+            },
+          ),
+          metadata: {
+            phase: "validate",
+            resultSource: "fallback",
+          },
+          summary: "Validating fallback scaffold output.",
+        },
+        projectId: input.projectId,
+      });
+
       validation = await validateBuild({
         draft,
         template: selection.template,
@@ -225,10 +555,83 @@ export async function initialBuildWorkflow(
     await persistBuildState({
       buildId: input.buildId,
       generationPatch: {
+        builderTracePatch: createTracePatch(
+          [
+            {
+              type: "tool_result",
+              tool_use_id:
+                source === "platform" ? "tool-validate-build-2" : "tool-validate-build-1",
+              tool_name: "validate_build",
+              code: "validate_build_completed",
+              message:
+                source === "platform"
+                  ? "Fallback scaffold passed validation."
+                  : "Generated build passed validation.",
+              payload: {
+                warningCount: validation.warnings.length,
+              },
+              status: "success",
+            },
+            {
+              type: "tool_use_started",
+              tool_use_id: "tool-persist-build-state-1",
+              tool_name: "persist_build_state",
+              code: "persist_build_state_started",
+              message: "Persisting the validated files and preview metadata.",
+              payload: {
+                outputPathCount: validation.outputPaths.length,
+              },
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "tool-persist-build-state-1",
+              tool_name: "persist_build_state",
+              code: "persist_build_state_completed",
+              message: "Persisted the validated build state.",
+              payload: {
+                outputPathCount: validation.outputPaths.length,
+              },
+              status: "success",
+            },
+            {
+              type: "preview_ready",
+              buildId: input.buildId,
+              code: "preview_ready",
+              fallbackReason,
+              fallbackUsed,
+              message: "Preview is ready for the studio client.",
+              payload: {
+                source,
+                warningCount: warnings.length,
+              },
+              previewEntryPath: selection.template.previewEntryPath,
+              projectId: input.projectId,
+            },
+            {
+              type: "done",
+              buildId: input.buildId,
+              code: "build_completed",
+              fallbackReason,
+              fallbackUsed,
+              message: draft.summary,
+              payload: {
+                source,
+                warningCount: warnings.length,
+              },
+              projectId: input.projectId,
+            },
+          ],
+          {
+            fallbackReason,
+            fallbackUsed,
+            previewReady: true,
+          },
+        ),
         completedAt: null,
         error: null,
         files: validation.files,
         metadata: {
+          fallbackReason,
           phase: source === "platform" ? "fallback-completed" : "completed",
           resultSource: source === "platform" ? "fallback" : "ai",
           templateReason: selectedTemplateReason,
@@ -255,8 +658,27 @@ export async function initialBuildWorkflow(
     await persistBuildState({
       buildId: input.buildId,
       generationPatch: {
+        builderTracePatch: createTracePatch(
+          [
+            {
+              type: "error",
+              buildId: input.buildId,
+              code: "build_failed",
+              message: toErrorMessage(error),
+              payload: {
+                selectedTemplateId,
+              },
+              projectId: input.projectId,
+            },
+          ],
+          {
+            fallbackReason,
+            fallbackUsed,
+          },
+        ),
         error: toErrorMessage(error),
         metadata: {
+          fallbackReason,
           phase: "failed",
           resultSource: "error",
           selectedTemplateId,

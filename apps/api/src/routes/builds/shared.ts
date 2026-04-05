@@ -1,4 +1,11 @@
-import type { BuildPlanContext, InitialBuildOutput, Project } from "@beomz-studio/contracts";
+import type {
+  BuildPlanContext,
+  BuilderV3Event,
+  BuilderV3TraceMetadata,
+  InitialBuildOutput,
+  Project,
+} from "@beomz-studio/contracts";
+import { createEmptyBuilderV3TraceMetadata } from "@beomz-studio/contracts";
 import type { GenerationRow, ProjectRow } from "@beomz-studio/studio-db";
 import { getTemplateDefinition } from "@beomz-studio/templates";
 import { z } from "zod";
@@ -25,8 +32,17 @@ export const startBuildRequestSchema = z.object({
   projectName?: string;
 } & BuildPlanContext>;
 
+const builderTraceSchema = z.object({
+  events: z.array(z.record(z.string(), z.unknown())).optional(),
+  lastEventId: z.string().nullable().optional(),
+  previewReady: z.boolean().optional(),
+  fallbackUsed: z.boolean().optional(),
+  fallbackReason: z.string().nullable().optional(),
+}).passthrough();
+
 const buildMetadataSchema = z
   .object({
+    builderTrace: builderTraceSchema.optional(),
     failureReason: z.enum(FAILURE_REASONS).optional(),
     fallbackReason: z.string().optional(),
     phase: z.string().optional(),
@@ -50,9 +66,126 @@ const buildMetadataSchema = z
 
 export type BuildRouteMetadata = z.infer<typeof buildMetadataSchema>;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readBuilderTraceMetadataFromParsed(
+  metadata: BuildRouteMetadata,
+): BuilderV3TraceMetadata {
+  const parsed = builderTraceSchema.safeParse(metadata.builderTrace ?? {});
+  if (!parsed.success) {
+    return createEmptyBuilderV3TraceMetadata();
+  }
+
+  return {
+    events: (parsed.data.events ?? []) as unknown as readonly BuilderV3Event[],
+    lastEventId: parsed.data.lastEventId ?? null,
+    previewReady: parsed.data.previewReady ?? false,
+    fallbackReason: parsed.data.fallbackReason ?? null,
+    fallbackUsed: parsed.data.fallbackUsed ?? false,
+  };
+}
+
+function synthesizeBuilderTrace(
+  row: GenerationRow,
+  metadata: BuildRouteMetadata,
+): BuilderV3TraceMetadata {
+  const template = getTemplateDefinition(row.template_id);
+  const fallbackReason = metadata.fallbackReason ?? null;
+  const fallbackUsed = metadata.resultSource === "fallback";
+  const events: BuilderV3Event[] = [];
+
+  if (metadata.phase) {
+    events.push({
+      code: `legacy_${metadata.phase}`,
+      id: "legacy-1",
+      message: row.summary ?? `Build is ${metadata.phase}.`,
+      operation: "initial_build",
+      phase: metadata.phase,
+      timestamp: row.started_at,
+      type: "status",
+    });
+  }
+
+  if (row.status === "completed") {
+    events.push({
+      buildId: row.id,
+      code: "preview_ready",
+      fallbackReason,
+      fallbackUsed,
+      id: events.length === 0 ? "legacy-1" : "legacy-2",
+      message: "Preview is ready for the studio client.",
+      operation: "initial_build",
+      payload: {
+        source: metadata.resultSource ?? "ai",
+      },
+      previewEntryPath: row.preview_entry_path ?? template.previewEntryPath,
+      projectId: row.project_id,
+      timestamp: row.completed_at ?? row.started_at,
+      type: "preview_ready",
+    });
+    events.push({
+      buildId: row.id,
+      code: "build_completed",
+      fallbackReason,
+      fallbackUsed,
+      id: events.length === 1 ? "legacy-2" : "legacy-3",
+      message: row.summary ?? "Build completed.",
+      operation: "initial_build",
+      payload: {
+        source: metadata.resultSource ?? "ai",
+      },
+      projectId: row.project_id,
+      timestamp: row.completed_at ?? row.started_at,
+      type: "done",
+    });
+  }
+
+  if (row.status === "failed" || row.status === "cancelled") {
+    events.push({
+      buildId: row.id,
+      code: "build_failed",
+      id: events.length === 0 ? "legacy-1" : "legacy-2",
+      message: row.error ?? "Build failed.",
+      operation: "initial_build",
+      payload: {
+        phase: metadata.phase ?? null,
+      },
+      projectId: row.project_id,
+      timestamp: row.completed_at ?? row.started_at,
+      type: "error",
+    });
+  }
+
+  return {
+    events,
+    lastEventId: events.at(-1)?.id ?? null,
+    previewReady: row.status === "completed",
+    fallbackReason,
+    fallbackUsed,
+  };
+}
+
 export function readBuildMetadata(metadata: Record<string, unknown>): BuildRouteMetadata {
   const parsed = buildMetadataSchema.safeParse(metadata);
   return parsed.success ? parsed.data : {};
+}
+
+export function readBuildTraceMetadata(row: GenerationRow): BuilderV3TraceMetadata {
+  const metadata = readBuildMetadata(isRecord(row.metadata) ? row.metadata : {});
+  const trace = readBuilderTraceMetadataFromParsed(metadata);
+
+  if (trace.events.length > 0 || trace.lastEventId || trace.previewReady || trace.fallbackUsed) {
+    return {
+      ...trace,
+      fallbackReason: trace.fallbackReason ?? metadata.fallbackReason ?? null,
+      fallbackUsed: trace.fallbackUsed || metadata.resultSource === "fallback",
+      previewReady: trace.previewReady || row.status === "completed",
+    };
+  }
+
+  return synthesizeBuilderTrace(row, metadata);
 }
 
 export function mapProjectRowToProject(row: ProjectRow): Project {

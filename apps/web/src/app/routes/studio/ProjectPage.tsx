@@ -4,26 +4,31 @@
  * Light mode — cream #faf9f6 throughout.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "@tanstack/react-router";
+import type { BuilderV3Event } from "@beomz-studio/contracts";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { FolderTree } from "lucide-react";
 import {
   TopBar,
   ChatPanel,
-  PreviewPanel,
   BuilderModals,
   type ChatMessage,
 } from "../../../components/builder";
-import { HistoryPanel } from "../../../components/studio/HistoryPanel";
+import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
   getBuildStatus,
-  startBuild,
+  getLatestBuildIdForProject,
   type BuildPayload,
+  type BuildStatusResponse,
 } from "../../../lib/api";
-import { supabase } from "../../../lib/supabase";
 import { consumeProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
+import { useBuilderEngineStream } from "../../../hooks/useBuilderEngineStream";
+import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
+import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
+import { useBuilderTranscript } from "../../../hooks/useBuilderTranscript";
 
 export function ProjectPage() {
   const { id } = useParams({ from: "/studio/project/$id" });
+  const navigate = useNavigate();
   const [launchIntent] = useState(() =>
     id === "new" ? consumeProjectLaunchIntent() : null,
   );
@@ -33,20 +38,27 @@ export function ProjectPage() {
   const [projectName, setProjectName] = useState("Untitled project");
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
 
-  // Chat state
+  const { appendTranscriptEntry } = useBuilderTranscript();
+  const { startAndStreamBuild, subscribeToBuild } = useBuilderEngineStream();
+  const {
+    resetHealth,
+    setLastError,
+    setTransport,
+    transport,
+  } = useBuilderSessionHealth();
+  const { clearState, restoreState, saveState } = useBuilderPersistence(projectId);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Build state
+  const [lastEventId, setLastEventId] = useState<string | null>(null);
   const [build, setBuild] = useState<BuildPayload | null>(null);
+  const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const activeAssistantMessageIdRef = useRef<string | null>(null);
+  const activeBuildIdRef = useRef<string | null>(null);
+  const resumingBuildRef = useRef(false);
 
-  // Preview state
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [, setPreviewKey] = useState(0);
-
-  // Panel visibility + widths
   const [showFiles, setShowFiles] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [showChat, setShowChat] = useState(true);
@@ -54,142 +66,367 @@ export function ProjectPage() {
   const [historyPanelWidth, setHistoryPanelWidth] = useState(220);
   const [chatPanelWidth, setChatPanelWidth] = useState(380);
 
-  // Resize drag state
   const dragRef = useRef<{
     target: "files" | "history" | "chat";
     startX: number;
     startWidth: number;
   } | null>(null);
 
-  // Modals
   const [showShareModal, setShowShareModal] = useState(false);
 
-  // Auto-start build if launch intent has an approved plan
-  const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoStarted.current || !launchIntent?.prompt) return;
-    autoStarted.current = true;
-    // Send the launch intent prompt as the first message
-    handleSendMessage(launchIntent.prompt);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setProjectId(id === "new" ? null : id);
+  }, [id]);
 
-  // Send message — calls Railway API
-  const handleSendMessage = useCallback(
-    async (text: string) => {
-      const userMsg: ChatMessage = {
-        id: `user-${Date.now()}`,
-        role: "user",
-        content: text,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-      setIsStreaming(true);
-      setStreamingText("");
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
 
-      const controller = new AbortController();
-      abortRef.current = controller;
+    saveState({
+      buildId: build?.id ?? null,
+      lastEventId,
+      previewGenerationId,
+    });
+  }, [build?.id, lastEventId, previewGenerationId, projectId, saveState]);
 
-      try {
-        const response = await startBuild({ prompt: text });
-        setProjectId(response.project.id);
-        setBuild(response.build);
+  const upsertAssistantMessage = useCallback(
+    (buildId: string, updater: (message: ChatMessage) => ChatMessage) => {
+      const messageId = `assistant-${buildId}`;
+      activeAssistantMessageIdRef.current = messageId;
 
-        const poll = async () => {
-          if (controller.signal.aborted) return;
-          try {
-            const status = await getBuildStatus(response.build.id);
-            setBuild(status.build);
-
-            if (status.build.status === "completed") {
-              const summary = status.build.summary ?? "Build completed.";
-              setStreamingText("");
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: `assistant-${Date.now()}`,
-                  role: "assistant",
-                  content: summary,
-                  timestamp: new Date().toISOString(),
-                },
-              ]);
-              setIsStreaming(false);
-              return;
-            }
-
-            if (status.build.status === "failed" || status.build.status === "cancelled") {
-              setStreamingText("");
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: `assistant-${Date.now()}`,
-                  role: "assistant",
-                  content: status.build.error ?? "Build failed.",
-                  timestamp: new Date().toISOString(),
-                },
-              ]);
-              setIsStreaming(false);
-              return;
-            }
-
-            const phase = status.build.phase;
-            if (phase) {
-              const phaseLabels: Record<string, string> = {
-                planner: "Planning architecture...",
-                "template-selector": "Selecting approach...",
-                generate: "Generating files...",
-                validate: "Validating output...",
-              };
-              setStreamingText(phaseLabels[phase] ?? `${phase}...`);
-            }
-
-            setTimeout(poll, 1500);
-          } catch {
-            if (!controller.signal.aborted) {
-              setIsStreaming(false);
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: `assistant-${Date.now()}`,
-                  role: "assistant",
-                  content: "Something went wrong. Please try again.",
-                  timestamp: new Date().toISOString(),
-                },
-              ]);
-            }
+      setMessages((previousMessages) => {
+        let found = false;
+        const nextMessages = previousMessages.map((message) => {
+          if (message.id !== messageId) {
+            return message;
           }
-        };
 
-        void poll();
-      } catch (error) {
-        setIsStreaming(false);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `assistant-${Date.now()}`,
+          found = true;
+          return updater(message);
+        });
+
+        if (found) {
+          return nextMessages;
+        }
+
+        return [
+          ...nextMessages,
+          updater({
+            id: messageId,
             role: "assistant",
-            content:
-              error instanceof Error
-                ? error.message
-                : "Failed to start build.",
+            content: "",
             timestamp: new Date().toISOString(),
-          },
-        ]);
-      }
+            traceEntries: [],
+          }),
+        ];
+      });
     },
     [],
   );
+
+  const replayTraceEvents = useCallback(
+    (buildId: string, events: readonly BuilderV3Event[], fallbackContent = "") => {
+      if (events.length === 0 && fallbackContent.length === 0) {
+        return;
+      }
+
+      upsertAssistantMessage(buildId, (message) => {
+        let nextContent = message.content || fallbackContent;
+        let nextEntries = message.traceEntries ?? [];
+
+        for (const event of events) {
+          if (event.type === "assistant_delta") {
+            nextContent += event.delta;
+          } else {
+            nextEntries = appendTranscriptEntry(nextEntries, event);
+          }
+        }
+
+        const terminalEvent = events.at(-1);
+        if (
+          terminalEvent
+          && (terminalEvent.type === "done" || terminalEvent.type === "error")
+          && nextContent.trim().length === 0
+        ) {
+          nextContent = terminalEvent.message;
+        }
+
+        return {
+          ...message,
+          content: nextContent,
+          traceEntries: nextEntries,
+        };
+      });
+    },
+    [appendTranscriptEntry, upsertAssistantMessage],
+  );
+
+  const handleBuilderEvent = useCallback((event: BuilderV3Event) => {
+    const buildId = "buildId" in event ? event.buildId : activeBuildIdRef.current;
+    if (!buildId) {
+      return;
+    }
+
+    activeBuildIdRef.current = buildId;
+    setLastEventId(event.id);
+
+    upsertAssistantMessage(buildId, (message) => {
+      const nextEntries =
+        event.type === "assistant_delta"
+          ? message.traceEntries ?? []
+          : appendTranscriptEntry(message.traceEntries ?? [], event);
+      let nextContent =
+        event.type === "assistant_delta"
+          ? `${message.content}${event.delta}`
+          : message.content;
+
+      if ((event.type === "done" || event.type === "error") && nextContent.trim().length === 0) {
+        nextContent = event.message;
+      }
+
+      return {
+        ...message,
+        content: nextContent,
+        traceEntries: nextEntries,
+      };
+    });
+
+    if (event.type === "preview_ready") {
+      setPreviewGenerationId(event.buildId);
+      setProjectId(event.projectId);
+    }
+
+    if (event.type === "done" || event.type === "error") {
+      setIsStreaming(false);
+      setStreamingText("");
+    }
+  }, [appendTranscriptEntry, upsertAssistantMessage]);
+
+  const handleBuildStatus = useCallback((status: BuildStatusResponse) => {
+    setBuild(status.build);
+    setProjectId(status.project.id);
+    setProjectName(status.project.name);
+
+    if (status.trace.previewReady || status.build.status === "completed") {
+      setPreviewGenerationId(status.build.id);
+    }
+
+    if (status.build.status === "completed" || status.build.status === "failed") {
+      setIsStreaming(false);
+      setStreamingText("");
+    }
+  }, []);
+
+  const handleTransportChange = useCallback((nextTransport: "idle" | "streaming" | "polling" | "reconnecting") => {
+    setTransport(nextTransport);
+
+    const transportLabel =
+      nextTransport === "streaming" ? "Connecting live build stream..."
+      : nextTransport === "polling" ? "Live stream unavailable. Continuing with polling..."
+      : nextTransport === "reconnecting" ? "Reconnecting to the live build stream..."
+      : "";
+
+    setStreamingText(transportLabel);
+  }, [setTransport]);
+
+  const startBuildSession = useCallback(
+    async (text: string) => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+      resetHealth();
+      setIsStreaming(true);
+      setStreamingText("Connecting live build stream...");
+      setPreviewGenerationId(null);
+      setLastEventId(null);
+      activeAssistantMessageIdRef.current = null;
+      activeBuildIdRef.current = null;
+
+      await startAndStreamBuild({
+        body: {
+          prompt: text,
+          summary: launchIntent?.approvedPlan?.summary,
+          steps: launchIntent?.approvedPlan?.steps,
+        },
+        onBuildStarted: (response) => {
+          activeBuildIdRef.current = response.build.id;
+          setBuild(response.build);
+          setProjectId(response.project.id);
+          setProjectName(response.project.name);
+          replayTraceEvents(
+            response.build.id,
+            response.trace.events,
+            response.build.summary ?? "",
+          );
+
+          if (response.trace.previewReady) {
+            setPreviewGenerationId(response.build.id);
+          }
+
+          if (id === "new") {
+            void navigate({
+              params: { id: response.project.id },
+              to: "/studio/project/$id",
+            });
+          }
+        },
+        onBuildStatus: handleBuildStatus,
+        onEvent: handleBuilderEvent,
+        onStreamError: setLastError,
+        onTransportChange: handleTransportChange,
+        signal: controller.signal,
+      });
+    },
+    [
+      handleBuildStatus,
+      handleBuilderEvent,
+      handleTransportChange,
+      id,
+      launchIntent?.approvedPlan?.steps,
+      launchIntent?.approvedPlan?.summary,
+      navigate,
+      replayTraceEvents,
+      resetHealth,
+      setLastError,
+      startAndStreamBuild,
+    ],
+  );
+
+  const handleSendMessage = useCallback((text: string) => {
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
+
+    abortRef.current?.abort();
+    setMessages((previousMessages) => [...previousMessages, userMessage]);
+
+    void startBuildSession(text).catch((error) => {
+      if (abortRef.current?.signal.aborted) {
+        return;
+      }
+
+      setIsStreaming(false);
+      setStreamingText("");
+      setMessages((previousMessages) => [
+        ...previousMessages,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          content:
+            error instanceof Error
+              ? error.message
+              : "Failed to start build.",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    });
+  }, [startBuildSession]);
 
   const handleStopStreaming = useCallback(() => {
     abortRef.current?.abort();
     setIsStreaming(false);
     setStreamingText("");
-  }, []);
+    setTransport("idle");
+  }, [setTransport]);
 
   const handleRefreshPreview = useCallback(() => {
-    setPreviewKey((k) => k + 1);
-  }, []);
+    if (build?.id) {
+      setPreviewGenerationId(build.id);
+    }
+  }, [build?.id]);
 
-  // Panel resize with snap-to-close
+  useEffect(() => {
+    if (resumingBuildRef.current || id === "new" || !projectId || build) {
+      return;
+    }
+
+    resumingBuildRef.current = true;
+    const controller = new AbortController();
+
+    void (async () => {
+      const restoredState = restoreState();
+      const latestBuildId = restoredState?.buildId ?? await getLatestBuildIdForProject(projectId);
+
+      if (!latestBuildId || controller.signal.aborted) {
+        return;
+      }
+
+      const status = await getBuildStatus(latestBuildId);
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      activeBuildIdRef.current = status.build.id;
+      setBuild(status.build);
+      setProjectName(status.project.name);
+      setProjectId(status.project.id);
+      setPreviewGenerationId(
+        restoredState?.previewGenerationId
+          ?? (status.trace.previewReady || status.build.status === "completed"
+            ? status.build.id
+            : null),
+      );
+      replayTraceEvents(status.build.id, status.trace.events, status.build.summary ?? "");
+      setLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
+
+      if (status.build.status === "queued" || status.build.status === "running") {
+        abortRef.current = controller;
+        setIsStreaming(true);
+        setStreamingText("Reconnecting to the live build stream...");
+
+        await subscribeToBuild({
+          buildId: status.build.id,
+          lastEventId: restoredState?.lastEventId ?? status.trace.lastEventId,
+          onBuildStatus: handleBuildStatus,
+          onEvent: handleBuilderEvent,
+          onStreamError: setLastError,
+          onTransportChange: handleTransportChange,
+          signal: controller.signal,
+        });
+      }
+    })()
+      .catch((error: unknown) => {
+        setLastError(error instanceof Error ? error.message : "Failed to restore build session.");
+      })
+      .finally(() => {
+        resumingBuildRef.current = false;
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    build,
+    handleBuildStatus,
+    handleBuilderEvent,
+    handleTransportChange,
+    id,
+    projectId,
+    replayTraceEvents,
+    restoreState,
+    setLastError,
+    subscribeToBuild,
+  ]);
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !launchIntent?.prompt) {
+      return;
+    }
+
+    autoStarted.current = true;
+    handleSendMessage(launchIntent.prompt);
+  }, [handleSendMessage, launchIntent?.prompt]);
+
+  useEffect(() => {
+    if (build?.status === "completed" || build?.status === "failed") {
+      clearState();
+    }
+  }, [build?.status, clearState]);
+
   const startResize = useCallback(
     (target: "files" | "history" | "chat", e: React.MouseEvent) => {
       e.preventDefault();
@@ -201,19 +438,29 @@ export function ProjectPage() {
       dragRef.current = { target, startX, startWidth };
 
       const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
+        if (!dragRef.current) {
+          return;
+        }
+
         const delta = ev.clientX - dragRef.current.startX;
         const raw = dragRef.current.startWidth + delta;
         const newWidth = raw < 100 ? 0 : Math.max(150, Math.min(500, raw));
+
         if (dragRef.current.target === "files") {
           setFilesPanelWidth(newWidth || 200);
-          if (newWidth === 0) setShowFiles(false);
+          if (newWidth === 0) {
+            setShowFiles(false);
+          }
         } else if (dragRef.current.target === "history") {
           setHistoryPanelWidth(newWidth || 220);
-          if (newWidth === 0) setShowHistory(false);
+          if (newWidth === 0) {
+            setShowHistory(false);
+          }
         } else {
           setChatPanelWidth(newWidth || 380);
-          if (newWidth === 0) setShowChat(false);
+          if (newWidth === 0) {
+            setShowChat(false);
+          }
         }
       };
 
@@ -230,35 +477,9 @@ export function ProjectPage() {
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
     },
-    [filesPanelWidth, historyPanelWidth, chatPanelWidth],
+    [chatPanelWidth, filesPanelWidth, historyPanelWidth],
   );
 
-  // Subscribe to preview URL updates
-  useEffect(() => {
-    if (!projectId) return;
-    const channel = supabase
-      .channel(`builder-preview-${projectId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          filter: `project_id=eq.${projectId}`,
-          schema: "public",
-          table: "previews",
-        },
-        (payload) => {
-          const url = (payload.new as Record<string, unknown>)?.url;
-          if (typeof url === "string") setPreviewUrl(url);
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [projectId]);
-
-  // Resize handle component
   const ResizeHandle = ({ target }: { target: "files" | "history" | "chat" }) => (
     <div
       onMouseDown={(e) => startResize(target, e)}
@@ -269,7 +490,6 @@ export function ProjectPage() {
 
   return (
     <div className="flex h-full flex-col bg-[#faf9f6]">
-      {/* TopBar */}
       <TopBar
         projectName={projectName}
         onProjectNameChange={setProjectName}
@@ -284,9 +504,7 @@ export function ProjectPage() {
         onToggleChat={() => setShowChat((v) => !v)}
       />
 
-      {/* Main layout: [Files?] | [History?] | [Chat?] | Preview */}
-      <div className="flex flex-1 min-h-0">
-        {/* Files panel */}
+      <div className="flex min-h-0 flex-1">
         <div
           className="shrink-0 overflow-hidden border-r border-[#e5e7eb] bg-[#faf9f6] transition-[width] duration-200 ease-in-out"
           style={{ width: showFiles ? filesPanelWidth : 0 }}
@@ -303,7 +521,6 @@ export function ProjectPage() {
         </div>
         {showFiles && <ResizeHandle target="files" />}
 
-        {/* History panel */}
         <div
           className="shrink-0 overflow-hidden border-r border-[#e5e7eb] bg-[#faf9f6] transition-[width] duration-200 ease-in-out"
           style={{ width: showHistory ? historyPanelWidth : 0 }}
@@ -317,7 +534,6 @@ export function ProjectPage() {
         </div>
         {showHistory && <ResizeHandle target="history" />}
 
-        {/* Chat panel */}
         <div
           className="shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
           style={{ width: showChat ? chatPanelWidth : 0 }}
@@ -326,7 +542,10 @@ export function ProjectPage() {
             <ChatPanel
               messages={messages}
               isStreaming={isStreaming}
-              streamingText={streamingText}
+              streamingText={
+                transport === "idle" ? ""
+                : streamingText
+              }
               onSendMessage={handleSendMessage}
               onStopStreaming={handleStopStreaming}
               width={chatPanelWidth}
@@ -335,14 +554,14 @@ export function ProjectPage() {
         </div>
         {showChat && <ResizeHandle target="chat" />}
 
-        {/* Preview panel — fills remaining space */}
-        <PreviewPanel
-          previewUrl={previewUrl}
-          isLoading={isStreaming && !previewUrl}
-        />
+        <div className="min-w-0 flex-1">
+          <PreviewPane
+            generationId={previewGenerationId}
+            projectId={previewGenerationId ? projectId : null}
+          />
+        </div>
       </div>
 
-      {/* Modals */}
       <BuilderModals
         showShareModal={showShareModal}
         onCloseShareModal={() => setShowShareModal(false)}
