@@ -39,7 +39,7 @@ const anthropicEnvSchema = z.object({
       ? ANTHROPIC_DEFAULT_MODEL
       : value.trim();
   }, z.string().min(1)).default(ANTHROPIC_DEFAULT_MODEL),
-  ANTHROPIC_MAX_TOKENS: z.coerce.number().int().positive().default(8192),
+  ANTHROPIC_MAX_TOKENS: z.coerce.number().int().positive().default(4096),
 });
 
 export type TemporalRuntimeConfig = z.infer<typeof temporalEnvSchema>;

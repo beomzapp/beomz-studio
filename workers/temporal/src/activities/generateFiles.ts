@@ -2,6 +2,7 @@ import {
   getInitialBuildPromptPolicy,
   type InitialBuildPromptPolicy,
 } from "@beomz-studio/prompt-policies";
+import type { TemplatePage } from "@beomz-studio/contracts";
 import { z } from "zod";
 
 import { getAnthropicRuntimeConfig } from "../config.js";
@@ -27,12 +28,6 @@ const generatedFileSchema = z.object({
   content: z.string().min(1),
 });
 
-const generatedBuildResponseSchema = z.object({
-  summary: z.string().min(1).max(400),
-  warnings: z.array(z.string()).default([]),
-  files: z.array(generatedFileSchema).min(1),
-});
-
 function buildSystemPrompt(policy: InitialBuildPromptPolicy): string {
   return [
     "You are the Beomz Studio initial build generator.",
@@ -42,14 +37,21 @@ function buildSystemPrompt(policy: InitialBuildPromptPolicy): string {
   ].join("\n");
 }
 
-function buildUserPrompt(input: GenerateFilesActivityInput): string {
-  const requiredFiles = input.template.pages.map((page) => ({
+function buildTemplatePageContext(input: GenerateFilesActivityInput): string {
+  return JSON.stringify(input.template.pages.map((page) => ({
     pageId: page.id,
     label: page.name,
     path: buildGeneratedPageFilePath(input.template.id, page.id),
     routePath: page.path,
     summary: page.summary,
-  }));
+  })), null, 2);
+}
+
+function buildUserPrompt(
+  input: GenerateFilesActivityInput,
+  page: TemplatePage,
+): string {
+  const filePath = buildGeneratedPageFilePath(input.template.id, page.id);
 
   return [
     `Project name: ${input.project.name}`,
@@ -58,21 +60,29 @@ function buildUserPrompt(input: GenerateFilesActivityInput): string {
     `Template: ${input.template.name}`,
     `Template description: ${input.template.description}`,
     `Template prompt hints: ${input.template.promptHints.join(" | ")}`,
-    `Required route files (generate exactly these page files, each as standalone TSX with a default export):`,
-    JSON.stringify(requiredFiles, null, 2),
+    "Full template page set for consistency across navigation and tone:",
+    buildTemplatePageContext(input),
+    "Generate exactly one standalone TSX page file for this page:",
+    JSON.stringify(
+      {
+        pageId: page.id,
+        name: page.name,
+        filePath,
+        routePath: page.path,
+        kind: page.kind,
+        summary: page.summary,
+        requiresAuth: page.requiresAuth,
+      },
+      null,
+      2,
+    ),
     "Return JSON with this exact shape:",
     JSON.stringify(
       {
-        summary: "Short summary of what was generated",
-        warnings: ["Optional warning"],
-        files: [
-          {
-            path: requiredFiles[0]?.path ?? "apps/web/src/app/generated/template/page.tsx",
-            kind: "route",
-            language: "tsx",
-            content: "export default function ExamplePage() { return <div />; }",
-          },
-        ],
+        path: filePath,
+        kind: "route",
+        language: "tsx",
+        content: "export default function ExamplePage() { return <div />; }",
       },
       null,
       2,
@@ -135,51 +145,94 @@ async function callAnthropic(system: string, userMessage: string) {
   }>;
 }
 
+function extractTextContent(rawResponse: {
+  content?: Array<{ type?: string; text?: string }>;
+}): string {
+  return (rawResponse.content ?? [])
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text ?? "")
+    .join("\n")
+    .trim();
+}
+
+function parseGeneratedFileResponse(input: {
+  config: ReturnType<typeof getAnthropicRuntimeConfig>;
+  page: TemplatePage;
+  templateId: GenerateFilesActivityInput["template"]["id"];
+  text: string;
+}): z.infer<typeof generatedFileSchema> {
+  try {
+    return generatedFileSchema.parse(
+      JSON.parse(extractJsonPayload(input.text)),
+    );
+  } catch (error) {
+    console.error("Failed to parse Anthropic generation response.", {
+      error: error instanceof Error ? error.message : String(error),
+      maxTokens: input.config.ANTHROPIC_MAX_TOKENS,
+      model: input.config.ANTHROPIC_MODEL,
+      pageId: input.page.id,
+      rawResponseText: input.text,
+      templateId: input.templateId,
+    });
+    throw error;
+  }
+}
+
 export async function generateFiles(
   input: GenerateFilesActivityInput,
 ): Promise<GeneratedBuildDraft> {
   const config = getAnthropicRuntimeConfig();
   const policy = getInitialBuildPromptPolicy(input.template.id);
-  const rawResponse = await callAnthropic(
-    buildSystemPrompt(policy),
-    buildUserPrompt(input),
-  );
+  const warnings: string[] = [];
+  const files = [];
 
-  const text = (rawResponse.content ?? [])
-    .filter((block) => block.type === "text" && typeof block.text === "string")
-    .map((block) => block.text ?? "")
-    .join("\n")
-    .trim();
-
-  if (!text) {
-    throw new Error("Anthropic returned no text content.");
-  }
-
-  let parsed: z.infer<typeof generatedBuildResponseSchema>;
-  try {
-    parsed = generatedBuildResponseSchema.parse(
-      JSON.parse(extractJsonPayload(text)),
+  for (const page of input.template.pages) {
+    const rawResponse = await callAnthropic(
+      buildSystemPrompt(policy),
+      buildUserPrompt(input, page),
     );
-  } catch (error) {
-    console.error("Failed to parse Anthropic generation response.", {
-      error: error instanceof Error ? error.message : String(error),
-      maxTokens: config.ANTHROPIC_MAX_TOKENS,
-      model: config.ANTHROPIC_MODEL,
-      rawResponseText: text,
+    const text = extractTextContent(rawResponse);
+
+    if (!text) {
+      throw new Error(`Anthropic returned no text content for page ${page.id}.`);
+    }
+
+    const parsed = parseGeneratedFileResponse({
+      config,
+      page,
+      templateId: input.template.id,
+      text,
     });
-    throw error;
+    const expectedPath = buildGeneratedPageFilePath(input.template.id, page.id);
+
+    if (parsed.path !== expectedPath) {
+      warnings.push(`Model returned unexpected path for ${page.id}; normalized to ${expectedPath}.`);
+    }
+
+    if (parsed.kind !== "route") {
+      warnings.push(`Model returned kind ${parsed.kind} for ${page.id}; normalized to route.`);
+    }
+
+    if (parsed.language.toLowerCase() !== "tsx") {
+      warnings.push(`Model returned language ${parsed.language} for ${page.id}; normalized to tsx.`);
+    }
+
+    files.push({
+      ...parsed,
+      path: expectedPath,
+      kind: "route" as const,
+      language: "tsx",
+      content: parsed.content.trim(),
+      locked: false,
+      source: "ai" as const,
+    });
   }
 
   return {
-    files: parsed.files.map((file) => ({
-      ...file,
-      content: file.content.trim(),
-      locked: false,
-      source: "ai",
-    })),
+    files,
     previewEntryPath: input.template.previewEntryPath,
     source: "ai",
-    summary: parsed.summary,
-    warnings: parsed.warnings,
+    summary: `Generated ${input.template.pages.length} route files for ${input.template.name}.`,
+    warnings,
   };
 }
