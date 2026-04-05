@@ -1,337 +1,223 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+/**
+ * ProjectPage — V1 builder layout ported to V2.
+ * TopBar + ChatPanel (left) + PreviewPanel (right) + History sidebar.
+ * Light mode — cream #faf9f6 throughout.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
+import { Clock, FolderTree } from "lucide-react";
 import {
-  Rocket,
-  FolderTree,
-  MessageSquare,
-  Monitor,
-  Play,
-  Clock,
-} from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
-import {
-  Brain,
-  Layers,
-  Code,
-  ShieldCheck,
-  CheckCircle,
-  XCircle,
-} from "lucide-react";
-import {
-  BuildLog,
-  GenerationTimeline,
-  PlanStepButton,
-  PreviewPane,
-  type TimelineStep,
-} from "../../../components/studio";
+  TopBar,
+  ChatPanel,
+  PreviewPanel,
+  BuilderModals,
+  type ChatMessage,
+} from "../../../components/builder";
 import { HistoryPanel } from "../../../components/studio/HistoryPanel";
-import type { PlanStep } from "../../../components/studio/PlanStepButton";
-import type { LogEntryData } from "../../../components/studio/LogEntry";
 import {
   getBuildStatus,
   startBuild,
   type BuildPayload,
 } from "../../../lib/api";
-import { getDeferredItems } from "../../../lib/getDeferredItems";
-
-const PHASE_LOG: Record<string, { label: string; icon: React.ReactNode }> = {
-  planner: { label: "Planning architecture", icon: <Brain size={12} /> },
-  "template-selector": { label: "Selecting template", icon: <Layers size={12} /> },
-  generate: { label: "Generating files", icon: <Code size={12} /> },
-  validate: { label: "Validating output", icon: <ShieldCheck size={12} /> },
-  completed: { label: "Generation complete", icon: <CheckCircle size={12} /> },
-  "fallback-completed": { label: "Generation complete (fallback)", icon: <CheckCircle size={12} /> },
-};
-
-const INITIAL_STEPS: TimelineStep[] = [
-  { label: "Planning", status: "pending" },
-  { label: "Selecting approach", status: "pending" },
-  { label: "Generating files", status: "pending" },
-  { label: "Validating", status: "pending" },
-  { label: "Complete", status: "pending" },
-];
+import { supabase } from "../../../lib/supabase";
 
 export function ProjectPage() {
-  const navigate = useNavigate();
   const { id } = useParams({ from: "/studio/project/$id" });
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(
+  const [projectId, setProjectId] = useState<string | null>(
     id === "new" ? null : id,
   );
+  const [projectName, setProjectName] = useState("Untitled project");
+  const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
+
+  // Chat state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Build state
   const [build, setBuild] = useState<BuildPayload | null>(null);
-  const [buildError, setBuildError] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("a SaaS dashboard");
-  const [phase, setPhase] = useState(1);
-  const [completedItems, setCompletedItems] = useState<string[]>([]);
-  const [deferredItems, setDeferredItems] = useState<string[]>([]);
-  const [isBuilding, setIsBuilding] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
-  const [activeStepId, setActiveStepId] = useState<string | null>(null);
-  const [logEntries, setLogEntries] = useState<LogEntryData[]>([]);
-  const lastLoggedPhase = useRef<string | null>(null);
-  const deferredPromise = useRef<Promise<string[]> | null>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Preview state
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [_previewKey, setPreviewKey] = useState(0);
+
+  // Sidebar
   const [sidebarTab, setSidebarTab] = useState<"files" | "history">("files");
 
-  const runBuild = useCallback(async () => {
-    if (isBuilding) return;
-    setIsBuilding(true);
-    setBuild(null);
-    setBuildError(null);
-    setDeferredItems([]);
-    setLogEntries([]);
-    lastLoggedPhase.current = null;
+  // Modals
+  const [showShareModal, setShowShareModal] = useState(false);
 
-    deferredPromise.current = getDeferredItems(prompt);
+  // Send message — calls Railway API with SSE streaming
+  const handleSendMessage = useCallback(
+    async (text: string) => {
+      // Add user message
+      const userMsg: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: text,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setIsStreaming(true);
+      setStreamingText("");
 
-    try {
-      const response = await startBuild({
-        prompt,
-      });
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-      setActiveProjectId(response.project.id);
-      setBuild(response.build);
-      setChatInput(prompt);
-
-      if (response.project.id !== id) {
-        await navigate({
-          params: {
-            id: response.project.id,
-          },
-          to: "/studio/project/$id",
-        });
-      }
-    } catch (error) {
-      setBuildError(
-        error instanceof Error ? error.message : "Failed to start the build.",
-      );
-      setIsBuilding(false);
-    }
-  }, [isBuilding, prompt]);
-
-  const handleImplement = useCallback(
-    (implementPrompt: string) => {
-      // Extract item name from the prompt pattern "Build X for: Y"
-      const match = implementPrompt.match(/^Build (.+) for:/);
-      if (match) {
-        setCompletedItems((prev) => [...prev, match[1]]);
-      }
-      setPhase((p) => p + 1);
-      setChatInput(implementPrompt);
-    },
-    []
-  );
-
-  const handleStepClick = useCallback(
-    (step: PlanStep) => {
-      if (step.status === "done") {
-        document.getElementById(step.id)?.scrollIntoView({ behavior: "smooth" });
-        return;
-      }
-      // Fire this step as next generation
-      const buildPrompt = `Build ${step.label} for: ${prompt}`;
-      setActiveStepId(step.id);
-      setPlanSteps((prev) =>
-        prev.map((s) =>
-          s.id === step.id ? { ...s, status: "running" as const } : s
-        )
-      );
-      setPrompt(buildPrompt);
-      setChatInput(buildPrompt);
-      // handleImplement already increments phase and tracks completed items
-      handleImplement(buildPrompt);
-    },
-    [prompt, handleImplement]
-  );
-
-  useEffect(() => {
-    setActiveProjectId(id === "new" ? null : id);
-  }, [id]);
-
-  useEffect(() => {
-    if (!build || build.status === "completed" || build.status === "failed" || build.status === "cancelled") {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(async () => {
       try {
-        const response = await getBuildStatus(build.id);
+        // Start build via existing API
+        const response = await startBuild({ prompt: text });
+        setProjectId(response.project.id);
         setBuild(response.build);
 
-        // Append log entry when phase changes
-        const currentPhase = response.build.phase;
-        if (currentPhase && currentPhase !== lastLoggedPhase.current) {
-          // Mark previous running entry as done
-          setLogEntries((prev) =>
-            prev.map((e) => (e.status === "running" ? { ...e, status: "done" as const } : e))
-          );
-          const meta = PHASE_LOG[currentPhase];
-          if (meta) {
-            const now = new Date();
-            const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-            setLogEntries((prev) => [
-              ...prev,
-              {
-                id: `log-${currentPhase}-${Date.now()}`,
-                icon: meta.icon,
-                label: meta.label,
-                detail: "",
-                timestamp: ts,
-                status: currentPhase === "completed" || currentPhase === "fallback-completed" ? "done" : "running",
-              },
-            ]);
-          }
-          lastLoggedPhase.current = currentPhase;
-        }
-
-        if (response.build.status === "completed") {
-          let items: string[];
+        // Poll for build status
+        const poll = async () => {
+          if (controller.signal.aborted) return;
           try {
-            items = (await deferredPromise.current) ?? [
-              "Advanced settings",
-              "User management",
-              "Analytics dashboard",
-            ];
+            const status = await getBuildStatus(response.build.id);
+            setBuild(status.build);
+
+            if (status.build.status === "completed") {
+              const summary = status.build.summary ?? "Build completed.";
+              setStreamingText("");
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `assistant-${Date.now()}`,
+                  role: "assistant",
+                  content: summary,
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+              setIsStreaming(false);
+              return;
+            }
+
+            if (status.build.status === "failed" || status.build.status === "cancelled") {
+              setStreamingText("");
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `assistant-${Date.now()}`,
+                  role: "assistant",
+                  content: status.build.error ?? "Build failed.",
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+              setIsStreaming(false);
+              return;
+            }
+
+            // Show phase as streaming text
+            const phase = status.build.phase;
+            if (phase) {
+              const phaseLabels: Record<string, string> = {
+                planner: "Planning architecture...",
+                "template-selector": "Selecting approach...",
+                generate: "Generating files...",
+                validate: "Validating output...",
+              };
+              setStreamingText(phaseLabels[phase] ?? `${phase}...`);
+            }
+
+            // Continue polling
+            setTimeout(poll, 1500);
           } catch {
-            items = [
-              "Advanced settings",
-              "User management",
-              "Analytics dashboard",
-            ];
+            if (!controller.signal.aborted) {
+              setIsStreaming(false);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `assistant-${Date.now()}`,
+                  role: "assistant",
+                  content: "Something went wrong. Please try again.",
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+            }
           }
+        };
 
-          setDeferredItems(items);
-          setPlanSteps((prev) => {
-            // Preserve done status for already-completed steps
-            const doneIds = new Set(prev.filter((s) => s.status === "done").map((s) => s.id));
-            return items.map((label) => ({
-              id: `step-${label.toLowerCase().replace(/\s+/g, "-")}`,
-              label,
-              status: doneIds.has(`step-${label.toLowerCase().replace(/\s+/g, "-")}`)
-                ? "done" as const
-                : "pending" as const,
-            }));
-          });
-
-          // Mark the step that just finished building as done
-          if (activeStepId) {
-            setPlanSteps((prev) =>
-              prev.map((s) =>
-                s.id === activeStepId ? { ...s, status: "done" as const } : s
-              )
-            );
-            setActiveStepId(null);
-          }
-
-          setIsBuilding(false);
-          return;
-        }
-
-        if (response.build.status === "failed" || response.build.status === "cancelled") {
-          const now = new Date();
-          const ts = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-          setLogEntries((prev) => [
-            ...prev.map((e) => (e.status === "running" ? { ...e, status: "done" as const } : e)),
-            {
-              id: `log-error-${Date.now()}`,
-              icon: <XCircle size={12} />,
-              label: "Error",
-              detail: response.build.error ?? "Build stopped",
-              timestamp: ts,
-              status: "error" as const,
-            },
-          ]);
-          setIsBuilding(false);
-          setBuildError(response.build.error ?? "The build stopped before completion.");
-        }
+        void poll();
       } catch (error) {
-        setIsBuilding(false);
-        setBuildError(
-          error instanceof Error ? error.message : "Failed to refresh build status.",
-        );
+        setIsStreaming(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            content:
+              error instanceof Error
+                ? error.message
+                : "Failed to start build.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
       }
-    }, 1500);
+    },
+    [],
+  );
 
-    return () => window.clearTimeout(timeoutId);
-  }, [build]);
+  const handleStopStreaming = useCallback(() => {
+    abortRef.current?.abort();
+    setIsStreaming(false);
+    setStreamingText("");
+  }, []);
 
-  const buildSteps = useMemo<TimelineStep[]>(() => {
-    if (!build) {
-      return INITIAL_STEPS;
-    }
+  const handleRefreshPreview = useCallback(() => {
+    setPreviewKey((k) => k + 1);
+  }, []);
 
-    const steps: TimelineStep[] = INITIAL_STEPS.map((step) => ({ ...step }));
-    const phaseOrder = [
-      "planner",
-      "template-selector",
-      "generate",
-      "validate",
-      "completed",
-      "fallback-completed",
-    ];
-    const activePhaseIndex = build.phase ? phaseOrder.indexOf(build.phase) : -1;
-    const buildFailed = build.status === "failed" || build.status === "cancelled";
+  // Subscribe to preview URL updates
+  useEffect(() => {
+    if (!projectId) return;
 
-    steps.forEach((step, index) => {
-      if (build.status === "completed") {
-        step.status = "done";
-        return;
-      }
+    const channel = supabase
+      .channel(`builder-preview-${projectId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          filter: `project_id=eq.${projectId}`,
+          schema: "public",
+          table: "previews",
+        },
+        (payload) => {
+          const url = (payload.new as Record<string, unknown>)?.url;
+          if (typeof url === "string") setPreviewUrl(url);
+        },
+      )
+      .subscribe();
 
-      if (activePhaseIndex > index) {
-        step.status = "done";
-        return;
-      }
-
-      if (activePhaseIndex === index || (activePhaseIndex === -1 && index === 0 && build.status !== "queued")) {
-        step.status = buildFailed ? "error" : "running";
-      }
-    });
-
-    if (build.status === "queued") {
-      steps[0] = { ...steps[0], status: "running" };
-    }
-
-    if (buildFailed && activePhaseIndex === -1) {
-      steps[0] = { ...steps[0], status: "error" };
-    }
-
-    if (build.status === "completed") {
-      steps[steps.length - 1] = { ...steps[steps.length - 1], status: "done" };
-    }
-
-    return steps;
-  }, [build]);
-
-  const isComplete = build?.status === "completed";
-  const isThinking = isBuilding && (!build?.phase || build.phase === "planner");
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [projectId]);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Project header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-white">Project {id}</h2>
-        <button
-          disabled
-          className="flex items-center gap-2 rounded-lg bg-orange/20 px-3 py-1.5 text-xs font-semibold text-orange opacity-50 cursor-not-allowed"
-        >
-          <Rocket size={14} />
-          Deploy
-        </button>
-      </div>
+    <div className="flex h-full flex-col bg-[#faf9f6]">
+      {/* TopBar */}
+      <TopBar
+        projectName={projectName}
+        onProjectNameChange={setProjectName}
+        onRefreshPreview={handleRefreshPreview}
+        userMode={userMode}
+        onUserModeChange={setUserMode}
+      />
 
-      {/* 3-panel layout */}
-      <div className="grid flex-1 grid-cols-1 lg:grid-cols-[240px_1fr_1fr]">
-        {/* Sidebar: Files / History tabs */}
-        <div className="hidden flex-col border-r border-border lg:flex">
+      {/* Main layout: Sidebar + Chat + Preview */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left sidebar — Files / History tabs */}
+        <div className="hidden w-[200px] shrink-0 flex-col border-r border-[#e5e7eb] bg-[#faf9f6] lg:flex">
           {/* Tab switcher */}
-          <div className="flex border-b border-border">
+          <div className="flex border-b border-[#e5e7eb]">
             <button
               onClick={() => setSidebarTab("files")}
               className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
                 sidebarTab === "files"
-                  ? "border-b-2 border-orange text-white"
-                  : "text-white/30 hover:text-white/50"
+                  ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
+                  : "text-[#9ca3af] hover:text-[#6b7280]"
               }`}
             >
               <FolderTree size={12} />
@@ -341,8 +227,8 @@ export function ProjectPage() {
               onClick={() => setSidebarTab("history")}
               className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
                 sidebarTab === "history"
-                  ? "border-b-2 border-orange text-white"
-                  : "text-white/30 hover:text-white/50"
+                  ? "border-b-2 border-[#F97316] text-[#1a1a1a]"
+                  : "text-[#9ca3af] hover:text-[#6b7280]"
               }`}
             >
               <Clock size={12} />
@@ -354,120 +240,41 @@ export function ProjectPage() {
           <div className="flex-1 overflow-hidden">
             {sidebarTab === "files" ? (
               <div className="p-4">
-                <p className="mt-8 text-center text-xs text-white/20">No files</p>
+                <p className="mt-8 text-center text-xs text-[#c4c4c4]">
+                  No files yet
+                </p>
               </div>
             ) : (
               <HistoryPanel
-                projectId={activeProjectId}
+                projectId={projectId}
                 activeGenerationId={build?.id}
-                onRestore={(genId) => {
-                  // Trigger preview refresh by updating build state
-                  setBuild((prev) => prev ? { ...prev, id: genId } : prev);
-                }}
               />
             )}
           </div>
         </div>
 
         {/* Chat panel */}
-        <div className="flex flex-col border-r border-border">
-          <div className="border-b border-border px-4 py-2">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/30">
-              <MessageSquare size={14} />
-              Chat
-            </div>
-          </div>
-          <div className="flex flex-1 flex-col">
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4">
-              {chatInput && (
-                <div id="chat-user-prompt" className="rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/70">
-                  {chatInput}
-                </div>
-              )}
-              {build?.summary && (
-                <div
-                  id="chat-ai-response"
-                  className={`mt-3 rounded-lg border border-border bg-white/[0.02] p-3 text-sm text-white/55${isBuilding ? " streaming-shimmer" : ""}`}
-                >
-                  {build.summary}
-                </div>
-              )}
-              {planSteps.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-white/30">
-                    Plan
-                  </p>
-                  {planSteps.map((step) => (
-                    <PlanStepButton
-                      key={step.id}
-                      step={step}
-                      onClick={handleStepClick}
-                    />
-                  ))}
-                </div>
-              )}
-              {buildError && (
-                <div className="mt-3 rounded-lg border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">
-                  {buildError}
-                </div>
-              )}
-            </div>
-            <div className="border-t border-border p-4">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput || prompt}
-                  onChange={(e) => {
-                    setChatInput(e.target.value);
-                    setPrompt(e.target.value);
-                  }}
-                  placeholder="Describe what to build..."
-                  className="flex-1 rounded-lg border border-border bg-white/[0.02] px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:border-orange/50"
-                />
-                <button
-                  onClick={runBuild}
-                  disabled={isBuilding}
-                  className="flex items-center gap-2 rounded-lg bg-orange px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Play size={14} />
-                  {isBuilding ? "Building…" : "Start Build"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ChatPanel
+          messages={messages}
+          isStreaming={isStreaming}
+          streamingText={streamingText}
+          onSendMessage={handleSendMessage}
+          onStopStreaming={handleStopStreaming}
+          width={380}
+        />
 
-        {/* Preview pane */}
-        <div className="hidden flex-col lg:flex">
-          <div className="border-b border-border px-4 py-2">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/30">
-              <Monitor size={14} />
-              Preview
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 border-b border-border">
-              <PreviewPane
-                generationId={build?.id}
-                projectId={activeProjectId}
-              />
-            </div>
-            <div className="max-h-[320px] overflow-y-auto">
-              <GenerationTimeline
-                steps={buildSteps}
-                isComplete={isComplete}
-                isThinking={isThinking}
-                deferredItems={deferredItems}
-                originalPrompt={prompt}
-                phase={phase}
-                completedItems={completedItems}
-                onImplement={handleImplement}
-              />
-            </div>
-            <BuildLog entries={logEntries} />
-          </div>
-        </div>
+        {/* Preview panel */}
+        <PreviewPanel
+          previewUrl={previewUrl}
+          isLoading={isStreaming && !previewUrl}
+        />
       </div>
+
+      {/* Modals */}
+      <BuilderModals
+        showShareModal={showShareModal}
+        onCloseShareModal={() => setShowShareModal(false)}
+      />
     </div>
   );
 }
