@@ -98,6 +98,10 @@ export function PreviewPane({
   }, [response]);
 
   const requestPreviewSession = useEffectEvent(async () => {
+    if (isLoading) {
+      return;
+    }
+
     if (!projectId || !isUuid(projectId)) {
       setError(null);
       setHasFirstFrame(false);
