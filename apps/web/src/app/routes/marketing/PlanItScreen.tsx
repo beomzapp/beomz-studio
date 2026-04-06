@@ -76,6 +76,15 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
 
+  // Override dark body background for the light plan page
+  useEffect(() => {
+    const prev = document.body.style.background;
+    document.body.style.background = "#faf9f6";
+    return () => {
+      document.body.style.background = prev;
+    };
+  }, []);
+
   const navigate = useNavigate();
   const { session, loading: authLoading } = useAuth();
 
