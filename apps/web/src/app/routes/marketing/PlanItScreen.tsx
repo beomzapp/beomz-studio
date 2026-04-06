@@ -285,26 +285,33 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleChipClick = useCallback(
-    (chip: string) => {
+    (chip: string, allChips?: string[]) => {
       if (typing) return;
-      clearChips();
-
-      const userMsgId = `user-${Date.now()}`;
-      setMessages((prev) => [
-        ...prev,
-        { id: userMsgId, role: "user", content: chip },
-      ]);
-      scrollToBottom();
-
-      const newHistory: HistoryEntry[] = [
-        ...historyRef.current,
-        { role: "user", content: chip },
-      ];
-      historyRef.current = newHistory;
-
-      const newCount = questionCount + 1;
-      setQuestionCount(newCount);
-      void runAnalysis(newHistory, newCount);
+      // For "All of the above", join all non-"All" chips as one answer
+      const isAll = chip.toLowerCase().startsWith("all") && allChips && allChips.length > 1;
+      const answer = isAll
+        ? allChips!.filter((c) => !c.toLowerCase().startsWith("all")).join(", ")
+        : chip;
+      // Mark selected chip visually before clearing
+      setMessages((prev) =>
+        prev.map((m) => (m.chips ? { ...m, selectedChip: chip } : m))
+      );
+      setTimeout(() => {
+        clearChips();
+        setMessages((prev) => [
+          ...prev,
+          { id: `user-${Date.now()}`, role: "user", content: answer },
+        ]);
+        scrollToBottom();
+        const newHistory: HistoryEntry[] = [
+          ...historyRef.current,
+          { role: "user", content: answer },
+        ];
+        historyRef.current = newHistory;
+        const newCount = questionCount + 1;
+        setQuestionCount(newCount);
+        void runAnalysis(newHistory, newCount);
+      }, 150);
     },
     [typing, clearChips, questionCount, runAnalysis, scrollToBottom],
   );
@@ -359,35 +366,35 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   ]);
 
   const handleBuildIt = useCallback(() => {
-    // Combine original prompt with all user answers for a rich build intent
     const userAnswers = historyRef.current
       .filter((h) => h.role === "user")
       .map((h) => h.content);
     const fullPrompt = [prompt, ...userAnswers].join(". ");
 
-    // Extract summary from the plan card message
-    const planMsg = messages.find((m) => m.isPlan);
+    // Use the most recent plan card
+    const planMsg = [...messages].reverse().find((m) => m.isPlan);
     const summary = planMsg?.planSummary ?? [];
 
-    // Save intent and navigate to builder
+    // Build valid PlanStep[] — both title and description must be non-empty
+    const steps = summary
+      .map((s) => {
+        const dashIdx = s.indexOf(" — ");
+        const colonIdx = s.indexOf(": ");
+        const splitIdx = dashIdx > -1 ? dashIdx : colonIdx > -1 ? colonIdx : -1;
+        if (splitIdx > -1) {
+          const sep = dashIdx > -1 ? 3 : 2;
+          return { title: s.slice(0, splitIdx).trim(), description: s.slice(splitIdx + sep).trim() };
+        }
+        return { title: s.trim(), description: s.trim() };
+      })
+      .filter((step) => step.title.length > 0 && step.description.length > 0);
+
     saveProjectLaunchIntent({
       prompt: fullPrompt,
-      approvedPlan:
-        summary.length > 0
-          ? {
-              summary: summary.join(", "),
-              steps: summary.map((s) => {
-                const parts = s.split(" — ");
-                return {
-                  title: parts[0]?.trim() ?? s,
-                  description: parts[1]?.trim() ?? "",
-                };
-              }),
-            }
-          : undefined,
+      approvedPlan: steps.length > 0 ? { summary: summary.join(", "), steps } : undefined,
     });
-
     navigate({ to: "/studio/project/$id", params: { id: "new" } });
+  }, [prompt, messages, navigate]);
   }, [prompt, messages, navigate]);
 
   const handleEditPlan = useCallback(() => {
@@ -421,10 +428,6 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
           </button>
           <BeomzLogo className="h-5 w-auto text-[#1a1a1a]" />
         </div>
-
-        <span className="rounded-full border border-[#388bfd]/30 bg-[#388bfd]/5 px-3 py-1 text-xs font-medium text-[#388bfd]">
-          ◈ plan mode
-        </span>
 
         <GlobalNav />
       </div>
@@ -509,10 +512,18 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
                     <div className="mt-3 flex flex-wrap gap-2">
                       {msg.chips.map((chip) => (
                         <button
-                          key={chip}
-                          onClick={() => handleChipClick(chip)}
-                          className="rounded-full border border-[rgba(0,0,0,0.12)] px-3 py-1.5 text-xs text-[#1a1a1a] transition-all hover:border-[#e8580a]/50 hover:text-[#e8580a]"
-                        >
+                      key={chip}
+                      onClick={() => handleChipClick(chip, msg.chips)}
+                      disabled={!!msg.selectedChip}
+                      className={[
+                        "rounded-full border px-3 py-1.5 text-xs transition-all",
+                        msg.selectedChip === chip
+                          ? "border-[#e8580a] bg-[#e8580a] text-white"
+                          : msg.selectedChip
+                          ? "border-[rgba(0,0,0,0.06)] text-[rgba(0,0,0,0.3)] cursor-default"
+                          : "border-[rgba(0,0,0,0.12)] text-[#1a1a1a] hover:border-[#e8580a]/50 hover:text-[#e8580a]",
+                      ].join(" ")}
+                    >
                           {chip}
                         </button>
                       ))}
