@@ -8,3 +8,4 @@ export { PlanTypewriter } from "./PlanTypewriter";
 export { BuilderModals } from "./BuilderModals";
 export { DatabasePanel } from "./DatabasePanel";
 export { IntegrationsPanel } from "./IntegrationsPanel";
+export { PhaseIndicator } from "./PhaseIndicator";
