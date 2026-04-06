@@ -195,8 +195,17 @@ export function ProjectPage() {
     });
 
     if (event.type === "preview_ready") {
-      setPreviewGenerationId(event.buildId);
       setProjectId(event.projectId);
+      void getBuildStatus(event.buildId)
+        .then((status) => {
+          if (status.result) {
+            setBuildResult(status.result);
+          }
+          setPreviewGenerationId(event.buildId);
+        })
+        .catch(() => {
+          setPreviewGenerationId(event.buildId);
+        });
     }
 
     if (event.type === "done" || event.type === "error") {
