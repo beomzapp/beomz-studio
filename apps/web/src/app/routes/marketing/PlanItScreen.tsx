@@ -201,6 +201,9 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
           "Auth — sign-up, login, protected routes",
           "Settings — profile and preferences",
         ];
+        await typewriterMessage(
+          `Got it! Here's a build plan for "${prompt}". Let me know if you'd like to adjust anything before we start.`,
+        );
         setMessages((prev) => [
           ...prev,
           {

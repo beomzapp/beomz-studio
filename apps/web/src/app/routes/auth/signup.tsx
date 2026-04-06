@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { supabase } from "../../../lib/supabase";
+import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 export function SignupPage() {
   const [email, setEmail] = useState("");
@@ -43,12 +44,7 @@ export function SignupPage() {
       <div className="w-full max-w-[400px] rounded-xl bg-cream p-10 shadow-lg">
         {/* Logo */}
         <div className="mb-6 flex justify-center">
-          <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
-            <path
-              d="M8 8h8v8H8V8Zm0 16h8v8H8v-8Zm16-16h8v8h-8V8Zm0 16h8v8h-8v-8Zm-8-8h8v8h-8v-8Z"
-              fill="#060612"
-            />
-          </svg>
+          <BeomzLogo className="h-7 w-auto text-[#1a1a1a]" />
         </div>
 
         <h1 className="mb-8 text-center text-xl font-semibold text-cream-text">
