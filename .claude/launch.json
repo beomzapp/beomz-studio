@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@beomz-studio/web", "dev", "--port", "5188"],
+      "runtimeExecutable": "/opt/homebrew/bin/npx",
+      "runtimeArgs": ["--yes", "vite", "--port", "5188"],
+      "cwd": "apps/web",
       "port": 5188
     }
   ]

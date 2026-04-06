@@ -25,7 +25,7 @@ const temporalEnvSchema = z
     }
   });
 
-const ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 
 const anthropicEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
