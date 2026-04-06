@@ -10,6 +10,7 @@ import {
   Lock,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
+import { GlobalNav } from "../../../components/layout/GlobalNav";
 
 const NAV_ITEMS = [
   { to: "/studio/home", label: "Projects", icon: FolderOpen, locked: false },
@@ -93,16 +94,24 @@ export function StudioLayout() {
       {/* Main */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Mobile header */}
-        <header className="flex h-14 items-center border-b border-border px-4 lg:hidden">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="text-white/60 hover:text-white"
-          >
-            <Menu size={20} />
-          </button>
-          <span className="ml-3 text-sm font-semibold text-white">
-            beomz<span className="text-orange">.ai</span> Studio
-          </span>
+        <header className="flex h-14 items-center justify-between border-b border-border px-4 lg:hidden">
+          <div className="flex items-center">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="text-white/60 hover:text-white"
+            >
+              <Menu size={20} />
+            </button>
+            <span className="ml-3 text-sm font-semibold text-white">
+              beomz<span className="text-orange">.ai</span> Studio
+            </span>
+          </div>
+          <GlobalNav variant="light" />
+        </header>
+
+        {/* Desktop header — credits + avatar */}
+        <header className="hidden h-14 items-center justify-end border-b border-border px-4 lg:flex">
+          <GlobalNav variant="light" />
         </header>
 
         <main className="flex-1 overflow-y-auto">

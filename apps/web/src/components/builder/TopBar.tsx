@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
+import { GlobalNav } from "../layout/GlobalNav";
 
 export type ActiveView = "preview" | "code" | "database" | "integrations";
 
@@ -245,6 +246,9 @@ export function TopBar({
             {isPublishing ? "Publishing\u2026" : "Publish"}
           </button>
         )}
+
+        <div className="h-4 w-px bg-[#e5e5e5]" />
+        <GlobalNav />
       </div>
     </header>
   );
