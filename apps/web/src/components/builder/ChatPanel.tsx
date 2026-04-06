@@ -1,8 +1,8 @@
 /**
  * ChatPanel — V2 chat sidebar.
  * User messages: right-aligned dark bubble.
- * AI messages: left-aligned with orange "B" avatar, plain flowing text (no card).
- * Streaming cursor, rotating build status messages, completion suggestions.
+ * AI messages: left-aligned with orange "B" avatar, plain flowing text.
+ * No trace cards. Code content from assistant_delta is suppressed.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
@@ -16,9 +16,7 @@ import {
   Sparkles,
   ListChecks,
   AlertCircle,
-  CheckCircle2,
   Loader2,
-  Wrench,
   FileCode,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -32,8 +30,6 @@ export interface ChatMessage {
   planSteps?: readonly string[];
   changedFiles?: readonly string[];
   error?: string | null;
-  suggestions?: readonly string[];
-  phase?: { current: number; total: number; summary: string };
 }
 
 interface ChatPanelProps {
@@ -45,6 +41,63 @@ interface ChatPanelProps {
   onAutoFix?: (error: string) => void;
   onViewCode?: () => void;
   width?: number;
+}
+
+// ─────────────────────────────────────────────
+// Code line filter — suppress raw code dumps in chat
+// ─────────────────────────────────────────────
+
+const CODE_LINE_PATTERNS = [
+  /^import\s+/,
+  /^export\s+(default\s+)?(function|const|class|interface|type|enum)\s/,
+  /^(const|let|var)\s+\w+\s*[=:]/,
+  /^function\s+\w+/,
+  /^interface\s+\w+/,
+  /^type\s+\w+\s*=/,
+  /^class\s+\w+/,
+  /^\s*<[A-Z]\w+/,       // JSX opening tags
+  /^\s*<\/[A-Z]\w+>/,    // JSX closing tags
+  /^\s*return\s*\(/,
+  /^\s*\}\s*$/,           // lone closing brace
+  /^\s*\{\s*$/,           // lone opening brace
+  /^\s*\/\*\*/,           // JSDoc start
+  /^\s*\*\s/,             // JSDoc continuation
+  /^\s*\*\//,             // JSDoc end
+  /^```/,                 // code fence
+];
+
+function isCodeLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return CODE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+/**
+ * Filter out raw code lines from AI assistant text.
+ * Keeps only conversational prose.
+ */
+function filterCodeFromText(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  const proseLines: string[] = [];
+  let consecutiveCodeLines = 0;
+
+  for (const line of lines) {
+    if (isCodeLine(line)) {
+      consecutiveCodeLines++;
+      // If we see 3+ consecutive code lines, it's clearly a code block
+      continue;
+    }
+    // Reset counter for non-code lines
+    if (consecutiveCodeLines > 0 && line.trim() === "") {
+      consecutiveCodeLines = 0;
+      continue; // skip blank lines between code blocks
+    }
+    consecutiveCodeLines = 0;
+    proseLines.push(line);
+  }
+
+  return proseLines.join("\n").trim();
 }
 
 // ─────────────────────────────────────────────
@@ -71,7 +124,6 @@ const BUILDING_MESSAGES = [
   "Bringing it all together...",
   "Nearly ready...",
 ];
-
 
 // ─────────────────────────────────────────────
 // Markdown-lite renderer
@@ -136,45 +188,7 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 // ─────────────────────────────────────────────
-// Trace entry row
-// ─────────────────────────────────────────────
-
-function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
-  const isError = entry.status === "error" || entry.kind === "error";
-  const isSuccess = entry.status === "success" || entry.kind === "done";
-  const isRunning = entry.status === "running" || entry.kind === "tool_use";
-
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-2 rounded-xl border px-2.5 py-2 text-xs",
-        isError
-          ? "border-red-200 bg-red-50 text-red-700"
-          : isSuccess
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : "border-[#e5e5e5] bg-[#faf9f6] text-[#6b7280]",
-      )}
-    >
-      <span className="mt-0.5 shrink-0">
-        {isRunning ? <Loader2 size={13} className="animate-spin" />
-          : isError ? <AlertCircle size={13} />
-            : isSuccess ? <CheckCircle2 size={13} />
-              : <Wrench size={13} />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">{entry.message}</div>
-        {(entry.toolName || entry.code) && (
-          <div className="mt-1 text-[11px] uppercase tracking-wide opacity-70">
-            {[entry.toolName, entry.code].filter(Boolean).join(" \u00b7 ")}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Plan card
+// Plan card (kept — useful inline card)
 // ─────────────────────────────────────────────
 
 function PlanCardInline({ steps }: { steps: readonly string[] }) {
@@ -208,7 +222,7 @@ function FileChangeBadge({ files, onViewCode }: { files: readonly string[]; onVi
     >
       <FileCode size={12} />
       <span>{files.length} file{files.length !== 1 ? "s" : ""} changed</span>
-      <span className="text-[#F97316]">\u00b7 View code</span>
+      <span className="text-[#F97316]">{"\u00b7"} View code</span>
     </button>
   );
 }
@@ -276,32 +290,6 @@ function BuildingStatus() {
       >
         {BUILDING_MESSAGES[index]}
       </span>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Suggestion links
-// ─────────────────────────────────────────────
-
-function SuggestionLinks({
-  suggestions,
-  onSend,
-}: {
-  suggestions: readonly string[];
-  onSend: (text: string) => void;
-}) {
-  return (
-    <div className="mt-3 space-y-1.5 pl-9">
-      {suggestions.map((s) => (
-        <button
-          key={s}
-          onClick={() => onSend(s)}
-          className="block text-sm text-[#F97316] underline decoration-[#F97316]/30 underline-offset-2 transition-colors hover:text-[#ea6c10] hover:decoration-[#ea6c10]/50"
-        >
-          {s}
-        </button>
-      ))}
     </div>
   );
 }
@@ -381,12 +369,24 @@ export function ChatPanel({
   // Find the last error in messages for the error toast
   const lastError = [...messages].reverse().find((m) => m.error)?.error ?? null;
 
+  // Filter AI message content to remove raw code dumps
+  const getDisplayContent = (msg: ChatMessage): string => {
+    if (msg.role !== "assistant") return msg.content;
+    const filtered = filterCodeFromText(msg.content);
+    // If everything was code, show a fallback
+    if (!filtered && msg.content.length > 0) return "";
+    return filtered;
+  };
+
+  // Filter streaming text to remove code lines
+  const displayStreamingText = filterCodeFromText(streamingText);
+
   return (
     <div
-      className="flex shrink-0 flex-col border-r border-[#e5e5e5] bg-[#faf9f6]"
+      className="flex h-full shrink-0 flex-col border-r border-[#e5e5e5] bg-[#faf9f6]"
       style={{ width }}
     >
-      {/* Messages area — flex-1 so it fills remaining space */}
+      {/* Messages area — flex-1 + min-h-0 for proper scroll */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -402,56 +402,59 @@ export function ChatPanel({
 
         {hasMessages && (
           <div className="space-y-4">
-            {messages.map((msg) => (
-              <div key={msg.id}>
-                {msg.role === "user" ? (
-                  /* User message — right-aligned dark bubble */
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-3.5 py-2.5 text-sm leading-relaxed text-white">
-                      {msg.content}
-                    </div>
-                  </div>
-                ) : (
-                  /* AI message — left-aligned with orange avatar, NO card wrapper */
-                  <div className="flex items-start gap-2.5">
-                    <BeomzAvatar />
-                    <div className="group relative min-w-0 max-w-[85%] pt-0.5">
-                      {/* Plain text — no border, no background, no card */}
-                      {msg.content && <MarkdownText text={msg.content} />}
+            {messages.map((msg) => {
+              const displayContent = getDisplayContent(msg);
 
-                      {/* Plan steps card */}
-                      {msg.planSteps && msg.planSteps.length > 0 && (
-                        <PlanCardInline steps={msg.planSteps} />
-                      )}
+              // Skip rendering assistant messages that are entirely code (empty after filter)
+              // but still show if they have plan steps or changed files
+              const hasVisibleContent =
+                displayContent ||
+                (msg.planSteps && msg.planSteps.length > 0) ||
+                (msg.changedFiles && msg.changedFiles.length > 0);
 
-                      {/* Trace entries */}
-                      {msg.traceEntries && msg.traceEntries.length > 0 && (
-                        <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
-                          {msg.traceEntries.map((entry) => (
-                            <TraceEntryRow key={entry.id} entry={entry} />
-                          ))}
-                        </div>
-                      )}
+              if (msg.role === "assistant" && !hasVisibleContent) return null;
 
-                      {/* File change badge */}
-                      {msg.changedFiles && msg.changedFiles.length > 0 && (
-                        <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
-                      )}
-
-                      {/* Suggestions after build complete */}
-                      {msg.suggestions && msg.suggestions.length > 0 && !isStreaming && (
-                        <SuggestionLinks suggestions={msg.suggestions} onSend={onSendMessage} />
-                      )}
-
-                      {/* Copy button on hover */}
-                      <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <CopyButton text={msg.content} />
+              return (
+                <div key={msg.id}>
+                  {msg.role === "user" ? (
+                    /* User message — right-aligned dark bubble */
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-3.5 py-2.5 text-sm leading-relaxed text-white">
+                        {msg.content}
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  ) : (
+                    /* AI message — left-aligned with orange avatar, plain text (no card) */
+                    <div className="flex items-start gap-2.5">
+                      <BeomzAvatar />
+                      <div className="group relative min-w-0 max-w-[85%] pt-0.5">
+                        {/* Plain text — no border, no background */}
+                        {displayContent && <MarkdownText text={displayContent} />}
+
+                        {/* Plan steps card */}
+                        {msg.planSteps && msg.planSteps.length > 0 && (
+                          <PlanCardInline steps={msg.planSteps} />
+                        )}
+
+                        {/* Trace entries — REMOVED (BEO-174 §2) */}
+
+                        {/* File change badge */}
+                        {msg.changedFiles && msg.changedFiles.length > 0 && (
+                          <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
+                        )}
+
+                        {/* Copy button on hover */}
+                        {displayContent && (
+                          <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <CopyButton text={displayContent} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Streaming AI message — plain text with cursor */}
             {isStreaming && (
@@ -459,13 +462,13 @@ export function ChatPanel({
                 <div className="flex items-start gap-2.5">
                   <BeomzAvatar />
                   <div className="min-w-0 max-w-[85%] pt-0.5">
-                    {streamingText ? (
+                    {displayStreamingText ? (
                       <div className="text-sm leading-relaxed text-[#374151]">
-                        <MarkdownText text={streamingText} />
+                        <MarkdownText text={displayStreamingText} />
                         <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
                       </div>
                     ) : (
-                      /* No shimmer — just the cursor blinking while waiting for first token */
+                      /* Blinking cursor while waiting for first token */
                       <span className="inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
                     )}
                   </div>
@@ -504,7 +507,7 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Input bar — pinned to bottom with flex-shrink-0 */}
+      {/* Input bar — pinned to bottom */}
       <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
         <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
           <div className="px-3 pt-2">
