@@ -147,24 +147,29 @@ export function ProjectPage() {
       if (events.length === 0 && fallbackContent.length === 0) return;
 
       upsertAssistantMessage(buildId, (message) => {
-        let nextContent = message.content || fallbackContent;
+        let nextContent = message.content;
         let nextEntries = message.traceEntries ?? [];
 
         for (const event of events) {
-          if (event.type === "assistant_delta") {
-            nextContent += event.delta;
-          } else {
-            nextEntries = appendTranscriptEntry(nextEntries, event);
-          }
+          nextEntries = appendTranscriptEntry(nextEntries, event);
         }
 
         const terminalEvent = events.at(-1);
+        const terminalMessage =
+          terminalEvent && (terminalEvent.type === "done" || terminalEvent.type === "error")
+            ? terminalEvent.message
+            : "";
         if (
-          terminalEvent
-          && (terminalEvent.type === "done" || terminalEvent.type === "error")
+          nextEntries.length === 0
           && nextContent.trim().length === 0
+          && (
+            fallbackContent.trim().length > 0
+            || terminalMessage.length > 0
+          )
         ) {
-          nextContent = terminalEvent.message;
+          nextContent = fallbackContent.trim().length > 0
+            ? fallbackContent
+            : terminalMessage;
         }
 
         return { ...message, content: nextContent, traceEntries: nextEntries };
@@ -181,16 +186,14 @@ export function ProjectPage() {
     setLastEventId(event.id);
 
     upsertAssistantMessage(buildId, (message) => {
-      const nextEntries =
-        event.type === "assistant_delta"
-          ? message.traceEntries ?? []
-          : appendTranscriptEntry(message.traceEntries ?? [], event);
-      let nextContent =
-        event.type === "assistant_delta"
-          ? `${message.content}${event.delta}`
-          : message.content;
+      const nextEntries = appendTranscriptEntry(message.traceEntries ?? [], event);
+      let nextContent = message.content;
 
-      if ((event.type === "done" || event.type === "error") && nextContent.trim().length === 0) {
+      if (
+        nextEntries.length === 0
+        && (event.type === "done" || event.type === "error")
+        && nextContent.trim().length === 0
+      ) {
         nextContent = event.message;
       }
 

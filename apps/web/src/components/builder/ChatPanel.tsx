@@ -1,8 +1,8 @@
 /**
  * ChatPanel — V2 chat sidebar.
  * User messages: right-aligned dark bubble.
- * AI messages: left-aligned with orange "B" avatar, plain flowing text.
- * No trace cards. Code content from assistant_delta is suppressed.
+ * AI messages: left-aligned with orange "B" avatar.
+ * Human-readable build progress is shown as transcript rows.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
@@ -44,42 +44,80 @@ interface ChatPanelProps {
 }
 
 // ─────────────────────────────────────────────
-// Code line filter — suppress raw code dumps in chat
+// Code line filter — keep only prose-like lines
 // ─────────────────────────────────────────────
+
+const ALLOWED_ASSISTANT_MESSAGES = new Set([
+  "I'm designing the build plan.",
+  "I'm building the approved app now.",
+]);
+
+const PROSE_STARTER_PATTERN = /^(?:[A-Z][a-z]+|I(?:'|’)m|We(?:'|’)re|Building|Planning|Generating|Creating|Updating|Checking|Connecting|Reconnecting|Preview|Build|Error|Done|Ready|Almost|Starting|Finishing)\b/;
+
+function stripListPrefix(line: string): string {
+  return line
+    .replace(/^[-•*]\s+/, "")
+    .replace(/^\d+\.\s+/, "");
+}
+
+function hasLowSymbolDensity(line: string): boolean {
+  const nonSpace = line.replace(/\s/g, "");
+  if (nonSpace.length === 0) {
+    return true;
+  }
+
+  const symbols = (line.match(/[^A-Za-z0-9\s.,!?'"():/-]/g) || []).length;
+  return symbols / nonSpace.length < 0.1;
+}
+
+function isHumanReadableLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return true;
+  }
+
+  if (ALLOWED_ASSISTANT_MESSAGES.has(trimmed)) {
+    return true;
+  }
+
+  const proseCandidate = stripListPrefix(trimmed);
+  if (!/[A-Za-z]/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/(===|!==|=>|<=|>=|\$\{|<\/?[A-Za-z]|^\s*(?:import|export|const|let|var|function|class|interface|type|return|if|else|switch|case|for|while|try|catch|async|await|throw|default)\b)/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/[{}[\]|`]/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/^[a-z_$][\w$.]*\s*(?:===|!==|==|=|\?)/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/^(?:[A-Z][a-zA-Z]+,?\s*){3,}$/.test(proseCandidate) && !/[.!?]$/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (!hasLowSymbolDensity(proseCandidate)) {
+    return false;
+  }
+
+  const words = proseCandidate.split(/\s+/).filter(Boolean);
+  if (words.length <= 1 && !/[.!?]$/.test(proseCandidate)) {
+    return false;
+  }
+
+  return PROSE_STARTER_PATTERN.test(proseCandidate)
+    || /[.!?]$/.test(proseCandidate)
+    || words.length >= 4;
+}
 
 function filterCodeFromText(text: string): string {
   const lines = text.split("\n");
-
-  const kept = lines.filter(line => {
-    const t = line.trim();
-    if (t === "") return true;
-
-    if (new RegExp("^\\s*(import|export|const|let|var|function|class|interface|type|return|if|else|for|while|switch|case|try|catch|async|await|new|throw|default)\\b").test(line)) return false;
-    if (new RegExp("^\\s*[{};()\\[\\]]").test(line)) return false;
-    if (new RegExp("[{};(\\[]\\s*$").test(line)) return false;
-    if (new RegExp("\\)\\s*$").test(line) && new RegExp("\\w+\\(").test(line)) return false;
-    if (new RegExp("^\\s*<[\\w\\/]").test(line)) return false;
-    if (new RegExp("^\\s*\\/[\\/\\*]").test(line)) return false;
-    if (new RegExp("^\\s*\\*").test(line)) return false;
-    if (new RegExp("^```").test(line)) return false;
-    if (new RegExp("=>").test(line)) return false;
-    if (new RegExp("^\\s*[?|:]\\s").test(line)) return false;
-    if (new RegExp("^\\.\\.\\.").test(line)) return false;
-    if (new RegExp("^\\s*@\\w").test(line)) return false;
-    if (new RegExp("^\\s+\\w+[?]?\\s*:\\s*[\\w\"'{\\[(]").test(line)) return false;
-    if (new RegExp("^\\s*\\w[\\w.]*,\\s*$").test(line)) return false;
-    if (new RegExp("^\\s*[a-zA-Z][\\w:-]*=[\"'{]").test(line)) return false;
-    if (new RegExp("\\$\\{").test(line)) return false;
-    if (new RegExp(String.raw`^\s*d="[A-Z]`).test(line)) return false;
-    if (new RegExp("^[A-Z][A-Z0-9_]{3,}(_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\\b").test(line)) return false;
-    if (new RegExp("^\\s*[a-z][a-zA-Z0-9]*\\.[a-zA-Z]").test(line) && !/\s/.test(t)) return false;
-
-    const symbols = (line.match(/[{};=<>()\[\]|&!@#%^*~`\\]/g) || []).length;
-    const nonSpace = line.replace(/\s/g, "").length;
-    if (nonSpace > 0 && symbols / nonSpace > 0.15) return false;
-
-    return true;
-  });
+  const kept = lines.filter((line) => isHumanReadableLine(line));
 
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -172,7 +210,57 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 // ─────────────────────────────────────────────
-// Plan card (kept — useful inline card)
+// Progress rows
+// ─────────────────────────────────────────────
+
+function getVisibleTraceEntries(entries: readonly BuilderV3TranscriptEntry[] | undefined) {
+  return (entries ?? []).filter((entry) => (
+    entry.kind !== "assistant"
+    || ALLOWED_ASSISTANT_MESSAGES.has(entry.message.trim())
+  ));
+}
+
+function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
+  if (entry.kind === "assistant" && !ALLOWED_ASSISTANT_MESSAGES.has(entry.message.trim())) {
+    return null;
+  }
+
+  if (entry.kind === "status") {
+    return (
+      <div className="text-xs text-[#9ca3af]">
+        {entry.message}
+      </div>
+    );
+  }
+
+  const isRunning = entry.kind === "tool_use";
+  const isError = entry.kind === "error" || entry.status === "error";
+  const isDone = entry.kind === "done";
+  const isSuccess = isDone || entry.kind === "tool_result" || entry.status === "success";
+
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-xl border px-3 py-2 text-sm",
+        isError
+          ? "border-red-200 bg-red-50 text-red-700"
+          : isSuccess
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-[#e5e5e5] bg-white text-[#4b5563]",
+      )}
+    >
+      <span className="mt-0.5 shrink-0">
+        {isRunning ? <Loader2 size={14} className="animate-spin" />
+          : isError ? <AlertCircle size={14} />
+            : <Check size={14} />}
+      </span>
+      <span className="leading-relaxed">{entry.message}</span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Plan card
 // ─────────────────────────────────────────────
 
 function PlanCardInline({ steps }: { steps: readonly string[] }) {
@@ -356,13 +444,9 @@ export function ChatPanel({
   // Filter AI message content to remove raw code dumps
   const getDisplayContent = (msg: ChatMessage): string => {
     if (msg.role !== "assistant") return msg.content;
-    const filtered = filterCodeFromText(msg.content);
-    // If everything was code, show a fallback
-    if (!filtered && msg.content.length > 0) return "";
-    return filtered;
+    return filterCodeFromText(msg.content);
   };
 
-  // Filter streaming text to remove code lines
   const displayStreamingText = filterCodeFromText(streamingText);
 
   return (
@@ -388,13 +472,11 @@ export function ChatPanel({
           <div className="space-y-4">
             {messages.map((msg) => {
               const displayContent = getDisplayContent(msg);
+              const visibleTraceEntries = getVisibleTraceEntries(msg.traceEntries);
 
-              // Skip rendering assistant messages that are entirely code (empty after filter)
-              // but still show if they have plan steps or changed files
-              // traceEntries are explicitly NOT counted as visible content.
-              // BEO-174 §2 removed trace card rendering entirely.
               const hasVisibleContent =
-                displayContent ||
+                displayContent.length > 0 ||
+                visibleTraceEntries.length > 0 ||
                 (msg.planSteps && msg.planSteps.length > 0) ||
                 (msg.changedFiles && msg.changedFiles.length > 0);
 
@@ -414,22 +496,24 @@ export function ChatPanel({
                     <div className="flex items-start gap-2.5">
                       <BeomzAvatar />
                       <div className="group relative min-w-0 max-w-[85%] pt-0.5">
-                        {/* Plain text — no border, no background */}
                         {displayContent && <MarkdownText text={displayContent} />}
 
-                        {/* Plan steps card */}
+                        {visibleTraceEntries.length > 0 && (
+                          <div className="space-y-2">
+                            {visibleTraceEntries.map((entry) => (
+                              <TraceEntryRow key={entry.id} entry={entry} />
+                            ))}
+                          </div>
+                        )}
+
                         {msg.planSteps && msg.planSteps.length > 0 && (
                           <PlanCardInline steps={msg.planSteps} />
                         )}
 
-                        {/* Trace entries — REMOVED (BEO-174 §2) */}
-
-                        {/* File change badge */}
                         {msg.changedFiles && msg.changedFiles.length > 0 && (
                           <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
                         )}
 
-                        {/* Copy button on hover */}
                         {displayContent && (
                           <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
                             <CopyButton text={displayContent} />
