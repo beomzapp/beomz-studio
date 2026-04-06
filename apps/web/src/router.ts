@@ -5,7 +5,9 @@ import {
   redirect,
 } from "@tanstack/react-router";
 import { supabase } from "./lib/supabase";
+import { RootLayout } from "./components/layout/RootLayout";
 import { LandingPage } from "./app/routes/marketing/LandingPage";
+import { PlanPage } from "./app/routes/marketing/PlanPage";
 import { StudioLayout } from "./app/routes/studio/StudioLayout";
 import { HomePage } from "./app/routes/studio/HomePage";
 import { ProjectPage } from "./app/routes/studio/ProjectPage";
@@ -17,12 +19,23 @@ import { LoginPage } from "./app/routes/auth/login";
 import { SignupPage } from "./app/routes/auth/signup";
 import { AuthCallback } from "./app/routes/auth/callback";
 
-const rootRoute = createRootRoute();
+const rootRoute = createRootRoute({
+  component: RootLayout,
+});
 
 const landingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: LandingPage,
+});
+
+const planRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/plan",
+  component: PlanPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
 });
 
 const pricingRoute = createRoute({
@@ -95,6 +108,7 @@ const settingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   landingRoute,
+  planRoute,
   pricingRoute,
   authLoginRoute,
   authSignupRoute,
