@@ -598,7 +598,7 @@ export function ProjectPage() {
           className="shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
           style={{ width: showChat ? chatPanelWidth : 0 }}
         >
-          <div style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
+          <div className="h-full" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
             <ChatPanel
               messages={messages}
               isStreaming={isStreaming}

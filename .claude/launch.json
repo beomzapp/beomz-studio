@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@beomz-studio/web", "dev", "--port", "5188"],
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["-c", "cd /Users/omarfareda/Desktop/beomz-studio-main-live/apps/web && PATH=/opt/homebrew/bin:$PATH pnpm dev --port 5188"],
       "port": 5188
     }
   ]

@@ -55,15 +55,30 @@ const CODE_LINE_PATTERNS = [
   /^interface\s+\w+/,
   /^type\s+\w+\s*=/,
   /^class\s+\w+/,
-  /^\s*<[A-Z]\w+/,       // JSX opening tags
-  /^\s*<\/[A-Z]\w+>/,    // JSX closing tags
+  /^\s*<[A-Z]\w+/,           // JSX component opening tags
+  /^\s*<\/[A-Z]\w+>/,        // JSX component closing tags
+  /^\s*<[a-z][a-z0-9]*[\s/>]/, // HTML element tags (div, span, button…)
+  /^\s*<\/[a-z][a-z0-9]*>/,  // HTML closing tags
+  /^\s*\/>\s*$/,              // self-closing />
   /^\s*return\s*\(/,
-  /^\s*\}\s*$/,           // lone closing brace
-  /^\s*\{\s*$/,           // lone opening brace
-  /^\s*\/\*\*/,           // JSDoc start
-  /^\s*\*\s/,             // JSDoc continuation
-  /^\s*\*\//,             // JSDoc end
-  /^```/,                 // code fence
+  /^\s*\}\s*$/,               // lone closing brace
+  /^\s*\{\s*$/,               // lone opening brace
+  /^\s*\);\s*$/,              // closing paren+semicolon
+  /^\s*\)\s*$/,               // lone closing paren
+  /^\s*className=/,           // JSX className prop lines
+  /^\s*style=\{/,             // JSX style prop lines
+  /^\s*onClick=/,             // JSX event handler lines
+  /^\s*onChange=/,
+  /^\s*onSubmit=/,
+  /^\s*disabled=/,
+  /^\s*placeholder=/,
+  /^\s*[a-zA-Z][\w-]+=\{/,   // any JSX prop={...}
+  /^\s*\/\*\*/,               // JSDoc start
+  /^\s*\*\s/,                 // JSDoc continuation
+  /^\s*\*\//,                 // JSDoc end
+  /^```/,                     // code fence
+  /^\s*\/\//,                 // single-line comment
+  /^\s*\/\*/,                 // block comment start
   // Temporal/Beomz trace status codes (e.g. PLAN_BLUEPRINT_STARTED)
   /^[A-Z][A-Z0-9_]{3,}(?:_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\b/,
 ];

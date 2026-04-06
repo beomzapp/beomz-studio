@@ -148,9 +148,6 @@ function App() {
         {runtime.shell === "website" ? null : (
           <aside className="rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)]">
             <div className="mb-6">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-300/80">
-                {runtime.shell} shell
-              </div>
               <h1 className="mt-2 text-xl font-semibold text-white">{runtime.project.name}</h1>
             </div>
             <nav className="space-y-2">
@@ -174,35 +171,7 @@ function App() {
         )}
 
         <main className="min-w-0">
-          <header className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-300/80">
-              Local studio preview
-            </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold text-white">{activeRoute.label}</h2>
-                <p className="mt-1 text-sm text-white/60">{activeRoute.summary}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {runtime.navigation.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setActivePath(item.href)}
-                    className={
-                      item.href === activeRoute.path
-                        ? "rounded-full border border-orange-400/30 bg-orange-400/14 px-3 py-1.5 text-xs font-semibold text-orange-100"
-                        : "rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.08]"
-                    }
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </header>
-
-          <div className="rounded-[32px] border border-white/10 bg-[#081126] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+                    <div className="rounded-[32px] border border-white/10 bg-[#081126] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
             {ActiveRoute ? <ActiveRoute /> : <MissingRoute route={activeRoute} />}
           </div>
         </main>
