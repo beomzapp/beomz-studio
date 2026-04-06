@@ -1,309 +1,505 @@
+/**
+ * PlanItScreen — full AI-powered planning conversation.
+ *
+ * Flow:
+ *  1. On mount, POST to /plan/analyze with the user's prompt.
+ *  2. If confidence >= 0.85 (or max questions reached): stream aiMessage via
+ *     typewriter, then show the plan card with Build it / Edit the plan.
+ *  3. If confidence < 0.85: stream aiMessage, show answer chips from `options`.
+ *  4. User can also type free-text replies at any stage.
+ *  5. "Build it" saves a ProjectLaunchIntent and navigates to /studio/project/new.
+ *  6. "Edit the plan" prompts the AI to ask what to change.
+ *
+ * Design rules (BEO-175):
+ *  - AI messages: plain flowing text next to the B avatar — NO card box, NO border.
+ *  - Answer chips: pill buttons below the AI text.
+ *  - Plan card: white rounded card with colour-coded bullet dots.
+ *  - No thought bubbles. No hardcoded regex chip logic.
+ */
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Send } from "lucide-react";
-import { cn } from "../../../lib/cn";
+import { getApiBaseUrl } from "../../../lib/api";
+import { useAuth } from "../../../lib/useAuth";
+import { GlobalNav } from "../../../components/layout/GlobalNav";
+import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
+import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
-interface ChatMessage {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface AnalyzeResult {
+  confidence: number;
+  summary: string[] | null;
+  nextQuestion: string | null;
+  options: string[] | null;
+  aiMessage: string;
+}
+
+interface HistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface PlanMessage {
+  id: string;
   role: "ai" | "user";
   content: string;
   chips?: string[];
   isPlan?: boolean;
+  planSummary?: string[];
+  streaming?: boolean;
 }
-
-function getChipsForPrompt(prompt: string): string[] {
-  const lower = prompt.toLowerCase();
-  if (/financ|money|budget|expense|invoice/.test(lower))
-    return ["Track spending", "Manage invoices", "View investments", "Something else"];
-  if (/saas|dashboard|admin|manage/.test(lower))
-    return ["Manage projects", "View analytics", "Team collaboration", "Something else"];
-  return ["Just for me", "A team or business", "I want to sell it", "Something else"];
-}
-
-function getCoreFeature(prompt: string): string {
-  const lower = prompt.toLowerCase();
-  if (/financ|money|budget/.test(lower)) return "Finance tracker — expenses, budgets, reports";
-  if (/saas|dashboard/.test(lower)) return "Dashboard — metrics, charts, data tables";
-  if (/shop|store|ecommerce/.test(lower)) return "Product catalog — listings, cart, checkout";
-  if (/chat|messag/.test(lower)) return "Messaging — real-time chat, conversations";
-  if (/task|todo|project/.test(lower)) return "Task board — kanban, assignments, deadlines";
-  return "Core feature — main functionality";
-}
-
-const PLAN_DOTS = [
-  { color: "#e8580a", label: "Home / Dashboard", desc: "overview, key metrics" },
-  { color: "#388bfd", label: "", desc: "" }, // filled dynamically
-  { color: "#2db870", label: "Auth", desc: "sign up, login, protected routes" },
-  { color: "#a855f7", label: "Settings", desc: "profile, preferences" },
-];
 
 interface PlanItScreenProps {
   prompt: string;
   onBack: () => void;
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PLAN_COLORS = ["#e8580a", "#388bfd", "#2db870", "#a855f7", "#f59e0b"];
+const MAX_QUESTIONS = 3;
+const TYPEWRITER_INTERVAL_MS = 18;
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<PlanMessage[]>([]);
   const [typing, setTyping] = useState(false);
-  const [phase, setPhase] = useState(0); // 0=init, 1=q1shown, 2=q1answered, 3=q2shown, 4=q2answered, 5=plan
   const [inputText, setInputText] = useState("");
+  const [questionCount, setQuestionCount] = useState(0);
+  const [planReady, setPlanReady] = useState(false);
+
+  // Use a ref for history to avoid stale closures in callbacks
+  const historyRef = useRef<HistoryEntry[]>([]);
   const chatRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const initRef = useRef(false);
+
   const navigate = useNavigate();
+  const { session } = useAuth();
+
+  // ── Scroll ──────────────────────────────────────────────────────────────────
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
-      chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" });
+      if (chatRef.current) {
+        chatRef.current.scrollTop = chatRef.current.scrollHeight;
+      }
     }, 50);
   }, []);
 
-  const addAiMessage = useCallback(
-    (msg: Omit<ChatMessage, "role">, delay: number) => {
-      setTyping(true);
-      scrollToBottom();
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          setTyping(false);
-          setMessages((prev) => [...prev, { role: "ai", ...msg }]);
-          scrollToBottom();
-          resolve();
-        }, delay);
+  // ── Typewriter ──────────────────────────────────────────────────────────────
+
+  /**
+   * Appends a new AI message and streams text into it character by character.
+   * Returns a promise that resolves when streaming is complete.
+   */
+  const typewriterMessage = useCallback(
+    (text: string): Promise<void> => {
+      const msgId = `ai-${Date.now()}-${Math.random()}`;
+
+      return new Promise((resolve) => {
+        setMessages((prev) => [
+          ...prev,
+          { id: msgId, role: "ai", content: "", streaming: true },
+        ]);
+        scrollToBottom();
+
+        let i = 0;
+        const interval = setInterval(() => {
+          i++;
+          setMessages((prev) => {
+            const copy = [...prev];
+            const idx = copy.findIndex((m) => m.id === msgId);
+            if (idx !== -1) {
+              copy[idx] = { ...copy[idx], content: text.slice(0, i) };
+            }
+            return copy;
+          });
+          if (i % 8 === 0) scrollToBottom();
+          if (i >= text.length) {
+            clearInterval(interval);
+            // Finalize: stop streaming flag
+            setMessages((prev) => {
+              const copy = [...prev];
+              const idx = copy.findIndex((m) => m.id === msgId);
+              if (idx !== -1) {
+                copy[idx] = { ...copy[idx], content: text, streaming: false };
+              }
+              return copy;
+            });
+            resolve();
+          }
+        }, TYPEWRITER_INTERVAL_MS);
       });
     },
-    [scrollToBottom]
+    [scrollToBottom],
   );
 
-  // Initial conversation flow (runs once)
+  // ── Chip helpers ─────────────────────────────────────────────────────────────
+
+  /** Add chips to the most recent non-plan AI message */
+  const addChipsToLastAiMessage = useCallback((chips: string[]) => {
+    setMessages((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i >= 0; i--) {
+        if (copy[i].role === "ai" && !copy[i].isPlan) {
+          copy[i] = { ...copy[i], chips };
+          break;
+        }
+      }
+      return copy;
+    });
+  }, []);
+
+  /** Remove chips from all messages (after user selects one) */
+  const clearChips = useCallback(() => {
+    setMessages((prev) =>
+      prev.map((m) => (m.chips ? { ...m, chips: undefined } : m)),
+    );
+  }, []);
+
+  // ── API call ─────────────────────────────────────────────────────────────────
+
+  const callAnalyze = useCallback(
+    async (history: HistoryEntry[]): Promise<AnalyzeResult | null> => {
+      const apiBase = getApiBaseUrl();
+      try {
+        const res = await fetch(`${apiBase}/plan/analyze`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session?.access_token
+              ? { Authorization: `Bearer ${session.access_token}` }
+              : {}),
+          },
+          body: JSON.stringify({ prompt, history }),
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as AnalyzeResult;
+      } catch {
+        return null;
+      }
+    },
+    [prompt, session],
+  );
+
+  // ── Core analysis step ───────────────────────────────────────────────────────
+
+  const runAnalysis = useCallback(
+    async (history: HistoryEntry[], qCount: number) => {
+      setTyping(true);
+      const data = await callAnalyze(history);
+      setTyping(false);
+
+      if (!data) {
+        // Fallback plan when API is unreachable
+        const fallbackSummary = [
+          "Home / Dashboard — overview and key metrics",
+          "Core feature — main functionality",
+          "Auth — sign-up, login, protected routes",
+          "Settings — profile and preferences",
+        ];
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `plan-${Date.now()}`,
+            role: "ai",
+            content: "",
+            isPlan: true,
+            planSummary: fallbackSummary,
+          },
+        ]);
+        setPlanReady(true);
+        scrollToBottom();
+        return;
+      }
+
+      // Update shared history ref with AI response
+      historyRef.current = [
+        ...history,
+        { role: "assistant", content: data.aiMessage },
+      ];
+
+      if (data.confidence >= 0.85 || qCount >= MAX_QUESTIONS) {
+        // Enough context — show plan
+        const summary = data.summary ?? [
+          "Home / Dashboard — overview",
+          "Core feature — main functionality",
+          "Auth — sign-up and login",
+          "Settings — profile, preferences",
+        ];
+
+        await typewriterMessage(data.aiMessage);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `plan-${Date.now()}`,
+            role: "ai",
+            content: "",
+            isPlan: true,
+            planSummary: summary,
+          },
+        ]);
+        setPlanReady(true);
+        scrollToBottom();
+      } else {
+        // Need more context — ask a question with chips
+        await typewriterMessage(data.aiMessage);
+        if (data.options && data.options.length > 0) {
+          addChipsToLastAiMessage(data.options);
+        }
+        scrollToBottom();
+      }
+    },
+    [callAnalyze, typewriterMessage, addChipsToLastAiMessage, scrollToBottom],
+  );
+
+  // ── Mount: first analysis call ───────────────────────────────────────────────
+
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
+    historyRef.current = [];
+    void runAnalysis([], 0);
+  }, [runAnalysis]);
 
-    (async () => {
-      await addAiMessage({ content: `Got it — ${prompt}. Good choice. 💡` }, 600);
-      await addAiMessage({ content: "Before I start planning, one quick question:" }, 800);
-      const chips = getChipsForPrompt(prompt);
-      await addAiMessage(
-        { content: "What's the main purpose of this project?", chips },
-        600
-      );
-      setPhase(1);
-    })();
-  }, [prompt, addAiMessage]);
+  // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleChipClick = useCallback(
-    async (chip: string) => {
-      // Add user message
-      setMessages((prev) => [...prev, { role: "user", content: chip }]);
+    (chip: string) => {
+      if (typing) return;
+      clearChips();
+
+      const userMsgId = `user-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: userMsgId, role: "user", content: chip },
+      ]);
       scrollToBottom();
 
-      if (phase === 1) {
-        setPhase(2);
-        // Q2
-        await addAiMessage(
-          {
-            content: "And what should be the main thing users can do?",
-            chips: ["View data", "Create content", "Communicate", "Something else"],
-          },
-          800
-        );
-        setPhase(3);
-      } else if (phase === 3) {
-        setPhase(4);
-        // Plan summary
-        const core = getCoreFeature(prompt);
-        await addAiMessage(
-          { content: "", isPlan: true },
-          1000
-        );
-        // Store core feature for plan card rendering
-        setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last.isPlan) {
-            last.content = core;
-          }
-          return copy;
-        });
-        setPhase(5);
-      }
+      const newHistory: HistoryEntry[] = [
+        ...historyRef.current,
+        { role: "user", content: chip },
+      ];
+      historyRef.current = newHistory;
+
+      const newCount = questionCount + 1;
+      setQuestionCount(newCount);
+      void runAnalysis(newHistory, newCount);
     },
-    [phase, prompt, addAiMessage, scrollToBottom]
+    [typing, clearChips, questionCount, runAnalysis, scrollToBottom],
   );
 
   const handleSend = useCallback(() => {
-    if (!inputText.trim()) return;
     const text = inputText.trim();
+    if (!text || typing) return;
     setInputText("");
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    clearChips();
+
+    setMessages((prev) => [
+      ...prev,
+      { id: `user-${Date.now()}`, role: "user", content: text },
+    ]);
     scrollToBottom();
 
-    // Treat as chip selection for current phase
-    if (phase === 1 || phase === 3) {
-      handleChipClick(text);
-    }
-  }, [inputText, phase, handleChipClick, scrollToBottom]);
+    const newHistory: HistoryEntry[] = [
+      ...historyRef.current,
+      { role: "user", content: text },
+    ];
+    historyRef.current = newHistory;
 
-  // Thought bubbles for answered questions
-  const BUBBLE_POSITIONS = [
-    { pos: "top-20 right-8", bg: "#fff4ee", text: "#e8580a" },
-    { pos: "bottom-28 left-8", bg: "#f0f7ff", text: "#388bfd" },
-  ];
+    if (planReady) {
+      // Plan is ready — user wants to modify it
+      setTyping(true);
+      setTimeout(() => {
+        setTyping(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `ai-${Date.now()}`,
+            role: "ai",
+            content: "Sure — what would you like to change?",
+          },
+        ]);
+        scrollToBottom();
+        inputRef.current?.focus();
+      }, 600);
+    } else {
+      const newCount = questionCount + 1;
+      setQuestionCount(newCount);
+      void runAnalysis(newHistory, newCount);
+    }
+  }, [
+    inputText,
+    typing,
+    clearChips,
+    planReady,
+    questionCount,
+    runAnalysis,
+    scrollToBottom,
+  ]);
+
+  const handleBuildIt = useCallback(() => {
+    // Combine original prompt with all user answers for a rich build intent
+    const userAnswers = historyRef.current
+      .filter((h) => h.role === "user")
+      .map((h) => h.content);
+    const fullPrompt = [prompt, ...userAnswers].join(". ");
+
+    // Extract summary from the plan card message
+    const planMsg = messages.find((m) => m.isPlan);
+    const summary = planMsg?.planSummary ?? [];
+
+    // Save intent and navigate to builder
+    saveProjectLaunchIntent({
+      prompt: fullPrompt,
+      approvedPlan:
+        summary.length > 0
+          ? {
+              summary: summary.join(", "),
+              steps: summary.map((s) => {
+                const parts = s.split(" — ");
+                return {
+                  title: parts[0]?.trim() ?? s,
+                  description: parts[1]?.trim() ?? "",
+                };
+              }),
+            }
+          : undefined,
+    });
+
+    navigate({ to: "/studio/project/$id", params: { id: "new" } });
+  }, [prompt, messages, navigate]);
+
+  const handleEditPlan = useCallback(() => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `ai-${Date.now()}`,
+        role: "ai",
+        content: "Sure — what would you like to change?",
+      },
+    ]);
+    scrollToBottom();
+    setTimeout(() => inputRef.current?.focus(), 100);
+  }, [scrollToBottom]);
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div className="fixed inset-0 z-30 flex flex-col bg-[#faf9f6]">
-      {/* Top bar */}
+      {/* Top bar: [back] [logo] ··· [plan mode] ··· [GlobalNav] */}
       <div className="flex items-center justify-between border-b border-[rgba(0,0,0,0.07)] px-6 py-4">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
             className="text-[rgba(0,0,0,0.35)] transition-colors hover:text-[#1a1a1a]"
+            aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
-          <span className="text-lg font-bold text-[#1a1a1a]">
-            beomz<span className="text-[#e8580a]">.</span>
-          </span>
+          <BeomzLogo className="h-5 w-auto text-[#1a1a1a]" />
         </div>
+
         <span className="rounded-full border border-[#388bfd]/30 bg-[#388bfd]/5 px-3 py-1 text-xs font-medium text-[#388bfd]">
           ◈ plan mode
         </span>
-      </div>
 
-      {/* Echo */}
-      <div className="border-b border-[rgba(0,0,0,0.07)] px-6 py-3">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-[rgba(0,0,0,0.25)]">
-          YOU SAID
-        </p>
-        <p className="mt-1 text-sm font-semibold text-[#1a1a1a]">{prompt}</p>
+        <GlobalNav />
       </div>
-
-      {/* Thought bubbles */}
-      {messages
-        .filter((m) => m.role === "user")
-        .slice(0, 2)
-        .map((m, i) => (
-          <div
-            key={`tb-${i}`}
-            className={cn(
-              "pointer-events-none absolute z-10 hidden lg:block",
-              BUBBLE_POSITIONS[i]?.pos
-            )}
-            style={{ animation: "bubblePop 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards" }}
-          >
-            <div
-              className="relative rounded-2xl px-4 py-2.5 text-sm font-medium shadow-sm"
-              style={{
-                backgroundColor: BUBBLE_POSITIONS[i]?.bg,
-                color: BUBBLE_POSITIONS[i]?.text,
-              }}
-            >
-              {m.content}
-              <div
-                className="absolute -bottom-2 left-4 h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: BUBBLE_POSITIONS[i]?.bg }}
-              />
-              <div
-                className="absolute -bottom-4 left-2 h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: BUBBLE_POSITIONS[i]?.bg }}
-              />
-            </div>
-          </div>
-        ))}
 
       {/* Chat area */}
       <div ref={chatRef} className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto max-w-2xl space-y-4">
-          {messages.map((msg, i) => {
+        <div className="mx-auto max-w-2xl space-y-5">
+          {messages.map((msg) => {
+            // User message — right-aligned dark bubble
             if (msg.role === "user") {
               return (
-                <div key={i} className="flex justify-end">
-                  <div className="rounded-2xl rounded-br-md bg-[#1a1a1a] px-4 py-2.5 text-sm text-white">
+                <div key={msg.id} className="flex justify-end">
+                  <div className="max-w-[80%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-4 py-2.5 text-sm text-white">
                     {msg.content}
                   </div>
                 </div>
               );
             }
 
-            // Plan card
-            if (msg.isPlan) {
-              const core = msg.content;
-              const dots = [...PLAN_DOTS];
-              dots[1] = { color: "#388bfd", label: core.split("—")[0]?.trim() || "Core feature", desc: core.split("—")[1]?.trim() || "main functionality" };
+            // Plan card — white rounded card, no AI bubble wrapper
+            if (msg.isPlan && msg.planSummary) {
               return (
-                <div key={i} className="flex gap-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1a1a1a] text-xs font-bold text-[#e8580a]">
-                    B
+                <div
+                  key={msg.id}
+                  className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-white p-5 shadow-sm"
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-[#1a1a1a]">
+                      📋 Your build plan
+                    </span>
+                    <span className="text-xs text-[rgba(0,0,0,0.35)]">
+                      {msg.planSummary.length} parts
+                    </span>
                   </div>
-                  <div className="flex-1 rounded-2xl rounded-tl-md border border-[rgba(0,0,0,0.07)] bg-white p-5 shadow-sm">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-[#1a1a1a]">
-                        📋 Your build plan
-                      </h3>
-                      <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-0.5 text-xs text-[rgba(0,0,0,0.4)]">
-                        4 parts
-                      </span>
-                    </div>
-                    <div className="mb-4 border-t border-[rgba(0,0,0,0.07)]" />
-                    <ul className="space-y-3">
-                      {dots.map((d, di) => (
-                        <li key={di} className="flex items-start gap-3">
-                          <div
-                            className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: d.color }}
-                          />
-                          <div>
-                            <span className="text-sm font-medium text-[#1a1a1a]">
-                              {d.label}
-                            </span>
-                            {d.desc && (
-                              <span className="text-sm text-[rgba(0,0,0,0.35)]">
-                                {" "}
-                                — {d.desc}
-                              </span>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-4 border-t border-[rgba(0,0,0,0.07)]" />
-                    <div className="mt-4 flex gap-3">
-                      <button
-                        onClick={() => navigate({ to: "/studio/home" })}
-                        className="rounded-xl bg-[#e8580a] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#d14e09]"
-                      >
-                        ✨ Build this
-                      </button>
-                      <button className="rounded-xl border border-[rgba(0,0,0,0.1)] px-4 py-2 text-sm font-medium text-[#1a1a1a] transition-colors hover:bg-[rgba(0,0,0,0.03)]">
-                        Edit the plan
-                      </button>
-                    </div>
+                  <ul className="mb-4 space-y-2.5">
+                    {msg.planSummary.map((item, pi) => (
+                      <li key={pi} className="flex items-start gap-2.5">
+                        <div
+                          className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor:
+                              PLAN_COLORS[pi % PLAN_COLORS.length],
+                          }}
+                        />
+                        <span className="text-sm text-[#1a1a1a]">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex gap-2 border-t border-[rgba(0,0,0,0.07)] pt-3">
+                    <button
+                      onClick={handleBuildIt}
+                      className="rounded-xl bg-[#e8580a] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#d14e09]"
+                    >
+                      ✨ Build it
+                    </button>
+                    <button
+                      onClick={handleEditPlan}
+                      className="rounded-xl border border-[rgba(0,0,0,0.1)] px-4 py-2 text-sm text-[#1a1a1a] transition-colors hover:bg-[rgba(0,0,0,0.03)]"
+                    >
+                      Edit the plan
+                    </button>
                   </div>
                 </div>
               );
             }
 
-            // Normal AI message
+            // AI message — plain flowing text, NO card / NO border
             return (
-              <div key={i} className="flex gap-3">
+              <div key={msg.id} className="flex items-start gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1a1a1a] text-xs font-bold text-[#e8580a]">
                   B
                 </div>
-                <div className="flex-1">
-                  <div className="rounded-2xl rounded-tl-md border border-[rgba(0,0,0,0.07)] bg-white px-4 py-3 text-sm text-[#1a1a1a] shadow-sm">
+                <div className="flex-1 pt-0.5">
+                  <p className="text-sm leading-relaxed text-[#1a1a1a]">
                     {msg.content}
-                    {msg.chips && msg.chips.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {msg.chips.map((chip) => (
-                          <button
-                            key={chip}
-                            onClick={() => handleChipClick(chip)}
-                            className="rounded-full border border-[rgba(0,0,0,0.1)] bg-[#faf9f6] px-3 py-1 text-xs font-medium text-[#1a1a1a] transition-all hover:border-[#e8580a]/40 hover:bg-[#e8580a]/5 hover:text-[#e8580a]"
-                          >
-                            {chip}
-                          </button>
-                        ))}
-                      </div>
+                    {msg.streaming && (
+                      <span className="ml-0.5 inline-block h-[1em] w-0.5 translate-y-[2px] animate-pulse bg-[#9ca3af]" />
                     )}
-                  </div>
+                  </p>
+                  {/* Answer chips — only shown when streaming is done */}
+                  {!msg.streaming && msg.chips && msg.chips.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {msg.chips.map((chip) => (
+                        <button
+                          key={chip}
+                          onClick={() => handleChipClick(chip)}
+                          className="rounded-full border border-[rgba(0,0,0,0.12)] px-3 py-1.5 text-xs text-[#1a1a1a] transition-all hover:border-[#e8580a]/50 hover:text-[#e8580a]"
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -311,15 +507,19 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
 
           {/* Typing indicator */}
           {typing && (
-            <div className="flex gap-3">
+            <div className="flex items-start gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1a1a1a] text-xs font-bold text-[#e8580a]">
                 B
               </div>
-              <div className="rounded-2xl rounded-tl-md border border-[rgba(0,0,0,0.07)] bg-white px-4 py-3 shadow-sm">
+              <div className="pt-2.5">
                 <div className="flex gap-1">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-[rgba(0,0,0,0.2)]" style={{ animationDelay: "0ms" }} />
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-[rgba(0,0,0,0.2)]" style={{ animationDelay: "150ms" }} />
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-[rgba(0,0,0,0.2)]" style={{ animationDelay: "300ms" }} />
+                  {[0, 150, 300].map((delay) => (
+                    <span
+                      key={delay}
+                      className="h-2 w-2 animate-pulse rounded-full bg-[rgba(0,0,0,0.2)]"
+                      style={{ animationDelay: `${delay}ms` }}
+                    />
+                  ))}
                 </div>
               </div>
             </div>
@@ -327,10 +527,11 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
         </div>
       </div>
 
-      {/* Bottom input */}
+      {/* Bottom input — always visible */}
       <div className="border-t border-[rgba(0,0,0,0.07)] px-6 py-4">
         <div className="mx-auto flex max-w-2xl gap-2">
           <input
+            ref={inputRef}
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
@@ -340,25 +541,18 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
                 handleSend();
               }
             }}
-            placeholder="Type a reply..."
+            placeholder="Type a reply…"
             className="flex-1 rounded-full border border-[rgba(0,0,0,0.1)] bg-white px-4 py-2.5 text-sm text-[#1a1a1a] placeholder-[rgba(0,0,0,0.25)] outline-none focus:border-[#e8580a]/40"
           />
           <button
             onClick={handleSend}
-            disabled={!inputText.trim()}
+            disabled={!inputText.trim() || typing}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e8580a] text-white transition-colors hover:bg-[#d14e09] disabled:opacity-30"
           >
             <Send size={16} />
           </button>
         </div>
       </div>
-
-      <style>{`
-        @keyframes bubblePop {
-          from { opacity: 0; transform: scale(0); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
     </div>
   );
 }
