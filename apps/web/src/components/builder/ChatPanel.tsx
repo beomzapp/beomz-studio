@@ -47,99 +47,64 @@ interface ChatPanelProps {
 // Code line filter — suppress raw code dumps in chat
 // ─────────────────────────────────────────────
 
-const CODE_LINE_PATTERNS = [
-  // Module-level declarations
-  /^import\s+/,
-  /^export\s+(default\s+)?(function|const|class|interface|type|enum)\s/,
-  /^(const|let|var)\s+\w+\s*[=:]/,
-  /^function\s+\w+/,
-  /^interface\s+\w+/,
-  /^type\s+\w+\s*=/,
-  /^class\s+\w+/,
-  /^'use (client|server)'/,
-  /^"use (client|server)"/,
-  // JSX elements
-  /^\s*<[A-Z]\w+/,
-  /^\s*<\/[A-Z]\w+>/,
-  /^\s*<[a-z][a-z0-9]*[\s/>]/,
-  /^\s*<\/[a-z][a-z0-9]*>/,
-  /^\s*\/>\s*$/,
-  /^\s*return\s*\(/,
-  // Braces / punctuation-only lines
-  /^\s*[{}]\s*$/,
-  /^\s*\);\s*$/,
-  /^\s*\)\s*$/,
-  /^\s*\(\s*$/,
-  /^\s*\[\s*$/,
-  /^\s*\]\s*$/,
-  /^\s*\];\s*$/,
-  /^\s*\],\s*$/,
-  /^\s*\},\s*$/,
-  /^\s*\};\s*$/,
-  /^\s*\)\s*=>\s*\{/,
-  // JSX props
-  /^\s*className=/,
-  /^\s*style=\{/,
-  /^\s*onClick=/,
-  /^\s*onChange=/,
-  /^\s*onSubmit=/,
-  /^\s*onBlur=/,
-  /^\s*onFocus=/,
-  /^\s*disabled=/,
-  /^\s*placeholder=/,
-  /^\s*[a-zA-Z][\w-]+=\{/,
-  /^\s*[a-zA-Z][\w-]+="[^"]*"/,
-  // TypeScript type/interface property lines: `  id: string;`
-  /^\s+\w[\w?]*\??:\s*(string|number|boolean|null|undefined|void|any|never|object)\s*[;,]?\s*$/,
-  /^\s+\w[\w?]*\??:\s*\w+(\[\])?\s*[;,]\s*$/,
-  // Object literal value lines
-  /^\s+\w+:\s*['"`].*['"`],?\s*$/,
-  /^\s+\w+:\s*[-\d.]+,?\s*$/,
-  /^\s+\w+:\s*(true|false|null|undefined),?\s*$/,
-  /^\s+\w+:\s*\[/,
-  /^\s+\w+:\s*\{/,
-  // Comments and fences
-  /^```/,
-  /^\s*\/\//,
-  /^\s*\/\*/,
-  /^\s*\*[\s/]/,
-  /^\s*\*$/,
-  // Trace status codes
-  /^[A-Z][A-Z0-9_]{3,}(?:_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\b/,
-];
-
-function isCodeLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  return CODE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed));
-}
-
-/**
- * Filter out raw code lines from AI assistant text.
- * Keeps only conversational prose.
- */
 function filterCodeFromText(text: string): string {
-  if (!text) return text;
+  const codePatterns = [
+    new RegExp("^import\\s+"),
+    new RegExp("^export\\s+(default\\s+)?(function|const|class|interface|type|enum)\\s"),
+    new RegExp("^(const|let|var)\\s+[\\w\\[{]"),
+    new RegExp("^function\\s+\\w+"),
+    new RegExp("^interface\\s+\\w+"),
+    new RegExp("^type\\s+\\w+\\s*="),
+    new RegExp("^class\\s+\\w+"),
+    new RegExp("^\\s*\\?\\s"),
+    new RegExp("^\\s*:\\s*[\\w{(\\[]"),
+    new RegExp("^\\s*<[A-Z]\\w*"),
+    new RegExp("^\\s*<\\/[A-Z]\\w*>"),
+    new RegExp("^\\s*<[a-z][a-z0-9]*[\\s\\/]"),
+    new RegExp("^\\s*<\\/[a-z][a-z0-9]*>"),
+    new RegExp("^\\s*<[a-z][a-z0-9]*$"),
+    new RegExp("^\\s*\\/>\\s*$"),
+    new RegExp("^\\s*>\\s*$"),
+    new RegExp("^\\s*return\\s*\\("),
+    new RegExp("^\\s*[{}]\\s*$"),
+    new RegExp("^\\s*\\);\\s*$"),
+    new RegExp("^\\s*\\)\\s*$"),
+    new RegExp("^\\s*\\(\\s*$"),
+    new RegExp("^\\s*\\[\\s*$"),
+    new RegExp("^\\s*\\]\\s*$"),
+    new RegExp("^\\s*\\];\\s*$"),
+    new RegExp("^\\s*\\],\\s*$"),
+    new RegExp("^\\s*\\},\\s*$"),
+    new RegExp("^\\s*\\};\\s*$"),
+    new RegExp("^\\s*\\)\\s*=>\\s*[{(]"),
+    new RegExp("^\\s*\\w+\\s*\\(.*\\);\\s*$"),
+    new RegExp("^\\s*\\w+\\.\\w+\\s*\\(.*\\);\\s*$"),
+    new RegExp("^\\s*className="),
+    new RegExp("^\\s*style=\\{"),
+    new RegExp("^\\s*on[A-Z]\\w+="),
+    new RegExp("^\\s*disabled="),
+    new RegExp("^\\s*placeholder="),
+    new RegExp("^\\s*[a-zA-Z][\\w-]+=\\{"),
+    new RegExp('^\\s*d="[A-Z]'),
+    new RegExp("^\\s+\\w[\\w?]*\\??:\\s*(string|number|boolean|null|undefined|void|any|never|object)\\s*[;,]?\\s*$"),
+    new RegExp("^\\s+\\w[\\w?]*\\??:\\s*\\w+(\\[\\])?\\s*[;,]\\s*$"),
+    new RegExp("^\\s+\\w+:\\s*[-\\d.]+,?\\s*$"),
+    new RegExp("^\\s+\\w+:\\s*(true|false|null|undefined),?\\s*$"),
+    new RegExp("^\\s+\\w+:\\s*[\\[{(]"),
+    new RegExp("^\\s+\\w+:\\s*\\w+,?\\s*$"),
+    new RegExp("^\\s+\\.\\.\\.\\w+,?\\s*$"),
+    new RegExp("^\\s+\\[\\w+\\]:\\s*"),
+    new RegExp("^```"),
+    new RegExp("^\\s*\\/\\/"),
+    new RegExp("^\\s*\\/\\*"),
+    new RegExp("^\\s*\\*[\\s\\/]"),
+    new RegExp("^\\s*\\*$"),
+    new RegExp("^[A-Z][A-Z0-9_]{3,}(_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\\b"),
+  ];
+
   const lines = text.split("\n");
-  const proseLines: string[] = [];
-  let consecutiveCodeLines = 0;
-
-  for (const line of lines) {
-    if (isCodeLine(line)) {
-      consecutiveCodeLines++;
-      // If we see 3+ consecutive code lines, it's clearly a code block
-      continue;
-    }
-    // Reset counter for non-code lines
-    if (consecutiveCodeLines > 0 && line.trim() === "") {
-      consecutiveCodeLines = 0;
-      continue; // skip blank lines between code blocks
-    }
-    consecutiveCodeLines = 0;
-    proseLines.push(line);
-  }
-
-  return proseLines.join("\n").trim();
+  const kept = lines.filter(line => !codePatterns.some(p => p.test(line)));
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // ─────────────────────────────────────────────
