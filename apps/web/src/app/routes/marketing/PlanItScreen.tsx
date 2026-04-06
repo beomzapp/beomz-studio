@@ -425,7 +425,7 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
       </div>
 
       {/* Chat area */}
-      <div ref={chatRef} className="flex-1 overflow-y-auto px-6 py-6">
+      <div ref={chatRef} className="flex-1 overflow-y-auto min-h-0 px-6 py-6">
         <div className="mx-auto max-w-2xl space-y-5">
           {messages.map((msg) => {
             // User message — right-aligned dark bubble
