@@ -1,10 +1,144 @@
-import { startTransition, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import type { CreatePreviewSessionResponse, Project, StudioFile } from "@beomz-studio/contracts";
-import { Bug, Loader2, MonitorSmartphone } from "lucide-react";
+import {
+  Loader2,
+  Monitor,
+  Smartphone,
+  Tablet,
+  RefreshCw,
+} from "lucide-react";
 
 import { cn } from "../../lib/cn";
-import { createOrResumePreviewSession } from "../../lib/api";
 import { buildStudioPreviewHtml } from "../../lib/studio-preview";
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+function injectViewport(html: string, width: number | null): string {
+  if (!width) return html;
+
+  const viewportMeta = `<meta name="viewport" content="width=${width}, initial-scale=1.0" />`;
+
+  const widthStyle = `
+    <style>
+      html, body {
+        width: ${width}px !important;
+        min-width: ${width}px !important;
+        overflow-x: hidden;
+      }
+    </style>`;
+
+  return html
+    .replace(/<meta name="viewport"[^>]*\/?>/, viewportMeta)
+    .replace("</head>", widthStyle + "</head>");
+}
+
+// ─────────────────────────────────────────────
+// PhoneFrame
+// ─────────────────────────────────────────────
+
+function PhoneFrame({
+  children,
+  viewportWidth,
+  viewportHeight,
+}: {
+  children?: React.ReactNode;
+  viewportWidth: number;
+  viewportHeight: number;
+}) {
+  const bezel = 8;
+  const stageWidth = viewportWidth + bezel * 2;
+  const stageHeight = viewportHeight + bezel * 2;
+  const portraitStageHeight = 844 + bezel * 2;
+  const phoneScale = (870 / portraitStageHeight) * 0.85;
+  const frameWidth = Math.round(stageWidth * phoneScale);
+  const frameHeight = Math.round(stageHeight * phoneScale);
+
+  return (
+    <div
+      className="relative inline-block"
+      style={{ width: frameWidth, height: frameHeight, maxHeight: "calc(100vh - 160px)" }}
+    >
+      <div
+        className="absolute left-0 top-0 overflow-hidden"
+        style={{
+          borderRadius: 40,
+          border: `${bezel}px solid #1a1a1a`,
+          background: "#1a1a1a",
+          width: stageWidth,
+          height: stageHeight,
+          transform: `scale(${phoneScale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <div
+          className="flex h-full w-full flex-col overflow-hidden bg-white"
+          style={{ borderRadius: 34 }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// TabletFrame
+// ─────────────────────────────────────────────
+
+function TabletFrame({
+  children,
+  viewportWidth,
+  viewportHeight,
+  isPortrait,
+}: {
+  children?: React.ReactNode;
+  viewportWidth: number;
+  viewportHeight: number;
+  isPortrait: boolean;
+}) {
+  const bezel = 10;
+  const stageWidth = viewportWidth + bezel * 2;
+  const stageHeight = viewportHeight + bezel * 2;
+  const stageScale = isPortrait
+    ? 600 / viewportWidth
+    : Math.min(900 / viewportWidth, 640 / viewportHeight);
+  const frameWidth = Math.round(stageWidth * stageScale);
+  const frameHeight = Math.round(stageHeight * stageScale);
+
+  return (
+    <div className="relative inline-block" style={{ width: frameWidth, height: frameHeight }}>
+      <div
+        className="absolute left-0 top-0 flex flex-col overflow-hidden"
+        style={{
+          borderRadius: 20,
+          border: `${bezel}px solid #1a1a1a`,
+          background: "#1a1a1a",
+          width: stageWidth,
+          height: stageHeight,
+          transform: `scale(${stageScale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        <div className="flex flex-1 flex-col overflow-hidden bg-white" style={{ borderRadius: 12 }}>
+          {children}
+        </div>
+        {isPortrait ? (
+          <div className="flex h-6 items-center justify-center">
+            <div className="h-1.5 w-28 rounded-full bg-white/45" />
+          </div>
+        ) : (
+          <div className="absolute right-1.5 top-1/2 h-24 w-1.5 -translate-y-1/2 rounded-full bg-white/45" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Props
+// ─────────────────────────────────────────────
 
 interface PreviewPaneProps {
   files?: readonly StudioFile[] | null;
@@ -12,63 +146,7 @@ interface PreviewPaneProps {
   previewEntryPath?: string | null;
   project?: Pick<Project, "id" | "name" | "templateId"> | null;
   refreshToken?: number;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function buildInlineFallbackDoc(message: string): string {
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root {
-        color-scheme: dark;
-        font-family: "Geist Sans", system-ui, sans-serif;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        background:
-          radial-gradient(circle at top, rgba(249, 115, 22, 0.2), transparent 42%),
-          linear-gradient(160deg, #050816 0%, #0d1630 48%, #050816 100%);
-        color: rgba(255, 255, 255, 0.92);
-      }
-      div {
-        width: min(540px, calc(100vw - 32px));
-        padding: 28px;
-        border-radius: 28px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(13, 20, 42, 0.94);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-      }
-      strong {
-        display: block;
-        margin-bottom: 12px;
-        color: #f97316;
-        text-transform: uppercase;
-        letter-spacing: 0.18em;
-        font-size: 11px;
-      }
-      p {
-        margin: 0;
-        line-height: 1.7;
-        color: rgba(255, 255, 255, 0.7);
-      }
-    </style>
-  </head>
-  <body>
-    <div>
-      <strong>Preview fallback</strong>
-      <p>${message}</p>
-    </div>
-  </body>
-</html>`;
+  publishedSlug?: string | null;
 }
 
 export function PreviewPane({
@@ -77,41 +155,63 @@ export function PreviewPane({
   previewEntryPath,
   project,
   refreshToken = 0,
+  publishedSlug,
 }: PreviewPaneProps) {
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading] = useState(false);
   const [previewMode, setPreviewMode] = useState<"inline" | "remote">("inline");
-  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [, setRemoteError] = useState<string | null>(null);
   const [remoteResponse, setRemoteResponse] = useState<CreatePreviewSessionResponse | null>(null);
 
-  const inlineFrame = useMemo(() => {
-    if (!project || !files || files.length === 0) {
+  // Viewport state
+  const [viewMode, setViewMode] = useState<"web" | "tablet" | "mobile">("web");
+  const [mobileLandscape, setMobileLandscape] = useState(false);
+  const [tabletPortrait, setTabletPortrait] = useState(true);
+  const [zoom, setZoom] = useState(1);
+
+  const mobileViewportWidth = mobileLandscape ? 844 : 390;
+  const mobileViewportHeight = mobileLandscape ? 390 : 844;
+  const tabletViewportWidth = tabletPortrait ? 768 : 1024;
+  const tabletViewportHeight = tabletPortrait ? 1024 : 768;
+
+  const inlineHtml = useMemo(() => {
+    if (!project || !files || files.length === 0) return null;
+    try {
+      return buildStudioPreviewHtml({ files, previewEntryPath, project });
+    } catch {
       return null;
     }
+  }, [files, previewEntryPath, project]);
 
-    try {
-      return {
-        error: null,
-        key: `inline:${project.id}:${generationId ?? "draft"}:${refreshToken}`,
-        src: undefined,
-        srcDoc: buildStudioPreviewHtml({
-          files,
-          previewEntryPath,
-          project,
-        }),
-      };
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Inline preview failed to render.";
+  const mobileHtml = useMemo(
+    () => (inlineHtml ? injectViewport(inlineHtml, mobileViewportWidth) : null),
+    [inlineHtml, mobileViewportWidth],
+  );
+  const tabletHtml = useMemo(
+    () => (inlineHtml ? injectViewport(inlineHtml, tabletViewportWidth) : null),
+    [inlineHtml, tabletViewportWidth],
+  );
+  const webHtml = useMemo(
+    () => (inlineHtml ? injectViewport(inlineHtml, null) : null),
+    [inlineHtml],
+  );
 
-      return {
-        error: message,
-        key: `inline:${project.id}:error:${generationId ?? "draft"}:${refreshToken}`,
-        src: undefined,
-        srcDoc: buildInlineFallbackDoc(message),
-      };
-    }
-  }, [files, generationId, previewEntryPath, project, refreshToken]);
+  const inlineFrame = useMemo(() => {
+    if (!project || !files || files.length === 0) return null;
+
+    const html =
+      viewMode === "mobile" ? mobileHtml
+        : viewMode === "tablet" ? tabletHtml
+          : webHtml;
+
+    if (!html) return null;
+
+    return {
+      key: `inline:${project.id}:${generationId ?? "draft"}:${refreshToken}:${viewMode}`,
+      src: undefined,
+      srcDoc: html,
+    };
+  }, [files, generationId, project, refreshToken, viewMode, mobileHtml, tabletHtml, webHtml]);
 
   const remoteFrame = useMemo(() => {
     if (remoteResponse?.session.provider === "e2b" && remoteResponse.session.url) {
@@ -121,7 +221,6 @@ export function PreviewPane({
         srcDoc: undefined,
       };
     }
-
     if (remoteResponse?.fallbackHtml) {
       return {
         key: `${remoteResponse.session.id}:fallback`,
@@ -129,7 +228,6 @@ export function PreviewPane({
         srcDoc: remoteResponse.fallbackHtml,
       };
     }
-
     return null;
   }, [remoteResponse]);
 
@@ -138,59 +236,15 @@ export function PreviewPane({
       ? remoteFrame
       : inlineFrame;
 
-  const requestPreviewSession = useEffectEvent(async () => {
-    if (isLoading) {
-      return;
-    }
-
-    if (!project?.id || !isUuid(project.id)) {
-      return;
-    }
-
-    setIsLoading(true);
-    setRemoteError(null);
-
-    try {
-      const nextResponse = await createOrResumePreviewSession({
-        generationId: generationId ?? undefined,
-        projectId: project.id,
-      });
-
-      startTransition(() => {
-        setHasFirstFrame(false);
-        setPreviewMode("remote");
-        setRemoteResponse(nextResponse);
-      });
-    } catch (requestError) {
-      const message =
-        requestError instanceof Error ? requestError.message : "Remote preview failed to load.";
-
-      startTransition(() => {
-        setPreviewMode("inline");
-        setRemoteError(message);
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  });
-
-  useEffect(() => {
-    setHasFirstFrame(false);
-  }, [activeFrame?.key]);
+  useEffect(() => { setHasFirstFrame(false); }, [activeFrame?.key]);
 
   useEffect(() => {
     function handlePreviewMessage(event: MessageEvent) {
-      if (event.data?.type !== "beomz-preview-ready") {
-        return;
-      }
-
+      if (event.data?.type !== "beomz-preview-ready") return;
       setHasFirstFrame(true);
     }
-
     window.addEventListener("message", handlePreviewMessage);
-    return () => {
-      window.removeEventListener("message", handlePreviewMessage);
-    };
+    return () => { window.removeEventListener("message", handlePreviewMessage); };
   }, []);
 
   useEffect(() => {
@@ -200,28 +254,40 @@ export function PreviewPane({
     setHasFirstFrame(false);
   }, [generationId, project?.id]);
 
+  const handleRotate = useCallback(() => {
+    if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
+    if (viewMode === "tablet") setTabletPortrait((prev) => !prev);
+  }, [viewMode]);
+
   if (!project?.id) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-white/30">
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-[#9ca3af]">
         Start a build to launch the live preview.
       </div>
     );
   }
 
-  const statusMessage =
-    remoteError
-    ?? inlineFrame?.error
-    ?? (previewMode === "remote"
-      ? "Launching remote debug preview."
-      : "Rendering inline studio preview from the validated files.");
+  const urlBarText = publishedSlug ? `${publishedSlug}.beomz.app` : "beomz.app/preview";
 
-  return (
-    <div className="relative h-full min-h-[340px] overflow-hidden bg-[#050816]">
+  // ── Web view with browser chrome ──
+  const renderWebView = () => (
+    <div className="flex h-full flex-col">
+      {/* Browser chrome */}
+      <div className="flex flex-shrink-0 items-center gap-2 rounded-t-xl border border-b-0 border-[#e5e5e5] bg-[#f5f5f5] px-3 py-2">
+        <div className="flex gap-1.5">
+          <div className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+          <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
+          <div className="h-3 w-3 rounded-full bg-[#28c840]" />
+        </div>
+        <div className="flex-1 rounded-md border border-[#e5e5e5] bg-white px-3 py-1 text-xs text-[#9ca3af]">
+          {urlBarText}
+        </div>
+      </div>
       {activeFrame ? (
         <iframe
           key={activeFrame.key}
           allow="clipboard-read; clipboard-write"
-          className="h-full w-full border-0"
+          className="flex-1 w-full rounded-b-xl border border-[#e5e5e5] bg-white"
           referrerPolicy="no-referrer"
           sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
           src={activeFrame.src}
@@ -230,64 +296,149 @@ export function PreviewPane({
           onLoad={() => setHasFirstFrame(true)}
         />
       ) : (
-        <div className="flex h-full items-center justify-center text-sm text-white/25">
-          Start a build to see the inline preview.
+        <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#e5e5e5]">
+              <Monitor className="h-5 w-5 text-[#d1d5db]" />
+            </div>
+            <p className="text-sm font-medium text-[#6b7280]">Your app will appear here</p>
+            <p className="text-xs text-[#9ca3af]">Start a conversation to generate your app.</p>
+          </div>
         </div>
       )}
+    </div>
+  );
 
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-0 transition-opacity duration-300",
-          hasFirstFrame && !isLoading ? "opacity-0" : "opacity-100",
-        )}
-      >
-        <div className="flex h-full flex-col justify-between bg-[radial-gradient(circle_at_top,rgba(249,115,22,0.18),transparent_40%),linear-gradient(160deg,#050816_0%,#0d1630_48%,#050816_100%)] p-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-orange/80">
-                <MonitorSmartphone size={14} />
-                Preview
-              </div>
-              <div className="pointer-events-auto flex items-center gap-2">
-                {previewMode === "remote" ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPreviewMode("inline");
-                      setHasFirstFrame(false);
-                    }}
-                    className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75 transition hover:bg-white/[0.12]"
-                  >
-                    Use inline preview
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={!generationId || isLoading}
-                    onClick={() => {
-                      void requestPreviewSession();
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/75 transition hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Bug size={12} />
-                    Remote debug
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
-              <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
-            </div>
-            <div className="h-44 rounded-[28px] border border-white/10 bg-white/[0.04]" />
-          </div>
+  // ── Framed views (mobile/tablet) ──
+  const renderFramedView = () => {
+    const isMobile = viewMode === "mobile";
+    const vpW = isMobile ? mobileViewportWidth : tabletViewportWidth;
+    const vpH = isMobile ? mobileViewportHeight : tabletViewportHeight;
+    const html = isMobile ? mobileHtml : tabletHtml;
+    const Frame = isMobile ? PhoneFrame : TabletFrame;
 
-          <div className="flex items-center gap-3 text-sm text-white/65">
-            <Loader2 size={16} className={cn("text-orange", isLoading && "animate-spin")} />
-            <span>{statusMessage}</span>
-          </div>
+    const frameProps = isMobile
+      ? { viewportWidth: vpW, viewportHeight: vpH }
+      : { viewportWidth: vpW, viewportHeight: vpH, isPortrait: tabletPortrait };
+
+    return (
+      <div className="flex h-full items-center justify-center overflow-auto">
+        <div style={{ transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.2s ease" }}>
+          {/* @ts-expect-error -- Frame union, props are compatible */}
+          <Frame {...frameProps}>
+            {html ? (
+              <iframe
+                key={`${viewMode}-${refreshToken}`}
+                srcDoc={html}
+                width={String(vpW)}
+                height={String(vpH)}
+                style={{
+                  border: "none",
+                  display: "block",
+                  borderRadius: "inherit",
+                  overflowY: "auto",
+                  width: `${vpW}px`,
+                  height: `${vpH}px`,
+                }}
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                title={`${viewMode} preview`}
+                onLoad={() => setHasFirstFrame(true)}
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#d1d5db]">
+                  {isMobile ? <Smartphone className="h-5 w-5 text-[#d1d5db]" /> : <Tablet className="h-5 w-5 text-[#d1d5db]" />}
+                </div>
+                <p className="text-xs text-[#9ca3af]">Your app will appear here</p>
+              </div>
+            )}
+          </Frame>
         </div>
       </div>
+    );
+  };
+
+  return (
+    <div className="relative flex h-full min-h-[340px] flex-col overflow-hidden bg-white">
+      {/* Viewport toolbar */}
+      <div className="flex flex-shrink-0 items-center justify-center gap-2 border-b border-[#e5e5e5] py-2">
+        {/* Web / Tablet / Mobile switcher */}
+        <div className="flex items-center rounded-lg bg-[#f3f4f6] p-0.5">
+          {([
+            { mode: "web" as const, icon: Monitor, label: "Web" },
+            { mode: "tablet" as const, icon: Tablet, label: "Tablet" },
+            { mode: "mobile" as const, icon: Smartphone, label: "Mobile" },
+          ]).map(({ mode, icon: Icon, label }) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs transition-all",
+                viewMode === mode
+                  ? "bg-white font-medium text-[#1a1a1a] shadow-sm"
+                  : "text-[#6b7280] hover:text-[#1a1a1a]",
+              )}
+            >
+              <Icon size={12} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Rotate button */}
+        {viewMode !== "web" && (
+          <>
+            <div className="h-4 w-px bg-[#e5e5e5]" />
+            <button
+              onClick={handleRotate}
+              className="flex items-center gap-1.5 rounded-lg bg-[#f3f4f6] px-2.5 py-1 text-xs text-[#6b7280] transition-colors hover:bg-[#e5e7eb]"
+              title="Rotate"
+            >
+              <RefreshCw size={12} />
+              Rotate
+            </button>
+          </>
+        )}
+
+        {/* Zoom controls */}
+        {viewMode !== "web" && (
+          <>
+            <div className="h-4 w-px bg-[#e5e5e5]" />
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))}
+                className="flex h-6 w-6 items-center justify-center rounded text-sm font-medium text-[#6b7280] hover:bg-[#f3f4f6]"
+              >
+                {"\u2212"}
+              </button>
+              <span className="w-8 text-center text-xs text-[#6b7280]">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onClick={() => setZoom((z) => Math.min(2.0, z + 0.1))}
+                className="flex h-6 w-6 items-center justify-center rounded text-sm font-medium text-[#6b7280] hover:bg-[#f3f4f6]"
+              >
+                +
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Preview area */}
+      <div className="relative min-h-0 flex-1 overflow-auto p-4 md:p-6">
+        {viewMode === "web" ? renderWebView() : renderFramedView()}
+      </div>
+
+      {/* Loading overlay */}
+      {!hasFirstFrame && isLoading && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/80">
+          <div className="flex items-center gap-2 text-sm text-[#6b7280]">
+            <Loader2 size={16} className="animate-spin text-[#F97316]" />
+            <span>Loading preview...</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

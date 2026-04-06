@@ -1,7 +1,8 @@
 /**
- * ChatPanel — V1 chat sidebar ported to V2.
- * Light mode, cream bg, SSE streaming via Railway API.
- * Input pinned to bottom with icon toolbar.
+ * ChatPanel — V2 chat sidebar.
+ * User messages: right-aligned dark bubble.
+ * AI messages: left-aligned with orange "B" avatar.
+ * Plan cards, file change links, error toast, streaming shimmer.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
@@ -18,6 +19,7 @@ import {
   CheckCircle2,
   Loader2,
   Wrench,
+  FileCode,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -27,6 +29,9 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   traceEntries?: readonly BuilderV3TranscriptEntry[];
+  planSteps?: readonly string[];
+  changedFiles?: readonly string[];
+  error?: string | null;
 }
 
 interface ChatPanelProps {
@@ -35,8 +40,76 @@ interface ChatPanelProps {
   streamingText: string;
   onSendMessage: (text: string) => void;
   onStopStreaming?: () => void;
+  onAutoFix?: (error: string) => void;
+  onViewCode?: () => void;
   width?: number;
 }
+
+// ─────────────────────────────────────────────
+// Markdown-lite renderer
+// ─────────────────────────────────────────────
+
+function renderInline(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*.*?\*\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i} className="font-semibold text-[#1a1a1a]">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={i} className="rounded bg-[#f3f4f6] px-1.5 py-0.5 font-mono text-[13px] text-[#7c3aed]">{part.slice(1, -1)}</code>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+function MarkdownText({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let listBuffer: { type: "ul" | "ol"; items: string[] } | null = null;
+
+  const flushList = () => {
+    if (!listBuffer) return;
+    const Tag = listBuffer.type === "ol" ? "ol" : "ul";
+    const cls = listBuffer.type === "ol"
+      ? "list-decimal list-inside space-y-1 my-1.5"
+      : "list-disc list-inside space-y-1 my-1.5";
+    elements.push(
+      <Tag key={`list-${elements.length}`} className={cls}>
+        {listBuffer.items.map((item, i) => (
+          <li key={i} className="text-sm leading-relaxed text-[#374151]">{renderInline(item)}</li>
+        ))}
+      </Tag>,
+    );
+    listBuffer = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const ulMatch = line.match(/^[-•*]\s+(.*)/);
+    const olMatch = line.match(/^\d+[.)]\s+(.*)/);
+
+    if (ulMatch) {
+      if (listBuffer?.type !== "ul") { flushList(); listBuffer = { type: "ul", items: [] }; }
+      listBuffer!.items.push(ulMatch[1]);
+    } else if (olMatch) {
+      if (listBuffer?.type !== "ol") { flushList(); listBuffer = { type: "ol", items: [] }; }
+      listBuffer!.items.push(olMatch[1]);
+    } else {
+      flushList();
+      if (line.trim() === "") {
+        elements.push(<div key={`br-${i}`} className="h-2" />);
+      } else {
+        elements.push(<p key={`p-${i}`} className="text-sm leading-relaxed text-[#374151]">{renderInline(line)}</p>);
+      }
+    }
+  }
+  flushList();
+  return <>{elements}</>;
+}
+
+// ─────────────────────────────────────────────
+// Trace entry row
+// ─────────────────────────────────────────────
 
 function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
   const isError = entry.status === "error" || entry.kind === "error";
@@ -51,32 +124,70 @@ function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
           ? "border-red-200 bg-red-50 text-red-700"
           : isSuccess
             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : "border-[#ece7df] bg-[#faf9f6] text-[#6b7280]",
+            : "border-[#e5e5e5] bg-[#faf9f6] text-[#6b7280]",
       )}
     >
       <span className="mt-0.5 shrink-0">
-        {isRunning ? (
-          <Loader2 size={13} className="animate-spin" />
-        ) : isError ? (
-          <AlertCircle size={13} />
-        ) : isSuccess ? (
-          <CheckCircle2 size={13} />
-        ) : (
-          <Wrench size={13} />
-        )}
+        {isRunning ? <Loader2 size={13} className="animate-spin" />
+          : isError ? <AlertCircle size={13} />
+            : isSuccess ? <CheckCircle2 size={13} />
+              : <Wrench size={13} />}
       </span>
-
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-current">{entry.message}</div>
+        <div className="font-medium">{entry.message}</div>
         {(entry.toolName || entry.code) && (
-          <div className="mt-1 text-[11px] uppercase tracking-wide text-current/70">
-            {[entry.toolName, entry.code].filter(Boolean).join(" • ")}
+          <div className="mt-1 text-[11px] uppercase tracking-wide opacity-70">
+            {[entry.toolName, entry.code].filter(Boolean).join(" \u00b7 ")}
           </div>
         )}
       </div>
     </div>
   );
 }
+
+// ─────────────────────────────────────────────
+// Plan card
+// ─────────────────────────────────────────────
+
+function PlanCardInline({ steps }: { steps: readonly string[] }) {
+  return (
+    <div className="mt-2 rounded-xl border border-[#e5e5e5] bg-[#faf9f6] p-3">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">Plan</p>
+      <ol className="space-y-1.5">
+        {steps.map((step, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs text-[#374151]">
+            <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316]/10 text-[10px] font-bold text-[#F97316]">
+              {i + 1}
+            </span>
+            <span className="pt-0.5 leading-relaxed">{step}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// File change link
+// ─────────────────────────────────────────────
+
+function FileChangeBadge({ files, onViewCode }: { files: readonly string[]; onViewCode?: () => void }) {
+  if (files.length === 0) return null;
+  return (
+    <button
+      onClick={onViewCode}
+      className="mt-2 flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-[#f3f4f6]"
+    >
+      <FileCode size={12} />
+      <span>{files.length} file{files.length !== 1 ? "s" : ""} changed</span>
+      <span className="text-[#F97316]">\u00b7 View code</span>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Copy button
+// ─────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -95,12 +206,44 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// ─────────────────────────────────────────────
+// Orange B Avatar
+// ─────────────────────────────────────────────
+
+function BeomzAvatar() {
+  return (
+    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
+      B
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Streaming shimmer
+// ─────────────────────────────────────────────
+
+function StreamingShimmer() {
+  return (
+    <div className="space-y-2 py-1">
+      <div className="h-3 w-3/4 animate-pulse rounded bg-[#f3f4f6]" />
+      <div className="h-3 w-1/2 animate-pulse rounded bg-[#f3f4f6]" style={{ animationDelay: "150ms" }} />
+      <div className="h-3 w-2/3 animate-pulse rounded bg-[#f3f4f6]" style={{ animationDelay: "300ms" }} />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ChatPanel
+// ─────────────────────────────────────────────
+
 export function ChatPanel({
   messages,
   isStreaming,
   streamingText,
   onSendMessage,
   onStopStreaming,
+  onAutoFix,
+  onViewCode,
   width = 380,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -110,7 +253,6 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, streamingText]);
@@ -118,8 +260,7 @@ export function ChatPanel({
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    setShowScrollBtn(!atBottom);
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 80);
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -155,15 +296,13 @@ export function ChatPanel({
   );
 
   const hasMessages = messages.length > 0 || isStreaming;
-  const hasAssistantActivity = messages.some(
-    (message) =>
-      message.role === "assistant"
-      && (message.content.trim().length > 0 || (message.traceEntries?.length ?? 0) > 0),
-  );
+
+  // Find the last error in messages for the error toast
+  const lastError = [...messages].reverse().find((m) => m.error)?.error ?? null;
 
   return (
     <div
-      className="flex shrink-0 flex-col border-r border-[#e5e7eb] bg-[#faf9f6]"
+      className="flex shrink-0 flex-col border-r border-[#e5e5e5] bg-[#faf9f6]"
       style={{ width }}
     >
       {/* Messages area */}
@@ -172,7 +311,6 @@ export function ChatPanel({
         onScroll={handleScroll}
         className="relative flex-1 overflow-y-auto px-4 py-4"
       >
-        {/* Empty state — centred placeholder */}
         {!hasMessages && (
           <div className="flex h-full items-center justify-center">
             <p className="max-w-[200px] text-center text-sm leading-relaxed text-[#c4c4c4]">
@@ -181,61 +319,68 @@ export function ChatPanel({
           </div>
         )}
 
-        {/* Message list */}
         {hasMessages && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={cn(
-                  "group flex",
-                  msg.role === "user" ? "justify-end" : "justify-start",
+              <div key={msg.id}>
+                {msg.role === "user" ? (
+                  /* User message — right-aligned dark bubble */
+                  <div className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-3.5 py-2.5 text-sm leading-relaxed text-white">
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : (
+                  /* AI message — left-aligned with orange avatar */
+                  <div className="flex items-start gap-2.5">
+                    <BeomzAvatar />
+                    <div className="group relative min-w-0 max-w-[85%]">
+                      <div className="rounded-2xl rounded-bl-md border border-[#e5e5e5] bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[#1a1a1a]">
+                        {msg.content && <MarkdownText text={msg.content} />}
+
+                        {/* Plan steps card */}
+                        {msg.planSteps && msg.planSteps.length > 0 && (
+                          <PlanCardInline steps={msg.planSteps} />
+                        )}
+
+                        {/* Trace entries */}
+                        {msg.traceEntries && msg.traceEntries.length > 0 && (
+                          <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
+                            {msg.traceEntries.map((entry) => (
+                              <TraceEntryRow key={entry.id} entry={entry} />
+                            ))}
+                          </div>
+                        )}
+
+                        {/* File change badge */}
+                        {msg.changedFiles && msg.changedFiles.length > 0 && (
+                          <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
+                        )}
+                      </div>
+
+                      {/* Copy button on hover */}
+                      <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <CopyButton text={msg.content} />
+                      </div>
+                    </div>
+                  </div>
                 )}
-              >
-                <div
-                  className={cn(
-                    "relative max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
-                    msg.role === "user"
-                      ? "rounded-br-md bg-[#1a1a1a] text-white"
-                      : "rounded-bl-md border border-[#e5e7eb] bg-white text-[#1a1a1a]",
-                  )}
-                >
-                  {msg.content}
-                  {msg.traceEntries && msg.traceEntries.length > 0 && (
-                    <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
-                      {msg.traceEntries.map((entry) => (
-                        <TraceEntryRow key={entry.id} entry={entry} />
-                      ))}
-                    </div>
-                  )}
-                  {msg.role === "assistant" && (
-                    <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <CopyButton text={msg.content} />
-                    </div>
-                  )}
-                </div>
               </div>
             ))}
 
-            {/* Streaming message */}
-            {isStreaming && streamingText && (
-              <div className="flex justify-start">
-                <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-[#e5e7eb] bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[#1a1a1a]">
-                  {streamingText}
-                  <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#9ca3af]" />
-                </div>
-              </div>
-            )}
-
-            {/* Thinking indicator */}
-            {isStreaming && !streamingText && !hasAssistantActivity && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl rounded-bl-md border border-[#e5e7eb] bg-white px-3.5 py-2.5">
-                  <div className="flex gap-1">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#9ca3af]" style={{ animationDelay: "0ms" }} />
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#9ca3af]" style={{ animationDelay: "150ms" }} />
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#9ca3af]" style={{ animationDelay: "300ms" }} />
-                  </div>
+            {/* Streaming AI message */}
+            {isStreaming && (
+              <div className="flex items-start gap-2.5">
+                <BeomzAvatar />
+                <div className="min-w-0 max-w-[85%] rounded-2xl rounded-bl-md border border-[#e5e5e5] bg-white px-3.5 py-2.5">
+                  {streamingText ? (
+                    <div className="text-sm leading-relaxed text-[#1a1a1a]">
+                      <MarkdownText text={streamingText} />
+                      <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#9ca3af]" />
+                    </div>
+                  ) : (
+                    <StreamingShimmer />
+                  )}
                 </div>
               </div>
             )}
@@ -248,17 +393,30 @@ export function ChatPanel({
         {showScrollBtn && (
           <button
             onClick={scrollToBottom}
-            className="sticky bottom-2 left-1/2 -translate-x-1/2 rounded-full border border-[#e5e7eb] bg-white p-2 shadow-md transition-colors hover:bg-[rgba(0,0,0,0.02)]"
+            className="sticky bottom-2 left-1/2 -translate-x-1/2 rounded-full border border-[#e5e5e5] bg-white p-2 shadow-md transition-colors hover:bg-[rgba(0,0,0,0.02)]"
           >
             <ArrowDown size={14} className="text-[#6b7280]" />
           </button>
         )}
       </div>
 
-      {/* Input bar — pinned to bottom */}
-      <div className="border-t border-[#e5e7eb] px-3 py-2">
-        <div className="rounded-xl border border-[#e5e7eb] bg-white focus-within:border-[#F97316]/50">
-          {/* Textarea — grows upward */}
+      {/* Error toast */}
+      {lastError && !isStreaming && onAutoFix && (
+        <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs shadow-sm">
+          <AlertCircle size={14} className="flex-shrink-0 text-amber-500" />
+          <span className="flex-1 truncate text-amber-800">{lastError}</span>
+          <button
+            onClick={() => onAutoFix(lastError)}
+            className="flex-shrink-0 rounded-lg bg-[#F97316] px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+          >
+            Fix automatically &rarr;
+          </button>
+        </div>
+      )}
+
+      {/* Input bar */}
+      <div className="border-t border-[#e5e5e5] px-3 py-2">
+        <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
           <div className="px-3 pt-2">
             <textarea
               ref={textareaRef}
@@ -271,7 +429,6 @@ export function ChatPanel({
             />
           </div>
 
-          {/* Icon toolbar */}
           <div className="flex items-center justify-between px-2 pb-1.5">
             <div className="flex items-center gap-0.5">
               <button

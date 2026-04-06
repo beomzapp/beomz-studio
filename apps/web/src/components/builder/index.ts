@@ -1,7 +1,10 @@
 export { TopBar } from "./TopBar";
+export type { ActiveView } from "./TopBar";
 export { ChatPanel } from "./ChatPanel";
 export type { ChatMessage } from "./ChatPanel";
 export { PreviewPanel } from "./PreviewPanel";
 export { PlanCard } from "./PlanCard";
 export { PlanTypewriter } from "./PlanTypewriter";
 export { BuilderModals } from "./BuilderModals";
+export { DatabasePanel } from "./DatabasePanel";
+export { IntegrationsPanel } from "./IntegrationsPanel";
