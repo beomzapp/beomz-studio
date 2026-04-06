@@ -266,7 +266,19 @@ export function ProjectPage() {
           );
 
           if (response.trace.previewReady) {
-            setPreviewGenerationId(response.build.id);
+            void getBuildStatus(response.build.id)
+              .then((status) => {
+                if (!status.result) {
+                  return;
+                }
+
+                setBuild(status.build);
+                setBuildResult(status.result);
+                setPreviewGenerationId(response.build.id);
+              })
+              .catch(() => {
+                setPreviewGenerationId(response.build.id);
+              });
           }
 
           if (id === "new") {
