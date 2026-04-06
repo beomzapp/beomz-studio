@@ -395,7 +395,6 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
     });
     navigate({ to: "/studio/project/$id", params: { id: "new" } });
   }, [prompt, messages, navigate]);
-  }, [prompt, messages, navigate]);
 
   const handleEditPlan = useCallback(() => {
     // Add AI question message and focus input — user types what to change
