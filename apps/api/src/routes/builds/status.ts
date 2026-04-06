@@ -5,8 +5,8 @@ import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import {
   buildInitialBuildOutput,
+  mapGenerationRowToBuild,
   mapProjectRowToProject,
-  readBuildMetadata,
   readBuildTraceMetadata,
 } from "./shared.js";
 
@@ -30,24 +30,10 @@ buildsStatusRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json({ error: "Build not found." }, 404);
   }
 
-  const metadata = readBuildMetadata(generationRow.metadata);
   const trace = readBuildTraceMetadata(generationRow);
 
   return c.json({
-    build: {
-      completedAt: generationRow.completed_at,
-      error: generationRow.error,
-      id: generationRow.id,
-      phase: metadata.phase ?? null,
-      projectId: generationRow.project_id,
-      source: metadata.resultSource ?? null,
-      startedAt: generationRow.started_at,
-      status: generationRow.status,
-      summary: generationRow.summary,
-      templateId: generationRow.template_id,
-      templateReason: metadata.templateReason ?? null,
-      workflowId: metadata.workflowId ?? null,
-    },
+    build: mapGenerationRowToBuild(generationRow),
     project: mapProjectRowToProject(projectRow),
     result: buildInitialBuildOutput(generationRow),
     trace,
