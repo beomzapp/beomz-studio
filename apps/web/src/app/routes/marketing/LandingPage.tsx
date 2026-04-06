@@ -10,6 +10,7 @@ import {
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
+import { AuthModal } from "../../../components/auth/AuthModal";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 const SUGGESTIONS = [
@@ -46,9 +47,11 @@ export function LandingPage() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingPromptRef = useRef<string | null>(null);
   const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);
@@ -79,6 +82,21 @@ export function LandingPage() {
     });
   }, []);
 
+  // When session appears after email sign-in, restore the pending prompt into the input
+  useEffect(() => {
+    if (session && pendingPromptRef.current) {
+      const pending = pendingPromptRef.current;
+      pendingPromptRef.current = null;
+      setShowAuthModal(false);
+      if (editableRef.current) {
+        editableRef.current.textContent = pending;
+        setHasText(true);
+        updateFontSize();
+        placeCursorAtEnd(editableRef.current);
+      }
+    }
+  }, [session, updateFontSize]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
@@ -100,11 +118,18 @@ export function LandingPage() {
         const prompt = editableRef.current?.textContent?.trim() ?? "";
         if (!prompt) return;
 
-        // Always route through /plan for the planning/summary step
+        if (!session) {
+          // Not signed in — show auth overlay, keep prompt in input
+          pendingPromptRef.current = prompt;
+          setShowAuthModal(true);
+          return;
+        }
+
+        // Signed in — always route through /plan
         navigate({ to: "/plan", search: { q: prompt } });
       }
     },
-    [navigate, suggestionIndex, updateFontSize],
+    [navigate, session, suggestionIndex, updateFontSize],
   );
 
   const handleInput = useCallback(() => {
@@ -218,12 +243,12 @@ export function LandingPage() {
                 >
                   Sign in
                 </Link>
-                <Link
-                  to="/auth/signup"
+                <button
+                  onClick={() => setShowAuthModal(true)}
                   className="text-sm text-white/30 transition-colors hover:text-white/50"
                 >
                   Get started
-                </Link>
+                </button>
               </div>
             )}
           </div>
@@ -400,6 +425,12 @@ export function LandingPage() {
           </p>
         </div>
       </div>
+      {/* Auth modal overlay */}
+      <AuthModal
+        open={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        pendingPrompt={pendingPromptRef.current ?? ""}
+      />
     </div>
   );
 }

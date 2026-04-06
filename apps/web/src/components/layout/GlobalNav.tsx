@@ -65,6 +65,18 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
         &#9889; 247 credits
       </span>
 
+      {/* Dashboard link — always visible in nav bar */}
+      <Link
+        to="/studio/home"
+        className={
+          isLight
+            ? "text-sm text-white/50 transition-colors hover:text-white/80"
+            : "text-sm text-[#6b7280] transition-colors hover:text-[#1a1a1a]"
+        }
+      >
+        Dashboard &rarr;
+      </Link>
+
       {/* Avatar + dropdown */}
       <div className="relative" ref={dropdownRef}>
         <button
