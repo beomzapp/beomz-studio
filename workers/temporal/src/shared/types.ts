@@ -32,6 +32,11 @@ export interface GeneratedBuildDraft {
   summary: string;
   warnings: readonly string[];
   source: BuildResultSource;
+  assistantResponseText?: string;
+  assistantResponsesByPage?: readonly {
+    pageId: string;
+    text: string;
+  }[];
 }
 
 export interface ValidationIssue {
@@ -72,6 +77,7 @@ export interface TemplateSelectActivityInput {
 }
 
 export interface GenerateFilesActivityInput {
+  buildId: string;
   prompt: string;
   plan: InitialBuildPlan;
   template: TemplateDefinition;

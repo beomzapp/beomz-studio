@@ -239,6 +239,7 @@ export async function initialBuildWorkflow(
     let generationWarnings: string[] = [];
     let draft = await generateFiles({
       actor: input.actor,
+      buildId: input.buildId,
       existingFiles: input.existingFiles,
       plan,
       project,
@@ -631,6 +632,8 @@ export async function initialBuildWorkflow(
         error: null,
         files: validation.files,
         metadata: {
+          assistantResponseText: draft.assistantResponseText,
+          assistantResponsesByPage: draft.assistantResponsesByPage,
           fallbackReason,
           phase: source === "platform" ? "fallback-completed" : "completed",
           resultSource: source === "platform" ? "fallback" : "ai",

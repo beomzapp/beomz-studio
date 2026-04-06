@@ -2,8 +2,12 @@ import {
   getInitialBuildPromptPolicy,
   type InitialBuildPromptPolicy,
 } from "@beomz-studio/prompt-policies";
-import type { TemplatePage } from "@beomz-studio/contracts";
-import { z } from "zod";
+import {
+  createEmptyBuilderV3TraceMetadata,
+  type BuilderV3TraceMetadata,
+  type TemplatePage,
+} from "@beomz-studio/contracts";
+import { createStudioDbClient } from "@beomz-studio/studio-db";
 
 import { getAnthropicRuntimeConfig } from "../config.js";
 import {
@@ -14,6 +18,26 @@ import type {
   GenerateFilesActivityInput,
   GeneratedBuildDraft,
 } from "../shared/types.js";
+
+type AnthropicStreamEvent =
+  | {
+      type: "content_block_delta";
+      delta?: {
+        type?: string;
+        text?: string;
+      };
+    }
+  | {
+      type: "error";
+      error?: {
+        message?: string;
+        type?: string;
+      };
+    }
+  | {
+      type: string;
+      [key: string]: unknown;
+    };
 
 function buildSystemPrompt(policy: InitialBuildPromptPolicy): string {
   return [
@@ -135,7 +159,95 @@ function stripNonTsxEnvelope(text: string): string {
   return lines.slice(startIndex, endIndex + 1).join("\n").trim();
 }
 
-async function callAnthropic(system: string, userMessage: string) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readBuilderTraceMetadata(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
+  const candidate = metadata.builderTrace;
+  if (!isRecord(candidate)) {
+    return createEmptyBuilderV3TraceMetadata();
+  }
+
+  const events = Array.isArray(candidate.events) ? candidate.events : [];
+
+  return {
+    events,
+    lastEventId:
+      typeof candidate.lastEventId === "string" && candidate.lastEventId.length > 0
+        ? candidate.lastEventId
+        : null,
+    previewReady: candidate.previewReady === true,
+    fallbackReason:
+      typeof candidate.fallbackReason === "string" ? candidate.fallbackReason : null,
+    fallbackUsed: candidate.fallbackUsed === true,
+  };
+}
+
+async function appendAssistantDeltaEvent(input: {
+  buildId: string;
+  delta: string;
+  eventId: string;
+}): Promise<void> {
+  const db = createStudioDbClient();
+  const currentGeneration = await db.findGenerationById(input.buildId);
+  if (!currentGeneration) {
+    throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
+  }
+
+  const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
+  const currentTrace = readBuilderTraceMetadata(currentMetadata);
+  const event = {
+    delta: input.delta,
+    id: input.eventId,
+    operation: "initial_build" as const,
+    timestamp: new Date().toISOString(),
+    type: "assistant_delta" as const,
+  };
+
+  await db.updateGeneration(input.buildId, {
+    metadata: {
+      ...currentMetadata,
+      builderTrace: {
+        events: [...currentTrace.events, event],
+        lastEventId: event.id,
+        previewReady: currentTrace.previewReady,
+        fallbackReason: currentTrace.fallbackReason,
+        fallbackUsed: currentTrace.fallbackUsed,
+      } satisfies BuilderV3TraceMetadata,
+    },
+  });
+}
+
+async function persistAssistantResponseMetadata(input: {
+  buildId: string;
+  assistantResponseText: string;
+  assistantResponsesByPage: readonly {
+    pageId: string;
+    text: string;
+  }[];
+}): Promise<void> {
+  const db = createStudioDbClient();
+  const currentGeneration = await db.findGenerationById(input.buildId);
+  if (!currentGeneration) {
+    throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
+  }
+
+  const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
+  await db.updateGeneration(input.buildId, {
+    metadata: {
+      ...currentMetadata,
+      assistantResponseText: input.assistantResponseText,
+      assistantResponsesByPage: input.assistantResponsesByPage,
+    },
+  });
+}
+
+async function streamAnthropicMessage(input: {
+  system: string;
+  userMessage: string;
+  onTextDelta?: (delta: string) => Promise<void>;
+}): Promise<string> {
   const config = getAnthropicRuntimeConfig();
   if (!config.ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not configured.");
@@ -153,11 +265,12 @@ async function callAnthropic(system: string, userMessage: string) {
       body: JSON.stringify({
         max_tokens: config.ANTHROPIC_MAX_TOKENS,
         model: config.ANTHROPIC_MODEL,
-        system,
+        stream: true,
+        system: input.system,
         messages: [
           {
             role: "user",
-            content: userMessage,
+            content: input.userMessage,
           },
         ],
       }),
@@ -169,19 +282,102 @@ async function callAnthropic(system: string, userMessage: string) {
     throw new Error(`Anthropic returned ${response.status}: ${errorBody}`);
   }
 
-  return response.json() as Promise<{
-    content?: Array<{ type?: string; text?: string }>;
-  }>;
-}
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Anthropic streaming response body was unavailable.");
+  }
 
-function extractTextContent(rawResponse: {
-  content?: Array<{ type?: string; text?: string }>;
-}): string {
-  return (rawResponse.content ?? [])
-    .filter((block) => block.type === "text" && typeof block.text === "string")
-    .map((block) => block.text ?? "")
-    .join("\n")
-    .trim();
+  const decoder = new TextDecoder();
+  const textParts: string[] = [];
+  const dataLines: string[] = [];
+  let buffer = "";
+
+  const flushEvent = async () => {
+    if (dataLines.length === 0) {
+      return;
+    }
+
+    const payload = dataLines.join("\n");
+    dataLines.length = 0;
+
+    if (payload === "[DONE]") {
+      return;
+    }
+
+    const event = JSON.parse(payload) as AnthropicStreamEvent;
+    if (event.type === "error") {
+      const errorMessage =
+        isRecord(event.error) && typeof event.error.message === "string"
+          ? event.error.message
+          : "Anthropic streaming request failed.";
+      throw new Error(errorMessage);
+    }
+
+    const delta =
+      "delta" in event && isRecord(event.delta)
+        ? event.delta
+        : null;
+    const deltaText = typeof delta?.text === "string" ? delta.text : null;
+    if (
+      event.type === "content_block_delta"
+      && delta?.type === "text_delta"
+      && deltaText
+    ) {
+      textParts.push(deltaText);
+      await input.onTextDelta?.(deltaText);
+    }
+  };
+
+  const consumeBuffer = async (flushRemainder: boolean) => {
+    while (true) {
+      const lineBreakIndex = buffer.indexOf("\n");
+      if (lineBreakIndex === -1) {
+        break;
+      }
+
+      const rawLine = buffer.slice(0, lineBreakIndex);
+      buffer = buffer.slice(lineBreakIndex + 1);
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+
+      if (line.length === 0) {
+        await flushEvent();
+        continue;
+      }
+
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    if (!flushRemainder || buffer.length === 0) {
+      return;
+    }
+
+    const line = buffer.endsWith("\r") ? buffer.slice(0, -1) : buffer;
+    buffer = "";
+
+    if (line.length === 0) {
+      await flushEvent();
+      return;
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim());
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    await consumeBuffer(done);
+
+    if (done) {
+      await flushEvent();
+      break;
+    }
+  }
+
+  return textParts.join("");
 }
 
 function parseGeneratedFileContent(input: {
@@ -218,17 +414,38 @@ export async function generateFiles(
   const config = getAnthropicRuntimeConfig();
   const policy = getInitialBuildPromptPolicy(input.template.id);
   const files = [];
+  const assistantResponseParts: string[] = [];
+  const assistantResponsesByPage: Array<{ pageId: string; text: string }> = [];
+  let streamSequence = 0;
 
   for (const page of input.template.pages) {
-    const rawResponse = await callAnthropic(
-      buildSystemPrompt(policy),
-      buildUserPrompt(input, page),
-    );
-    const text = extractTextContent(rawResponse);
+    const text = await streamAnthropicMessage({
+      system: buildSystemPrompt(policy),
+      userMessage: buildUserPrompt(input, page),
+      onTextDelta: async (delta) => {
+        assistantResponseParts.push(delta);
+        streamSequence += 1;
+        await appendAssistantDeltaEvent({
+          buildId: input.buildId,
+          delta,
+          eventId: `assistant-${page.id}-${streamSequence}`,
+        });
+      },
+    });
 
-    if (!text) {
+    if (text.trim().length === 0) {
       throw new Error(`Anthropic returned no text content for page ${page.id}.`);
     }
+
+    assistantResponsesByPage.push({
+      pageId: page.id,
+      text,
+    });
+    await persistAssistantResponseMetadata({
+      buildId: input.buildId,
+      assistantResponseText: assistantResponseParts.join(""),
+      assistantResponsesByPage,
+    });
 
     const content = parseGeneratedFileContent({
       config,
@@ -248,6 +465,8 @@ export async function generateFiles(
   }
 
   return {
+    assistantResponseText: assistantResponseParts.join(""),
+    assistantResponsesByPage,
     files,
     previewEntryPath: input.template.previewEntryPath,
     source: "ai",

@@ -10,6 +10,7 @@ import type { OrgContext } from "../../types.js";
 import { readBuildTraceMetadata } from "./shared.js";
 
 const buildsEventsRoute = new Hono();
+const BUILD_EVENT_POLL_INTERVAL_MS = 250;
 
 function sliceEventsAfterEventId<T extends { id: string }>(
   events: readonly T[],
@@ -45,8 +46,23 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   return streamSSE(c, async (sse) => {
     let lastSentEventId = requestedLastEventId;
+    let streamOpen = true;
 
-    while (!c.req.raw.signal.aborted) {
+    const writeEvent = async (event: { data: string; event: string; id: string }) => {
+      if (!streamOpen || c.req.raw.signal.aborted) {
+        return false;
+      }
+
+      try {
+        await sse.writeSSE(event);
+        return true;
+      } catch {
+        streamOpen = false;
+        return false;
+      }
+    };
+
+    while (!c.req.raw.signal.aborted && streamOpen) {
       const currentGenerationRow = await orgContext.db.findGenerationById(buildId);
       if (!currentGenerationRow) {
         break;
@@ -61,11 +77,14 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       const nextEvents = sliceEventsAfterEventId(trace.events, lastSentEventId);
 
       for (const event of nextEvents) {
-        await sse.writeSSE({
+        const didWrite = await writeEvent({
           data: JSON.stringify(event),
           event: event.type,
           id: event.id,
         });
+        if (!didWrite) {
+          return;
+        }
         lastSentEventId = event.id;
 
         if (isBuilderV3TerminalEvent(event)) {
@@ -77,7 +96,9 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         return;
       }
 
-      await delay(1_000, undefined, { signal: c.req.raw.signal }).catch(() => undefined);
+      await delay(BUILD_EVENT_POLL_INTERVAL_MS, undefined, {
+        signal: c.req.raw.signal,
+      }).catch(() => undefined);
     }
   });
 });

@@ -43,6 +43,11 @@ const builderTraceSchema = z.object({
 const buildMetadataSchema = z
   .object({
     builderTrace: builderTraceSchema.optional(),
+    assistantResponseText: z.string().optional(),
+    assistantResponsesByPage: z.array(z.object({
+      pageId: z.string(),
+      text: z.string(),
+    })).optional(),
     failureReason: z.enum(FAILURE_REASONS).optional(),
     fallbackReason: z.string().optional(),
     phase: z.string().optional(),
