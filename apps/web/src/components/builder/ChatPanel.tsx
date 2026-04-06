@@ -64,6 +64,8 @@ const CODE_LINE_PATTERNS = [
   /^\s*\*\s/,             // JSDoc continuation
   /^\s*\*\//,             // JSDoc end
   /^```/,                 // code fence
+  // Temporal/Beomz trace status codes (e.g. PLAN_BLUEPRINT_STARTED)
+  /^[A-Z][A-Z0-9_]{3,}(?:_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\b/,
 ];
 
 function isCodeLine(line: string): boolean {
@@ -407,6 +409,8 @@ export function ChatPanel({
 
               // Skip rendering assistant messages that are entirely code (empty after filter)
               // but still show if they have plan steps or changed files
+              // traceEntries are explicitly NOT counted as visible content.
+              // BEO-174 §2 removed trace card rendering entirely.
               const hasVisibleContent =
                 displayContent ||
                 (msg.planSteps && msg.planSteps.length > 0) ||
