@@ -7,17 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
 import {
-  Send,
-  Square,
-  Paperclip,
-  ArrowDown,
-  Copy,
-  Check,
-  Sparkles,
-  ListChecks,
-  AlertCircle,
-  Loader2,
-  FileCode,
+  Send, Square, Paperclip, ArrowDown, Copy, Check, Sparkles, ListChecks,
+  AlertCircle, Loader2, FileCode, CheckCircle2, Zap,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -366,6 +357,70 @@ function BuildingStatus() {
   );
 }
 
+
+// ─────────────────────────────────────────────
+// Trace entry list — bolt-style inline steps
+// ─────────────────────────────────────────────
+function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntry[] }) {
+  if (!entries || entries.length === 0) return null;
+
+  // Find the done entry for the summary line
+  const doneEntry = entries.find((e) => e.kind === "done");
+  // Tool use/result pairs — deduplicate by toolUseId keeping the latest state
+  const stepMap = new Map<string, BuilderV3TranscriptEntry>();
+  const stepOrder: string[] = [];
+  for (const e of entries) {
+    if (e.kind !== "tool_use" && e.kind !== "tool_result") continue;
+    const key = e.toolUseId ?? e.message;
+    if (!stepMap.has(key)) stepOrder.push(key);
+    stepMap.set(key, e);
+  }
+
+  // Also include plain status entries (non-tool)
+  const statusEntries = entries.filter(
+    (e) => e.kind === "status" && e.code !== "build_completed"
+  );
+
+  return (
+    <div className="mb-2 flex flex-col gap-1">
+      {/* Status entries */}
+      {statusEntries.map((e, i) => (
+        <div key={e.id ?? i} className="flex items-center gap-2 text-xs text-[#9ca3af]">
+          <CheckCircle2 size={12} className="shrink-0 text-[#10b981]" />
+          <span>{e.message}</span>
+        </div>
+      ))}
+      {/* Tool steps */}
+      {stepOrder.map((key) => {
+        const e = stepMap.get(key)!;
+        const isRunning = e.kind === "tool_use";
+        const isError = e.kind === "tool_result" && e.status === "error";
+        return (
+          <div key={key} className="flex items-start gap-2 text-xs">
+            {isRunning ? (
+              <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin text-[#F97316]" />
+            ) : isError ? (
+              <AlertCircle size={12} className="mt-0.5 shrink-0 text-red-500" />
+            ) : (
+              <CheckCircle2 size={12} className="mt-0.5 shrink-0 text-[#10b981]" />
+            )}
+            <span className={isRunning ? "text-[#6b7280]" : isError ? "text-red-600" : "text-[#374151]"}>
+              {e.message}
+            </span>
+          </div>
+        );
+      })}
+      {/* Done summary */}
+      {doneEntry && (
+        <div className="mt-1 flex items-center gap-2 rounded-lg bg-[#F97316]/8 px-2.5 py-1.5 text-xs font-medium text-[#c2410c]">
+          <Zap size={12} className="shrink-0 text-[#F97316]" />
+          <span>{doneEntry.message}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────
 // ChatPanel
 // ─────────────────────────────────────────────
@@ -510,9 +565,14 @@ export function ChatPanel({
                           <PlanCardInline steps={msg.planSteps} />
                         )}
 
-                        {msg.changedFiles && msg.changedFiles.length > 0 && (
-                          <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
-                        )}
+                                     {/* Trace entries — inline line items */}
+                  {msg.traceEntries && msg.traceEntries.length > 0 && (
+                    <TraceEntryList entries={msg.traceEntries} />
+                  )}
+                  {/* File change badge */}
+                  {msg.changedFiles && msg.changedFiles.length > 0 && (
+                    <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
+                  )}
 
                         {displayContent && (
                           <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
