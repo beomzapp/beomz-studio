@@ -45,6 +45,7 @@ interface PlanMessage {
   role: "ai" | "user";
   content: string;
   chips?: string[];
+  selectedChip?: string;
   isPlan?: boolean;
   planSummary?: string[];
   streaming?: boolean;
@@ -275,9 +276,11 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
     if (authLoading) return; // wait for Supabase session to resolve before calling API
     if (initRef.current) return;
     initRef.current = true;
+    // Show the user's prompt as the first bubble
+    setMessages([{ id: `user-init-${Date.now()}`, role: "user", content: prompt }]);
     historyRef.current = [];
     void runAnalysis([], 0);
-  }, [authLoading, runAnalysis]);
+  }, [authLoading, runAnalysis, prompt]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -388,22 +391,24 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   }, [prompt, messages, navigate]);
 
   const handleEditPlan = useCallback(() => {
+    // Add AI question message and focus input — user types what to change
     setMessages((prev) => [
       ...prev,
       {
-        id: `ai-${Date.now()}`,
+        id: `ai-edit-${Date.now()}`,
         role: "ai",
-        content: "Sure — what would you like to change?",
+        content: "What would you like to change about the plan?",
       },
     ]);
     scrollToBottom();
+    setPlanReady(false); // allow next send to go through runAnalysis
     setTimeout(() => inputRef.current?.focus(), 100);
   }, [scrollToBottom]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-30 flex flex-col bg-[#faf9f6]">
+    <div className="flex h-screen flex-col bg-[#faf9f6]">
       {/* Top bar: [back] [logo] ··· [plan mode] ··· [GlobalNav] */}
       <div className="flex items-center justify-between border-b border-[rgba(0,0,0,0.07)] px-6 py-4">
         <div className="flex items-center gap-3">
