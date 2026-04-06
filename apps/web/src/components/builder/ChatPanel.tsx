@@ -48,6 +48,7 @@ interface ChatPanelProps {
 // ─────────────────────────────────────────────
 
 const CODE_LINE_PATTERNS = [
+  // Module-level declarations
   /^import\s+/,
   /^export\s+(default\s+)?(function|const|class|interface|type|enum)\s/,
   /^(const|let|var)\s+\w+\s*[=:]/,
@@ -55,31 +56,55 @@ const CODE_LINE_PATTERNS = [
   /^interface\s+\w+/,
   /^type\s+\w+\s*=/,
   /^class\s+\w+/,
-  /^\s*<[A-Z]\w+/,           // JSX component opening tags
-  /^\s*<\/[A-Z]\w+>/,        // JSX component closing tags
-  /^\s*<[a-z][a-z0-9]*[\s/>]/, // HTML element tags (div, span, button…)
-  /^\s*<\/[a-z][a-z0-9]*>/,  // HTML closing tags
-  /^\s*\/>\s*$/,              // self-closing />
+  /^'use (client|server)'/,
+  /^"use (client|server)"/,
+  // JSX elements
+  /^\s*<[A-Z]\w+/,
+  /^\s*<\/[A-Z]\w+>/,
+  /^\s*<[a-z][a-z0-9]*[\s/>]/,
+  /^\s*<\/[a-z][a-z0-9]*>/,
+  /^\s*\/>\s*$/,
   /^\s*return\s*\(/,
-  /^\s*\}\s*$/,               // lone closing brace
-  /^\s*\{\s*$/,               // lone opening brace
-  /^\s*\);\s*$/,              // closing paren+semicolon
-  /^\s*\)\s*$/,               // lone closing paren
-  /^\s*className=/,           // JSX className prop lines
-  /^\s*style=\{/,             // JSX style prop lines
-  /^\s*onClick=/,             // JSX event handler lines
+  // Braces / punctuation-only lines
+  /^\s*[{}]\s*$/,
+  /^\s*\);\s*$/,
+  /^\s*\)\s*$/,
+  /^\s*\(\s*$/,
+  /^\s*\[\s*$/,
+  /^\s*\]\s*$/,
+  /^\s*\];\s*$/,
+  /^\s*\],\s*$/,
+  /^\s*\},\s*$/,
+  /^\s*\};\s*$/,
+  /^\s*\)\s*=>\s*\{/,
+  // JSX props
+  /^\s*className=/,
+  /^\s*style=\{/,
+  /^\s*onClick=/,
   /^\s*onChange=/,
   /^\s*onSubmit=/,
+  /^\s*onBlur=/,
+  /^\s*onFocus=/,
   /^\s*disabled=/,
   /^\s*placeholder=/,
-  /^\s*[a-zA-Z][\w-]+=\{/,   // any JSX prop={...}
-  /^\s*\/\*\*/,               // JSDoc start
-  /^\s*\*\s/,                 // JSDoc continuation
-  /^\s*\*\//,                 // JSDoc end
-  /^```/,                     // code fence
-  /^\s*\/\//,                 // single-line comment
-  /^\s*\/\*/,                 // block comment start
-  // Temporal/Beomz trace status codes (e.g. PLAN_BLUEPRINT_STARTED)
+  /^\s*[a-zA-Z][\w-]+=\{/,
+  /^\s*[a-zA-Z][\w-]+="[^"]*"/,
+  // TypeScript type/interface property lines: `  id: string;`
+  /^\s+\w[\w?]*\??:\s*(string|number|boolean|null|undefined|void|any|never|object)\s*[;,]?\s*$/,
+  /^\s+\w[\w?]*\??:\s*\w+(\[\])?\s*[;,]\s*$/,
+  // Object literal value lines
+  /^\s+\w+:\s*['"`].*['"`],?\s*$/,
+  /^\s+\w+:\s*[-\d.]+,?\s*$/,
+  /^\s+\w+:\s*(true|false|null|undefined),?\s*$/,
+  /^\s+\w+:\s*\[/,
+  /^\s+\w+:\s*\{/,
+  // Comments and fences
+  /^```/,
+  /^\s*\/\//,
+  /^\s*\/\*/,
+  /^\s*\*[\s/]/,
+  /^\s*\*$/,
+  // Trace status codes
   /^[A-Z][A-Z0-9_]{3,}(?:_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\b/,
 ];
 
