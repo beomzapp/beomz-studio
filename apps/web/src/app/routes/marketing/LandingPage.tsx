@@ -6,18 +6,12 @@ import {
   Loader2,
   Paperclip,
   X,
-  LogOut,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useAuth } from "../../../lib/useAuth";
 import { supabase } from "../../../lib/supabase";
-import { getClarifyQuestions, generatePlan, type ClarifyQuestion, type PlanBullet } from "../../../lib/planClarify";
-import { QuestionsCard } from "../../../components/studio/QuestionsCard";
-import { ThoughtLabel } from "../../../components/studio/ThoughtLabel";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
-
-type FlowStep = "home" | "thinking" | "questions" | "planning" | "plan-ready";
 
 const SUGGESTIONS = [
   "a SaaS dashboard",
@@ -53,17 +47,26 @@ export function LandingPage() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [flowStep, setFlowStep] = useState<FlowStep>("home");
-  const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
-  const [promptForFlow, setPromptForFlow] = useState("");
-  const [questions, setQuestions] = useState<ClarifyQuestion[]>([]);
-  const [planBullets, setPlanBullets] = useState<PlanBullet[]>([]);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);
   const navigate = useNavigate();
+
+  // After sign-in, check if there's a pending prompt and navigate to /plan
+  const pendingPromptRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (session && pendingPromptRef.current) {
+      const prompt = pendingPromptRef.current;
+      pendingPromptRef.current = null;
+      setShowAuthModal(false);
+      navigate({ to: "/plan", search: { q: prompt } });
+    }
+  }, [session, navigate]);
 
   const updateFontSize = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -90,6 +93,21 @@ export function LandingPage() {
     });
   }, []);
 
+  const handleSubmitPrompt = useCallback(
+    (prompt: string) => {
+      if (!session) {
+        // Not signed in — show auth modal, preserve prompt
+        pendingPromptRef.current = prompt;
+        setShowAuthModal(true);
+        return;
+      }
+
+      // Signed in — navigate to plan page
+      navigate({ to: "/plan", search: { q: prompt } });
+    },
+    [session, navigate],
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
@@ -111,34 +129,15 @@ export function LandingPage() {
         const prompt = editableRef.current?.textContent?.trim() ?? "";
         if (!prompt) return;
 
-        setPromptForFlow(prompt);
-
-        if (userMode === "pro" || !planMode) {
+        if (!planMode) {
           saveProjectLaunchIntent({ prompt });
           navigate({ to: "/studio/project/$id", params: { id: "new" } });
         } else {
-          // Plan mode — ask AI for clarifying questions
-          setFlowStep("thinking");
-          setTimeout(() => {
-            window.scrollTo({ top: window.innerHeight, behavior: "smooth" });
-          }, 50);
-          getClarifyQuestions(prompt).then((qs) => {
-            if (qs.length === 0) {
-              // Clear prompt → skip questions, generate plan directly
-              setFlowStep("planning");
-              generatePlan(prompt, {}).then((bullets) => {
-                setPlanBullets(bullets);
-                setFlowStep("plan-ready");
-              });
-            } else {
-              setQuestions(qs);
-              setFlowStep("questions");
-            }
-          });
+          handleSubmitPrompt(prompt);
         }
       }
     },
-    [navigate, suggestionIndex, updateFontSize, userMode, planMode]
+    [navigate, suggestionIndex, updateFontSize, planMode, handleSubmitPrompt],
   );
 
   const handleInput = useCallback(() => {
@@ -216,44 +215,58 @@ export function LandingPage() {
       if (file) setAttachedFile(file);
       e.target.value = "";
     },
-    []
+    [],
   );
 
   useEffect(() => {
     editableRef.current?.focus();
   }, []);
 
-  const handleBackToHome = useCallback(() => {
-    setFlowStep("home");
-    setQuestions([]);
-    setPlanBullets([]);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
-
-  const handleQuestionsSubmit = useCallback(
-    (answers: Record<string, string[]>) => {
-      setQuestions([]); // Clear questions so card can't re-render
-      setFlowStep("planning");
-      generatePlan(promptForFlow, answers).then((bullets) => {
-        setPlanBullets(bullets);
-        setFlowStep("plan-ready");
-      });
-    },
-    [promptForFlow],
-  );
-
-  const handleSkipAll = useCallback(() => {
-    setFlowStep("planning");
-    generatePlan(promptForFlow, {}).then((bullets) => {
-      setPlanBullets(bullets);
-      setFlowStep("plan-ready");
+  const handleGoogleSignIn = async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
-  }, [promptForFlow]);
+    if (error) {
+      setAuthError(error.message);
+      setAuthLoading(false);
+    }
+  };
+
+  const handleGithubSignIn = async () => {
+    setAuthLoading(true);
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "github",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) {
+      setAuthError(error.message);
+      setAuthLoading(false);
+    }
+  };
+
+  // Get user initials for avatar
+  const userName = session?.user?.user_metadata?.full_name
+    ?? session?.user?.user_metadata?.name
+    ?? session?.user?.email
+    ?? "";
+  const userFirstName = userName.split(" ")[0] || "";
+  const userInitials = userName
+    .split(" ")
+    .slice(0, 2)
+    .map((n: string) => n[0]?.toUpperCase() ?? "")
+    .join("");
 
   return (
     <div className="h-screen overflow-hidden bg-bg">
-      {flowStep === "home" ? (
-      /* ===== FLOOR 1: Hero — locked, no scroll ===== */
+      {/* ===== Hero — locked, no scroll ===== */}
       <div className="relative h-screen">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
@@ -272,58 +285,44 @@ export function LandingPage() {
               Docs
             </a>
             {session ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
+                {/* Credits pill */}
+                <span className="rounded-full border border-white/10 px-2.5 py-1 text-xs text-white/40 font-mono">
+                  &#9889; 247 credits
+                </span>
+                {/* Dashboard link */}
                 <Link
                   to="/studio/home"
-                  className="rounded-lg bg-orange px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-orange/90"
+                  className="text-sm text-white/40 transition-colors hover:text-white/70"
                 >
-                  Go to studio
+                  Dashboard &rarr;
                 </Link>
-                <button
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                  }}
-                  className="flex items-center gap-1.5 text-sm text-white/40 transition-colors hover:text-white/70"
-                >
-                  <LogOut size={14} />
-                </button>
+                {/* User avatar + name */}
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
+                    {userInitials || "U"}
+                  </div>
+                  <span className="text-sm text-white/60">{userFirstName}</span>
+                </div>
               </div>
             ) : (
-              <Link
-                to="/auth/login"
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/50 transition-colors hover:border-white/20 hover:text-white/80"
-              >
-                Sign in
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link
+                  to="/auth/login"
+                  className="text-sm text-white/50 transition-colors hover:text-white/80"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  to="/auth/signup"
+                  className="text-sm text-white/30 transition-colors hover:text-white/50"
+                >
+                  Get started
+                </Link>
+              </div>
             )}
           </div>
         </nav>
-
-        {/* Simple/Pro mode toggle */}
-        <div className="absolute top-16 right-6 z-10 flex rounded-full border border-border bg-white/5 p-0.5">
-          <button
-            onClick={() => setUserMode("simple")}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-all",
-              userMode === "simple"
-                ? "bg-orange text-white"
-                : "text-white/40 hover:text-white/60"
-            )}
-          >
-            Simple
-          </button>
-          <button
-            onClick={() => setUserMode("pro")}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-all",
-              userMode === "pro"
-                ? "bg-orange text-white"
-                : "text-white/40 hover:text-white/60"
-            )}
-          >
-            Pro
-          </button>
-        </div>
 
         {/* Hero section */}
         <section className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
@@ -374,7 +373,7 @@ export function LandingPage() {
               className={cn(
                 "outline-none caret-orange inline-block min-w-[1ch] text-center",
                 !hasText &&
-                  "before:content-[attr(data-placeholder)] before:text-white/30"
+                  "before:content-[attr(data-placeholder)] before:text-white/30",
               )}
               style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
             />
@@ -384,7 +383,7 @@ export function LandingPage() {
           <div
             className={cn(
               "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
-              hasText ? "opacity-100" : "pointer-events-none opacity-0"
+              hasText ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           >
             {/* Plan mode toggle */}
@@ -395,7 +394,7 @@ export function LandingPage() {
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 planMode
                   ? "border-orange/50 bg-orange/10 text-orange"
-                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
+                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
               )}
             >
               <ListChecks size={14} />
@@ -411,7 +410,7 @@ export function LandingPage() {
                 "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
                 enhanceError
                   ? "border-red-500 text-red-400"
-                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple"
+                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple",
               )}
             >
               {enhancing ? (
@@ -461,7 +460,7 @@ export function LandingPage() {
                   "rounded-full border px-4 py-1.5 text-sm transition-all",
                   i === suggestionIndex
                     ? "border-orange/50 bg-orange/10 text-orange"
-                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60"
+                    : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
                 )}
               >
                 {s}
@@ -496,108 +495,75 @@ export function LandingPage() {
           </p>
         </div>
       </div>
-      ) : (
-      /* ===== FLOOR 2: Questions / Plan flow — only when not home ===== */
-      <div className="relative h-screen overflow-y-auto bg-[#faf9f6]">
-        <button
-          onClick={handleBackToHome}
-          className="absolute top-6 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(0,0,0,0.1)] text-[rgba(0,0,0,0.3)] transition-colors hover:border-[rgba(0,0,0,0.2)] hover:text-[rgba(0,0,0,0.6)]"
-          title="Back to home"
+
+      {/* ===== Auth Gate Modal ===== */}
+      {showAuthModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md bg-black/40"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAuthModal(false);
+          }}
         >
-            <X size={16} />
-        </button>
+          <div className="relative w-full max-w-[400px] rounded-2xl bg-[#faf9f6] p-10 shadow-2xl">
+            {/* Close button */}
+            <button
+              onClick={() => setShowAuthModal(false)}
+              className="absolute top-4 right-4 flex h-8 w-8 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-black/5 hover:text-[#6b7280]"
+            >
+              <X size={16} />
+            </button>
 
-        <div className="flex min-h-full flex-col items-center justify-center px-6 py-16">
-          {/* Intro message — fades in before questions */}
-            <div className="mb-6 max-w-xl text-center animate-[fadeIn_400ms_ease-out]">
-              {flowStep === "questions" ? (
-                <p className="text-sm text-[#1a1a1a]">
-                  Got it — <span className="font-semibold">{promptForFlow}</span>. Let me ask a few quick questions.
-                </p>
-              ) : flowStep === "plan-ready" ? (
-                <p className="text-sm text-[#1a1a1a]">
-                  Here&apos;s the plan for <span className="font-semibold">{promptForFlow}</span>
-                </p>
-              ) : (
-                <p className="text-sm text-[rgba(0,0,0,0.4)]">
-                  {promptForFlow}
-                </p>
-              )}
+            {/* Logo */}
+            <div className="mb-5 flex justify-center">
+              <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
+                <path
+                  d="M8 8h8v8H8V8Zm0 16h8v8H8v-8Zm16-16h8v8h-8V8Zm0 16h8v8h-8v-8Zm-8-8h8v8h-8v-8Z"
+                  fill="#060612"
+                />
+              </svg>
             </div>
 
-          {/* Thinking state */}
-          {(flowStep === "thinking" || flowStep === "planning") && (
-            <ThoughtLabel visible />
-          )}
+            <h2 className="mb-2 text-center text-lg font-semibold text-[#1a1a1a]">
+              Sign in to start building
+            </h2>
+            <p className="mb-6 text-center text-sm text-[#9ca3af]">
+              Your project will be ready when you&apos;re back.
+            </p>
 
-          {/* Questions card */}
-          {flowStep === "questions" && questions.length > 0 && (
-            <QuestionsCard
-              questions={questions}
-              onSubmit={handleQuestionsSubmit}
-              onSkipAll={handleSkipAll}
-            />
-          )}
+            {authError && (
+              <p className="mb-4 text-center text-xs text-red-500">{authError}</p>
+            )}
 
-          {/* Plan bullets */}
-          {flowStep === "plan-ready" && planBullets.length > 0 && (
-            <div className="mx-auto w-full max-w-xl">
-              <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-[#6b7280]">
-                    Build plan
-                  </h3>
-                  <span className="text-xs text-[#6b7280]">
-                    {planBullets.length} step{planBullets.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {planBullets.map((b, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 rounded-xl border border-[rgba(0,0,0,0.05)] bg-[rgba(0,0,0,0.01)] px-4 py-3"
-                    >
-                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F97316]/10 text-xs font-bold text-[#F97316]">
-                        {i + 1}
-                      </span>
-                      <div>
-                        <span className="text-sm font-semibold text-[#1a1a1a]">
-                          {b.label}
-                        </span>
-                        {b.description && (
-                          <p className="mt-0.5 text-xs text-[#6b7280]">
-                            {b.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-5 border-t border-[#e5e7eb] pt-4">
-                  <button
-                    onClick={() => {
-                      saveProjectLaunchIntent({
-                        approvedPlan: {
-                          steps: planBullets.map((bullet) => ({
-                            description: bullet.description,
-                            title: bullet.label,
-                          })),
-                        },
-                        prompt: promptForFlow,
-                      });
-                      navigate({ to: "/studio/project/$id", params: { id: "new" } });
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
-                  >
-                    Start building
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+            {/* Google OAuth */}
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={authLoading}
+              className="flex w-full items-center justify-center gap-3 rounded-lg border border-[#e2e2e2] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-shadow hover:shadow-md disabled:opacity-50"
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
+                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853" />
+                <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" />
+                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" />
+              </svg>
+              Continue with Google
+            </button>
 
+            <div className="my-3" />
+
+            {/* GitHub OAuth */}
+            <button
+              onClick={handleGithubSignIn}
+              disabled={authLoading}
+              className="flex w-full items-center justify-center gap-3 rounded-lg border border-[#e2e2e2] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-shadow hover:shadow-md disabled:opacity-50"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#1a1a1a" aria-hidden>
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+              </svg>
+              Continue with GitHub
+            </button>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );
