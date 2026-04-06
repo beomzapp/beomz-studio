@@ -54,31 +54,59 @@ function filterCodeFromText(text: string): string {
     const t = line.trim();
     if (t === "") return true;
 
-    // Drop obvious code patterns using RegExp constructor (avoids TS parse issues)
-    const drops = [
-      new RegExp("^\\s*(import|export|const|let|var|function|class|interface|type|return|if|else|for|while|switch|case|try|catch|async|await|new|throw)\\b"),
-      new RegExp("^\\s*[{};()\\[\\]]"),
-      new RegExp("[{};]$"),
-      new RegExp("^\\s*<[\\w\\/]"),
-      new RegExp("^\\s*\\/[\\/\\*]"),
-      new RegExp("^```"),
-      new RegExp("=>"),
-      new RegExp("^\\s*\\?\\s"),
-      new RegExp("^\\s*\\|\\s"),
-      new RegExp("^\\s*\\.\\.\\."),
-      new RegExp("^\\s*@\\w"),
-      new RegExp("^\\s+[\\w]+\\??\\s*:\\s*[\\w\"'`{\\[\\(]"),
-      new RegExp("^\\s*\\w+,\\s*$"),
-      new RegExp("^\\s*[\"'`][a-z][^\"'`]*[\"'`],?\\s*$"),
-      new RegExp('^\\s*d="[A-Z]'),
-      new RegExp("^[A-Z][A-Z0-9_]{3,}(_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\\b"),
-    ];
-    if (drops.some(p => p.test(line))) return false;
+    // Drop obvious code keyword starts
+    if (new RegExp("^\\s*(import|export|const|let|var|function|class|interface|type|return|if|else|for|while|switch|case|try|catch|async|await|new|throw|default)\\b").test(line)) return false;
 
-    // Drop lines with high ratio of code symbols
-    const symbols = (line.match(/[{};=<>()\[\]|&!@#%^*~`\\]/g) || []).length;
+    // Drop lines starting with bracket/brace/paren/semicolon
+    if (new RegExp("^\\s*[{};()\\[\\]]").test(line)) return false;
+
+    // Drop lines ending with { } ;
+    if (new RegExp("[{};]\\s*$").test(line)) return false;
+
+    // Drop JSX/HTML tags
+    if (new RegExp("^\\s*<[\\w\\/]").test(line)) return false;
+
+    // Drop comments
+    if (new RegExp("^\\s*\\/[\\/\\*]").test(line)) return false;
+    if (new RegExp("^\\s*\\*").test(line)) return false;
+
+    // Drop code fences
+    if (new RegExp("^```").test(line)) return false;
+
+    // Drop arrow functions
+    if (new RegExp("=>").test(line)) return false;
+
+    // Drop ternary / union type continuation lines
+    if (new RegExp("^\\s*[?|]\\s").test(line)) return false;
+
+    // Drop spread operator
+    if (new RegExp("^\\s*\\.\\.\\.").test(line)) return false;
+
+    // Drop decorator lines
+    if (new RegExp("^\\s*@\\w").test(line)) return false;
+
+    // Drop TypeScript type annotations
+    if (new RegExp("^\\s+\\w+[?]?\\s*:\\s*[\\w\"'{\\[(]").test(line)) return false;
+
+    // Drop trailing comma lines
+    if (new RegExp("^\\s*\\w[\\w.]*,\\s*$").test(line)) return false;
+
+    // Drop JSX/SVG/HTML attribute lines: fill="none", className="...", strokeLinecap="round", etc.
+    if (new RegExp("^\\s*[a-zA-Z][\\w:-]*=[\"'`{]").test(line)) return false;
+
+    // Drop template literal expressions
+    if (new RegExp("\\$\\{").test(line)) return false;
+
+    // Drop SVG path data
+    if (new RegExp("^\\s*d=\"[A-Z]").test(line)) return false;
+
+    // Drop Temporal status event lines
+    if (new RegExp("^[A-Z][A-Z0-9_]{3,}(_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\\b").test(line)) return false;
+
+    // Drop lines with high ratio of code symbols (15% threshold)
+    const symbols = (line.match(/[{};=<>()[\]|&!@#%^*~`\\]/g) || []).length;
     const nonSpace = line.replace(/\s/g, "").length;
-    if (nonSpace > 0 && symbols / nonSpace > 0.2) return false;
+    if (nonSpace > 0 && symbols / nonSpace > 0.15) return false;
 
     return true;
   });
