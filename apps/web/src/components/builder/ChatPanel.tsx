@@ -48,62 +48,41 @@ interface ChatPanelProps {
 // ─────────────────────────────────────────────
 
 function filterCodeFromText(text: string): string {
-  const codePatterns = [
-    new RegExp("^import\\s+"),
-    new RegExp("^export\\s+(default\\s+)?(function|const|class|interface|type|enum)\\s"),
-    new RegExp("^(const|let|var)\\s+[\\w\\[{]"),
-    new RegExp("^function\\s+\\w+"),
-    new RegExp("^interface\\s+\\w+"),
-    new RegExp("^type\\s+\\w+\\s*="),
-    new RegExp("^class\\s+\\w+"),
-    new RegExp("^\\s*\\?\\s"),
-    new RegExp("^\\s*:\\s*[\\w{(\\[]"),
-    new RegExp("^\\s*<[A-Z]\\w*"),
-    new RegExp("^\\s*<\\/[A-Z]\\w*>"),
-    new RegExp("^\\s*<[a-z][a-z0-9]*[\\s\\/]"),
-    new RegExp("^\\s*<\\/[a-z][a-z0-9]*>"),
-    new RegExp("^\\s*<[a-z][a-z0-9]*$"),
-    new RegExp("^\\s*\\/>\\s*$"),
-    new RegExp("^\\s*>\\s*$"),
-    new RegExp("^\\s*return\\s*\\("),
-    new RegExp("^\\s*[{}]\\s*$"),
-    new RegExp("^\\s*\\);\\s*$"),
-    new RegExp("^\\s*\\)\\s*$"),
-    new RegExp("^\\s*\\(\\s*$"),
-    new RegExp("^\\s*\\[\\s*$"),
-    new RegExp("^\\s*\\]\\s*$"),
-    new RegExp("^\\s*\\];\\s*$"),
-    new RegExp("^\\s*\\],\\s*$"),
-    new RegExp("^\\s*\\},\\s*$"),
-    new RegExp("^\\s*\\};\\s*$"),
-    new RegExp("^\\s*\\)\\s*=>\\s*[{(]"),
-    new RegExp("^\\s*\\w+\\s*\\(.*\\);\\s*$"),
-    new RegExp("^\\s*\\w+\\.\\w+\\s*\\(.*\\);\\s*$"),
-    new RegExp("^\\s*className="),
-    new RegExp("^\\s*style=\\{"),
-    new RegExp("^\\s*on[A-Z]\\w+="),
-    new RegExp("^\\s*disabled="),
-    new RegExp("^\\s*placeholder="),
-    new RegExp("^\\s*[a-zA-Z][\\w-]+=\\{"),
-    new RegExp('^\\s*d="[A-Z]'),
-    new RegExp("^\\s+\\w[\\w?]*\\??:\\s*(string|number|boolean|null|undefined|void|any|never|object)\\s*[;,]?\\s*$"),
-    new RegExp("^\\s+\\w[\\w?]*\\??:\\s*\\w+(\\[\\])?\\s*[;,]\\s*$"),
-    new RegExp("^\\s+\\w+:\\s*[-\\d.]+,?\\s*$"),
-    new RegExp("^\\s+\\w+:\\s*(true|false|null|undefined),?\\s*$"),
-    new RegExp("^\\s+\\w+:\\s*[\\[{(]"),
-    new RegExp("^\\s+\\w+:\\s*\\w+,?\\s*$"),
-    new RegExp("^\\s+\\.\\.\\.\\w+,?\\s*$"),
-    new RegExp("^\\s+\\[\\w+\\]:\\s*"),
-    new RegExp("^```"),
-    new RegExp("^\\s*\\/\\/"),
-    new RegExp("^\\s*\\/\\*"),
-    new RegExp("^\\s*\\*[\\s\\/]"),
-    new RegExp("^\\s*\\*$"),
-    new RegExp("^[A-Z][A-Z0-9_]{3,}(_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\\b"),
-  ];
-
   const lines = text.split("\n");
-  const kept = lines.filter(line => !codePatterns.some(p => p.test(line)));
+
+  const kept = lines.filter(line => {
+    const t = line.trim();
+    if (t === "") return true;
+
+    // Drop obvious code patterns using RegExp constructor (avoids TS parse issues)
+    const drops = [
+      new RegExp("^\\s*(import|export|const|let|var|function|class|interface|type|return|if|else|for|while|switch|case|try|catch|async|await|new|throw)\\b"),
+      new RegExp("^\\s*[{};()\\[\\]]"),
+      new RegExp("[{};]$"),
+      new RegExp("^\\s*<[\\w\\/]"),
+      new RegExp("^\\s*\\/[\\/\\*]"),
+      new RegExp("^```"),
+      new RegExp("=>"),
+      new RegExp("^\\s*\\?\\s"),
+      new RegExp("^\\s*\\|\\s"),
+      new RegExp("^\\s*\\.\\.\\."),
+      new RegExp("^\\s*@\\w"),
+      new RegExp("^\\s+[\\w]+\\??\\s*:\\s*[\\w\"'`{\\[\\(]"),
+      new RegExp("^\\s*\\w+,\\s*$"),
+      new RegExp("^\\s*[\"'`][a-z][^\"'`]*[\"'`],?\\s*$"),
+      new RegExp('^\\s*d="[A-Z]'),
+      new RegExp("^[A-Z][A-Z0-9_]{3,}(_STARTED|_COMPLETED|_QUEUED|_FAILED|_RUNNING|_ERROR|_READY|_DONE)\\b"),
+    ];
+    if (drops.some(p => p.test(line))) return false;
+
+    // Drop lines with high ratio of code symbols
+    const symbols = (line.match(/[{};=<>()\[\]|&!@#%^*~`\\]/g) || []).length;
+    const nonSpace = line.replace(/\s/g, "").length;
+    if (nonSpace > 0 && symbols / nonSpace > 0.2) return false;
+
+    return true;
+  });
+
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
