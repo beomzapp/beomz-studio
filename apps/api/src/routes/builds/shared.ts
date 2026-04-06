@@ -222,3 +222,22 @@ export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput 
     warnings: row.warnings,
   };
 }
+
+export function mapGenerationRowToBuild(row: GenerationRow) {
+  const metadata = readBuildMetadata(row.metadata);
+
+  return {
+    completedAt: row.completed_at,
+    error: row.error,
+    id: row.id,
+    phase: metadata.phase ?? null,
+    projectId: row.project_id,
+    source: metadata.resultSource ?? null,
+    startedAt: row.started_at,
+    status: row.status,
+    summary: row.summary,
+    templateId: row.template_id,
+    templateReason: metadata.templateReason ?? null,
+    workflowId: metadata.workflowId ?? null,
+  };
+}
