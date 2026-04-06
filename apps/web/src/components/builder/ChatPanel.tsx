@@ -1,8 +1,8 @@
 /**
  * ChatPanel — V2 chat sidebar.
  * User messages: right-aligned dark bubble.
- * AI messages: left-aligned with orange "B" avatar.
- * Plan cards, file change links, error toast, streaming shimmer.
+ * AI messages: left-aligned with orange "B" avatar, plain flowing text (no card).
+ * Streaming cursor, rotating build status messages, completion suggestions.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
@@ -32,6 +32,8 @@ export interface ChatMessage {
   planSteps?: readonly string[];
   changedFiles?: readonly string[];
   error?: string | null;
+  suggestions?: readonly string[];
+  phase?: { current: number; total: number; summary: string };
 }
 
 interface ChatPanelProps {
@@ -44,6 +46,32 @@ interface ChatPanelProps {
   onViewCode?: () => void;
   width?: number;
 }
+
+// ─────────────────────────────────────────────
+// Building status messages
+// ─────────────────────────────────────────────
+
+const BUILDING_MESSAGES = [
+  "Thinking really hard...",
+  "Planning your components...",
+  "Writing the good stuff...",
+  "Making it beautiful...",
+  "Connecting the pieces...",
+  "Checking the details...",
+  "Almost there...",
+  "Polishing the edges...",
+  "Running through it once more...",
+  "Adding the finishing touches...",
+  "Making sure everything works...",
+  "One sec, this part is tricky...",
+  "Laying the foundations...",
+  "Wiring up the logic...",
+  "Styling things up...",
+  "Just a moment...",
+  "Bringing it all together...",
+  "Nearly ready...",
+];
+
 
 // ─────────────────────────────────────────────
 // Markdown-lite renderer
@@ -219,15 +247,61 @@ function BeomzAvatar() {
 }
 
 // ─────────────────────────────────────────────
-// Streaming shimmer
+// Building status indicator (rotating messages)
 // ─────────────────────────────────────────────
 
-function StreamingShimmer() {
+function BuildingStatus() {
+  const [index, setIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIndex((prev) => (prev + 1) % BUILDING_MESSAGES.length);
+        setVisible(true);
+      }, 200);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div className="space-y-2 py-1">
-      <div className="h-3 w-3/4 animate-pulse rounded bg-[#f3f4f6]" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-[#f3f4f6]" style={{ animationDelay: "150ms" }} />
-      <div className="h-3 w-2/3 animate-pulse rounded bg-[#f3f4f6]" style={{ animationDelay: "300ms" }} />
+    <div className="flex items-center gap-2 pl-9">
+      <Loader2 size={12} className="animate-spin text-[#9ca3af]" />
+      <span
+        className={cn(
+          "text-xs text-[#9ca3af] transition-opacity duration-200",
+          visible ? "opacity-100" : "opacity-0",
+        )}
+      >
+        {BUILDING_MESSAGES[index]}
+      </span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Suggestion links
+// ─────────────────────────────────────────────
+
+function SuggestionLinks({
+  suggestions,
+  onSend,
+}: {
+  suggestions: readonly string[];
+  onSend: (text: string) => void;
+}) {
+  return (
+    <div className="mt-3 space-y-1.5 pl-9">
+      {suggestions.map((s) => (
+        <button
+          key={s}
+          onClick={() => onSend(s)}
+          className="block text-sm text-[#F97316] underline decoration-[#F97316]/30 underline-offset-2 transition-colors hover:text-[#ea6c10] hover:decoration-[#ea6c10]/50"
+        >
+          {s}
+        </button>
+      ))}
     </div>
   );
 }
@@ -252,19 +326,26 @@ export function ChatPanel({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const userScrolledUp = useRef(false);
 
+  // Auto-scroll to bottom when new messages arrive, unless user scrolled up
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!userScrolledUp.current) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages.length, streamingText]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 80);
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUp.current = distFromBottom > 80;
+    setShowScrollBtn(distFromBottom > 80);
   }, []);
 
   const scrollToBottom = useCallback(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    userScrolledUp.current = false;
   }, []);
 
   const handleSend = useCallback(() => {
@@ -305,11 +386,11 @@ export function ChatPanel({
       className="flex shrink-0 flex-col border-r border-[#e5e5e5] bg-[#faf9f6]"
       style={{ width }}
     >
-      {/* Messages area */}
+      {/* Messages area — flex-1 so it fills remaining space */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="relative flex-1 overflow-y-auto px-4 py-4"
+        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4"
       >
         {!hasMessages && (
           <div className="flex h-full items-center justify-center">
@@ -331,32 +412,36 @@ export function ChatPanel({
                     </div>
                   </div>
                 ) : (
-                  /* AI message — left-aligned with orange avatar */
+                  /* AI message — left-aligned with orange avatar, NO card wrapper */
                   <div className="flex items-start gap-2.5">
                     <BeomzAvatar />
-                    <div className="group relative min-w-0 max-w-[85%]">
-                      <div className="rounded-2xl rounded-bl-md border border-[#e5e5e5] bg-white px-3.5 py-2.5 text-sm leading-relaxed text-[#1a1a1a]">
-                        {msg.content && <MarkdownText text={msg.content} />}
+                    <div className="group relative min-w-0 max-w-[85%] pt-0.5">
+                      {/* Plain text — no border, no background, no card */}
+                      {msg.content && <MarkdownText text={msg.content} />}
 
-                        {/* Plan steps card */}
-                        {msg.planSteps && msg.planSteps.length > 0 && (
-                          <PlanCardInline steps={msg.planSteps} />
-                        )}
+                      {/* Plan steps card */}
+                      {msg.planSteps && msg.planSteps.length > 0 && (
+                        <PlanCardInline steps={msg.planSteps} />
+                      )}
 
-                        {/* Trace entries */}
-                        {msg.traceEntries && msg.traceEntries.length > 0 && (
-                          <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
-                            {msg.traceEntries.map((entry) => (
-                              <TraceEntryRow key={entry.id} entry={entry} />
-                            ))}
-                          </div>
-                        )}
+                      {/* Trace entries */}
+                      {msg.traceEntries && msg.traceEntries.length > 0 && (
+                        <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
+                          {msg.traceEntries.map((entry) => (
+                            <TraceEntryRow key={entry.id} entry={entry} />
+                          ))}
+                        </div>
+                      )}
 
-                        {/* File change badge */}
-                        {msg.changedFiles && msg.changedFiles.length > 0 && (
-                          <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
-                        )}
-                      </div>
+                      {/* File change badge */}
+                      {msg.changedFiles && msg.changedFiles.length > 0 && (
+                        <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
+                      )}
+
+                      {/* Suggestions after build complete */}
+                      {msg.suggestions && msg.suggestions.length > 0 && !isStreaming && (
+                        <SuggestionLinks suggestions={msg.suggestions} onSend={onSendMessage} />
+                      )}
 
                       {/* Copy button on hover */}
                       <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -368,21 +453,26 @@ export function ChatPanel({
               </div>
             ))}
 
-            {/* Streaming AI message */}
+            {/* Streaming AI message — plain text with cursor */}
             {isStreaming && (
-              <div className="flex items-start gap-2.5">
-                <BeomzAvatar />
-                <div className="min-w-0 max-w-[85%] rounded-2xl rounded-bl-md border border-[#e5e5e5] bg-white px-3.5 py-2.5">
-                  {streamingText ? (
-                    <div className="text-sm leading-relaxed text-[#1a1a1a]">
-                      <MarkdownText text={streamingText} />
-                      <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#9ca3af]" />
-                    </div>
-                  ) : (
-                    <StreamingShimmer />
-                  )}
+              <>
+                <div className="flex items-start gap-2.5">
+                  <BeomzAvatar />
+                  <div className="min-w-0 max-w-[85%] pt-0.5">
+                    {streamingText ? (
+                      <div className="text-sm leading-relaxed text-[#374151]">
+                        <MarkdownText text={streamingText} />
+                        <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
+                      </div>
+                    ) : (
+                      /* No shimmer — just the cursor blinking while waiting for first token */
+                      <span className="inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
+                    )}
+                  </div>
                 </div>
-              </div>
+                {/* Rotating build status messages */}
+                <BuildingStatus />
+              </>
             )}
           </div>
         )}
@@ -414,8 +504,8 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Input bar */}
-      <div className="border-t border-[#e5e5e5] px-3 py-2">
+      {/* Input bar — pinned to bottom with flex-shrink-0 */}
+      <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
         <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
           <div className="px-3 pt-2">
             <textarea
