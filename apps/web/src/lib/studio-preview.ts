@@ -945,6 +945,9 @@ const BABEL_RUNNER = `
     ReactDOM.createRoot(document.getElementById("root")).render(
       React.createElement(PreviewErrorBoundary, null, React.createElement(App))
     );
+    try {
+      window.parent.postMessage({ type: "beomz-preview-ready" }, "*");
+    } catch (_postMessageError) {}
   } catch (err) {
     renderError(err);
   }

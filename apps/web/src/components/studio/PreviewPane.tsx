@@ -179,6 +179,21 @@ export function PreviewPane({
   }, [activeFrame?.key]);
 
   useEffect(() => {
+    function handlePreviewMessage(event: MessageEvent) {
+      if (event.data?.type !== "beomz-preview-ready") {
+        return;
+      }
+
+      setHasFirstFrame(true);
+    }
+
+    window.addEventListener("message", handlePreviewMessage);
+    return () => {
+      window.removeEventListener("message", handlePreviewMessage);
+    };
+  }, []);
+
+  useEffect(() => {
     setPreviewMode("inline");
     setRemoteError(null);
     setRemoteResponse(null);
