@@ -106,12 +106,8 @@ export function synthesizeTraceFromBuildStatus(
 export function eventToTranscriptEntry(event: BuilderV3Event): BuilderV3TranscriptEntry | null {
   switch (event.type) {
     case "assistant_delta":
-      return {
-        id: event.id,
-        kind: "assistant",
-        message: event.delta,
-        timestamp: event.timestamp,
-      };
+      // Raw code tokens from the Temporal worker — never show in chat
+      return null;
     case "status":
       return {
         code: event.code,
