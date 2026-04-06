@@ -77,7 +77,7 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   const initRef = useRef(false);
 
   const navigate = useNavigate();
-  const { session } = useAuth();
+  const { session, loading: authLoading } = useAuth();
 
   // ── Scroll ──────────────────────────────────────────────────────────────────
 
@@ -263,11 +263,12 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
   // ── Mount: first analysis call ───────────────────────────────────────────────
 
   useEffect(() => {
+    if (authLoading) return; // wait for Supabase session to resolve before calling API
     if (initRef.current) return;
     initRef.current = true;
     historyRef.current = [];
     void runAnalysis([], 0);
-  }, [runAnalysis]);
+  }, [authLoading, runAnalysis]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
