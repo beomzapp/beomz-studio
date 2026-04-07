@@ -723,30 +723,25 @@ function cleanBundledCode(code: string): string {
 
 const PREVIEW_GLOBALS = `
 const { useState, useEffect, useMemo, useRef, useCallback, useReducer, useContext, createContext } = React;
-window.lucide = new Proxy({}, {
-  get: function(_target, prop) {
-    if (typeof prop !== "string") return undefined;
-    return function LucideProxyIcon(props) {
-      return React.createElement(
-        "span",
-        {
-          className: props && props.className ? props.className : "",
-          style: Object.assign(
-            {
-              display: "inline-flex",
-              width: (props && props.size) || 16,
-              height: (props && props.size) || 16,
-              borderRadius: 999,
-              background: "rgba(249,115,22,0.18)",
-              border: "1px solid rgba(249,115,22,0.35)"
-            },
-            props && props.style ? props.style : {}
-          )
-        }
-      );
-    };
-  }
-});
+window.lucide = typeof LucideReact !== "undefined"
+  ? LucideReact
+  : new Proxy({}, {
+      get: function(_target, _prop) {
+        return function LucideFallbackIcon(props) {
+          return React.createElement("span", {
+            className: props && props.className ? props.className : "",
+            style: Object.assign(
+              {
+                display: "inline-block",
+                width: (props && props.size) || 16,
+                height: (props && props.size) || 16
+              },
+              props && props.style ? props.style : {}
+            )
+          });
+        };
+      }
+    });
 window.ReactRouterDOM = {
   useNavigate: function() { return function() {}; },
   useLocation: function() { return { pathname: "/", search: "", hash: "", state: null }; },
@@ -919,6 +914,8 @@ export function buildStudioPreviewHtml(input: BuildStudioPreviewHtmlInput): stri
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script>window.react = window.React;</script>
+    <script src="https://unpkg.com/lucide-react@0.436.0/dist/umd/lucide-react.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>

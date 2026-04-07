@@ -424,7 +424,11 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
         // skip template selection tool steps (internal plumbing, not useful to users)
         if (
           (e.kind === "tool_use" || e.kind === "tool_result") &&
-          (e.toolName === "template_select")
+          (
+            e.toolName === "template_select"
+            || e.toolName === "validate_build"
+            || e.toolName === "persist_build_state"
+          )
         ) return null;
 
         // status -> tiny grey uppercase section label
