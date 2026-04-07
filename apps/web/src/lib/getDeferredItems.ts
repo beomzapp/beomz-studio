@@ -1,5 +1,6 @@
 export async function getDeferredItems(prompt: string): Promise<string[]> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY ?? "";
+  if (!apiKey) return ["Advanced settings", "User management", "Analytics dashboard"];
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

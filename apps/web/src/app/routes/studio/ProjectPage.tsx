@@ -33,6 +33,8 @@ import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
 import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
 import { useBuilderTranscript } from "../../../hooks/useBuilderTranscript";
 import { cn } from "../../../lib/cn";
+import { getSuggestionChips } from "../../../lib/getSuggestionChips";
+import { streamBuildSummary } from "../../../lib/streamBuildSummary";
 
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
@@ -82,6 +84,15 @@ export function ProjectPage() {
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
   const resumingBuildRef = useRef(false);
+
+  const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
+
+  // Post-build AI summary state
+  const [pendingSummaryBuildId, setPendingSummaryBuildId] = useState<string | null>(null);
+  const summaryGeneratedRef = useRef(new Set<string>());
+  const summaryAbortRef = useRef<AbortController | null>(null);
+  const lastUserPromptRef = useRef("");
+  const buildSummaryTextRef = useRef("");
 
   const [showChat, setShowChat] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
@@ -214,6 +225,22 @@ export function ProjectPage() {
       setIsStreaming(false);
       setStreamingText("");
     }
+
+    if (event.type === "done") {
+      buildSummaryTextRef.current = event.message;
+      const bid = "buildId" in event ? event.buildId : activeBuildIdRef.current;
+      if (bid) setPendingSummaryBuildId(bid);
+
+      setMessages((prev) => {
+        const lastUserMsg = [...prev].reverse().find((m) => m.role === "user");
+        if (lastUserMsg) {
+          void getSuggestionChips(lastUserMsg.content).then((chips) => {
+            if (chips.length > 0) setSuggestionChips(chips);
+          });
+        }
+        return prev;
+      });
+    }
   }, [appendTranscriptEntry, upsertAssistantMessage]);
 
   const handleBuildStatus = useCallback((status: BuildStatusResponse) => {
@@ -223,6 +250,10 @@ export function ProjectPage() {
     if (status.result) setBuildResult(status.result);
     if (status.trace.previewReady || status.build.status === "completed") {
       setPreviewGenerationId(status.build.id);
+    }
+    if (status.build.status === "completed") {
+      buildSummaryTextRef.current = status.build.summary ?? "Build completed.";
+      setPendingSummaryBuildId(status.build.id);
     }
     if (status.build.status === "completed" || status.build.status === "failed") {
       setIsStreaming(false);
@@ -298,6 +329,8 @@ export function ProjectPage() {
       timestamp: new Date().toISOString(),
     };
 
+    lastUserPromptRef.current = text;
+    summaryAbortRef.current?.abort();
     abortRef.current?.abort();
     setMessages((prev) => [...prev, userMessage]);
 
@@ -389,6 +422,79 @@ export function ProjectPage() {
   useEffect(() => {
     if (build?.status === "completed" || build?.status === "failed") clearState();
   }, [build?.status, clearState]);
+
+  // ── Post-build AI summary ──
+
+  useEffect(() => {
+    if (!pendingSummaryBuildId) return;
+    if (summaryGeneratedRef.current.has(pendingSummaryBuildId)) {
+      setPendingSummaryBuildId(null);
+      return;
+    }
+
+    const buildId = pendingSummaryBuildId;
+    summaryGeneratedRef.current.add(buildId);
+    setPendingSummaryBuildId(null);
+
+    const userPrompt = lastUserPromptRef.current;
+    if (!userPrompt || !import.meta.env.VITE_ANTHROPIC_API_KEY) return;
+
+    const fileCount = buildResult?.files?.length ?? 0;
+    const buildInfo = [
+      `App: ${projectName}`,
+      fileCount > 0 ? `${fileCount} files generated` : null,
+      buildSummaryTextRef.current,
+    ]
+      .filter(Boolean)
+      .join(". ");
+
+    const summaryMsgId = `summary-${buildId}`;
+    const controller = new AbortController();
+    summaryAbortRef.current = controller;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: summaryMsgId,
+        role: "assistant" as const,
+        content: "\u258B",
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    (async () => {
+      let accumulated = "";
+      try {
+        for await (const delta of streamBuildSummary(userPrompt, buildInfo, controller.signal)) {
+          accumulated += delta;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === summaryMsgId ? { ...m, content: accumulated + "\u258B" } : m,
+            ),
+          );
+        }
+        // Remove cursor when streaming finishes
+        if (accumulated) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === summaryMsgId ? { ...m, content: accumulated } : m,
+            ),
+          );
+        } else {
+          setMessages((prev) => prev.filter((m) => m.id !== summaryMsgId));
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setMessages((prev) => prev.filter((m) => m.id !== summaryMsgId));
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSummaryBuildId, buildResult, projectName]);
 
   // ── Resize logic ──
 
@@ -610,6 +716,8 @@ export function ProjectPage() {
               onStopStreaming={handleStopStreaming}
               onViewCode={() => setActiveView("code")}
               width={chatPanelWidth}
+              suggestionChips={suggestionChips}
+              onDismissChips={() => setSuggestionChips([])}
             />
           </div>
         </div>
