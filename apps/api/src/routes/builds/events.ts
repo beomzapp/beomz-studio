@@ -1,16 +1,18 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-import { isBuilderV3TerminalEvent } from "@beomz-studio/contracts";
+import { isBuilderV3TerminalEvent, type TemplateId } from "@beomz-studio/contracts";
+import { getTemplateDefinition } from "@beomz-studio/templates";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
-import { readBuildTraceMetadata } from "./shared.js";
+import { readBuildMetadata, readBuildTraceMetadata } from "./shared.js";
 
 const buildsEventsRoute = new Hono();
 const BUILD_EVENT_POLL_INTERVAL_MS = 250;
+const TERMINAL_EVENT_RETRY_LIMIT = 2;
 
 function sliceEventsAfterEventId<T extends { id: string }>(
   events: readonly T[],
@@ -22,6 +24,64 @@ function sliceEventsAfterEventId<T extends { id: string }>(
 
   const lastIndex = events.findIndex((event) => event.id === lastEventId);
   return lastIndex === -1 ? events : events.slice(lastIndex + 1);
+}
+
+function isSyntheticTerminalEventId(buildId: string, eventId: string | null): boolean {
+  return eventId === `${buildId}:done` || eventId === `${buildId}:error`;
+}
+
+function buildTerminalSafetyEvent(
+  row: {
+    completed_at: string | null;
+    error: string | null;
+    id: string;
+    metadata: Record<string, unknown>;
+    preview_entry_path: string | null;
+    project_id: string;
+    started_at: string;
+    status: string;
+    summary: string | null;
+    template_id: string;
+  },
+) {
+  const metadata = readBuildMetadata(row.metadata);
+  const fallbackReason = metadata.fallbackReason ?? null;
+  const fallbackUsed = metadata.resultSource === "fallback";
+  const timestamp = row.completed_at ?? row.started_at;
+
+  if (row.status === "failed" || row.status === "cancelled") {
+    return {
+      buildId: row.id,
+      code: "build_failed",
+      id: `${row.id}:error`,
+      message: row.error ?? "Build failed.",
+      operation: "initial_build" as const,
+      payload: {
+        phase: metadata.phase ?? null,
+      },
+      projectId: row.project_id,
+      timestamp,
+      type: "error" as const,
+    };
+  }
+
+  return {
+    buildId: row.id,
+    code: "build_completed",
+    fallbackReason,
+    fallbackUsed,
+    id: `${row.id}:done`,
+    message: row.summary ?? "Build completed.",
+    operation: "initial_build" as const,
+    payload: {
+      previewEntryPath:
+        row.preview_entry_path ?? getTemplateDefinition(row.template_id as TemplateId).previewEntryPath,
+      source: metadata.resultSource ?? "ai",
+    },
+    projectId: row.project_id,
+    timestamp,
+    type: "done" as const,
+  };
 }
 
 buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
@@ -47,6 +107,7 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   return streamSSE(c, async (sse) => {
     let lastSentEventId = requestedLastEventId;
     let streamOpen = true;
+    let completedPollsWithoutTerminal = 0;
 
     const writeEvent = async (event: { data: string; event: string; id: string }) => {
       if (!streamOpen || c.req.raw.signal.aborted) {
@@ -92,10 +153,56 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         }
       }
 
-      if (currentGenerationRow.status === "completed" || currentGenerationRow.status === "failed") {
+      const terminalEventAlreadySeen =
+        isSyntheticTerminalEventId(buildId, lastSentEventId)
+        || trace.events.some(
+          (event) => event.id === lastSentEventId && isBuilderV3TerminalEvent(event),
+        );
+
+      if (
+        currentGenerationRow.status === "completed"
+        || currentGenerationRow.status === "failed"
+        || currentGenerationRow.status === "cancelled"
+      ) {
+        if (terminalEventAlreadySeen) {
+          return;
+        }
+
+        completedPollsWithoutTerminal += 1;
+        if (completedPollsWithoutTerminal <= TERMINAL_EVENT_RETRY_LIMIT) {
+          await delay(BUILD_EVENT_POLL_INTERVAL_MS, undefined, {
+            signal: c.req.raw.signal,
+          }).catch(() => undefined);
+          continue;
+        }
+
+        const safetyEvent = buildTerminalSafetyEvent({
+          completed_at: currentGenerationRow.completed_at,
+          error: currentGenerationRow.error,
+          id: currentGenerationRow.id,
+          metadata:
+            typeof currentGenerationRow.metadata === "object" && currentGenerationRow.metadata !== null
+              ? currentGenerationRow.metadata as Record<string, unknown>
+              : {},
+          preview_entry_path: currentGenerationRow.preview_entry_path,
+          project_id: currentGenerationRow.project_id,
+          started_at: currentGenerationRow.started_at,
+          status: currentGenerationRow.status,
+          summary: currentGenerationRow.summary,
+          template_id: currentGenerationRow.template_id,
+        });
+        const didWrite = await writeEvent({
+          data: JSON.stringify(safetyEvent),
+          event: safetyEvent.type,
+          id: safetyEvent.id,
+        });
+        if (!didWrite) {
+          return;
+        }
         return;
       }
 
+      completedPollsWithoutTerminal = 0;
       await delay(BUILD_EVENT_POLL_INTERVAL_MS, undefined, {
         signal: c.req.raw.signal,
       }).catch(() => undefined);
