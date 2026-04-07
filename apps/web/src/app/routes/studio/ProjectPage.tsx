@@ -229,19 +229,23 @@ export function ProjectPage() {
     if (event.type === "done") {
       buildSummaryTextRef.current = event.message;
       const bid = "buildId" in event ? event.buildId : activeBuildIdRef.current;
+      if (!lastUserPromptRef.current) {
+        lastUserPromptRef.current = projectName || "build this app";
+      }
       if (bid) setPendingSummaryBuildId(bid);
 
       setMessages((prev) => {
         const lastUserMsg = [...prev].reverse().find((m) => m.role === "user");
-        if (lastUserMsg) {
-          void getSuggestionChips(lastUserMsg.content).then((chips) => {
+        const prompt = lastUserMsg?.content || lastUserPromptRef.current || projectName;
+        if (prompt) {
+          void getSuggestionChips(prompt).then((chips) => {
             if (chips.length > 0) setSuggestionChips(chips);
           });
         }
         return prev;
       });
     }
-  }, [appendTranscriptEntry, upsertAssistantMessage]);
+  }, [appendTranscriptEntry, projectName, upsertAssistantMessage]);
 
   const handleBuildStatus = useCallback((status: BuildStatusResponse) => {
     setBuild(status.build);
@@ -253,6 +257,9 @@ export function ProjectPage() {
     }
     if (status.build.status === "completed") {
       buildSummaryTextRef.current = status.build.summary ?? "Build completed.";
+      if (!lastUserPromptRef.current) {
+        lastUserPromptRef.current = status.project.name || "build this app";
+      }
       setPendingSummaryBuildId(status.build.id);
     }
     if (status.build.status === "completed" || status.build.status === "failed") {
@@ -422,6 +429,23 @@ export function ProjectPage() {
   useEffect(() => {
     if (build?.status === "completed" || build?.status === "failed") clearState();
   }, [build?.status, clearState]);
+
+  useEffect(() => {
+    if (!buildResult?.files?.length) return;
+    const bid = activeBuildIdRef.current;
+    if (!bid) return;
+
+    const files = buildResult.files.map((file) => file.path);
+    const messageId = `assistant-${bid}`;
+
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === messageId && (!message.changedFiles || message.changedFiles.length === 0)
+          ? { ...message, changedFiles: files }
+          : message,
+      ),
+    );
+  }, [buildResult]);
 
   // ── Post-build AI summary ──
 
