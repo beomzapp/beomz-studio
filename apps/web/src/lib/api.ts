@@ -21,6 +21,7 @@ export interface BuildPayload {
   completedAt: string | null;
   error: string | null;
   id: string;
+  operationId: string;
   phase: string | null;
   projectId: string;
   source: string | null;
@@ -38,6 +39,7 @@ export interface BuildStatusResponse {
   result: {
     files: readonly StudioFile[];
     generation: {
+      changedPaths?: readonly string[];
       id: string;
       operationId: string;
       outputPaths: readonly string[];

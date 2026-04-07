@@ -25,6 +25,7 @@ import {
 import {
   buildSystemPromptFrame,
   type AnthropicSystemTextBlock,
+  type BuildSystemPromptInput,
   type SystemPromptFrame,
 } from "./systemPrompt.js";
 import {
@@ -171,6 +172,7 @@ export interface GenerationEngineOptions {
   model: StreamingModel;
   operation: OperationContract;
   persistence?: GenerationTurnPersistence | false;
+  promptPolicy?: BuildSystemPromptInput["promptPolicy"];
   project: Pick<
     Project,
     "id" | "name" | "orgId" | "previewEntryPath" | "status" | "templateId"
@@ -996,6 +998,7 @@ export class GenerationEngine {
           actor: this.options.actor,
           actionDefinitions: this.actionDefinitions,
           operation: this.options.operation,
+          promptPolicy: this.options.promptPolicy,
           project: this.options.project,
           prompt: this.options.prompt,
           template: this.template,

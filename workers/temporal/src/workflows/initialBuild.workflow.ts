@@ -10,7 +10,7 @@ import type {
   BuilderV3ToolUseStartedEvent,
   BuilderV3TracePatch,
 } from "@beomz-studio/contracts";
-import { initialBuildOperation } from "@beomz-studio/operations";
+import { initialBuildOperation, projectIterationOperation } from "@beomz-studio/operations";
 import { getTemplateDefinition } from "@beomz-studio/templates";
 import { proxyActivities } from "@temporalio/workflow";
 
@@ -42,8 +42,22 @@ function toErrorMessage(error: unknown): string {
 export async function initialBuildWorkflow(
   input: InitialBuildWorkflowInput,
 ): Promise<InitialBuildWorkflowResult> {
+  return runBuildWorkflow(input, "initial_build");
+}
+
+export async function projectIterationWorkflow(
+  input: InitialBuildWorkflowInput,
+): Promise<InitialBuildWorkflowResult> {
+  return runBuildWorkflow(input, "iteration");
+}
+
+async function runBuildWorkflow(
+  input: InitialBuildWorkflowInput,
+  operation: "initial_build" | "iteration",
+): Promise<InitialBuildWorkflowResult> {
   const plan = createInitialBuildPlan(input.prompt, input.projectName);
-  const isIteration = input.existingFiles.length > 0;
+  const isIteration = operation === "iteration";
+  const operationId = isIteration ? projectIterationOperation.id : initialBuildOperation.id;
   let eventSequence = 1;
   let fallbackReason: string | null = null;
   let fallbackUsed = false;
@@ -66,7 +80,7 @@ export async function initialBuildWorkflow(
   ): BuilderV3Event => ({
     ...event,
     id: String(++eventSequence),
-    operation: "initial_build",
+    operation,
     timestamp: new Date().toISOString(),
   });
 
@@ -595,8 +609,9 @@ export async function initialBuildWorkflow(
     const result: InitialBuildWorkflowResult = {
       files: validation.files,
       generation: {
+        changedPaths: validation.outputPaths,
         id: input.buildId,
-        operationId: initialBuildOperation.id,
+        operationId,
         outputPaths: validation.outputPaths,
         status: "completed",
         summary: draft.summary,

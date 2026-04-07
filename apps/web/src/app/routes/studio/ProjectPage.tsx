@@ -438,7 +438,7 @@ export function ProjectPage() {
     const bid = activeBuildIdRef.current;
     if (!bid) return;
 
-    const files = buildResult.generation.outputPaths;
+    const files = buildResult.generation.changedPaths ?? buildResult.generation.outputPaths;
     const messageId = `assistant-${bid}`;
 
     setMessages((prev) =>

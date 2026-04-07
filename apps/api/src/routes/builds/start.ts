@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { initialBuildOperation } from "@beomz-studio/operations";
+import { initialBuildOperation, projectIterationOperation } from "@beomz-studio/operations";
 import type { BuilderV3TraceMetadata, PlanStep } from "@beomz-studio/contracts";
 import {
   INITIAL_BUILD_WORKFLOW_TYPE,
+  PROJECT_ITERATION_WORKFLOW_TYPE,
   buildInitialBuildWorkflowId,
+  buildProjectIterationWorkflowId,
   buildProjectNameFromPrompt,
   getInitialBuildTaskQueue,
   getTemporalClient,
@@ -63,6 +65,7 @@ function derivePlanKeywords(steps: readonly PlanStep[] | undefined): string[] | 
 
 function createInitialBuilderTrace(
   requestedAt: string,
+  operation: "initial_build" | "iteration",
 ): BuilderV3TraceMetadata {
   return {
     events: [
@@ -70,7 +73,7 @@ function createInitialBuilderTrace(
         code: "build_queued",
         id: "1",
         message: "Build queued. Waiting for the worker to start.",
-        operation: "initial_build",
+        operation,
         timestamp: requestedAt,
         type: "status",
         phase: "queued",
@@ -155,8 +158,13 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
   const requestedAt = new Date().toISOString();
-  const workflowId = buildInitialBuildWorkflowId(buildId);
-  const initialBuilderTrace = createInitialBuilderTrace(requestedAt);
+  const operation = isIteration ? "iteration" : "initial_build";
+  const workflowId = isIteration
+    ? buildProjectIterationWorkflowId(buildId)
+    : buildInitialBuildWorkflowId(buildId);
+  const workflowType = isIteration ? PROJECT_ITERATION_WORKFLOW_TYPE : INITIAL_BUILD_WORKFLOW_TYPE;
+  const operationId = isIteration ? projectIterationOperation.id : initialBuildOperation.id;
+  const initialBuilderTrace = createInitialBuilderTrace(requestedAt, operation);
 
   const initialMetadata = {
     builderTrace: initialBuilderTrace,
@@ -194,7 +202,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     files: [],
     id: buildId,
     metadata: initialMetadata,
-    operation_id: initialBuildOperation.id,
+    operation_id: operationId,
     output_paths: [],
     preview_entry_path: selection.template.previewEntryPath,
     project_id: projectId,
@@ -215,7 +223,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   try {
     const temporalClient = await getTemporalClient();
 
-    await temporalClient.workflow.start(INITIAL_BUILD_WORKFLOW_TYPE, {
+    await temporalClient.workflow.start(workflowType, {
       args: [
         {
           actor: {

@@ -3,11 +3,16 @@ import { Client, Connection } from "@temporalio/client";
 import { getTemporalConnectionOptions, getTemporalRuntimeConfig } from "./config.js";
 
 export const INITIAL_BUILD_WORKFLOW_TYPE = "initialBuildWorkflow";
+export const PROJECT_ITERATION_WORKFLOW_TYPE = "projectIterationWorkflow";
 
 let cachedTemporalClientPromise: Promise<Client> | null = null;
 
 export function buildInitialBuildWorkflowId(buildId: string): string {
   return `initial-build:${buildId}`;
+}
+
+export function buildProjectIterationWorkflowId(buildId: string): string {
+  return `project-iteration:${buildId}`;
 }
 
 export function getInitialBuildTaskQueue(): string {

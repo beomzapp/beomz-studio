@@ -1,4 +1,4 @@
-export type BuilderV3Operation = "initial_build" | "clarify_plan";
+export type BuilderV3Operation = "initial_build" | "iteration" | "clarify_plan";
 
 export type BuilderV3ToolName =
   | "plan_blueprint"

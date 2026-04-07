@@ -4,7 +4,11 @@ import type {
   Project,
   TemplateDefinition,
 } from "@beomz-studio/contracts";
-import { getInitialBuildPromptPolicy } from "@beomz-studio/prompt-policies";
+import {
+  getInitialBuildPromptPolicy,
+  type InitialBuildPromptPolicy,
+  type IterationPromptPolicy,
+} from "@beomz-studio/prompt-policies";
 import { getTemplateDefinition } from "@beomz-studio/templates";
 
 import {
@@ -36,6 +40,7 @@ export interface BuildSystemPromptInput {
   actor?: OperationActor;
   actionDefinitions?: readonly ActionDefinition[];
   operation: OperationContract;
+  promptPolicy?: InitialBuildPromptPolicy | IterationPromptPolicy;
   project: Pick<
     Project,
     "id" | "name" | "orgId" | "previewEntryPath" | "status" | "templateId"
@@ -122,7 +127,7 @@ function buildVfsSection(vfs: VirtualFileSystem, maxInlineChars = 16_000): strin
 
 function buildDynamicSection(input: BuildSystemPromptInput): string {
   const template = input.template ?? getTemplateDefinition(input.project.templateId);
-  const promptPolicy = getInitialBuildPromptPolicy(template.id);
+  const promptPolicy = input.promptPolicy ?? getInitialBuildPromptPolicy(template.id);
 
   return [
     "DYNAMIC SECTION",

@@ -1,18 +1,118 @@
+import {
+  buildGeneratedAppShellPath,
+  buildGeneratedDataFilePath,
+  buildGeneratedManifestPath,
+  buildGeneratedNavigationFilePath,
+  buildGeneratedPageFilePath,
+  buildGeneratedThemeFilePath,
+  buildGeneratedUiComponentPath,
+} from "@beomz-studio/contracts";
+
 import type { ValidationResult } from "./types.js";
 
 const KERNEL_PATHS = ["packages/kernel/"];
 
 const REQUIRED_FILES_BY_TEMPLATE: Record<string, string[]> = {
-  "marketing-website": ["src/pages/Home.tsx"],
-  "saas-dashboard": ["src/pages/Overview.tsx"],
-  "workspace-task": ["src/pages/Tasks.tsx"],
-  "mobile-app": ["src/pages/Home.tsx"],
-  "social-app": ["src/pages/Feed.tsx"],
-  "ecommerce": ["src/pages/Home.tsx"],
-  "portfolio": ["src/pages/Home.tsx"],
-  "blog-cms": ["src/pages/Articles.tsx"],
-  "onboarding-flow": ["src/pages/Welcome.tsx"],
-  "data-table-app": ["src/pages/Overview.tsx"],
+  "marketing-website": [
+    buildGeneratedManifestPath("marketing-website"),
+    buildGeneratedThemeFilePath("marketing-website"),
+    buildGeneratedDataFilePath("marketing-website"),
+    buildGeneratedNavigationFilePath("marketing-website"),
+    buildGeneratedAppShellPath("marketing-website"),
+    buildGeneratedUiComponentPath("marketing-website", "PrimaryButton"),
+    buildGeneratedUiComponentPath("marketing-website", "SurfaceCard"),
+    buildGeneratedPageFilePath("marketing-website", "home"),
+  ],
+  "saas-dashboard": [
+    buildGeneratedManifestPath("saas-dashboard"),
+    buildGeneratedThemeFilePath("saas-dashboard"),
+    buildGeneratedDataFilePath("saas-dashboard"),
+    buildGeneratedNavigationFilePath("saas-dashboard"),
+    buildGeneratedAppShellPath("saas-dashboard"),
+    buildGeneratedUiComponentPath("saas-dashboard", "PrimaryButton"),
+    buildGeneratedUiComponentPath("saas-dashboard", "SurfaceCard"),
+    buildGeneratedPageFilePath("saas-dashboard", "overview"),
+  ],
+  "workspace-task": [
+    buildGeneratedManifestPath("workspace-task"),
+    buildGeneratedThemeFilePath("workspace-task"),
+    buildGeneratedDataFilePath("workspace-task"),
+    buildGeneratedNavigationFilePath("workspace-task"),
+    buildGeneratedAppShellPath("workspace-task"),
+    buildGeneratedUiComponentPath("workspace-task", "PrimaryButton"),
+    buildGeneratedUiComponentPath("workspace-task", "SurfaceCard"),
+    buildGeneratedPageFilePath("workspace-task", "tasks"),
+  ],
+  "mobile-app": [
+    buildGeneratedManifestPath("mobile-app"),
+    buildGeneratedThemeFilePath("mobile-app"),
+    buildGeneratedDataFilePath("mobile-app"),
+    buildGeneratedNavigationFilePath("mobile-app"),
+    buildGeneratedAppShellPath("mobile-app"),
+    buildGeneratedUiComponentPath("mobile-app", "PrimaryButton"),
+    buildGeneratedUiComponentPath("mobile-app", "SurfaceCard"),
+    buildGeneratedPageFilePath("mobile-app", "home"),
+  ],
+  "social-app": [
+    buildGeneratedManifestPath("social-app"),
+    buildGeneratedThemeFilePath("social-app"),
+    buildGeneratedDataFilePath("social-app"),
+    buildGeneratedNavigationFilePath("social-app"),
+    buildGeneratedAppShellPath("social-app"),
+    buildGeneratedUiComponentPath("social-app", "PrimaryButton"),
+    buildGeneratedUiComponentPath("social-app", "SurfaceCard"),
+    buildGeneratedPageFilePath("social-app", "feed"),
+  ],
+  "ecommerce": [
+    buildGeneratedManifestPath("ecommerce"),
+    buildGeneratedThemeFilePath("ecommerce"),
+    buildGeneratedDataFilePath("ecommerce"),
+    buildGeneratedNavigationFilePath("ecommerce"),
+    buildGeneratedAppShellPath("ecommerce"),
+    buildGeneratedUiComponentPath("ecommerce", "PrimaryButton"),
+    buildGeneratedUiComponentPath("ecommerce", "SurfaceCard"),
+    buildGeneratedPageFilePath("ecommerce", "home"),
+  ],
+  "portfolio": [
+    buildGeneratedManifestPath("portfolio"),
+    buildGeneratedThemeFilePath("portfolio"),
+    buildGeneratedDataFilePath("portfolio"),
+    buildGeneratedNavigationFilePath("portfolio"),
+    buildGeneratedAppShellPath("portfolio"),
+    buildGeneratedUiComponentPath("portfolio", "PrimaryButton"),
+    buildGeneratedUiComponentPath("portfolio", "SurfaceCard"),
+    buildGeneratedPageFilePath("portfolio", "home"),
+  ],
+  "blog-cms": [
+    buildGeneratedManifestPath("blog-cms"),
+    buildGeneratedThemeFilePath("blog-cms"),
+    buildGeneratedDataFilePath("blog-cms"),
+    buildGeneratedNavigationFilePath("blog-cms"),
+    buildGeneratedAppShellPath("blog-cms"),
+    buildGeneratedUiComponentPath("blog-cms", "PrimaryButton"),
+    buildGeneratedUiComponentPath("blog-cms", "SurfaceCard"),
+    buildGeneratedPageFilePath("blog-cms", "articles"),
+  ],
+  "onboarding-flow": [
+    buildGeneratedManifestPath("onboarding-flow"),
+    buildGeneratedThemeFilePath("onboarding-flow"),
+    buildGeneratedDataFilePath("onboarding-flow"),
+    buildGeneratedNavigationFilePath("onboarding-flow"),
+    buildGeneratedAppShellPath("onboarding-flow"),
+    buildGeneratedUiComponentPath("onboarding-flow", "PrimaryButton"),
+    buildGeneratedUiComponentPath("onboarding-flow", "SurfaceCard"),
+    buildGeneratedPageFilePath("onboarding-flow", "welcome"),
+  ],
+  "data-table-app": [
+    buildGeneratedManifestPath("data-table-app"),
+    buildGeneratedThemeFilePath("data-table-app"),
+    buildGeneratedDataFilePath("data-table-app"),
+    buildGeneratedNavigationFilePath("data-table-app"),
+    buildGeneratedAppShellPath("data-table-app"),
+    buildGeneratedUiComponentPath("data-table-app", "PrimaryButton"),
+    buildGeneratedUiComponentPath("data-table-app", "SurfaceCard"),
+    buildGeneratedPageFilePath("data-table-app", "overview"),
+  ],
 };
 
 /**
@@ -64,7 +164,7 @@ export function validateInitialBuild(
   // Check required files
   const required = REQUIRED_FILES_BY_TEMPLATE[templateId] ?? [];
   for (const req of required) {
-    if (!files.some((f) => f.endsWith(req))) {
+    if (!files.some((f) => f === req || f.endsWith(req))) {
       errors.push(`Required file missing: ${req} (template: ${templateId})`);
     }
   }

@@ -213,6 +213,7 @@ export async function createPreviewSession(
   } satisfies PreviewSession;
 
   const runtime = createRuntimeContract({
+    files: input.generation.files,
     mode: "preview",
     project: input.project,
     provider: "e2b",

@@ -29,6 +29,9 @@ export function synthesizeTraceFromBuildStatus(
     return response.trace;
   }
 
+  const operation = response.build.operationId === "projectIteration"
+    ? "iteration"
+    : "initial_build";
   const phase = response.build.phase ?? "queued";
   const fallbackUsed = response.build.source === "fallback";
   const previewEntryPath = response.result?.previewEntryPath ?? response.project.previewEntryPath;
@@ -37,7 +40,7 @@ export function synthesizeTraceFromBuildStatus(
       code: `status_${phase}`,
       id: `${response.build.id}:${phase}:${response.build.status}`,
       message: response.build.summary ?? `Build is ${phase}.`,
-      operation: "initial_build",
+      operation,
       phase,
       timestamp: response.build.completedAt ?? response.build.startedAt,
       type: "status",
@@ -52,7 +55,7 @@ export function synthesizeTraceFromBuildStatus(
       fallbackUsed,
       id: `${response.build.id}:preview-ready`,
       message: "Preview is ready for the studio client.",
-      operation: "initial_build",
+      operation,
       payload: {
         source: response.build.source ?? "ai",
       },
@@ -68,7 +71,7 @@ export function synthesizeTraceFromBuildStatus(
       fallbackUsed,
       id: `${response.build.id}:done`,
       message: response.build.summary ?? "Build completed.",
-      operation: "initial_build",
+      operation,
       payload: {
         source: response.build.source ?? "ai",
       },
@@ -84,7 +87,7 @@ export function synthesizeTraceFromBuildStatus(
       code: "build_failed",
       id: `${response.build.id}:error`,
       message: response.build.error ?? "Build failed.",
-      operation: "initial_build",
+      operation,
       payload: {
         phase,
       },

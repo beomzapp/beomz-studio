@@ -44,6 +44,7 @@ export async function buildPublishArtifact(
   await sandbox.setTimeout(config.E2B_PREVIEW_TIMEOUT_MS);
 
   const runtime = createRuntimeContract({
+    files: input.generation.files,
     mode: "publish",
     project: input.project,
     provider: "e2b",

@@ -1,8 +1,13 @@
+import {
+  buildGeneratedManifest,
+  buildGeneratedNavigationFromManifest,
+  buildGeneratedRoutesFromManifest,
+  readGeneratedManifestFromFiles,
+} from "@beomz-studio/contracts";
 import type {
   PreviewRuntimeContract,
   Project,
   StudioFile,
-  TemplateDefinition,
 } from "@beomz-studio/contracts";
 import { getTemplateDefinition } from "@beomz-studio/templates";
 
@@ -27,36 +32,20 @@ interface BuildStudioPreviewHtmlInput {
   project: Pick<Project, "id" | "name" | "templateId">;
 }
 
-function buildGeneratedPageFilePath(templateId: string, pageId: string): string {
-  return `apps/web/src/app/generated/${templateId}/${pageId}.tsx`;
-}
-
 function buildInlineRuntimeContract(input: BuildStudioPreviewHtmlInput): PreviewRuntimeContract {
-  const template = getTemplateDefinition(input.project.templateId as TemplateDefinition["id"]);
+  const template = getTemplateDefinition(input.project.templateId);
+  const manifest =
+    readGeneratedManifestFromFiles(template.id, input.files)
+    ?? buildGeneratedManifest(template);
 
   return {
-    entryPath: input.previewEntryPath ?? template.previewEntryPath,
+    entryPath: input.previewEntryPath ?? manifest.entryPath,
     mode: "preview",
-    navigation: template.pages
-      .filter((page) => page.inPrimaryNav)
-      .map((page) => ({
-        auth: page.requiresAuth ? "authenticated" : "public",
-        href: page.path,
-        id: `${template.id}:${page.id}`,
-        label: page.navigationLabel,
-      })),
+    navigation: buildGeneratedNavigationFromManifest(manifest),
     project: input.project,
     provider: "local",
-    routes: template.pages.map((page) => ({
-      auth: page.requiresAuth ? "authenticated" : "public",
-      filePath: buildGeneratedPageFilePath(template.id, page.id),
-      id: `${template.id}:${page.id}`,
-      inPrimaryNav: page.inPrimaryNav,
-      label: page.navigationLabel,
-      path: page.path,
-      summary: page.summary,
-    })),
-    shell: template.shell,
+    routes: buildGeneratedRoutesFromManifest(manifest),
+    shell: manifest.shell,
     templateId: template.id,
   };
 }

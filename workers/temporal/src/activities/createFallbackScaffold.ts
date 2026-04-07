@@ -8,6 +8,7 @@ import {
   buildGeneratedPageComponentName,
   buildGeneratedPageFilePath,
 } from "../shared/paths.js";
+import { buildGeneratedScaffoldFiles } from "../shared/generatedSurface.js";
 import type {
   FallbackScaffoldActivityInput,
   GeneratedBuildDraft,
@@ -446,14 +447,22 @@ function createRouteFile(
 export async function createFallbackScaffold(
   input: FallbackScaffoldActivityInput,
 ): Promise<GeneratedBuildDraft> {
+  const scaffoldFiles = buildGeneratedScaffoldFiles({
+    project: input.project,
+    template: input.template,
+  });
+
   return {
-    files: input.template.pages.map((page) =>
-      createRouteFile(
-        input.template,
-        page,
-        input.project.name,
-        input.plan.intentSummary,
-      )),
+    files: [
+      ...scaffoldFiles,
+      ...input.template.pages.map((page) =>
+        createRouteFile(
+          input.template,
+          page,
+          input.project.name,
+          input.plan.intentSummary,
+        )),
+    ],
     previewEntryPath: input.template.previewEntryPath,
     source: "platform",
     summary: `Fallback scaffold for ${input.template.name}`,

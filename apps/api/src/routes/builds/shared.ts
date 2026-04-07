@@ -128,6 +128,7 @@ function synthesizeBuilderTrace(
   metadata: BuildRouteMetadata,
 ): BuilderV3TraceMetadata {
   const template = getTemplateDefinition(row.template_id);
+  const operation = row.operation_id === "projectIteration" ? "iteration" : "initial_build";
   const fallbackReason = metadata.fallbackReason ?? null;
   const fallbackUsed = metadata.resultSource === "fallback";
   const events: BuilderV3Event[] = [];
@@ -137,7 +138,7 @@ function synthesizeBuilderTrace(
       code: `legacy_${metadata.phase}`,
       id: "legacy-1",
       message: row.summary ?? `Build is ${metadata.phase}.`,
-      operation: "initial_build",
+      operation,
       phase: metadata.phase,
       timestamp: row.started_at,
       type: "status",
@@ -152,7 +153,7 @@ function synthesizeBuilderTrace(
       fallbackUsed,
       id: events.length === 0 ? "legacy-1" : "legacy-2",
       message: "Preview is ready for the studio client.",
-      operation: "initial_build",
+      operation,
       payload: {
         source: metadata.resultSource ?? "ai",
       },
@@ -168,7 +169,7 @@ function synthesizeBuilderTrace(
       fallbackUsed,
       id: events.length === 1 ? "legacy-2" : "legacy-3",
       message: row.summary ?? "Build completed.",
-      operation: "initial_build",
+      operation,
       payload: {
         source: metadata.resultSource ?? "ai",
       },
@@ -184,7 +185,7 @@ function synthesizeBuilderTrace(
       code: "build_failed",
       id: events.length === 0 ? "legacy-1" : "legacy-2",
       message: row.error ?? "Build failed.",
-      operation: "initial_build",
+      operation,
       payload: {
         phase: metadata.phase ?? null,
       },
@@ -247,6 +248,7 @@ export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput 
   return {
     files: row.files,
     generation: {
+      changedPaths: row.output_paths,
       id: row.id,
       operationId: row.operation_id,
       outputPaths: row.output_paths,
@@ -266,6 +268,7 @@ export function mapGenerationRowToBuild(row: GenerationRow) {
     completedAt: row.completed_at,
     error: row.error,
     id: row.id,
+    operationId: row.operation_id,
     phase: metadata.phase ?? null,
     projectId: row.project_id,
     source: metadata.resultSource ?? null,

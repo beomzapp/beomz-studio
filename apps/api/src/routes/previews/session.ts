@@ -29,6 +29,10 @@ function toErrorMessage(error: unknown): string {
 
 function buildLocalPreviewResponse(input: {
   error?: string;
+  files: readonly {
+    content: string;
+    path: string;
+  }[];
   generationId: string;
   previewId: string;
   project: {
@@ -47,6 +51,7 @@ function buildLocalPreviewResponse(input: {
     status: "running",
   } satisfies PreviewSession;
   const runtime = createRuntimeContract({
+    files: input.files,
     mode: "preview",
     project: input.project,
     provider: "local",
@@ -62,11 +67,18 @@ function buildLocalPreviewResponse(input: {
     }),
     generationId: input.generationId,
     runtime,
-    session: localSession,
+    session: {
+      ...localSession,
+      entryPath: runtime.entryPath,
+    },
   };
 }
 
 function buildStoredPreviewResponse(input: {
+  files: readonly {
+    content: string;
+    path: string;
+  }[];
   generationId: string;
   previewRow: {
     id: string;
@@ -94,6 +106,7 @@ function buildStoredPreviewResponse(input: {
     url: input.previewRow.preview_url ?? undefined,
   } satisfies PreviewSession;
   const runtime = createRuntimeContract({
+    files: input.files,
     mode: "preview",
     project: input.project,
     provider: "e2b",
@@ -103,7 +116,10 @@ function buildStoredPreviewResponse(input: {
   return {
     generationId: input.generationId,
     runtime,
-    session,
+    session: {
+      ...session,
+      entryPath: runtime.entryPath,
+    },
   };
 }
 
@@ -164,6 +180,7 @@ previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json(
       buildLocalPreviewResponse({
         error: errorMessage,
+        files: generationRow.files,
         generationId: generationRow.id,
         previewId: previewRow.id,
         project,
@@ -197,6 +214,7 @@ previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   } else if (previewRow.status === "booting") {
     return c.json(
       buildStoredPreviewResponse({
+        files: generationRow.files,
         generationId: generationRow.id,
         previewRow,
         project,
@@ -267,6 +285,7 @@ previewsSessionRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json(
       buildLocalPreviewResponse({
         error: errorMessage,
+        files: generationRow.files,
         generationId: generationRow.id,
         previewId: previewRow.id,
         project,

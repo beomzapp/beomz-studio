@@ -51,6 +51,7 @@ export async function patchPreviewFiles(
     status: "running",
   } satisfies PreviewSession;
   const runtime = createRuntimeContract({
+    files: input.generation.files,
     mode: "preview",
     project: input.project,
     provider: "e2b",

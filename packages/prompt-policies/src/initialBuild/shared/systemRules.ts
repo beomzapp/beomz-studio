@@ -11,4 +11,7 @@ export const sharedInitialBuildSystemRules = [
   "Seed lists, tables, feeds, and cards with 3 to 5 rows of realistic example data using real-looking names, dates, prices, counts, statuses, and labels. Never use Lorem ipsum, Sample text, Item 1, or other generic filler.",
   "All buttons must use explicit action labels such as Save Changes, Add Task, Send Message, View Invoice, or Start Free Trial.",
   "Never put the entire app in one component. Split the experience into logical subcomponents such as Sidebar, TopBar, PageContent, Card, Modal, FeedItem, ProductGrid, or FormStep.",
+  "The generated app must include a stable scaffold: route manifest, theme/tokens file, navigation config, shared data file, AppShell layout component, and shared UI primitives before or alongside route files.",
+  "Route files should contain route-specific content only. Shared navigation, shell layout, responsive frame logic, and repeated UI primitives belong in the scaffold files, not duplicated inside each page.",
+  "Favor editing theme, navigation, AppShell, or shared UI modules for global changes instead of rewriting every route file.",
 ] as const;

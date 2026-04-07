@@ -1,11 +1,19 @@
 import { initialBuildOperation } from "@beomz-studio/operations";
 import { minimatch } from "minimatch";
 import ts from "typescript";
+import {
+  buildGeneratedManifest,
+  readGeneratedManifestFromFiles,
+} from "@beomz-studio/contracts";
 
 import {
   buildExpectedGeneratedPaths,
   normalizeGeneratedPath,
 } from "../shared/paths.js";
+import {
+  classifyIterationIntent,
+  findDuplicateSemanticNavLabels,
+} from "../shared/iterationContext.js";
 import type {
   BuildValidationResult,
   ValidateBuildActivityInput,
@@ -42,11 +50,21 @@ function createDiagnosticsForFile(
   }));
 }
 
+function findShellDuplicationViolations(files: readonly { path: string; content: string }[]): string[] {
+  return files
+    .filter((file) => /\/app\/generated\/.+\.(tsx|jsx|ts|js)$/i.test(file.path))
+    .filter((file) =>
+      /(function\s+(Sidebar|TopBar|BottomTab|BottomNav|DrawerMenu)\b|const\s+(Sidebar|TopBar|BottomTab|BottomNav|DrawerMenu)\s*=|<aside\b[\s\S]{0,400}<nav\b)/i.test(file.content),
+    )
+    .map((file) => file.path);
+}
+
 export async function validateBuild(
   input: ValidateBuildActivityInput,
 ): Promise<BuildValidationResult> {
   const errors: ValidationIssue[] = [];
   const warnings = [...input.draft.warnings];
+  const isIteration = input.draft.changedPaths !== undefined && input.draft.changedPaths.length > 0;
   const normalizedFiles = input.draft.files.map((file) => ({
     ...file,
     path: normalizeGeneratedPath(file.path),
@@ -129,6 +147,43 @@ export async function validateBuild(
     }
   }
 
+  const manifest =
+    readGeneratedManifestFromFiles(input.template.id, normalizedFiles)
+    ?? buildGeneratedManifest(input.template);
+
+  for (const route of manifest.routes) {
+    const normalizedRoutePath = normalizeGeneratedPath(route.filePath);
+    if (!generatedPaths.has(normalizedRoutePath)) {
+      errors.push({
+        code: "missing-manifest-route",
+        message: `Route manifest points to a missing generated route file: ${normalizedRoutePath}`,
+        path: normalizedRoutePath,
+        validationId: "template-contract-check",
+      });
+    }
+  }
+
+  const duplicateSemanticLabels = findDuplicateSemanticNavLabels(
+    manifest.routes.filter((route) => route.inPrimaryNav).map((route) => route.label),
+  );
+  for (const duplicate of duplicateSemanticLabels) {
+    errors.push({
+      code: "duplicate-semantic-nav",
+      message: `Navigation contains duplicate or overlapping destinations: ${duplicate}`,
+      validationId: "iteration-semantic-nav-check",
+    });
+  }
+
+  const shellDuplicationViolations = findShellDuplicationViolations(normalizedFiles);
+  for (const path of shellDuplicationViolations) {
+    errors.push({
+      code: "shell-duplication",
+      message: "Route file duplicates shell-owned navigation or layout chrome.",
+      path,
+      validationId: "iteration-shell-ownership-check",
+    });
+  }
+
   if (input.draft.previewEntryPath !== input.template.previewEntryPath) {
     errors.push({
       code: "preview-entry-mismatch",
@@ -138,7 +193,7 @@ export async function validateBuild(
   }
 
   const unexpectedRouteFiles = normalizedFiles.filter(
-    (file) => file.kind === "route" && !expectedRoutePaths.includes(file.path),
+    (file) => file.kind === "route" && !manifest.routes.some((route) => normalizeGeneratedPath(route.filePath) === file.path),
   );
   if (unexpectedRouteFiles.length > 0) {
     warnings.push(
@@ -146,6 +201,24 @@ export async function validateBuild(
         .map((file) => file.path)
         .join(", ")}`,
     );
+  }
+
+  if (isIteration) {
+    const iterationIntent = classifyIterationIntent(input.draft.summary);
+    const forbiddenAuthNav = manifest.routes
+      .filter((route) => route.inPrimaryNav)
+      .map((route) => route.label)
+      .filter((label) =>
+        ["login", "sign in", "signup", "sign up", "logout", "log out"].includes(label.toLowerCase()),
+      );
+
+    if (iterationIntent === "auth_flow" && forbiddenAuthNav.length > 0) {
+      errors.push({
+        code: "auth-nav-leak",
+        message: "Auth actions must not be added as primary navigation destinations.",
+        validationId: "iteration-semantic-nav-check",
+      });
+    }
   }
 
   const outputPaths = Array.from(

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@beomz-studio/contracts": "workspace:*",
+    "@beomz-studio/engine": "workspace:*",
     "@beomz-studio/operations": "workspace:*",
     "@beomz-studio/prompt-policies": "workspace:*",
     "@beomz-studio/studio-db": "workspace:*",

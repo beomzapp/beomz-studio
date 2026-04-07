@@ -41,7 +41,9 @@ export interface InitialBuildInput {
 }
 
 export interface InitialBuildOutput {
-  generation: Pick<Generation, "id" | "operationId" | "status" | "summary" | "outputPaths">;
+  generation: Pick<Generation, "id" | "operationId" | "status" | "summary" | "outputPaths"> & {
+    changedPaths?: readonly string[];
+  };
   files: readonly StudioFile[];
   previewEntryPath: string;
   warnings: readonly string[];
