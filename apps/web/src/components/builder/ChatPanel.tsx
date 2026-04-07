@@ -401,75 +401,14 @@ function SuggestionLinks({
 function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntry[] }) {
   if (!entries || entries.length === 0) return null;
 
-  // Pre-compute which tool_use ids have a matching tool_result so we can skip the tool_use row
-  const resolvedToolUseIds = new Set<string>();
-  for (const e of entries) {
-    if (e.kind === "tool_result" && e.toolUseId) {
-      resolvedToolUseIds.add(e.toolUseId);
-    }
-  }
-
   return (
     <div className="mb-2 flex flex-col gap-1">
       {entries.map((e, i) => {
-        // skip assistant entries
-        if (e.kind === "assistant") return null;
-
-        // skip internal preview/build-completed status lines and template selection steps
         if (
-          e.kind === "status" &&
-          (e.code === "preview_ready" || e.code === "build_completed" || e.code === "template_selection_started")
-        ) return null;
-
-        // skip template selection tool steps (internal plumbing, not useful to users)
-        if (
-          (e.kind === "tool_use" || e.kind === "tool_result") &&
-          (
-            e.toolName === "template_select"
-            || e.toolName === "validate_build"
-            || e.toolName === "persist_build_state"
-          )
-        ) return null;
-
-        // status -> tiny grey uppercase section label
-        if (e.kind === "status") {
-          return (
-            <div
-              key={e.id ?? i}
-              className="mt-1 first:mt-0 text-[10px] font-semibold uppercase tracking-widest text-[#9ca3af]"
-            >
-              {e.message}
-            </div>
-          );
-        }
-
-        // tool_use that already has a matching tool_result -> skip (result row handles it)
-        if (e.kind === "tool_use" && e.toolUseId && resolvedToolUseIds.has(e.toolUseId)) {
-          return null;
-        }
-
-        // tool_use with no result yet -> running (animated spinner + grey text)
-        if (e.kind === "tool_use") {
-          return (
-            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
-              <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin text-[#9ca3af]" />
-              <span className="text-[#9ca3af]">{e.message}</span>
-            </div>
-          );
-        }
-
-        // tool_result error -> red x + red text
-        if (e.kind === "tool_result" && e.status === "error") {
-          return (
-            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
-              <span className="mt-0.5 shrink-0 leading-none text-red-500">x</span>
-              <span className="text-red-600">{e.message}</span>
-            </div>
-          );
-        }
-
-        // tool_result success -> green check + dark text
-        if (e.kind === "tool_result") {
+          e.kind === "tool_result"
+          && e.status === "success"
+          && e.toolName === "plan_blueprint"
+        ) {
           return (
             <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
               <Check size={12} className="mt-0.5 shrink-0 text-[#10b981]" />
@@ -478,7 +417,6 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
           );
         }
 
-        // error kind -> red x + red text
         if (e.kind === "error") {
           return (
             <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
@@ -488,7 +426,6 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
           );
         }
 
-        // done kind -> bold, no background
         if (e.kind === "done") {
           return (
             <div key={e.id ?? i} className="mt-1 flex items-center gap-2 text-xs font-semibold text-[#1a1a1a]">

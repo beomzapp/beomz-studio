@@ -114,6 +114,9 @@ function buildUserPrompt(
 }
 
 function buildIterationUserPrompt(input: GenerateFilesActivityInput): string {
+  const exampleChangedFilePath = input.existingFiles[0]?.path
+    ?? buildGeneratedPageFilePath(input.template.id, input.template.pages[0]?.id ?? "home");
+
   return [
     `Project name: ${input.project.name}`,
     `User request: ${input.plan.normalizedPrompt}`,
@@ -141,7 +144,7 @@ function buildIterationUserPrompt(input: GenerateFilesActivityInput): string {
         summary: "Short sentence describing the targeted edit.",
         changedFiles: [
           {
-            path: "apps/web/src/app/generated/example/page.tsx",
+            path: exampleChangedFilePath,
             content: "Full updated file contents here",
           },
         ],
@@ -512,34 +515,131 @@ function parseIterationResponse(text: string): IterationResponsePayload {
   };
 }
 
+function normalizePath(filePath: string): string {
+  return filePath
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/")
+    .toLowerCase();
+}
+
+function cleanChangedFilePath(filePath: string): string {
+  return filePath
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+/g, "/");
+}
+
+function inferFileLanguage(filePath: string): string {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+
+  switch (extension) {
+    case "tsx":
+      return "tsx";
+    case "ts":
+      return "ts";
+    case "jsx":
+      return "jsx";
+    case "js":
+      return "js";
+    case "json":
+      return "json";
+    case "css":
+      return "css";
+    case "md":
+    case "mdx":
+      return extension;
+    default:
+      return extension ?? "tsx";
+  }
+}
+
+function inferFileKind(filePath: string): StudioFile["kind"] {
+  const normalizedPath = cleanChangedFilePath(filePath).toLowerCase();
+
+  if (/\/app\/generated\/.+\.(tsx|jsx|ts|js)$/.test(normalizedPath)) {
+    return "route";
+  }
+  if (/\/components\//.test(normalizedPath)) {
+    return "component";
+  }
+  if (/\/layouts?\//.test(normalizedPath)) {
+    return "layout";
+  }
+  if (/\.css$/.test(normalizedPath)) {
+    return "style";
+  }
+  if (/\.(json|ya?ml|toml)$/.test(normalizedPath) || /\/config\//.test(normalizedPath)) {
+    return "config";
+  }
+  if (/\.(md|mdx)$/.test(normalizedPath)) {
+    return "content";
+  }
+
+  return "component";
+}
+
+function sanitizeChangedFileContent(filePath: string, content: string): string {
+  if (/\.(tsx|ts|jsx|js)$/i.test(filePath)) {
+    return stripNonTsxEnvelope(extractCodePayload(content));
+  }
+
+  return content.trim();
+}
+
 function mergeChangedFiles(input: {
   changedFiles: readonly IterationResponseFile[];
   existingFiles: readonly StudioFile[];
-}): readonly StudioFile[] {
-  const existingFilesByPath = new Map(
-    input.existingFiles.map((file) => [file.path, file] as const),
+}): {
+  changedPaths: readonly string[];
+  files: readonly StudioFile[];
+} {
+  const mergedFiles = [...input.existingFiles];
+  const existingFileIndexByPath = new Map(
+    input.existingFiles.map((file, index) => [normalizePath(file.path), index] as const),
   );
+  const changedPaths: string[] = [];
 
   for (const changedFile of input.changedFiles) {
-    if (!existingFilesByPath.has(changedFile.path)) {
-      throw new Error(
-        `Iteration attempted to modify a file outside the current project: ${changedFile.path}`,
-      );
+    const normalizedChangedPath = normalizePath(changedFile.path);
+    const cleanedPath = cleanChangedFilePath(changedFile.path);
+    const existingIndex = existingFileIndexByPath.get(normalizedChangedPath);
+    const nextContent = sanitizeChangedFileContent(cleanedPath, changedFile.content);
+
+    if (existingIndex !== undefined) {
+      const existingFile = mergedFiles[existingIndex];
+      if (!existingFile) {
+        continue;
+      }
+
+      const nextPath = existingFile.path;
+      mergedFiles[existingIndex] = {
+        ...existingFile,
+        content: nextContent,
+        path: nextPath,
+        source: "ai",
+      };
+      changedPaths.push(nextPath);
+      continue;
     }
+
+    mergedFiles.push({
+      content: nextContent,
+      kind: inferFileKind(cleanedPath),
+      language: inferFileLanguage(cleanedPath),
+      locked: false,
+      path: cleanedPath,
+      source: "ai",
+    });
+    changedPaths.push(cleanedPath);
   }
 
-  return input.existingFiles.map((file) => {
-    const replacement = input.changedFiles.find((changedFile) => changedFile.path === file.path);
-    if (!replacement) {
-      return file;
-    }
-
-    return {
-      ...file,
-      content: replacement.content.trim(),
-      source: "ai",
-    };
-  });
+  return {
+    changedPaths: Array.from(new Set(changedPaths)),
+    files: mergedFiles,
+  };
 }
 
 export async function generateFiles(
@@ -585,27 +685,22 @@ export async function generateFiles(
       assistantResponsesByPage,
     });
 
-    const changedFiles = iterationResponse.changedFiles.map((file) => ({
-      content: stripNonTsxEnvelope(extractCodePayload(file.content)),
-      path: file.path,
-    }));
-
-    const mergedFiles = mergeChangedFiles({
-      changedFiles,
+    const mergedResult = mergeChangedFiles({
+      changedFiles: iterationResponse.changedFiles,
       existingFiles: input.existingFiles,
     });
 
     return {
       assistantResponseText: assistantResponseParts.join(""),
       assistantResponsesByPage,
-      changedPaths: changedFiles.map((file) => file.path),
-      files: mergedFiles,
+      changedPaths: mergedResult.changedPaths,
+      files: mergedResult.files,
       previewEntryPath: input.template.previewEntryPath,
       source: "ai",
       summary:
         iterationResponse.summary?.trim()
-        || (changedFiles.length > 0
-          ? `Updated ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"} in ${input.project.name}.`
+        || (mergedResult.changedPaths.length > 0
+          ? `Updated ${mergedResult.changedPaths.length} file${mergedResult.changedPaths.length === 1 ? "" : "s"} in ${input.project.name}.`
           : `No file changes were needed for ${input.project.name}.`),
       warnings: [],
     };
