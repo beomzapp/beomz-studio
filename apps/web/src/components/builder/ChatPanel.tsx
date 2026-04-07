@@ -19,7 +19,8 @@ import {
   CheckCircle2,
   Loader2,
   Wrench,
-  FileCode,
+  ChevronDown,
+  Code2,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -198,20 +199,61 @@ function PlanCardInline({ steps }: { steps: readonly string[] }) {
 }
 
 // ─────────────────────────────────────────────
-// File change link
+// File summary (collapsible)
 // ─────────────────────────────────────────────
 
-function FileChangeBadge({ files, onViewCode }: { files: readonly string[]; onViewCode?: () => void }) {
+function FilesSummary({ files, onViewCode }: { files: readonly string[]; onViewCode?: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   if (files.length === 0) return null;
+
   return (
-    <button
-      onClick={onViewCode}
-      className="mt-2 flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-[#f3f4f6]"
-    >
-      <FileCode size={12} />
-      <span>{files.length} file{files.length !== 1 ? "s" : ""} changed</span>
-      <span className="text-[#F97316]">\u00b7 View code</span>
-    </button>
+    <div className="mt-2 overflow-hidden rounded-xl border border-[#e5e5e5] bg-[#faf9f6]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-2.5 py-2">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-xs text-[#6b7280] transition-colors hover:text-[#374151]"
+        >
+          <span className="text-sm leading-none">{"\uD83D\uDCC4"}</span>
+          <span>Generated {files.length} file{files.length !== 1 ? "s" : ""}</span>
+          <ChevronDown
+            size={12}
+            className={cn(
+              "transition-transform duration-200",
+              expanded ? "rotate-0" : "-rotate-90",
+            )}
+          />
+        </button>
+        {onViewCode && (
+          <button
+            onClick={onViewCode}
+            className="rounded p-1 text-[#9ca3af] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#F97316]"
+            title="View code"
+          >
+            <Code2 size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* File list */}
+      {expanded && (
+        <div className="border-t border-[#e5e5e5] px-2.5 py-1.5">
+          {files.map((filePath) => {
+            const fileName = filePath.split("/").pop() ?? filePath;
+            return (
+              <div
+                key={filePath}
+                className="flex items-center gap-1.5 py-0.5 text-xs"
+                title={filePath}
+              >
+                <span className="font-mono font-bold text-emerald-500">+</span>
+                <span className="truncate font-mono text-[#374151]">{fileName}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -460,9 +502,9 @@ export function ChatPanel({
                         </div>
                       )}
 
-                      {/* File change badge */}
+                      {/* File summary */}
                       {msg.changedFiles && msg.changedFiles.length > 0 && (
-                        <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
+                        <FilesSummary files={msg.changedFiles} onViewCode={onViewCode} />
                       )}
 
                       {/* Suggestions after build complete */}

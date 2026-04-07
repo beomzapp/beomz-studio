@@ -711,7 +711,11 @@ export function ProjectPage() {
               streamingText={transport === "idle" ? "" : streamingText}
               onSendMessage={handleSendMessage}
               onStopStreaming={handleStopStreaming}
-              onViewCode={() => setActiveView("code")}
+              onViewCode={() => {
+                setActiveView("code");
+                const firstFile = buildResult?.files?.[0]?.path;
+                if (firstFile) setSelectedFile(firstFile);
+              }}
               width={chatPanelWidth}
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
