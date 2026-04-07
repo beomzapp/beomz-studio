@@ -14,7 +14,7 @@ export interface KernelRouteDefinition {
   inPrimaryNav: boolean;
 }
 
-export const routeRegistry = Object.freeze(
+export const routeRegistry: Record<TemplateId, readonly KernelRouteDefinition[]> =
   TEMPLATE_REGISTRY.reduce<Record<TemplateId, readonly KernelRouteDefinition[]>>(
     (registry, template) => {
       registry[template.id] = template.pages.map((page) => ({
@@ -30,8 +30,7 @@ export const routeRegistry = Object.freeze(
       return registry;
     },
     {} as Record<TemplateId, readonly KernelRouteDefinition[]>,
-  ),
-);
+  );
 
 export function getRoutesForTemplate(templateId: TemplateId): readonly KernelRouteDefinition[] {
   return routeRegistry[templateId];

@@ -10,7 +10,7 @@ export interface KernelNavItem {
   auth: RouteAuthPolicy;
 }
 
-export const navRegistry = Object.freeze(
+export const navRegistry: Record<TemplateId, readonly KernelNavItem[]> =
   (Object.keys(routeRegistry) as TemplateId[]).reduce<Record<TemplateId, readonly KernelNavItem[]>>(
     (registry, templateId) => {
       registry[templateId] = routeRegistry[templateId]
@@ -26,8 +26,7 @@ export const navRegistry = Object.freeze(
       return registry;
     },
     {} as Record<TemplateId, readonly KernelNavItem[]>,
-  ),
-);
+  );
 
 export function getPrimaryNavItems(templateId: TemplateId): readonly KernelNavItem[] {
   return navRegistry[templateId];
