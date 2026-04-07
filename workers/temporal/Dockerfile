@@ -1,7 +1,4 @@
 FROM node:20-alpine
-
-RUN apk add --no-cache ca-certificates
-
 RUN npm install -g pnpm@9.15.4
 WORKDIR /app
 
