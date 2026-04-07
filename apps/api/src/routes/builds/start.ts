@@ -10,6 +10,7 @@ import {
   getTemporalClient,
   selectInitialBuildTemplate,
 } from "@beomz-studio/temporal-worker";
+import { getTemplateDefinition } from "@beomz-studio/templates";
 import { Hono } from "hono";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
@@ -104,6 +105,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   let planSessionId = parsedBody.data.planSessionId;
   let planSummary = parsedBody.data.summary;
   let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
+  const requestedProjectId = parsedBody.data.projectId?.trim();
 
   if (planSessionId) {
     const planSession = await orgContext.db.findPlanSessionById(planSessionId);
@@ -120,12 +122,38 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   const effectivePrompt = buildPlanContextPrompt(prompt, planSummary, planSteps);
-  const selection = selectInitialBuildTemplate({ prompt: effectivePrompt });
+  let projectRow = requestedProjectId
+    ? await orgContext.db.findProjectById(requestedProjectId)
+    : null;
+
+  if (requestedProjectId && !projectRow) {
+    return c.json({ error: "Project not found." }, 404);
+  }
+
+  if (projectRow && projectRow.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found." }, 404);
+  }
+
+  let existingFiles = parsedBody.data.existingFiles ? [...parsedBody.data.existingFiles] : [];
+  if (projectRow && existingFiles.length === 0) {
+    const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectRow.id);
+    existingFiles = latestGeneration?.files ? [...latestGeneration.files] : [];
+  }
+
+  const isIteration = Boolean(projectRow && existingFiles.length > 0);
+  const selection = isIteration && projectRow
+    ? {
+        reason: `Reusing the current ${projectRow.template} template for this project iteration.`,
+        scores: { [projectRow.template]: 1 },
+        template: getTemplateDefinition(projectRow.template),
+      }
+    : selectInitialBuildTemplate({ prompt: effectivePrompt });
   const projectName =
-    parsedBody.data.projectName?.trim()
+    (isIteration ? projectRow?.name : parsedBody.data.projectName?.trim())
+    || (projectRow?.name)
     || buildProjectNameFromPrompt(prompt, selection.template.defaultProjectName);
   const buildId = randomUUID();
-  const projectId = randomUUID();
+  const projectId = projectRow?.id ?? randomUUID();
   const requestedAt = new Date().toISOString();
   const workflowId = buildInitialBuildWorkflowId(buildId);
   const initialBuilderTrace = createInitialBuilderTrace(requestedAt);
@@ -144,13 +172,21 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     workflowId,
   } satisfies Record<string, unknown>;
 
-  const projectRow = await orgContext.db.createProject({
-    id: projectId,
-    name: projectName,
-    org_id: orgContext.org.id,
-    status: "queued",
-    template: selection.template.id,
-  });
+  if (projectRow) {
+    projectRow = await orgContext.db.updateProject(projectId, {
+      name: projectName,
+      status: "queued",
+      template: selection.template.id,
+    });
+  } else {
+    projectRow = await orgContext.db.createProject({
+      id: projectId,
+      name: projectName,
+      org_id: orgContext.org.id,
+      status: "queued",
+      template: selection.template.id,
+    });
+  }
 
   const generationRow = await orgContext.db.createGeneration({
     completed_at: null,
@@ -166,8 +202,12 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     started_at: requestedAt,
     status: "queued",
     summary: planSummary
-      ? `Queued ${selection.template.name} initial build from approved plan.`
-      : `Queued ${selection.template.name} initial build.`,
+      ? isIteration
+        ? `Queued requested changes for ${projectName} from the approved plan.`
+        : `Queued ${selection.template.name} initial build from approved plan.`
+      : isIteration
+        ? `Queued requested changes for ${projectName}.`
+        : `Queued ${selection.template.name} initial build.`,
     template_id: selection.template.id,
     warnings: [],
   });
@@ -191,7 +231,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
             },
           },
           buildId,
-          existingFiles: [],
+          existingFiles,
           projectId,
           projectName,
           prompt: effectivePrompt,

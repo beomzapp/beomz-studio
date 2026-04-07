@@ -11,6 +11,7 @@ import type {
   BuilderV3TracePatch,
 } from "@beomz-studio/contracts";
 import { initialBuildOperation } from "@beomz-studio/operations";
+import { getTemplateDefinition } from "@beomz-studio/templates";
 import { proxyActivities } from "@temporalio/workflow";
 
 import { createInitialBuildPlan } from "../shared/planner.js";
@@ -42,6 +43,7 @@ export async function initialBuildWorkflow(
   input: InitialBuildWorkflowInput,
 ): Promise<InitialBuildWorkflowResult> {
   const plan = createInitialBuildPlan(input.prompt, input.projectName);
+  const isIteration = input.existingFiles.length > 0;
   let eventSequence = 1;
   let fallbackReason: string | null = null;
   let fallbackUsed = false;
@@ -84,7 +86,9 @@ export async function initialBuildWorkflow(
           {
             type: "status",
             code: "planner_started",
-            message: `Planning initial build for ${plan.projectNameSuggestion}.`,
+            message: isIteration
+              ? `Planning requested changes for ${plan.projectNameSuggestion}.`
+              : `Planning initial build for ${plan.projectNameSuggestion}.`,
             phase: "planner",
           },
           {
@@ -92,7 +96,9 @@ export async function initialBuildWorkflow(
             tool_use_id: "tool-plan-blueprint-1",
             tool_name: "plan_blueprint",
             code: "plan_blueprint_started",
-            message: "Creating the initial build blueprint from the prompt.",
+            message: isIteration
+              ? "Creating an edit blueprint from the latest user request."
+              : "Creating the initial build blueprint from the prompt.",
             payload: {
               keywordCount: plan.keywords.length,
             },
@@ -102,7 +108,9 @@ export async function initialBuildWorkflow(
             tool_use_id: "tool-plan-blueprint-1",
             tool_name: "plan_blueprint",
             code: "plan_blueprint_completed",
-            message: "Initial build blueprint is ready.",
+            message: isIteration
+              ? "Edit blueprint is ready."
+              : "Initial build blueprint is ready.",
             payload: {
               keywords: [...plan.keywords],
               suggestedProjectName: plan.projectNameSuggestion,
@@ -116,7 +124,9 @@ export async function initialBuildWorkflow(
           planSummary: plan.intentSummary,
         },
         status: "running",
-        summary: `Planning initial build for ${plan.projectNameSuggestion}.`,
+        summary: isIteration
+          ? `Planning requested changes for ${plan.projectNameSuggestion}.`
+          : `Planning initial build for ${plan.projectNameSuggestion}.`,
       },
       projectId: input.projectId,
       projectPatch: {
@@ -132,7 +142,9 @@ export async function initialBuildWorkflow(
           {
             type: "status",
             code: "template_selection_started",
-            message: "Selecting the best template for this build.",
+            message: isIteration
+              ? "Reusing the existing project template for this iteration."
+              : "Selecting the best template for this build.",
             phase: "template-selector",
           },
           {
@@ -140,8 +152,11 @@ export async function initialBuildWorkflow(
             tool_use_id: "tool-template-select-1",
             tool_name: "template_select",
             code: "template_select_started",
-            message: "Evaluating templates against the build plan.",
+            message: isIteration
+              ? "Reusing the current project template."
+              : "Evaluating templates against the build plan.",
             payload: {
+              mode: isIteration ? "iteration" : "initial_build",
               provisionalTemplateId: input.provisionalTemplateId ?? null,
             },
           },
@@ -154,10 +169,27 @@ export async function initialBuildWorkflow(
       projectId: input.projectId,
     });
 
-    const selection = await templateSelect({
-      plan,
-      prompt: input.prompt,
-    });
+    if (isIteration && !input.provisionalTemplateId) {
+      throw new Error("Iteration builds require a provisional template id.");
+    }
+
+    const selection = isIteration
+      ? (() => {
+          const iterationTemplateId = input.provisionalTemplateId;
+          if (!iterationTemplateId) {
+            throw new Error("Iteration builds require a provisional template id.");
+          }
+
+          return {
+            reason: "Reusing the existing project template for this iteration request.",
+            scores: { [iterationTemplateId]: 1 },
+            template: getTemplateDefinition(iterationTemplateId),
+          };
+        })()
+      : await templateSelect({
+          plan,
+          prompt: input.prompt,
+        });
     selectedTemplateId = selection.template.id;
     selectedTemplateReason = selection.reason;
     selectedTemplateScores = selection.scores;
@@ -171,7 +203,9 @@ export async function initialBuildWorkflow(
             tool_use_id: "tool-template-select-1",
             tool_name: "template_select",
             code: "template_select_completed",
-            message: `Selected ${selection.template.name} as the starting template.`,
+            message: isIteration
+              ? `Reusing ${selection.template.name} as the current project template.`
+              : `Selected ${selection.template.name} as the starting template.`,
             payload: {
               reason: selection.reason,
               scores: selection.scores,
@@ -186,7 +220,9 @@ export async function initialBuildWorkflow(
           templateScores: selection.scores,
         },
         previewEntryPath: selection.template.previewEntryPath,
-        summary: `Selected ${selection.template.name} template for the initial build.`,
+        summary: isIteration
+          ? `Reusing ${selection.template.name} template for the requested changes.`
+          : `Selected ${selection.template.name} template for the initial build.`,
         templateId: selection.template.id,
       },
       projectId: input.projectId,
@@ -213,7 +249,9 @@ export async function initialBuildWorkflow(
           {
             type: "status",
             code: "generation_started",
-            message: `Generating files for ${selection.template.name}.`,
+            message: isIteration
+              ? `Applying requested changes to ${plan.projectNameSuggestion}.`
+              : `Generating files for ${selection.template.name}.`,
             phase: "generate",
           },
           {
@@ -221,8 +259,11 @@ export async function initialBuildWorkflow(
             tool_use_id: "tool-generate-files-1",
             tool_name: "generate_files",
             code: "generate_files_started",
-            message: "Generating the initial file set.",
+            message: isIteration
+              ? "Editing the current project files."
+              : "Generating the initial file set.",
             payload: {
+              mode: isIteration ? "iteration" : "initial_build",
               templateId: selection.template.id,
             },
           },
@@ -230,7 +271,9 @@ export async function initialBuildWorkflow(
         metadata: {
           phase: "generate",
         },
-        summary: `Generating files for ${selection.template.name}.`,
+        summary: isIteration
+          ? `Applying requested changes to ${plan.projectNameSuggestion}.`
+          : `Generating files for ${selection.template.name}.`,
       },
       projectId: input.projectId,
     });
@@ -246,6 +289,10 @@ export async function initialBuildWorkflow(
       prompt: input.prompt,
       template: selection.template,
     }).catch(async (error: unknown) => {
+      if (isIteration) {
+        throw error;
+      }
+
       source = "platform";
       fallbackUsed = true;
       fallbackReason = toErrorMessage(error);
@@ -402,6 +449,14 @@ export async function initialBuildWorkflow(
     });
 
     if (!validation.passed) {
+      if (isIteration) {
+        throw new Error(
+          `Edited build failed validation: ${validation.errors
+            .map((error) => error.message)
+            .join("; ")}`,
+        );
+      }
+
       const failedValidationToolUseId =
         source === "ai" ? "tool-validate-build-1" : "tool-validate-build-2";
       source = "platform";

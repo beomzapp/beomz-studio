@@ -148,7 +148,13 @@ export async function validateBuild(
     );
   }
 
-  const outputPaths = Array.from(new Set(normalizedFiles.map((file) => file.path)));
+  const outputPaths = Array.from(
+    new Set(
+      input.draft.changedPaths && input.draft.changedPaths.length > 0
+        ? input.draft.changedPaths.map((filePath) => normalizeGeneratedPath(filePath))
+        : normalizedFiles.map((file) => file.path),
+    ),
+  );
 
   return {
     errors,

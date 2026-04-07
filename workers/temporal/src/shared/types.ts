@@ -28,6 +28,7 @@ export interface TemplateSelectionResult {
 
 export interface GeneratedBuildDraft {
   files: readonly StudioFile[];
+  changedPaths?: readonly string[];
   previewEntryPath: string;
   summary: string;
   warnings: readonly string[];
@@ -61,7 +62,7 @@ export interface InitialBuildWorkflowInput {
   prompt: string;
   projectName: string;
   requestedAt: string;
-  existingFiles: readonly Pick<StudioFile, "path" | "kind" | "locked" | "hash">[];
+  existingFiles: readonly StudioFile[];
   provisionalTemplateId?: TemplateId;
 }
 
@@ -83,7 +84,7 @@ export interface GenerateFilesActivityInput {
   template: TemplateDefinition;
   actor: OperationActor;
   project: Pick<Project, "id" | "name" | "templateId" | "previewEntryPath" | "status" | "orgId">;
-  existingFiles: readonly Pick<StudioFile, "path" | "kind" | "locked" | "hash">[];
+  existingFiles: readonly StudioFile[];
 }
 
 export interface ValidateBuildActivityInput {

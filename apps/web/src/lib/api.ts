@@ -124,7 +124,9 @@ async function requestJson<TResponse>(
 }
 
 export function startBuild(body: {
+  existingFiles?: readonly StudioFile[];
   prompt: string;
+  projectId?: string;
   projectName?: string;
 } & BuildPlanContext): Promise<StartBuildResponse> {
   return requestJson<StartBuildResponse>("/builds/start", {

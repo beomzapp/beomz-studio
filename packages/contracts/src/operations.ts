@@ -37,7 +37,7 @@ export interface InitialBuildInput {
   project: Project;
   template: TemplateDefinition;
   actor: OperationActor;
-  existingFiles: readonly Pick<StudioFile, "path" | "kind" | "locked" | "hash">[];
+  existingFiles: readonly StudioFile[];
 }
 
 export interface InitialBuildOutput {

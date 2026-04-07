@@ -4,6 +4,7 @@ import type {
   BuilderV3TraceMetadata,
   InitialBuildOutput,
   Project,
+  StudioFile,
 } from "@beomz-studio/contracts";
 import { createEmptyBuilderV3TraceMetadata } from "@beomz-studio/contracts";
 import type { GenerationRow, ProjectRow } from "@beomz-studio/studio-db";
@@ -24,13 +25,43 @@ export const FAILURE_REASONS = [
 
 export type FailureReasonCode = (typeof FAILURE_REASONS)[number];
 
-export const startBuildRequestSchema = z.object({
-  prompt: z.string().trim().min(8).max(4000),
-  projectName: z.string().trim().min(1).max(120).optional(),
-}).merge(buildPlanContextSchema) satisfies z.ZodType<{
+const studioFileKindSchema = z.enum([
+  "route",
+  "component",
+  "layout",
+  "style",
+  "data",
+  "content",
+  "config",
+  "asset-manifest",
+]);
+
+const studioFileSourceSchema = z.enum(["user", "platform", "ai"]);
+
+const studioFileSchema = z.object({
+  path: z.string().trim().min(1),
+  kind: studioFileKindSchema,
+  language: z.string().trim().min(1),
+  content: z.string(),
+  source: studioFileSourceSchema,
+  locked: z.boolean(),
+  hash: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export interface StartBuildRequest extends BuildPlanContext {
   prompt: string;
+  projectId?: string;
   projectName?: string;
-} & BuildPlanContext>;
+  existingFiles?: readonly StudioFile[];
+}
+
+export const startBuildRequestSchema = z.object({
+  existingFiles: z.array(studioFileSchema).optional(),
+  prompt: z.string().trim().min(8).max(4000),
+  projectId: z.string().trim().uuid().optional(),
+  projectName: z.string().trim().min(1).max(120).optional(),
+}).merge(buildPlanContextSchema) satisfies z.ZodType<StartBuildRequest>;
 
 const builderTraceSchema = z.object({
   events: z.array(z.record(z.string(), z.unknown())).optional(),

@@ -292,7 +292,10 @@ export function ProjectPage() {
 
       await startAndStreamBuild({
         body: {
+          existingFiles: buildResult?.files?.length ? buildResult.files : undefined,
           prompt: text,
+          projectId: projectId ?? undefined,
+          projectName: projectName !== "Untitled project" ? projectName : undefined,
           summary: launchIntent?.approvedPlan?.summary,
           steps: launchIntent?.approvedPlan?.steps,
         },
@@ -435,7 +438,7 @@ export function ProjectPage() {
     const bid = activeBuildIdRef.current;
     if (!bid) return;
 
-    const files = buildResult.files.map((file) => file.path);
+    const files = buildResult.generation.outputPaths;
     const messageId = `assistant-${bid}`;
 
     setMessages((prev) =>
