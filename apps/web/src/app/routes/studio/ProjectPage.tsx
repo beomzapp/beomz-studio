@@ -461,7 +461,7 @@ export function ProjectPage() {
     setPendingSummaryBuildId(null);
 
     const userPrompt = lastUserPromptRef.current;
-    if (!userPrompt || !import.meta.env.VITE_ANTHROPIC_API_KEY) return;
+    if (!userPrompt) return;
 
     const fileCount = buildResult?.files?.length ?? 0;
     const buildInfo = [

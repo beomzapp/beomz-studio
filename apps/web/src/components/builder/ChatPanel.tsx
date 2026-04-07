@@ -415,10 +415,16 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
         // skip assistant entries
         if (e.kind === "assistant") return null;
 
-        // skip internal preview/build-completed status lines
+        // skip internal preview/build-completed status lines and template selection steps
         if (
           e.kind === "status" &&
-          (e.code === "preview_ready" || e.code === "build_completed")
+          (e.code === "preview_ready" || e.code === "build_completed" || e.code === "template_selection_started")
+        ) return null;
+
+        // skip template selection tool steps (internal plumbing, not useful to users)
+        if (
+          (e.kind === "tool_use" || e.kind === "tool_result") &&
+          (e.toolName === "template_select")
         ) return null;
 
         // status -> tiny grey uppercase section label
@@ -426,7 +432,7 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
           return (
             <div
               key={e.id ?? i}
-              className="mt-2 first:mt-0 text-[10px] font-semibold uppercase tracking-widest text-[#9ca3af]"
+              className="mt-1 first:mt-0 text-[10px] font-semibold uppercase tracking-widest text-[#9ca3af]"
             >
               {e.message}
             </div>

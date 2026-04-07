@@ -1,36 +1,29 @@
 /**
- * streamBuildSummary — streams a post-build AI summary from Claude Sonnet.
+ * streamBuildSummary — streams a post-build AI summary via the API server.
+ * The API key stays on the server; no VITE_ANTHROPIC_API_KEY needed.
  * Yields text deltas as an async generator for typewriter rendering.
  */
+import { getAccessToken, getApiBaseUrl } from "./api";
+
 export async function* streamBuildSummary(
   userPrompt: string,
   buildInfo: string,
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-  if (!apiKey) return;
+  let token: string;
+  try {
+    token = await getAccessToken();
+  } catch {
+    return;
+  }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(`${getApiBaseUrl()}/builds/summary`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-5",
-      max_tokens: 300,
-      stream: true,
-      system:
-        "You are Beomz, a friendly app builder assistant. The user asked you to build something and you just finished building it. Write a short, conversational summary (2-3 sentences) of what you built. Mention the key features you included. End by asking what they'd like to change. Do not use markdown formatting.",
-      messages: [
-        {
-          role: "user",
-          content: `User request: "${userPrompt}"\n\nBuild result: ${buildInfo}`,
-        },
-      ],
-    }),
+    body: JSON.stringify({ userPrompt, buildInfo }),
     signal,
   });
 
@@ -51,14 +44,8 @@ export async function* streamBuildSummary(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       const data = line.slice(6).trim();
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.type === "content_block_delta" && parsed.delta?.text) {
-          yield parsed.delta.text as string;
-        }
-      } catch {
-        // skip malformed chunks
-      }
+      if (data === "[DONE]") return;
+      yield data;
     }
   }
 }

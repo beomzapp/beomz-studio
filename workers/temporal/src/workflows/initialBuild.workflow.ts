@@ -221,7 +221,7 @@ export async function initialBuildWorkflow(
             tool_use_id: "tool-generate-files-1",
             tool_name: "generate_files",
             code: "generate_files_started",
-            message: "Generating the initial file set with Anthropic.",
+            message: "Generating the initial file set.",
             payload: {
               templateId: selection.template.id,
             },
