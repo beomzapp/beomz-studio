@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import type { CreatePreviewSessionResponse, Project, StudioFile } from "@beomz-studio/contracts";
 import {
-  Loader2,
   Monitor,
   Smartphone,
   Tablet,
-  RefreshCw,
+  RefreshCw
 } from "lucide-react";
 
 import { cn } from "../../lib/cn";
@@ -41,7 +40,7 @@ function injectViewport(html: string, width: number | null): string {
 function PhoneFrame({
   children,
   viewportWidth,
-  viewportHeight,
+  viewportHeight
 }: {
   children?: React.ReactNode;
   viewportWidth: number;
@@ -69,8 +68,8 @@ function PhoneFrame({
           width: stageWidth,
           height: stageHeight,
           transform: `scale(${phoneScale})`,
-          transformOrigin: "top left",
-        }}
+          transformOrigin: "top left"
+}}
       >
         <div
           className="flex h-full w-full flex-col overflow-hidden bg-white"
@@ -91,7 +90,7 @@ function TabletFrame({
   children,
   viewportWidth,
   viewportHeight,
-  isPortrait,
+  isPortrait
 }: {
   children?: React.ReactNode;
   viewportWidth: number;
@@ -118,8 +117,8 @@ function TabletFrame({
           width: stageWidth,
           height: stageHeight,
           transform: `scale(${stageScale})`,
-          transformOrigin: "top left",
-        }}
+          transformOrigin: "top left"
+}}
       >
         <div className="flex flex-1 flex-col overflow-hidden bg-white" style={{ borderRadius: 12 }}>
           {children}
@@ -155,10 +154,10 @@ export function PreviewPane({
   previewEntryPath,
   project,
   refreshToken = 0,
-  publishedSlug,
+  publishedSlug
 }: PreviewPaneProps) {
-  const [hasFirstFrame, setHasFirstFrame] = useState(false);
-  const [isLoading] = useState(false);
+  // Show building overlay when project exists but no preview files yet
+  const isBuilding = !!(project?.id && (!files || files.length === 0));
   const [previewMode, setPreviewMode] = useState<"inline" | "remote">("inline");
   const [, setRemoteError] = useState<string | null>(null);
   const [remoteResponse, setRemoteResponse] = useState<CreatePreviewSessionResponse | null>(null);
@@ -209,8 +208,8 @@ export function PreviewPane({
     return {
       key: `inline:${project.id}:${generationId ?? "draft"}:${refreshToken}:${viewMode}`,
       src: undefined,
-      srcDoc: html,
-    };
+      srcDoc: html
+};
   }, [files, generationId, project, refreshToken, viewMode, mobileHtml, tabletHtml, webHtml]);
 
   const remoteFrame = useMemo(() => {
@@ -218,15 +217,15 @@ export function PreviewPane({
       return {
         key: `${remoteResponse.session.id}:${remoteResponse.session.url}`,
         src: remoteResponse.session.url,
-        srcDoc: undefined,
-      };
+        srcDoc: undefined
+};
     }
     if (remoteResponse?.fallbackHtml) {
       return {
         key: `${remoteResponse.session.id}:fallback`,
         src: undefined,
-        srcDoc: remoteResponse.fallbackHtml,
-      };
+        srcDoc: remoteResponse.fallbackHtml
+};
     }
     return null;
   }, [remoteResponse]);
@@ -236,12 +235,10 @@ export function PreviewPane({
       ? remoteFrame
       : inlineFrame;
 
-  useEffect(() => { setHasFirstFrame(false); }, [activeFrame?.key]);
 
   useEffect(() => {
     function handlePreviewMessage(event: MessageEvent) {
       if (event.data?.type !== "beomz-preview-ready") return;
-      setHasFirstFrame(true);
     }
     window.addEventListener("message", handlePreviewMessage);
     return () => { window.removeEventListener("message", handlePreviewMessage); };
@@ -251,7 +248,6 @@ export function PreviewPane({
     setPreviewMode("inline");
     setRemoteError(null);
     setRemoteResponse(null);
-    setHasFirstFrame(false);
   }, [generationId, project?.id]);
 
   const handleRotate = useCallback(() => {
@@ -293,7 +289,7 @@ export function PreviewPane({
           src={activeFrame.src}
           srcDoc={activeFrame.srcDoc}
           title="Beomz Studio Preview"
-          onLoad={() => setHasFirstFrame(true)}
+         
         />
       ) : (
         <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
@@ -338,11 +334,11 @@ export function PreviewPane({
                   borderRadius: "inherit",
                   overflowY: "auto",
                   width: `${vpW}px`,
-                  height: `${vpH}px`,
-                }}
+                  height: `${vpH}px`
+}}
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 title={`${viewMode} preview`}
-                onLoad={() => setHasFirstFrame(true)}
+               
               />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -430,12 +426,19 @@ export function PreviewPane({
         {viewMode === "web" ? renderWebView() : renderFramedView()}
       </div>
 
-      {/* Loading overlay */}
-      {!hasFirstFrame && isLoading && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/80">
-          <div className="flex items-center gap-2 text-sm text-[#6b7280]">
-            <Loader2 size={16} className="animate-spin text-[#F97316]" />
-            <span>Loading preview...</span>
+      {/* Building overlay */}
+      {isBuilding && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#faf9f6]">
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative flex h-16 w-16 items-center justify-center">
+              <div className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/20" />
+              <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
+              <span className="text-xl font-bold text-[#F97316]">B</span>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-[#1a1a1a]">Building your app…</p>
+              <p className="mt-1 text-xs text-[#9ca3af]">This usually takes 15–30 seconds</p>
+            </div>
           </div>
         </div>
       )}

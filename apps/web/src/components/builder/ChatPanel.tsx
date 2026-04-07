@@ -3,6 +3,7 @@
  * User messages: right-aligned dark bubble.
  * AI messages: left-aligned with orange "B" avatar, plain flowing text (no card).
  * Streaming cursor, rotating build status messages, completion suggestions.
+ * Human-readable build progress is shown as transcript rows.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
@@ -16,11 +17,10 @@ import {
   Sparkles,
   ListChecks,
   AlertCircle,
-  CheckCircle2,
   Loader2,
-  Wrench,
   ChevronDown,
   Code2,
+  Zap,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -51,6 +51,85 @@ interface ChatPanelProps {
 }
 
 // ─────────────────────────────────────────────
+// Code line filter — keep only prose-like lines
+// ─────────────────────────────────────────────
+
+const ALLOWED_ASSISTANT_MESSAGES = new Set([
+  "I’m designing the build plan.",
+  "I’m building the approved app now.",
+]);
+
+const PROSE_STARTER_PATTERN = /^(?:[A-Z][a-z]+|I(?:’|’)m|We(?:’|’)re|Building|Planning|Generating|Creating|Updating|Checking|Connecting|Reconnecting|Preview|Build|Error|Done|Ready|Almost|Starting|Finishing)\b/;
+
+function stripListPrefix(line: string): string {
+  return line
+    .replace(/^[-•*]\s+/, "")
+    .replace(/^\d+\.\s+/, "");
+}
+
+function hasLowSymbolDensity(line: string): boolean {
+  const nonSpace = line.replace(/\s/g, "");
+  if (nonSpace.length === 0) {
+    return true;
+  }
+
+  const symbols = (line.match(/[^A-Za-z0-9\s.,!?’"():/-]/g) || []).length;
+  return symbols / nonSpace.length < 0.1;
+}
+
+function isHumanReadableLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return true;
+  }
+
+  if (ALLOWED_ASSISTANT_MESSAGES.has(trimmed)) {
+    return true;
+  }
+
+  const proseCandidate = stripListPrefix(trimmed);
+  if (!/[A-Za-z]/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/(===|!==|=>|<=|>=|\$\{|<\/?[A-Za-z]|^\s*(?:import|export|const|let|var|function|class|interface|type|return|if|else|switch|case|for|while|try|catch|async|await|throw|default)\b)/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/[{}[\]|`]/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/^[a-z_$][\w$.]*\s*(?:===|!==|==|=|\?)/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (/^(?:[A-Z][a-zA-Z]+,?\s*){3,}$/.test(proseCandidate) && !/[.!?]$/.test(proseCandidate)) {
+    return false;
+  }
+
+  if (!hasLowSymbolDensity(proseCandidate)) {
+    return false;
+  }
+
+  const words = proseCandidate.split(/\s+/).filter(Boolean);
+  if (words.length <= 1 && !/[.!?]$/.test(proseCandidate)) {
+    return false;
+  }
+
+  return PROSE_STARTER_PATTERN.test(proseCandidate)
+    || /[.!?]$/.test(proseCandidate)
+    || words.length >= 4;
+}
+
+function filterCodeFromText(text: string): string {
+  const lines = text.split("\n");
+  const kept = lines.filter((line) => isHumanReadableLine(line));
+
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// ─────────────────────────────────────────────
 // Building status messages
 // ─────────────────────────────────────────────
 
@@ -74,7 +153,6 @@ const BUILDING_MESSAGES = [
   "Bringing it all together...",
   "Nearly ready...",
 ];
-
 
 // ─────────────────────────────────────────────
 // Markdown-lite renderer
@@ -139,42 +217,9 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 // ─────────────────────────────────────────────
-// Trace entry row
+// Progress rows
 // ─────────────────────────────────────────────
 
-function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
-  const isError = entry.status === "error" || entry.kind === "error";
-  const isSuccess = entry.status === "success" || entry.kind === "done";
-  const isRunning = entry.status === "running" || entry.kind === "tool_use";
-
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-2 rounded-xl border px-2.5 py-2 text-xs",
-        isError
-          ? "border-red-200 bg-red-50 text-red-700"
-          : isSuccess
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : "border-[#e5e5e5] bg-[#faf9f6] text-[#6b7280]",
-      )}
-    >
-      <span className="mt-0.5 shrink-0">
-        {isRunning ? <Loader2 size={13} className="animate-spin" />
-          : isError ? <AlertCircle size={13} />
-            : isSuccess ? <CheckCircle2 size={13} />
-              : <Wrench size={13} />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">{entry.message}</div>
-        {(entry.toolName || entry.code) && (
-          <div className="mt-1 text-[11px] uppercase tracking-wide opacity-70">
-            {[entry.toolName, entry.code].filter(Boolean).join(" \u00b7 ")}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────
 // Plan card
@@ -351,6 +396,105 @@ function SuggestionLinks({
 }
 
 // ─────────────────────────────────────────────
+// Trace entry list — single clean rendering path
+// ─────────────────────────────────────────────
+function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntry[] }) {
+  if (!entries || entries.length === 0) return null;
+
+  // Pre-compute which tool_use ids have a matching tool_result so we can skip the tool_use row
+  const resolvedToolUseIds = new Set<string>();
+  for (const e of entries) {
+    if (e.kind === "tool_result" && e.toolUseId) {
+      resolvedToolUseIds.add(e.toolUseId);
+    }
+  }
+
+  return (
+    <div className="mb-2 flex flex-col gap-1">
+      {entries.map((e, i) => {
+        // skip assistant entries
+        if (e.kind === "assistant") return null;
+
+        // skip internal preview/build-completed status lines
+        if (
+          e.kind === "status" &&
+          (e.code === "preview_ready" || e.code === "build_completed")
+        ) return null;
+
+        // status -> tiny grey uppercase section label
+        if (e.kind === "status") {
+          return (
+            <div
+              key={e.id ?? i}
+              className="mt-2 first:mt-0 text-[10px] font-semibold uppercase tracking-widest text-[#9ca3af]"
+            >
+              {e.message}
+            </div>
+          );
+        }
+
+        // tool_use that already has a matching tool_result -> skip (result row handles it)
+        if (e.kind === "tool_use" && e.toolUseId && resolvedToolUseIds.has(e.toolUseId)) {
+          return null;
+        }
+
+        // tool_use with no result yet -> running (animated spinner + grey text)
+        if (e.kind === "tool_use") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin text-[#9ca3af]" />
+              <span className="text-[#9ca3af]">{e.message}</span>
+            </div>
+          );
+        }
+
+        // tool_result error -> red x + red text
+        if (e.kind === "tool_result" && e.status === "error") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <span className="mt-0.5 shrink-0 leading-none text-red-500">x</span>
+              <span className="text-red-600">{e.message}</span>
+            </div>
+          );
+        }
+
+        // tool_result success -> green check + dark text
+        if (e.kind === "tool_result") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <Check size={12} className="mt-0.5 shrink-0 text-[#10b981]" />
+              <span className="text-[#1a1a1a]">{e.message}</span>
+            </div>
+          );
+        }
+
+        // error kind -> red x + red text
+        if (e.kind === "error") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <span className="mt-0.5 shrink-0 leading-none text-red-500">x</span>
+              <span className="text-red-600">{e.message}</span>
+            </div>
+          );
+        }
+
+        // done kind -> bold, no background
+        if (e.kind === "done") {
+          return (
+            <div key={e.id ?? i} className="mt-1 flex items-center gap-2 text-xs font-semibold text-[#1a1a1a]">
+              <Zap size={12} className="shrink-0 text-[#F97316]" />
+              <span>{e.message}</span>
+            </div>
+          );
+        }
+
+        return null;
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
 // ChatPanel
 // ─────────────────────────────────────────────
 
@@ -450,12 +594,20 @@ export function ChatPanel({
   // Find the last error in messages for the error toast
   const lastError = [...messages].reverse().find((m) => m.error)?.error ?? null;
 
+  // Filter AI message content to remove raw code dumps
+  const getDisplayContent = (msg: ChatMessage): string => {
+    if (msg.role !== "assistant") return msg.content;
+    return filterCodeFromText(msg.content);
+  };
+
+  const displayStreamingText = filterCodeFromText(streamingText);
+
   return (
     <div
-      className="flex shrink-0 flex-col border-r border-[#e5e5e5] bg-[#faf9f6]"
+      className="flex h-full shrink-0 flex-col border-r border-[#e5e5e5] bg-[#faf9f6]"
       style={{ width }}
     >
-      {/* Messages area — flex-1 so it fills remaining space */}
+      {/* Messages area — flex-1 + min-h-0 for proper scroll */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -471,56 +623,66 @@ export function ChatPanel({
 
         {hasMessages && (
           <div className="space-y-4">
-            {messages.map((msg) => (
-              <div key={msg.id}>
-                {msg.role === "user" ? (
-                  /* User message — right-aligned dark bubble */
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-3.5 py-2.5 text-sm leading-relaxed text-white">
-                      {msg.content}
-                    </div>
-                  </div>
-                ) : (
-                  /* AI message — left-aligned with orange avatar, NO card wrapper */
-                  <div className="flex items-start gap-2.5">
-                    <BeomzAvatar />
-                    <div className="group relative min-w-0 max-w-[85%] pt-0.5">
-                      {/* Plain text — no border, no background, no card */}
-                      {msg.content && <MarkdownText text={msg.content} />}
+            {messages.map((msg) => {
+              const displayContent = getDisplayContent(msg);
+              const hasTrace = (msg.traceEntries?.length ?? 0) > 0;
 
-                      {/* Plan steps card */}
-                      {msg.planSteps && msg.planSteps.length > 0 && (
-                        <PlanCardInline steps={msg.planSteps} />
-                      )}
+              const hasVisibleContent =
+                (displayContent.length > 0 && !hasTrace) ||
+                hasTrace ||
+                (msg.planSteps && msg.planSteps.length > 0) ||
+                (msg.changedFiles && msg.changedFiles.length > 0);
 
-                      {/* Trace entries */}
-                      {msg.traceEntries && msg.traceEntries.length > 0 && (
-                        <div className={cn(msg.content ? "mt-3 space-y-2" : "space-y-2")}>
-                          {msg.traceEntries.map((entry) => (
-                            <TraceEntryRow key={entry.id} entry={entry} />
-                          ))}
-                        </div>
-                      )}
+              if (msg.role === "assistant" && !hasVisibleContent) return null;
 
-                      {/* File summary */}
-                      {msg.changedFiles && msg.changedFiles.length > 0 && (
-                        <FilesSummary files={msg.changedFiles} onViewCode={onViewCode} />
-                      )}
-
-                      {/* Suggestions after build complete */}
-                      {msg.suggestions && msg.suggestions.length > 0 && !isStreaming && (
-                        <SuggestionLinks suggestions={msg.suggestions} onSend={onSendMessage} />
-                      )}
-
-                      {/* Copy button on hover */}
-                      <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <CopyButton text={msg.content} />
+              return (
+                <div key={msg.id}>
+                  {msg.role === "user" ? (
+                    /* User message — right-aligned dark bubble */
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-3.5 py-2.5 text-sm leading-relaxed text-white">
+                        {msg.content}
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  ) : (
+                    /* AI message — left-aligned with orange avatar, plain text (no card) */
+                    <div className="flex items-start gap-2.5">
+                      <BeomzAvatar />
+                      <div className="group relative min-w-0 max-w-[85%] pt-0.5">
+                        {/* Prose content — hidden during builds (when trace entries exist) */}
+                        {displayContent && !hasTrace && <MarkdownText text={displayContent} />}
+
+                        {/* Single trace rendering path */}
+                        {hasTrace && (
+                          <TraceEntryList entries={msg.traceEntries!} />
+                        )}
+
+                        {/* Plan steps card */}
+                        {msg.planSteps && msg.planSteps.length > 0 && (
+                          <PlanCardInline steps={msg.planSteps} />
+                        )}
+
+                        {/* File summary (collapsible) */}
+                        {msg.changedFiles && msg.changedFiles.length > 0 && (
+                          <FilesSummary files={msg.changedFiles} onViewCode={onViewCode} />
+                        )}
+
+                        {/* Suggestions after build complete */}
+                        {msg.suggestions && msg.suggestions.length > 0 && !isStreaming && (
+                          <SuggestionLinks suggestions={msg.suggestions} onSend={onSendMessage} />
+                        )}
+
+                        {displayContent && !hasTrace && (
+                          <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <CopyButton text={displayContent} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Streaming AI message — plain text with cursor */}
             {isStreaming && (
@@ -528,13 +690,13 @@ export function ChatPanel({
                 <div className="flex items-start gap-2.5">
                   <BeomzAvatar />
                   <div className="min-w-0 max-w-[85%] pt-0.5">
-                    {streamingText ? (
+                    {displayStreamingText ? (
                       <div className="text-sm leading-relaxed text-[#374151]">
-                        <MarkdownText text={streamingText} />
+                        <MarkdownText text={displayStreamingText} />
                         <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
                       </div>
                     ) : (
-                      /* No shimmer — just the cursor blinking while waiting for first token */
+                      /* Blinking cursor while waiting for first token */
                       <span className="inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
                     )}
                   </div>
@@ -588,7 +750,7 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Input bar — pinned to bottom with flex-shrink-0 */}
+      {/* Input bar — pinned to bottom */}
       <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
         <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
           <div className="px-3 pt-2">

@@ -16,6 +16,12 @@
   --color-thinking: rgba(249, 115, 22, 0.5);
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);

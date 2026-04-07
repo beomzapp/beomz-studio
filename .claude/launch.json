@@ -3,9 +3,8 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "/opt/homebrew/bin/npx",
-      "runtimeArgs": ["--yes", "vite", "--port", "5188"],
-      "cwd": "apps/web",
+      "runtimeExecutable": "/opt/homebrew/Cellar/node/25.8.1_1/bin/node",
+      "runtimeArgs": ["/Users/omarfareda/Desktop/beomz-studio/apps/web/node_modules/vite/bin/vite.js", "--port", "5188"],
       "port": 5188
     }
   ]

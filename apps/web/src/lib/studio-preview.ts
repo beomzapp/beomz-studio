@@ -142,73 +142,10 @@ function App() {
       ? "mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-6 py-8"
       : "grid min-h-screen grid-cols-[260px_minmax(0,1fr)] gap-6 px-6 py-8";
 
-  return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(249,115,22,0.14),transparent_42%),linear-gradient(160deg,#050816_0%,#0d1630_48%,#050816_100%)] text-white">
-      <div className={shellClass}>
-        {runtime.shell === "website" ? null : (
-          <aside className="rounded-[28px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)]">
-            <div className="mb-6">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-300/80">
-                {runtime.shell} shell
-              </div>
-              <h1 className="mt-2 text-xl font-semibold text-white">{runtime.project.name}</h1>
-            </div>
-            <nav className="space-y-2">
-              {runtime.routes.map((route) => (
-                <button
-                  key={route.id}
-                  type="button"
-                  onClick={() => setActivePath(route.path)}
-                  className={
-                    route.path === activeRoute.path
-                      ? "w-full rounded-2xl border border-orange-400/30 bg-orange-400/12 px-4 py-3 text-left"
-                      : "w-full rounded-2xl border border-transparent bg-transparent px-4 py-3 text-left hover:border-white/10 hover:bg-white/[0.04]"
-                  }
-                >
-                  <div className="text-sm font-medium text-white">{route.label}</div>
-                  <div className="mt-1 text-xs leading-5 text-white/55">{route.summary}</div>
-                </button>
-              ))}
-            </nav>
-          </aside>
-        )}
-
-        <main className="min-w-0">
-          <header className="mb-6 rounded-[28px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-orange-300/80">
-              Local studio preview
-            </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold text-white">{activeRoute.label}</h2>
-                <p className="mt-1 text-sm text-white/60">{activeRoute.summary}</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {runtime.navigation.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setActivePath(item.href)}
-                    className={
-                      item.href === activeRoute.path
-                        ? "rounded-full border border-orange-400/30 bg-orange-400/14 px-3 py-1.5 text-xs font-semibold text-orange-100"
-                        : "rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-white/65 hover:bg-white/[0.08]"
-                    }
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </header>
-
-          <div className="rounded-[32px] border border-white/10 bg-[#081126] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
-            {ActiveRoute ? <ActiveRoute /> : <MissingRoute route={activeRoute} />}
-          </div>
-        </main>
-      </div>
-    </div>
-  );
+  return React.createElement(
+        routeComponents[activeRoute.path] || MissingRoute,
+        routeComponents[activeRoute.path] ? null : { route: activeRoute }
+      );
 }
 
 export default App;

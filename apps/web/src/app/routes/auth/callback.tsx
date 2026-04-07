@@ -8,7 +8,14 @@ export function AuthCallback() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate({ to: "/studio/home" });
+        // If user had a pending build prompt before Google OAuth, send them straight to /plan
+        const pendingPrompt = sessionStorage.getItem("pending_build_prompt");
+        if (pendingPrompt) {
+          sessionStorage.removeItem("pending_build_prompt");
+          navigate({ to: "/plan", search: { q: pendingPrompt } });
+        } else {
+          navigate({ to: "/studio/home" });
+        }
       } else {
         navigate({ to: "/auth/login" });
       }

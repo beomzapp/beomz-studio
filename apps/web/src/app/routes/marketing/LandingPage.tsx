@@ -8,9 +8,10 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
-import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useAuth } from "../../../lib/useAuth";
-import { supabase } from "../../../lib/supabase";
+import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
+import { GlobalNav } from "../../../components/layout/GlobalNav";
+import { AuthModal } from "../../../components/auth/AuthModal";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 const SUGGESTIONS = [
@@ -48,17 +49,16 @@ export function LandingPage() {
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingPromptRef = useRef<string | null>(null);
   const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);
   const navigate = useNavigate();
 
   // After sign-in, check if there's a pending prompt and navigate to /plan
-  const pendingPromptRef = useRef<string | null>(null);
   useEffect(() => {
     if (session && pendingPromptRef.current) {
       const prompt = pendingPromptRef.current;
@@ -108,6 +108,21 @@ export function LandingPage() {
     [session, navigate],
   );
 
+  // When session appears after email sign-in, restore the pending prompt into the input
+  useEffect(() => {
+    if (session && pendingPromptRef.current) {
+      const pending = pendingPromptRef.current;
+      pendingPromptRef.current = null;
+      setShowAuthModal(false);
+      if (editableRef.current) {
+        editableRef.current.textContent = pending;
+        setHasText(true);
+        updateFontSize();
+        placeCursorAtEnd(editableRef.current);
+      }
+    }
+  }, [session, updateFontSize]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Tab") {
@@ -129,15 +144,25 @@ export function LandingPage() {
         const prompt = editableRef.current?.textContent?.trim() ?? "";
         if (!prompt) return;
 
+        if (!session) {
+          // Not signed in — show auth overlay, keep prompt in input
+          pendingPromptRef.current = prompt;
+          setShowAuthModal(true);
+          return;
+        }
+
         if (!planMode) {
           saveProjectLaunchIntent({ prompt });
           navigate({ to: "/studio/project/$id", params: { id: "new" } });
         } else {
           handleSubmitPrompt(prompt);
         }
+
+        // Signed in — always route through /plan
+        navigate({ to: "/plan", search: { q: prompt } });
       }
     },
-    [navigate, suggestionIndex, updateFontSize, planMode, handleSubmitPrompt],
+    [navigate, session, suggestionIndex, updateFontSize, planMode, handleSubmitPrompt],
   );
 
   const handleInput = useCallback(() => {
@@ -222,36 +247,6 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
-  const handleGoogleSignIn = async () => {
-    setAuthLoading(true);
-    setAuthError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) {
-      setAuthError(error.message);
-      setAuthLoading(false);
-    }
-  };
-
-  const handleGithubSignIn = async () => {
-    setAuthLoading(true);
-    setAuthError(null);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "github",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) {
-      setAuthError(error.message);
-      setAuthLoading(false);
-    }
-  };
-
   // Get user initials for avatar
   const userName = session?.user?.user_metadata?.full_name
     ?? session?.user?.user_metadata?.name
@@ -266,7 +261,6 @@ export function LandingPage() {
 
   return (
     <div className="h-screen overflow-hidden bg-bg">
-      {/* ===== Hero — locked, no scroll ===== */}
       <div className="relative h-screen">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
@@ -297,6 +291,8 @@ export function LandingPage() {
                 >
                   Dashboard &rarr;
                 </Link>
+                {/* GlobalNav for authenticated user actions */}
+                <GlobalNav variant="light" />
                 {/* User avatar + name */}
                 <div className="flex items-center gap-2">
                   <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
@@ -313,12 +309,12 @@ export function LandingPage() {
                 >
                   Sign in
                 </Link>
-                <Link
-                  to="/auth/signup"
+                <button
+                  onClick={() => setShowAuthModal(true)}
                   className="text-sm text-white/30 transition-colors hover:text-white/50"
                 >
                   Get started
-                </Link>
+                </button>
               </div>
             )}
           </div>
@@ -495,76 +491,12 @@ export function LandingPage() {
           </p>
         </div>
       </div>
-
-      {/* ===== Auth Gate Modal ===== */}
-      {showAuthModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md bg-black/40"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowAuthModal(false);
-          }}
-        >
-          <div className="relative w-full max-w-[400px] rounded-2xl bg-[#faf9f6] p-10 shadow-2xl">
-            {/* Close button */}
-            <button
-              onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 right-4 flex h-8 w-8 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-black/5 hover:text-[#6b7280]"
-            >
-              <X size={16} />
-            </button>
-
-            {/* Logo */}
-            <div className="mb-5 flex justify-center">
-              <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
-                <path
-                  d="M8 8h8v8H8V8Zm0 16h8v8H8v-8Zm16-16h8v8h-8V8Zm0 16h8v8h-8v-8Zm-8-8h8v8h-8v-8Z"
-                  fill="#060612"
-                />
-              </svg>
-            </div>
-
-            <h2 className="mb-2 text-center text-lg font-semibold text-[#1a1a1a]">
-              Sign in to start building
-            </h2>
-            <p className="mb-6 text-center text-sm text-[#9ca3af]">
-              Your project will be ready when you&apos;re back.
-            </p>
-
-            {authError && (
-              <p className="mb-4 text-center text-xs text-red-500">{authError}</p>
-            )}
-
-            {/* Google OAuth */}
-            <button
-              onClick={handleGoogleSignIn}
-              disabled={authLoading}
-              className="flex w-full items-center justify-center gap-3 rounded-lg border border-[#e2e2e2] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-shadow hover:shadow-md disabled:opacity-50"
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
-                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
-                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853" />
-                <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" />
-                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335" />
-              </svg>
-              Continue with Google
-            </button>
-
-            <div className="my-3" />
-
-            {/* GitHub OAuth */}
-            <button
-              onClick={handleGithubSignIn}
-              disabled={authLoading}
-              className="flex w-full items-center justify-center gap-3 rounded-lg border border-[#e2e2e2] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-shadow hover:shadow-md disabled:opacity-50"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="#1a1a1a" aria-hidden>
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-              </svg>
-              Continue with GitHub
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Auth modal overlay */}
+      <AuthModal
+        open={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        pendingPrompt={pendingPromptRef.current ?? ""}
+      />
     </div>
   );
 }
