@@ -416,11 +416,11 @@ function buildPageContent(
 ): string {
   const componentName = buildGeneratedPageComponentName(template.id, page.id);
 
-  if (template.id === "marketing-website") {
+  if (template.shell === "website") {
     return buildMarketingPageBody(page, componentName, projectName, promptSummary);
   }
 
-  if (template.id === "saas-dashboard") {
+  if (template.shell === "dashboard") {
     return buildDashboardPageBody(page, componentName, projectName);
   }
 

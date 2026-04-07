@@ -29,10 +29,17 @@ export function getFallbackForTemplate(
 ): { path: string; content: string }[] {
   switch (templateId) {
     case "marketing-website":
+    case "ecommerce":
+    case "portfolio":
+    case "blog-cms":
+    case "onboarding-flow":
       return getMarketingFallback();
     case "saas-dashboard":
+    case "data-table-app":
       return getSaasFallback();
     case "workspace-task":
+    case "mobile-app":
+    case "social-app":
       return getWorkspaceFallback();
     default:
       return getMarketingFallback();

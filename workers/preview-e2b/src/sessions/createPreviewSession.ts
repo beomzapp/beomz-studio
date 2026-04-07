@@ -6,6 +6,7 @@ import type {
   Project,
   StudioFile,
 } from "@beomz-studio/contracts";
+import { getTemplateDefinition } from "@beomz-studio/templates";
 
 import { getPreviewRuntimeConfig } from "../config.js";
 import { createRuntimeContract } from "../runtime/contract.js";
@@ -194,6 +195,7 @@ export async function createPreviewSession(
   input: CreatePreviewSessionInput,
 ): Promise<CreatePreviewSessionResult> {
   const config = getPreviewRuntimeConfig();
+  const template = getTemplateDefinition(input.project.templateId);
   const sessionBase = {
     createdAt: new Date().toISOString(),
     entryPath: "/",
@@ -206,11 +208,7 @@ export async function createPreviewSession(
   const sandbox = await connectOrCreateSandbox(input);
   const provisionalSession = {
     ...sessionBase,
-    entryPath: input.project.templateId === "marketing-website"
-      ? "/"
-      : input.project.templateId === "saas-dashboard"
-        ? "/app"
-        : "/workspace",
+    entryPath: template.previewEntryPath,
     sandboxId: sandbox.sandboxId,
   } satisfies PreviewSession;
 

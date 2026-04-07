@@ -1,7 +1,14 @@
 export type TemplateId =
   | "marketing-website"
   | "saas-dashboard"
-  | "workspace-task";
+  | "workspace-task"
+  | "mobile-app"
+  | "social-app"
+  | "ecommerce"
+  | "portfolio"
+  | "blog-cms"
+  | "onboarding-flow"
+  | "data-table-app";
 
 export type TemplateShell = "website" | "dashboard" | "workspace";
 
@@ -13,7 +20,19 @@ export type TemplatePageKind =
   | "customers"
   | "settings"
   | "tasks"
-  | "board";
+  | "board"
+  | "mobile-home"
+  | "activity"
+  | "profile"
+  | "feed"
+  | "explore"
+  | "products"
+  | "checkout"
+  | "projects"
+  | "articles"
+  | "article"
+  | "onboarding-step"
+  | "data-table";
 
 export interface TemplatePage {
   id: string;

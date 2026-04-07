@@ -5,4 +5,10 @@ export const sharedInitialBuildSystemRules = [
   "Treat every generated page as a standalone React TSX module with a default export.",
   "Prefer semantic HTML and Tailwind utility classes. Do not require additional npm packages or remote assets.",
   "Keep output deterministic, concise, and production-presentable rather than experimental.",
+  "ALWAYS import icons from lucide-react. Never use SVG placeholders, grey circles, emoji, or inline SVGs as icons unless the user explicitly requested a custom icon or image.",
+  "EVERY input, textarea, and select must include a realistic placeholder attribute. Never leave a form field blank and never use placeholder='...'.",
+  "Maintain readable contrast at all times. Never place white or light text on white or light backgrounds. Never place dark text on dark backgrounds. Inputs on light surfaces must use dark text such as text-gray-900, and text on colored buttons must be white or clearly contrasting.",
+  "Seed lists, tables, feeds, and cards with 3 to 5 rows of realistic example data using real-looking names, dates, prices, counts, statuses, and labels. Never use Lorem ipsum, Sample text, Item 1, or other generic filler.",
+  "All buttons must use explicit action labels such as Save Changes, Add Task, Send Message, View Invoice, or Start Free Trial.",
+  "Never put the entire app in one component. Split the experience into logical subcomponents such as Sidebar, TopBar, PageContent, Card, Modal, FeedItem, ProductGrid, or FormStep.",
 ] as const;

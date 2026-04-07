@@ -4,7 +4,14 @@ import {
   marketingWebsiteInitialBuildPolicy,
   type InitialBuildPromptPolicy,
 } from "./marketingWebsite.js";
+import { blogCmsInitialBuildPolicy } from "./blogCms.js";
+import { dataTableAppInitialBuildPolicy } from "./dataTableApp.js";
+import { ecommerceInitialBuildPolicy } from "./ecommerce.js";
+import { mobileAppInitialBuildPolicy } from "./mobileApp.js";
+import { onboardingFlowInitialBuildPolicy } from "./onboardingFlow.js";
+import { portfolioInitialBuildPolicy } from "./portfolio.js";
 import { saasDashboardInitialBuildPolicy } from "./saasDashboard.js";
+import { socialAppInitialBuildPolicy } from "./socialApp.js";
 import { workspaceTaskInitialBuildPolicy } from "./workspaceTask.js";
 
 export type { InitialBuildPromptPolicy } from "./marketingWebsite.js";
@@ -14,6 +21,13 @@ export const INITIAL_BUILD_PROMPT_POLICIES = [
   marketingWebsiteInitialBuildPolicy,
   saasDashboardInitialBuildPolicy,
   workspaceTaskInitialBuildPolicy,
+  mobileAppInitialBuildPolicy,
+  socialAppInitialBuildPolicy,
+  ecommerceInitialBuildPolicy,
+  portfolioInitialBuildPolicy,
+  blogCmsInitialBuildPolicy,
+  onboardingFlowInitialBuildPolicy,
+  dataTableAppInitialBuildPolicy,
 ] as const satisfies readonly InitialBuildPromptPolicy[];
 
 const policiesByTemplateId = INITIAL_BUILD_PROMPT_POLICIES.reduce<

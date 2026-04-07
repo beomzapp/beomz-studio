@@ -6,6 +6,13 @@ const REQUIRED_FILES_BY_TEMPLATE: Record<string, string[]> = {
   "marketing-website": ["src/pages/Home.tsx"],
   "saas-dashboard": ["src/pages/Overview.tsx"],
   "workspace-task": ["src/pages/Tasks.tsx"],
+  "mobile-app": ["src/pages/Home.tsx"],
+  "social-app": ["src/pages/Feed.tsx"],
+  "ecommerce": ["src/pages/Home.tsx"],
+  "portfolio": ["src/pages/Home.tsx"],
+  "blog-cms": ["src/pages/Articles.tsx"],
+  "onboarding-flow": ["src/pages/Welcome.tsx"],
+  "data-table-app": ["src/pages/Overview.tsx"],
 };
 
 /**
