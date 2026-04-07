@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
 import {
   Send, Square, Paperclip, ArrowDown, Copy, Check, Sparkles, ListChecks,
-  AlertCircle, Loader2, FileCode, CheckCircle2, Zap,
+  AlertCircle, Loader2, FileCode, Zap,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -204,51 +204,6 @@ function MarkdownText({ text }: { text: string }) {
 // Progress rows
 // ─────────────────────────────────────────────
 
-function getVisibleTraceEntries(entries: readonly BuilderV3TranscriptEntry[] | undefined) {
-  return (entries ?? []).filter((entry) => (
-    entry.kind !== "assistant"
-    || ALLOWED_ASSISTANT_MESSAGES.has(entry.message.trim())
-  ));
-}
-
-function TraceEntryRow({ entry }: { entry: BuilderV3TranscriptEntry }) {
-  if (entry.kind === "assistant" && !ALLOWED_ASSISTANT_MESSAGES.has(entry.message.trim())) {
-    return null;
-  }
-
-  if (entry.kind === "status") {
-    return (
-      <div className="text-xs text-[#9ca3af]">
-        {entry.message}
-      </div>
-    );
-  }
-
-  const isRunning = entry.kind === "tool_use";
-  const isError = entry.kind === "error" || entry.status === "error";
-  const isDone = entry.kind === "done";
-  const isSuccess = isDone || entry.kind === "tool_result" || entry.status === "success";
-
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-2 rounded-xl border px-3 py-2 text-sm",
-        isError
-          ? "border-red-200 bg-red-50 text-red-700"
-          : isSuccess
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : "border-[#e5e5e5] bg-white text-[#4b5563]",
-      )}
-    >
-      <span className="mt-0.5 shrink-0">
-        {isRunning ? <Loader2 size={14} className="animate-spin" />
-          : isError ? <AlertCircle size={14} />
-            : <Check size={14} />}
-      </span>
-      <span className="leading-relaxed">{entry.message}</span>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────
 // Plan card
@@ -359,64 +314,100 @@ function BuildingStatus() {
 
 
 // ─────────────────────────────────────────────
-// Trace entry list — bolt-style inline steps
+// Trace entry list — single clean rendering path
 // ─────────────────────────────────────────────
 function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntry[] }) {
   if (!entries || entries.length === 0) return null;
 
-  // Find the done entry for the summary line
-  const doneEntry = entries.find((e) => e.kind === "done");
-  // Tool use/result pairs — deduplicate by toolUseId keeping the latest state
-  const stepMap = new Map<string, BuilderV3TranscriptEntry>();
-  const stepOrder: string[] = [];
+  // Pre-compute which tool_use ids have a matching tool_result so we can skip the tool_use row
+  const resolvedToolUseIds = new Set<string>();
   for (const e of entries) {
-    if (e.kind !== "tool_use" && e.kind !== "tool_result") continue;
-    const key = e.toolUseId ?? e.message;
-    if (!stepMap.has(key)) stepOrder.push(key);
-    stepMap.set(key, e);
+    if (e.kind === "tool_result" && e.toolUseId) {
+      resolvedToolUseIds.add(e.toolUseId);
+    }
   }
-
-  // Also include plain status entries (non-tool)
-  const statusEntries = entries.filter(
-    (e) => e.kind === "status" && e.code !== "build_completed"
-  );
 
   return (
     <div className="mb-2 flex flex-col gap-1">
-      {/* Status entries */}
-      {statusEntries.map((e, i) => (
-        <div key={e.id ?? i} className="flex items-center gap-2 text-xs text-[#9ca3af]">
-          <CheckCircle2 size={12} className="shrink-0 text-[#10b981]" />
-          <span>{e.message}</span>
-        </div>
-      ))}
-      {/* Tool steps */}
-      {stepOrder.map((key) => {
-        const e = stepMap.get(key)!;
-        const isRunning = e.kind === "tool_use";
-        const isError = e.kind === "tool_result" && e.status === "error";
-        return (
-          <div key={key} className="flex items-start gap-2 text-xs">
-            {isRunning ? (
-              <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin text-[#F97316]" />
-            ) : isError ? (
-              <AlertCircle size={12} className="mt-0.5 shrink-0 text-red-500" />
-            ) : (
-              <CheckCircle2 size={12} className="mt-0.5 shrink-0 text-[#10b981]" />
-            )}
-            <span className={isRunning ? "text-[#6b7280]" : isError ? "text-red-600" : "text-[#374151]"}>
+      {entries.map((e, i) => {
+        // skip assistant entries
+        if (e.kind === "assistant") return null;
+
+        // skip internal preview/build-completed status lines
+        if (
+          e.kind === "status" &&
+          (e.code === "preview_ready" || e.code === "build_completed")
+        ) return null;
+
+        // status → tiny grey uppercase section label
+        if (e.kind === "status") {
+          return (
+            <div
+              key={e.id ?? i}
+              className="mt-2 first:mt-0 text-[10px] font-semibold uppercase tracking-widest text-[#9ca3af]"
+            >
               {e.message}
-            </span>
-          </div>
-        );
+            </div>
+          );
+        }
+
+        // tool_use that already has a matching tool_result → skip (result row handles it)
+        if (e.kind === "tool_use" && e.toolUseId && resolvedToolUseIds.has(e.toolUseId)) {
+          return null;
+        }
+
+        // tool_use with no result yet → running (animated spinner + grey text)
+        if (e.kind === "tool_use") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin text-[#9ca3af]" />
+              <span className="text-[#9ca3af]">{e.message}</span>
+            </div>
+          );
+        }
+
+        // tool_result error → red ✗ + red text
+        if (e.kind === "tool_result" && e.status === "error") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <span className="mt-0.5 shrink-0 leading-none text-red-500">✗</span>
+              <span className="text-red-600">{e.message}</span>
+            </div>
+          );
+        }
+
+        // tool_result success → green ✓ + dark text
+        if (e.kind === "tool_result") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <Check size={12} className="mt-0.5 shrink-0 text-[#10b981]" />
+              <span className="text-[#1a1a1a]">{e.message}</span>
+            </div>
+          );
+        }
+
+        // error kind → red ✗ + red text
+        if (e.kind === "error") {
+          return (
+            <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
+              <span className="mt-0.5 shrink-0 leading-none text-red-500">✗</span>
+              <span className="text-red-600">{e.message}</span>
+            </div>
+          );
+        }
+
+        // done kind → ⚡ bold, no background
+        if (e.kind === "done") {
+          return (
+            <div key={e.id ?? i} className="mt-1 flex items-center gap-2 text-xs font-semibold text-[#1a1a1a]">
+              <Zap size={12} className="shrink-0 text-[#F97316]" />
+              <span>{e.message}</span>
+            </div>
+          );
+        }
+
+        return null;
       })}
-      {/* Done summary */}
-      {doneEntry && (
-        <div className="mt-1 flex items-center gap-2 rounded-lg bg-[#F97316]/8 px-2.5 py-1.5 text-xs font-medium text-[#c2410c]">
-          <Zap size={12} className="shrink-0 text-[#F97316]" />
-          <span>{doneEntry.message}</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -527,11 +518,11 @@ export function ChatPanel({
           <div className="space-y-4">
             {messages.map((msg) => {
               const displayContent = getDisplayContent(msg);
-              const visibleTraceEntries = getVisibleTraceEntries(msg.traceEntries);
+              const hasTrace = (msg.traceEntries?.length ?? 0) > 0;
 
               const hasVisibleContent =
-                displayContent.length > 0 ||
-                visibleTraceEntries.length > 0 ||
+                (displayContent.length > 0 && !hasTrace) ||
+                hasTrace ||
                 (msg.planSteps && msg.planSteps.length > 0) ||
                 (msg.changedFiles && msg.changedFiles.length > 0);
 
@@ -551,30 +542,23 @@ export function ChatPanel({
                     <div className="flex items-start gap-2.5">
                       <BeomzAvatar />
                       <div className="group relative min-w-0 max-w-[85%] pt-0.5">
-                        {displayContent && <MarkdownText text={displayContent} />}
+                        {/* Prose content — hidden during builds (when trace entries exist) */}
+                        {displayContent && !hasTrace && <MarkdownText text={displayContent} />}
 
-                        {visibleTraceEntries.length > 0 && (
-                          <div className="space-y-2">
-                            {visibleTraceEntries.map((entry) => (
-                              <TraceEntryRow key={entry.id} entry={entry} />
-                            ))}
-                          </div>
+                        {/* Single trace rendering path */}
+                        {hasTrace && (
+                          <TraceEntryList entries={msg.traceEntries!} />
                         )}
 
                         {msg.planSteps && msg.planSteps.length > 0 && (
                           <PlanCardInline steps={msg.planSteps} />
                         )}
 
-                                     {/* Trace entries — inline line items */}
-                  {msg.traceEntries && msg.traceEntries.length > 0 && (
-                    <TraceEntryList entries={msg.traceEntries} />
-                  )}
-                  {/* File change badge */}
-                  {msg.changedFiles && msg.changedFiles.length > 0 && (
-                    <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
-                  )}
+                        {msg.changedFiles && msg.changedFiles.length > 0 && (
+                          <FileChangeBadge files={msg.changedFiles} onViewCode={onViewCode} />
+                        )}
 
-                        {displayContent && (
+                        {displayContent && !hasTrace && (
                           <div className="absolute -right-8 top-1 opacity-0 transition-opacity group-hover:opacity-100">
                             <CopyButton text={displayContent} />
                           </div>
