@@ -1,5 +1,5 @@
 /**
- * streamBuildSummary — streams a post-build AI summary from Claude Haiku.
+ * streamBuildSummary — streams a post-build AI summary from Claude Sonnet.
  * Yields text deltas as an async generator for typewriter rendering.
  */
 export async function* streamBuildSummary(
@@ -19,7 +19,7 @@ export async function* streamBuildSummary(
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-5",
       max_tokens: 300,
       stream: true,
       system:

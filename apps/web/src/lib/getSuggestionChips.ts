@@ -1,5 +1,5 @@
 /**
- * getSuggestionChips — calls Haiku to generate 3 contextual follow-on
+ * getSuggestionChips — calls Sonnet to generate 3 contextual follow-on
  * suggestions after a build completes.
  */
 export async function getSuggestionChips(prompt: string): Promise<string[]> {
@@ -15,7 +15,7 @@ export async function getSuggestionChips(prompt: string): Promise<string[]> {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-sonnet-4-5",
         max_tokens: 120,
         system:
           "You help users iterate on apps they just built. Given the user's original prompt, suggest 3 short follow-on actions they might want next (e.g. add a feature, change styling, add a page). Each suggestion must be under 8 words. Return ONLY a valid JSON array of 3 strings, no markdown.",
