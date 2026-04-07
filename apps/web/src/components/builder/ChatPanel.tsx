@@ -45,6 +45,8 @@ interface ChatPanelProps {
   onAutoFix?: (error: string) => void;
   onViewCode?: () => void;
   width?: number;
+  suggestionChips?: string[];
+  onDismissChips?: () => void;
 }
 
 // ─────────────────────────────────────────────
@@ -319,14 +321,38 @@ export function ChatPanel({
   onAutoFix,
   onViewCode,
   width = 380,
+  suggestionChips,
+  onDismissChips,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
+  const [chipsDismissed, setChipsDismissed] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const userScrolledUp = useRef(false);
+
+  // Reset chipsDismissed when new chips arrive
+  const prevChipsRef = useRef(suggestionChips);
+  useEffect(() => {
+    if (suggestionChips && suggestionChips.length > 0 && suggestionChips !== prevChipsRef.current) {
+      setChipsDismissed(false);
+    }
+    prevChipsRef.current = suggestionChips;
+  }, [suggestionChips]);
+
+  const dismissChips = useCallback(() => {
+    setChipsDismissed(true);
+    onDismissChips?.();
+  }, [onDismissChips]);
+
+  const handleChipClick = useCallback((chip: string) => {
+    dismissChips();
+    onSendMessage(chip);
+  }, [dismissChips, onSendMessage]);
+
+  const showChips = !chipsDismissed && !isStreaming && suggestionChips && suggestionChips.length > 0;
 
   // Auto-scroll to bottom when new messages arrive, unless user scrolled up
   useEffect(() => {
@@ -369,11 +395,12 @@ export function ChatPanel({
   const handleTextareaChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInput(e.target.value);
+      if (e.target.value.length > 0 && showChips) dismissChips();
       const el = e.target;
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
     },
-    [],
+    [showChips, dismissChips],
   );
 
   const hasMessages = messages.length > 0 || isStreaming;
@@ -501,6 +528,21 @@ export function ChatPanel({
           >
             Fix automatically &rarr;
           </button>
+        </div>
+      )}
+
+      {/* Suggestion chips above input */}
+      {showChips && (
+        <div className="flex flex-shrink-0 flex-wrap gap-2 px-3 pb-2">
+          {suggestionChips!.map((chip) => (
+            <button
+              key={chip}
+              onClick={() => handleChipClick(chip)}
+              className="rounded-full border border-[#F97316]/30 bg-[#faf9f6] px-3.5 py-1.5 text-sm text-[#F97316] transition-all hover:border-[#F97316] hover:bg-[#F97316]/5"
+            >
+              {chip}
+            </button>
+          ))}
         </div>
       )}
 
