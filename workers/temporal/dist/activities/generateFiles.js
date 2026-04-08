@@ -1,0 +1,472 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.generateFiles = generateFiles;
+const engine_1 = require("@beomz-studio/engine");
+const operations_1 = require("@beomz-studio/operations");
+const prompt_policies_1 = require("@beomz-studio/prompt-policies");
+const contracts_1 = require("@beomz-studio/contracts");
+const studio_db_1 = require("@beomz-studio/studio-db");
+const config_js_1 = require("../config.js");
+const paths_js_1 = require("../shared/paths.js");
+const generatedSurface_js_1 = require("../shared/generatedSurface.js");
+const iterationContext_js_1 = require("../shared/iterationContext.js");
+function buildSystemPrompt(policy, mode) {
+    return [
+        mode === "iteration"
+            ? "You are the Beomz Studio iteration generator."
+            : "You are the Beomz Studio initial build generator.",
+        policy.systemPrompt,
+        "Non-negotiable constraints:",
+        ...policy.constraints.map((constraint) => `- ${constraint}`),
+    ].join("\n");
+}
+function buildTemplatePageContext(input) {
+    return JSON.stringify(input.template.pages.map((page) => ({
+        pageId: page.id,
+        label: page.name,
+        path: (0, paths_js_1.buildGeneratedPageFilePath)(input.template.id, page.id),
+        routePath: page.path,
+        summary: page.summary,
+    })), null, 2);
+}
+function buildUserPrompt(input, page) {
+    const filePath = (0, paths_js_1.buildGeneratedPageFilePath)(input.template.id, page.id);
+    const componentName = (0, paths_js_1.buildGeneratedPageComponentName)(input.template.id, page.id);
+    return [
+        `Project name: ${input.project.name}`,
+        `Prompt: ${input.plan.normalizedPrompt}`,
+        `Intent summary: ${input.plan.intentSummary}`,
+        `Template: ${input.template.name}`,
+        `Template description: ${input.template.description}`,
+        `Template prompt hints: ${input.template.promptHints.join(" | ")}`,
+        (0, generatedSurface_js_1.buildScaffoldPromptBlock)(input.template),
+        "Full template page set for consistency across navigation and tone:",
+        buildTemplatePageContext(input),
+        "Generate exactly one standalone TSX page file for this page:",
+        JSON.stringify({
+            pageId: page.id,
+            name: page.name,
+            filePath,
+            componentName,
+            routePath: page.path,
+            kind: page.kind,
+            summary: page.summary,
+            requiresAuth: page.requiresAuth,
+        }, null, 2),
+        "The page MUST import AppShell from the generated scaffold and wrap route-specific content inside it.",
+        "Use shared generated theme/data/ui modules where helpful. Do not re-create shell navigation, footer, mobile drawer, or topbar inside the route file.",
+        "Output ONLY the complete TSX file contents for that one page.",
+        `The file must default export a React component named ${componentName}.`,
+        "Do not return JSON, markdown fences, explanations, or any prose outside the TSX file.",
+    ].join("\n\n");
+}
+function buildIterationUserPrompt(input) {
+    const intent = (0, iterationContext_js_1.classifyIterationIntent)(input.plan.normalizedPrompt);
+    const fingerprint = (0, iterationContext_js_1.buildLayoutFingerprint)(input.template, input.existingFiles);
+    return [
+        `Project name: ${input.project.name}`,
+        `User request: ${input.plan.normalizedPrompt}`,
+        `Intent summary: ${input.plan.intentSummary}`,
+        `Template: ${input.template.name}`,
+        `Template description: ${input.template.description}`,
+        (0, generatedSurface_js_1.buildScaffoldPromptBlock)(input.template),
+        (0, iterationContext_js_1.buildIterationPromptBlock)({ fingerprint, intent }),
+        "Current files are already mounted in the virtual filesystem and are the source of truth.",
+        "Use tool actions to inspect the current app, make the minimum required edits, and finish with a concise summary.",
+    ].join("\n\n");
+}
+function extractCodePayload(text) {
+    const fencedMatch = text.match(/```(?:tsx|ts|jsx|js)?\s*([\s\S]*?)```/i);
+    if (fencedMatch?.[1]) {
+        return fencedMatch[1].trim();
+    }
+    return text.trim();
+}
+function isLikelyCodeStartLine(line) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+        return false;
+    }
+    return /^(?:import|export|const|let|var|function|async function|class|type|interface|enum)\b/.test(trimmed)
+        || /^(?:["']use\s+\w+["'];?)$/.test(trimmed)
+        || /^(?:\/\/|\/\*|\*\/|\*)/.test(trimmed)
+        || /^(?:<[A-ZA-Za-z!/]|return\s*\(|return\s*<)/.test(trimmed);
+}
+function isLikelyCodeEndLine(line) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+        return false;
+    }
+    return /(?:[;{}])$/.test(trimmed)
+        || /(?:\)|\])$/.test(trimmed)
+        || /\/>$/.test(trimmed)
+        || /^<\/?[A-ZA-z]/.test(trimmed)
+        || /^export default\b/.test(trimmed);
+}
+function stripNonTsxEnvelope(text) {
+    const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.replace(/\s+$/, ""));
+    let startIndex = 0;
+    while (startIndex < lines.length && lines[startIndex]?.trim().length === 0) {
+        startIndex += 1;
+    }
+    const firstCodeLineIndex = lines.findIndex(isLikelyCodeStartLine);
+    if (firstCodeLineIndex !== -1) {
+        startIndex = Math.max(startIndex, firstCodeLineIndex);
+    }
+    let endIndex = lines.length - 1;
+    while (endIndex >= startIndex && lines[endIndex]?.trim().length === 0) {
+        endIndex -= 1;
+    }
+    for (let index = endIndex; index >= startIndex; index -= 1) {
+        if (isLikelyCodeEndLine(lines[index] ?? "")) {
+            endIndex = index;
+            break;
+        }
+    }
+    return lines.slice(startIndex, endIndex + 1).join("\n").trim();
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function readBuilderTraceMetadata(metadata) {
+    const candidate = metadata.builderTrace;
+    if (!isRecord(candidate)) {
+        return (0, contracts_1.createEmptyBuilderV3TraceMetadata)();
+    }
+    const events = Array.isArray(candidate.events) ? candidate.events : [];
+    return {
+        events,
+        lastEventId: typeof candidate.lastEventId === "string" && candidate.lastEventId.length > 0
+            ? candidate.lastEventId
+            : null,
+        previewReady: candidate.previewReady === true,
+        fallbackReason: typeof candidate.fallbackReason === "string" ? candidate.fallbackReason : null,
+        fallbackUsed: candidate.fallbackUsed === true,
+    };
+}
+async function appendAssistantDeltaEvent(input) {
+    const db = (0, studio_db_1.createStudioDbClient)();
+    const currentGeneration = await db.findGenerationById(input.buildId);
+    if (!currentGeneration) {
+        throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
+    }
+    const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
+    const currentTrace = readBuilderTraceMetadata(currentMetadata);
+    const event = {
+        delta: input.delta,
+        id: input.eventId,
+        operation: "initial_build",
+        timestamp: new Date().toISOString(),
+        type: "assistant_delta",
+    };
+    await db.updateGeneration(input.buildId, {
+        metadata: {
+            ...currentMetadata,
+            builderTrace: {
+                events: [...currentTrace.events, event],
+                lastEventId: event.id,
+                previewReady: currentTrace.previewReady,
+                fallbackReason: currentTrace.fallbackReason,
+                fallbackUsed: currentTrace.fallbackUsed,
+            },
+        },
+    });
+}
+async function persistAssistantResponseMetadata(input) {
+    const db = (0, studio_db_1.createStudioDbClient)();
+    const currentGeneration = await db.findGenerationById(input.buildId);
+    if (!currentGeneration) {
+        throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
+    }
+    const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
+    await db.updateGeneration(input.buildId, {
+        metadata: {
+            ...currentMetadata,
+            assistantResponseText: input.assistantResponseText,
+            assistantResponsesByPage: input.assistantResponsesByPage,
+        },
+    });
+}
+async function streamAnthropicMessage(input) {
+    const config = (0, config_js_1.getAnthropicRuntimeConfig)();
+    if (!config.ANTHROPIC_API_KEY) {
+        throw new Error("ANTHROPIC_API_KEY is not configured.");
+    }
+    const response = await fetch(`${config.ANTHROPIC_BASE_URL.replace(/\/$/, "")}/v1/messages`, {
+        method: "POST",
+        headers: {
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+            "x-api-key": config.ANTHROPIC_API_KEY,
+        },
+        body: JSON.stringify({
+            max_tokens: config.ANTHROPIC_MAX_TOKENS,
+            model: config.ANTHROPIC_MODEL,
+            stream: true,
+            system: input.system,
+            messages: [
+                {
+                    role: "user",
+                    content: input.userMessage,
+                },
+            ],
+        }),
+    });
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Anthropic returned ${response.status}: ${errorBody}`);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) {
+        throw new Error("Anthropic streaming response body was unavailable.");
+    }
+    const decoder = new TextDecoder();
+    const textParts = [];
+    const dataLines = [];
+    let buffer = "";
+    const flushEvent = async () => {
+        if (dataLines.length === 0) {
+            return;
+        }
+        const payload = dataLines.join("\n");
+        dataLines.length = 0;
+        if (payload === "[DONE]") {
+            return;
+        }
+        const event = JSON.parse(payload);
+        if (event.type === "error") {
+            const errorMessage = isRecord(event.error) && typeof event.error.message === "string"
+                ? event.error.message
+                : "Anthropic streaming request failed.";
+            throw new Error(errorMessage);
+        }
+        const delta = "delta" in event && isRecord(event.delta)
+            ? event.delta
+            : null;
+        const deltaText = typeof delta?.text === "string" ? delta.text : null;
+        if (event.type === "content_block_delta"
+            && delta?.type === "text_delta"
+            && deltaText) {
+            textParts.push(deltaText);
+            await input.onTextDelta?.(deltaText);
+        }
+    };
+    const consumeBuffer = async (flushRemainder) => {
+        while (true) {
+            const lineBreakIndex = buffer.indexOf("\n");
+            if (lineBreakIndex === -1) {
+                break;
+            }
+            const rawLine = buffer.slice(0, lineBreakIndex);
+            buffer = buffer.slice(lineBreakIndex + 1);
+            const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+            if (line.length === 0) {
+                await flushEvent();
+                continue;
+            }
+            if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+            }
+        }
+        if (!flushRemainder || buffer.length === 0) {
+            return;
+        }
+        const line = buffer.endsWith("\r") ? buffer.slice(0, -1) : buffer;
+        buffer = "";
+        if (line.length === 0) {
+            await flushEvent();
+            return;
+        }
+        if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trim());
+        }
+    };
+    while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        await consumeBuffer(done);
+        if (done) {
+            await flushEvent();
+            break;
+        }
+    }
+    return textParts.join("");
+}
+function parseGeneratedFileContent(input) {
+    const extractedContent = extractCodePayload(input.text);
+    const content = stripNonTsxEnvelope(extractedContent);
+    if (content.length > 0) {
+        if (content !== extractedContent) {
+            console.warn("Stripped non-TSX envelope from generated page content.", {
+                pageId: input.page.id,
+                templateId: input.templateId,
+            });
+        }
+        return content;
+    }
+    console.error("Anthropic generation response was empty after code extraction.", {
+        maxTokens: input.config.ANTHROPIC_MAX_TOKENS,
+        model: input.config.ANTHROPIC_MODEL,
+        pageId: input.page.id,
+        rawResponseText: input.text,
+        templateId: input.templateId,
+    });
+    throw new Error(`Anthropic returned empty code content for page ${input.page.id}.`);
+}
+function normalizeComparableContent(content) {
+    return content.replace(/\r\n/g, "\n").trim();
+}
+function getMaterialChangedPaths(existingFiles, nextFiles) {
+    const existingByPath = new Map(existingFiles.map((file) => [(0, contracts_1.normalizeGeneratedPath)(file.path), normalizeComparableContent(file.content)]));
+    return nextFiles
+        .filter((file) => {
+        const normalizedPath = (0, contracts_1.normalizeGeneratedPath)(file.path);
+        const previous = existingByPath.get(normalizedPath);
+        if (previous === undefined) {
+            return true;
+        }
+        return previous !== normalizeComparableContent(file.content);
+    })
+        .map((file) => (0, contracts_1.normalizeGeneratedPath)(file.path));
+}
+async function generateFiles(input) {
+    const config = (0, config_js_1.getAnthropicRuntimeConfig)();
+    const isIteration = input.existingFiles.length > 0;
+    const policy = isIteration
+        ? (0, prompt_policies_1.getIterationPromptPolicy)(input.template.id)
+        : (0, prompt_policies_1.getInitialBuildPromptPolicy)(input.template.id);
+    const files = [];
+    const assistantResponseParts = [];
+    const assistantResponsesByPage = [];
+    let streamSequence = 0;
+    if (isIteration) {
+        if (!config.ANTHROPIC_API_KEY) {
+            throw new Error("ANTHROPIC_API_KEY is not configured.");
+        }
+        const model = new engine_1.AnthropicStreamingModel({
+            apiKey: config.ANTHROPIC_API_KEY,
+            baseUrl: config.ANTHROPIC_BASE_URL,
+            maxTokens: config.ANTHROPIC_MAX_TOKENS,
+            model: config.ANTHROPIC_MODEL,
+            timeoutMs: 180_000,
+        });
+        const engine = new engine_1.GenerationEngine({
+            actor: input.actor,
+            generationId: input.buildId,
+            initialFiles: input.existingFiles.map((file) => ({
+                content: file.content,
+                path: (0, contracts_1.normalizeGeneratedPath)(file.path),
+            })),
+            maxTurns: 30,
+            model,
+            operation: operations_1.projectIterationOperation,
+            persistence: false,
+            prompt: buildIterationUserPrompt(input),
+            promptPolicy: (0, prompt_policies_1.getIterationPromptPolicy)(input.template.id),
+            project: input.project,
+            template: input.template,
+        });
+        const turnTexts = [];
+        let resultSummary = "";
+        let finalFiles = input.existingFiles;
+        for await (const event of engine.run()) {
+            if (event.type === "text_delta" && event.text.length > 0) {
+                assistantResponseParts.push(event.text);
+                turnTexts.push(event.text);
+                streamSequence += 1;
+                await appendAssistantDeltaEvent({
+                    buildId: input.buildId,
+                    delta: event.text,
+                    eventId: `assistant-iteration-${streamSequence}`,
+                });
+            }
+            if (event.type === "llm_turn_completed") {
+                assistantResponsesByPage.push({
+                    pageId: `iteration-turn-${event.turn}`,
+                    text: turnTexts.join(""),
+                });
+                turnTexts.length = 0;
+            }
+            if (event.type === "generation_completed") {
+                finalFiles = event.result.files;
+                resultSummary = event.result.summary;
+            }
+        }
+        await persistAssistantResponseMetadata({
+            buildId: input.buildId,
+            assistantResponseText: assistantResponseParts.join(""),
+            assistantResponsesByPage,
+        });
+        const changedPaths = getMaterialChangedPaths(input.existingFiles, finalFiles);
+        return {
+            assistantResponseText: assistantResponseParts.join(""),
+            assistantResponsesByPage,
+            changedPaths,
+            files: finalFiles,
+            previewEntryPath: input.template.previewEntryPath,
+            source: "ai",
+            summary: resultSummary.trim()
+                || (changedPaths.length > 0
+                    ? `Updated ${changedPaths.length} file${changedPaths.length === 1 ? "" : "s"} in ${input.project.name}.`
+                    : `No file changes were needed for ${input.project.name}.`),
+            warnings: [],
+        };
+    }
+    const scaffoldFiles = (0, generatedSurface_js_1.buildGeneratedScaffoldFiles)({
+        project: input.project,
+        template: input.template,
+    });
+    files.push(...scaffoldFiles);
+    for (const page of input.template.pages) {
+        const text = await streamAnthropicMessage({
+            system: buildSystemPrompt(policy, "initial"),
+            userMessage: buildUserPrompt(input, page),
+            onTextDelta: async (delta) => {
+                assistantResponseParts.push(delta);
+                streamSequence += 1;
+                await appendAssistantDeltaEvent({
+                    buildId: input.buildId,
+                    delta,
+                    eventId: `assistant-${page.id}-${streamSequence}`,
+                });
+            },
+        });
+        if (text.trim().length === 0) {
+            throw new Error(`Anthropic returned no text content for page ${page.id}.`);
+        }
+        assistantResponsesByPage.push({
+            pageId: page.id,
+            text,
+        });
+        await persistAssistantResponseMetadata({
+            buildId: input.buildId,
+            assistantResponseText: assistantResponseParts.join(""),
+            assistantResponsesByPage,
+        });
+        const content = parseGeneratedFileContent({
+            config,
+            page,
+            templateId: input.template.id,
+            text,
+        });
+        files.push({
+            path: (0, paths_js_1.buildGeneratedPageFilePath)(input.template.id, page.id),
+            kind: "route",
+            language: "tsx",
+            content: content.trim(),
+            locked: false,
+            source: "ai",
+        });
+    }
+    return {
+        assistantResponseText: assistantResponseParts.join(""),
+        assistantResponsesByPage,
+        files,
+        previewEntryPath: input.template.previewEntryPath,
+        source: "ai",
+        summary: `Generated ${files.length} scaffold and route files for ${input.template.name}.`,
+        warnings: [],
+    };
+}

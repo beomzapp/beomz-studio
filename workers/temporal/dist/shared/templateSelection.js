@@ -1,0 +1,164 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.selectInitialBuildTemplate = selectInitialBuildTemplate;
+const templates_1 = require("@beomz-studio/templates");
+const templateSignals = {
+    "marketing-website": [
+        "contact",
+        "cta",
+        "hero",
+        "landing",
+        "launch",
+        "marketing",
+        "pricing",
+        "public",
+        "waitlist",
+        "website",
+    ],
+    "saas-dashboard": [
+        "account",
+        "admin",
+        "analytics",
+        "customer",
+        "dashboard",
+        "metrics",
+        "overview",
+        "saas",
+        "settings",
+        "workspace billing",
+    ],
+    "workspace-task": [
+        "backlog",
+        "board",
+        "collaboration",
+        "kanban",
+        "project",
+        "sprint",
+        "task",
+        "team",
+        "todo",
+        "workflow",
+        "workspace",
+    ],
+    "mobile-app": [
+        "calories",
+        "diary",
+        "fitness",
+        "habit",
+        "journal",
+        "meditation",
+        "mobile",
+        "personal",
+        "streak",
+        "tracker",
+    ],
+    "social-app": [
+        "comment",
+        "community",
+        "dating",
+        "feed",
+        "follow",
+        "forum",
+        "like",
+        "message",
+        "post",
+        "social",
+    ],
+    ecommerce: [
+        "cart",
+        "catalog",
+        "checkout",
+        "commerce",
+        "marketplace",
+        "product",
+        "retail",
+        "shop",
+        "store",
+    ],
+    portfolio: [
+        "agency",
+        "case study",
+        "creative",
+        "freelancer",
+        "personal brand",
+        "portfolio",
+        "resume",
+        "showcase",
+        "studio",
+    ],
+    "blog-cms": [
+        "article",
+        "author",
+        "blog",
+        "content",
+        "documentation",
+        "editorial",
+        "magazine",
+        "news",
+        "post",
+    ],
+    "onboarding-flow": [
+        "form flow",
+        "multi-step",
+        "onboarding",
+        "quiz",
+        "sign up",
+        "stepper",
+        "survey",
+        "wizard",
+    ],
+    "data-table-app": [
+        "data table",
+        "employee",
+        "filter",
+        "fleet",
+        "inventory",
+        "logistics",
+        "operations",
+        "pagination",
+        "reporting",
+        "sortable",
+    ],
+};
+function countMatches(haystack, phrases) {
+    return phrases.reduce((score, phrase) => {
+        if (!haystack.includes(phrase)) {
+            return score;
+        }
+        return score + (phrase.includes(" ") ? 4 : 2);
+    }, 0);
+}
+function scoreTemplate(prompt, plan, templateId) {
+    const promptLower = prompt.toLowerCase();
+    const planHaystack = plan ? `${plan.intentSummary.toLowerCase()} ${plan.keywords.join(" ")}` : "";
+    let score = countMatches(promptLower, templateSignals[templateId]);
+    score += countMatches(planHaystack, templateSignals[templateId]);
+    if (templateId === "marketing-website" && score === 0) {
+        score += 1;
+    }
+    return score;
+}
+function selectInitialBuildTemplate(input) {
+    const templates = (0, templates_1.listTemplateDefinitions)();
+    const scoredTemplates = templates
+        .map((template) => ({
+        score: scoreTemplate(input.prompt, input.plan, template.id),
+        template,
+    }))
+        .sort((left, right) => right.score - left.score);
+    const selected = scoredTemplates[0];
+    if (!selected) {
+        throw new Error("No templates are registered for the initial build pipeline.");
+    }
+    const scores = scoredTemplates.reduce((accumulator, entry) => {
+        accumulator[entry.template.id] = entry.score;
+        return accumulator;
+    }, {});
+    return {
+        template: selected.template,
+        reason: selected.score > 0
+            ? `Selected ${selected.template.name} based on prompt intent keywords and route hints.`
+            : `Defaulted to ${selected.template.name} because no stronger template-specific intent was detected.`,
+        scores,
+    };
+}

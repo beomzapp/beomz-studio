@@ -1,0 +1,12 @@
+import type { ConnectionOptions } from "@temporalio/client";
+import type { NativeConnectionOptions } from "@temporalio/worker";
+import { z } from "zod";
+declare const temporalEnvSchema: any;
+declare const anthropicEnvSchema: any;
+export type TemporalRuntimeConfig = z.infer<typeof temporalEnvSchema>;
+export type AnthropicRuntimeConfig = z.infer<typeof anthropicEnvSchema>;
+export declare function getTemporalRuntimeConfig(): TemporalRuntimeConfig;
+export declare function getAnthropicRuntimeConfig(): AnthropicRuntimeConfig;
+export declare function getTemporalConnectionOptions(): ConnectionOptions;
+export declare function getTemporalNativeConnectionOptions(): NativeConnectionOptions;
+export {};
