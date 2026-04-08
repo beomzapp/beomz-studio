@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -45,18 +44,6 @@ async function main(): Promise<void> {
   if (shouldStartEmbeddedTemporalWorker()) {
     const workerEntry = fileURLToPath(
       new URL("../../../workers/temporal/dist/worker.js", import.meta.url),
-    );
-    const temporalNamespace = process.env.TEMPORAL_NAMESPACE ?? "quickstart-beomz-studio";
-    const temporalTaskQueue = process.env.TEMPORAL_TASK_QUEUE ?? "initial-builds";
-
-    if (!existsSync(workerEntry)) {
-      throw new Error(
-        `Embedded Temporal worker entry was not found at ${workerEntry}. Build workers/temporal before starting the API runtime.`,
-      );
-    }
-
-    console.log(
-      `Starting embedded Temporal worker (namespace=${temporalNamespace}, taskQueue=${temporalTaskQueue}).`,
     );
 
     workerProcess = spawn(process.execPath, [workerEntry], {

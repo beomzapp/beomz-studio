@@ -54,17 +54,9 @@ STUDIO_SUPABASE_URL=https://srflynvdrsdazxvcxmzb.supabase.co
 STUDIO_SUPABASE_SERVICE_ROLE_KEY=[set]
 ANTHROPIC_API_KEY=[set]
 E2B_API_KEY=[set]
-BEOMZ_ENABLE_EMBEDDED_TEMPORAL_WORKER=true
 TEMPORAL_ADDRESS=quickstart-beomz-studio.sdvdw.tmprl.cloud:7233
-TEMPORAL_NAMESPACE=quickstart-beomz-studio
-TEMPORAL_TASK_QUEUE=initial-builds
 PORT=3001
 ```
-
-### Railway deployment note
-- Production Railway should run Temporal inside the API service via `apps/api/src/bootstrap.ts`.
-- Do not rely on a separate Railway worker service rooted at `workers/temporal`; shared monorepo files will be missing from that deploy shape.
-- Keep the Railway API service at 1 replica during cutover, then scale intentionally after validating queue consumption.
 
 ### Local dev env — apps/web/.env.local
 ```
