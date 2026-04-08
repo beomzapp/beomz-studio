@@ -1,6 +1,9 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "buildCommand": "pnpm install --frozen-lockfile && pnpm --filter '@beomz-studio/temporal-worker...' build"
+  },
   "deploy": {
-    "startCommand": "node dist/worker.js"
+    "startCommand": "node workers/temporal/dist/worker.js"
   }
 }
