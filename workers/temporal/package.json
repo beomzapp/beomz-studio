@@ -2,10 +2,9 @@
   "name": "@beomz-studio/temporal-worker",
   "version": "0.0.0",
   "private": true,
-  "description": "Railway redeploy trigger for Temporal worker build fixes.",
+  "description": "Temporal worker for Beomz Studio.",
   "scripts": {
     "preinstall": "echo 'skipping'",
-    "build": "pnpm --dir /app --filter '@beomz-studio/temporal-worker...' build",
     "start": "node dist/worker.js"
   },
   "engines": {
