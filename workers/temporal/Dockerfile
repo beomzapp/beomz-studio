@@ -1,5 +1,6 @@
 FROM node:20-alpine
 WORKDIR /app
-COPY dist ./dist
 COPY package.json ./package.json
+RUN npm install --omit=dev
+COPY dist ./dist
 CMD ["node", "dist/worker.js"]
