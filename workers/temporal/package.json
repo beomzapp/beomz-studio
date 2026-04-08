@@ -2,6 +2,7 @@
   "name": "@beomz-studio/temporal-worker",
   "version": "0.0.0",
   "private": true,
+  "description": "Railway redeploy trigger for Temporal worker build fixes.",
   "scripts": {
     "preinstall": "echo 'skipping'",
     "build": "pnpm --dir /app install --frozen-lockfile && pnpm --dir /app --filter '@beomz-studio/temporal-worker...' build",
