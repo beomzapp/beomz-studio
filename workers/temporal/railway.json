@@ -1,6 +1,6 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "deploy": {
-    "startCommand": "node workers/temporal/dist/worker.js"
+    "startCommand": "node dist/worker.js"
   }
 }
