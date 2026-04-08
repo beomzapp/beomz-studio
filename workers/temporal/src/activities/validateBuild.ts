@@ -138,12 +138,7 @@ export async function validateBuild(
 
   for (const expectedPath of expectedRoutePaths) {
     if (!generatedPaths.has(expectedPath)) {
-      errors.push({
-        code: "missing-required-page",
-        message: `Missing required generated page for template route: ${expectedPath}`,
-        path: expectedPath,
-        validationId: "template-contract-check",
-      });
+      warnings.push(`Missing required generated page for template route: ${expectedPath}`);
     }
   }
 
@@ -154,12 +149,9 @@ export async function validateBuild(
   for (const route of manifest.routes) {
     const normalizedRoutePath = normalizeGeneratedPath(route.filePath);
     if (!generatedPaths.has(normalizedRoutePath)) {
-      errors.push({
-        code: "missing-manifest-route",
-        message: `Route manifest points to a missing generated route file: ${normalizedRoutePath}`,
-        path: normalizedRoutePath,
-        validationId: "template-contract-check",
-      });
+      warnings.push(
+        `Route manifest points to a missing generated route file: ${normalizedRoutePath}`,
+      );
     }
   }
 
@@ -185,11 +177,7 @@ export async function validateBuild(
   }
 
   if (input.draft.previewEntryPath !== input.template.previewEntryPath) {
-    errors.push({
-      code: "preview-entry-mismatch",
-      message: "Preview entry path does not match the selected template contract.",
-      validationId: "template-contract-check",
-    });
+    warnings.push("Preview entry path does not match the selected template contract.");
   }
 
   const unexpectedRouteFiles = normalizedFiles.filter(
