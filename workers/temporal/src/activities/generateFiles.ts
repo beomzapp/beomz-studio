@@ -507,7 +507,7 @@ export async function generateFiles(
         content: file.content,
         path: normalizeGeneratedPath(file.path),
       })),
-      maxTurns: 10,
+      maxTurns: 30,
       model,
       operation: projectIterationOperation,
       persistence: false,

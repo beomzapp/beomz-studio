@@ -21,6 +21,7 @@ export function getIterationPromptPolicy(templateId: TemplateId): IterationPromp
       "If the request adds a new page, update the generated route manifest and navigation config together with the new route file.",
       "Preserve the project's structure, routes, navigation, naming, and unrelated code unless the user explicitly asks for broader changes.",
       initialPolicy.systemPrompt,
+      "IMPORTANT: You must call the finish tool within a maximum of 5 file edits. Do not read every file before editing. Identify the most relevant file for the requested change, edit it directly, then call finish immediately. Be decisive and concise.",
     ].join(" "),
     constraints: [
       ...initialPolicy.constraints,
