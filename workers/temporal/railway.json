@@ -3,7 +3,7 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "workers/temporal/Dockerfile",
-    "dockerContext": "."
+    "dockerContext": "../.."
   },
   "deploy": {
     "startCommand": "node workers/temporal/dist/worker.js"
