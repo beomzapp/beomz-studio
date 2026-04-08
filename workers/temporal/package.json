@@ -5,7 +5,7 @@
   "description": "Railway redeploy trigger for Temporal worker build fixes.",
   "scripts": {
     "preinstall": "echo 'skipping'",
-    "build": "pnpm --dir /app install --frozen-lockfile && pnpm --dir /app --filter '@beomz-studio/temporal-worker...' build",
+    "build": "pnpm --dir /app --filter '@beomz-studio/temporal-worker...' build",
     "start": "node dist/worker.js"
   },
   "engines": {
