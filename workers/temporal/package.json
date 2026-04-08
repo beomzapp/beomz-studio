@@ -5,7 +5,7 @@
   "description": "Temporal worker for Beomz Studio.",
   "scripts": {
     "preinstall": "echo 'skipping'",
-    "start": "node dist/worker.js"
+    "start": "node dist/worker.cjs"
   },
   "engines": {
     "node": ">=20"
