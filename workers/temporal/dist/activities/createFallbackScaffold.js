@@ -1,8 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createFallbackScaffold = createFallbackScaffold;
-const paths_js_1 = require("../shared/paths.js");
-const generatedSurface_js_1 = require("../shared/generatedSurface.js");
+import { buildGeneratedPageComponentName, buildGeneratedPageFilePath, } from "../shared/paths.js";
+import { buildGeneratedScaffoldFiles } from "../shared/generatedSurface.js";
 function serialize(value) {
     return JSON.stringify(value, null, 2);
 }
@@ -376,7 +373,7 @@ function buildWorkspacePageBody(page, componentName, projectName) {
 `;
 }
 function buildPageContent(template, page, projectName, promptSummary) {
-    const componentName = (0, paths_js_1.buildGeneratedPageComponentName)(template.id, page.id);
+    const componentName = buildGeneratedPageComponentName(template.id, page.id);
     if (template.shell === "website") {
         return buildMarketingPageBody(page, componentName, projectName, promptSummary);
     }
@@ -391,12 +388,12 @@ function createRouteFile(template, page, projectName, promptSummary) {
         kind: "route",
         language: "tsx",
         locked: false,
-        path: (0, paths_js_1.buildGeneratedPageFilePath)(template.id, page.id),
+        path: buildGeneratedPageFilePath(template.id, page.id),
         source: "platform",
     };
 }
-async function createFallbackScaffold(input) {
-    const scaffoldFiles = (0, generatedSurface_js_1.buildGeneratedScaffoldFiles)({
+export async function createFallbackScaffold(input) {
+    const scaffoldFiles = buildGeneratedScaffoldFiles({
         project: input.project,
         template: input.template,
     });

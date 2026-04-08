@@ -1,34 +1,28 @@
-"use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateBuild = validateBuild;
-const operations_1 = require("@beomz-studio/operations");
-const minimatch_1 = require("minimatch");
-const typescript_1 = __importDefault(require("typescript"));
-const contracts_1 = require("@beomz-studio/contracts");
-const paths_js_1 = require("../shared/paths.js");
-const iterationContext_js_1 = require("../shared/iterationContext.js");
+import { initialBuildOperation } from "@beomz-studio/operations";
+import { minimatch } from "minimatch";
+import ts from "typescript";
+import { buildGeneratedManifest, readGeneratedManifestFromFiles, } from "@beomz-studio/contracts";
+import { buildExpectedGeneratedPaths, normalizeGeneratedPath, } from "../shared/paths.js";
+import { classifyIterationIntent, findDuplicateSemanticNavLabels, } from "../shared/iterationContext.js";
 function matchesAnyGlob(filePath, globs) {
-    return globs.some((glob) => (0, minimatch_1.minimatch)(filePath, glob, { dot: true }));
+    return globs.some((glob) => minimatch(filePath, glob, { dot: true }));
 }
 function createDiagnosticsForFile(filePath, content) {
     if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {
         return [];
     }
-    const result = typescript_1.default.transpileModule(content, {
+    const result = ts.transpileModule(content, {
         compilerOptions: {
-            target: typescript_1.default.ScriptTarget.ES2022,
-            module: typescript_1.default.ModuleKind.ESNext,
-            jsx: typescript_1.default.JsxEmit.ReactJSX,
+            target: ts.ScriptTarget.ES2022,
+            module: ts.ModuleKind.ESNext,
+            jsx: ts.JsxEmit.ReactJSX,
         },
         fileName: filePath,
         reportDiagnostics: true,
     });
     return (result.diagnostics ?? []).map((diagnostic) => ({
         code: "typescript-syntax",
-        message: typescript_1.default.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+        message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
         path: filePath,
         validationId: "typecheck-generated-surface",
     }));
@@ -39,13 +33,13 @@ function findShellDuplicationViolations(files) {
         .filter((file) => /(function\s+(Sidebar|TopBar|BottomTab|BottomNav|DrawerMenu)\b|const\s+(Sidebar|TopBar|BottomTab|BottomNav|DrawerMenu)\s*=|<aside\b[\s\S]{0,400}<nav\b)/i.test(file.content))
         .map((file) => file.path);
 }
-async function validateBuild(input) {
+export async function validateBuild(input) {
     const errors = [];
     const warnings = [...input.draft.warnings];
     const isIteration = input.draft.changedPaths !== undefined && input.draft.changedPaths.length > 0;
     const normalizedFiles = input.draft.files.map((file) => ({
         ...file,
-        path: (0, paths_js_1.normalizeGeneratedPath)(file.path),
+        path: normalizeGeneratedPath(file.path),
     }));
     const seenPaths = new Set();
     for (const file of normalizedFiles) {
@@ -67,7 +61,7 @@ async function validateBuild(input) {
             continue;
         }
         seenPaths.add(file.path);
-        if (!matchesAnyGlob(file.path, operations_1.initialBuildOperation.writeScope.allowedGlobs)) {
+        if (!matchesAnyGlob(file.path, initialBuildOperation.writeScope.allowedGlobs)) {
             errors.push({
                 code: "write-scope-denied",
                 message: "Generated file path falls outside the allowed initial build scope.",
@@ -75,7 +69,7 @@ async function validateBuild(input) {
                 validationId: "allowed-scope-check",
             });
         }
-        if (matchesAnyGlob(file.path, operations_1.initialBuildOperation.writeScope.deniedGlobs)) {
+        if (matchesAnyGlob(file.path, initialBuildOperation.writeScope.deniedGlobs)) {
             errors.push({
                 code: "denied-write-scope",
                 message: "Generated file path matches a denied platform-owned scope.",
@@ -83,7 +77,7 @@ async function validateBuild(input) {
                 validationId: "kernel-protection-check",
             });
         }
-        if (matchesAnyGlob(file.path, operations_1.initialBuildOperation.writeScope.immutableGlobs)) {
+        if (matchesAnyGlob(file.path, initialBuildOperation.writeScope.immutableGlobs)) {
             errors.push({
                 code: "immutable-write-scope",
                 message: "Generated file path targets an immutable kernel scope.",
@@ -101,7 +95,7 @@ async function validateBuild(input) {
         }
         errors.push(...createDiagnosticsForFile(file.path, file.content));
     }
-    const expectedRoutePaths = (0, paths_js_1.buildExpectedGeneratedPaths)(input.template);
+    const expectedRoutePaths = buildExpectedGeneratedPaths(input.template);
     const generatedPaths = new Set(normalizedFiles.map((file) => file.path));
     for (const expectedPath of expectedRoutePaths) {
         if (!generatedPaths.has(expectedPath)) {
@@ -113,10 +107,10 @@ async function validateBuild(input) {
             });
         }
     }
-    const manifest = (0, contracts_1.readGeneratedManifestFromFiles)(input.template.id, normalizedFiles)
-        ?? (0, contracts_1.buildGeneratedManifest)(input.template);
+    const manifest = readGeneratedManifestFromFiles(input.template.id, normalizedFiles)
+        ?? buildGeneratedManifest(input.template);
     for (const route of manifest.routes) {
-        const normalizedRoutePath = (0, paths_js_1.normalizeGeneratedPath)(route.filePath);
+        const normalizedRoutePath = normalizeGeneratedPath(route.filePath);
         if (!generatedPaths.has(normalizedRoutePath)) {
             errors.push({
                 code: "missing-manifest-route",
@@ -126,7 +120,7 @@ async function validateBuild(input) {
             });
         }
     }
-    const duplicateSemanticLabels = (0, iterationContext_js_1.findDuplicateSemanticNavLabels)(manifest.routes.filter((route) => route.inPrimaryNav).map((route) => route.label));
+    const duplicateSemanticLabels = findDuplicateSemanticNavLabels(manifest.routes.filter((route) => route.inPrimaryNav).map((route) => route.label));
     for (const duplicate of duplicateSemanticLabels) {
         errors.push({
             code: "duplicate-semantic-nav",
@@ -150,14 +144,14 @@ async function validateBuild(input) {
             validationId: "template-contract-check",
         });
     }
-    const unexpectedRouteFiles = normalizedFiles.filter((file) => file.kind === "route" && !manifest.routes.some((route) => (0, paths_js_1.normalizeGeneratedPath)(route.filePath) === file.path));
+    const unexpectedRouteFiles = normalizedFiles.filter((file) => file.kind === "route" && !manifest.routes.some((route) => normalizeGeneratedPath(route.filePath) === file.path));
     if (unexpectedRouteFiles.length > 0) {
         warnings.push(`Additional route files were generated outside the required template set: ${unexpectedRouteFiles
             .map((file) => file.path)
             .join(", ")}`);
     }
     if (isIteration) {
-        const iterationIntent = (0, iterationContext_js_1.classifyIterationIntent)(input.draft.summary);
+        const iterationIntent = classifyIterationIntent(input.draft.summary);
         const forbiddenAuthNav = manifest.routes
             .filter((route) => route.inPrimaryNav)
             .map((route) => route.label)
@@ -171,7 +165,7 @@ async function validateBuild(input) {
         }
     }
     const outputPaths = Array.from(new Set(input.draft.changedPaths && input.draft.changedPaths.length > 0
-        ? input.draft.changedPaths.map((filePath) => (0, paths_js_1.normalizeGeneratedPath)(filePath))
+        ? input.draft.changedPaths.map((filePath) => normalizeGeneratedPath(filePath))
         : normalizedFiles.map((file) => file.path)));
     return {
         errors,

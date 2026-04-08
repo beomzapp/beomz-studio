@@ -1,13 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.classifyIterationIntent = classifyIterationIntent;
-exports.getManifestFromFiles = getManifestFromFiles;
-exports.buildLayoutFingerprint = buildLayoutFingerprint;
-exports.buildIterationPromptBlock = buildIterationPromptBlock;
-exports.normalizeSemanticNavLabel = normalizeSemanticNavLabel;
-exports.findDuplicateSemanticNavLabels = findDuplicateSemanticNavLabels;
-const contracts_1 = require("@beomz-studio/contracts");
-function classifyIterationIntent(prompt) {
+import { buildGeneratedManifest, readGeneratedManifestFromFiles } from "@beomz-studio/contracts";
+export function classifyIterationIntent(prompt) {
     const promptLower = prompt.toLowerCase();
     if (/\b(auth|authentication|login|log in|sign in|signup|sign up|logout|log out|profile access)\b/.test(promptLower)) {
         return "auth_flow";
@@ -23,10 +15,10 @@ function classifyIterationIntent(prompt) {
     }
     return "general_edit";
 }
-function getManifestFromFiles(template, files) {
-    return (0, contracts_1.readGeneratedManifestFromFiles)(template.id, files) ?? (0, contracts_1.buildGeneratedManifest)(template);
+export function getManifestFromFiles(template, files) {
+    return readGeneratedManifestFromFiles(template.id, files) ?? buildGeneratedManifest(template);
 }
-function buildLayoutFingerprint(template, files) {
+export function buildLayoutFingerprint(template, files) {
     const manifest = getManifestFromFiles(template, files);
     const shellOwnedPaths = files
         .map((file) => file.path)
@@ -41,7 +33,7 @@ function buildLayoutFingerprint(template, files) {
         shellOwnedPaths,
     };
 }
-function buildIterationPromptBlock(input) {
+export function buildIterationPromptBlock(input) {
     return [
         `ITERATION INTENT: ${input.intent}`,
         "CURRENT APP STRUCTURE (preserve unless explicitly asked to change it):",
@@ -60,7 +52,7 @@ function buildIterationPromptBlock(input) {
         "- Never rebuild the entire app when a targeted edit will satisfy the request.",
     ].join("\n");
 }
-function normalizeSemanticNavLabel(label) {
+export function normalizeSemanticNavLabel(label) {
     return label
         .toLowerCase()
         .replace(/^my\s+/, "")
@@ -72,7 +64,7 @@ function normalizeSemanticNavLabel(label) {
         .replace(/\s+/g, " ")
         .trim();
 }
-function findDuplicateSemanticNavLabels(labels) {
+export function findDuplicateSemanticNavLabels(labels) {
     const grouped = new Map();
     for (const label of labels) {
         const normalized = normalizeSemanticNavLabel(label);

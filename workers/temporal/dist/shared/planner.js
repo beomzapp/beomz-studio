@@ -1,7 +1,3 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildProjectNameFromPrompt = buildProjectNameFromPrompt;
-exports.createInitialBuildPlan = createInitialBuildPlan;
 const promptStopWords = new Set([
     "a",
     "an",
@@ -23,7 +19,7 @@ function toTitleCase(value) {
         .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase())
         .join(" ");
 }
-function buildProjectNameFromPrompt(prompt, fallbackName) {
+export function buildProjectNameFromPrompt(prompt, fallbackName) {
     const tokens = prompt
         .trim()
         .replace(/\s+/g, " ")
@@ -36,7 +32,7 @@ function buildProjectNameFromPrompt(prompt, fallbackName) {
     }
     return toTitleCase(tokens.join(" "));
 }
-function createInitialBuildPlan(prompt, projectName) {
+export function createInitialBuildPlan(prompt, projectName) {
     const normalizedPrompt = prompt.trim().replace(/\s+/g, " ");
     const rawTokens = normalizedPrompt.toLowerCase().match(/[a-z0-9-]+/g) ?? [];
     const keywords = Array.from(new Set(rawTokens.filter((token) => token.length > 2 && !promptStopWords.has(token)))).slice(0, 8);

@@ -1,15 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.persistBuildState = persistBuildState;
-const contracts_1 = require("@beomz-studio/contracts");
-const studio_db_1 = require("@beomz-studio/studio-db");
+import { createEmptyBuilderV3TraceMetadata, } from "@beomz-studio/contracts";
+import { createStudioDbClient } from "@beomz-studio/studio-db";
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function readBuilderTraceMetadata(metadata) {
     const candidate = metadata.builderTrace;
     if (!isRecord(candidate)) {
-        return (0, contracts_1.createEmptyBuilderV3TraceMetadata)();
+        return createEmptyBuilderV3TraceMetadata();
     }
     const events = Array.isArray(candidate.events) ? candidate.events : [];
     return {
@@ -22,8 +19,8 @@ function readBuilderTraceMetadata(metadata) {
         fallbackUsed: candidate.fallbackUsed === true,
     };
 }
-async function persistBuildState(input) {
-    const db = (0, studio_db_1.createStudioDbClient)();
+export async function persistBuildState(input) {
+    const db = createStudioDbClient();
     if (input.projectPatch) {
         await db.updateProject(input.projectId, {
             name: input.projectPatch.name,

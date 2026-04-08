@@ -1,12 +1,8 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.initialBuildWorkflow = initialBuildWorkflow;
-exports.projectIterationWorkflow = projectIterationWorkflow;
-const operations_1 = require("@beomz-studio/operations");
-const templates_1 = require("@beomz-studio/templates");
-const workflow_1 = require("@temporalio/workflow");
-const planner_js_1 = require("../shared/planner.js");
-const { createFallbackScaffold, generateFiles, persistBuildState, templateSelect, validateBuild, } = (0, workflow_1.proxyActivities)({
+import { initialBuildOperation, projectIterationOperation } from "@beomz-studio/operations";
+import { getTemplateDefinition } from "@beomz-studio/templates";
+import { proxyActivities } from "@temporalio/workflow";
+import { createInitialBuildPlan } from "../shared/planner.js";
+const { createFallbackScaffold, generateFiles, persistBuildState, templateSelect, validateBuild, } = proxyActivities({
     retry: {
         maximumAttempts: 2,
     },
@@ -15,16 +11,16 @@ const { createFallbackScaffold, generateFiles, persistBuildState, templateSelect
 function toErrorMessage(error) {
     return error instanceof Error ? error.message : "Unknown workflow error.";
 }
-async function initialBuildWorkflow(input) {
+export async function initialBuildWorkflow(input) {
     return runBuildWorkflow(input, "initial_build");
 }
-async function projectIterationWorkflow(input) {
+export async function projectIterationWorkflow(input) {
     return runBuildWorkflow(input, "iteration");
 }
 async function runBuildWorkflow(input, operation) {
-    const plan = (0, planner_js_1.createInitialBuildPlan)(input.prompt, input.projectName);
+    const plan = createInitialBuildPlan(input.prompt, input.projectName);
     const isIteration = operation === "iteration";
-    const operationId = isIteration ? operations_1.projectIterationOperation.id : operations_1.initialBuildOperation.id;
+    const operationId = isIteration ? projectIterationOperation.id : initialBuildOperation.id;
     let eventSequence = 1;
     let fallbackReason = null;
     let fallbackUsed = false;
@@ -142,7 +138,7 @@ async function runBuildWorkflow(input, operation) {
                 return {
                     reason: "Reusing the existing project template for this iteration request.",
                     scores: { [iterationTemplateId]: 1 },
-                    template: (0, templates_1.getTemplateDefinition)(iterationTemplateId),
+                    template: getTemplateDefinition(iterationTemplateId),
                 };
             })()
             : await templateSelect({

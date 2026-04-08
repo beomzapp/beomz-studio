@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.selectInitialBuildTemplate = selectInitialBuildTemplate;
-const templates_1 = require("@beomz-studio/templates");
+import { listTemplateDefinitions } from "@beomz-studio/templates";
 const templateSignals = {
     "marketing-website": [
         "contact",
@@ -138,8 +135,8 @@ function scoreTemplate(prompt, plan, templateId) {
     }
     return score;
 }
-function selectInitialBuildTemplate(input) {
-    const templates = (0, templates_1.listTemplateDefinitions)();
+export function selectInitialBuildTemplate(input) {
+    const templates = listTemplateDefinitions();
     const scoredTemplates = templates
         .map((template) => ({
         score: scoreTemplate(input.prompt, input.plan, template.id),

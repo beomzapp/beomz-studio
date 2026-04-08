@@ -1,8 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildGeneratedScaffoldFiles = buildGeneratedScaffoldFiles;
-exports.buildScaffoldPromptBlock = buildScaffoldPromptBlock;
-const contracts_1 = require("@beomz-studio/contracts");
+import { buildGeneratedAppShellPath, buildGeneratedDataFilePath, buildGeneratedManifest, buildGeneratedManifestPath, buildGeneratedNavigationFilePath, buildGeneratedThemeFilePath, buildGeneratedUiComponentPath, } from "@beomz-studio/contracts";
 function serialize(value) {
     return JSON.stringify(value, null, 2);
 }
@@ -454,15 +450,15 @@ export function AppShell({ children, currentPath, title, subtitle }: AppShellPro
 }
 `;
 }
-function buildGeneratedScaffoldFiles(input) {
-    const manifest = (0, contracts_1.buildGeneratedManifest)(input.template);
+export function buildGeneratedScaffoldFiles(input) {
+    const manifest = buildGeneratedManifest(input.template);
     return [
         {
             content: `${serialize(manifest)}\n`,
             kind: "config",
             language: "json",
             locked: false,
-            path: (0, contracts_1.buildGeneratedManifestPath)(input.template.id),
+            path: buildGeneratedManifestPath(input.template.id),
             source: "platform",
         },
         {
@@ -470,7 +466,7 @@ function buildGeneratedScaffoldFiles(input) {
             kind: "config",
             language: "ts",
             locked: false,
-            path: (0, contracts_1.buildGeneratedThemeFilePath)(input.template.id),
+            path: buildGeneratedThemeFilePath(input.template.id),
             source: "platform",
         },
         {
@@ -478,7 +474,7 @@ function buildGeneratedScaffoldFiles(input) {
             kind: "config",
             language: "ts",
             locked: false,
-            path: (0, contracts_1.buildGeneratedNavigationFilePath)(input.template.id),
+            path: buildGeneratedNavigationFilePath(input.template.id),
             source: "platform",
         },
         {
@@ -486,7 +482,7 @@ function buildGeneratedScaffoldFiles(input) {
             kind: "data",
             language: "ts",
             locked: false,
-            path: (0, contracts_1.buildGeneratedDataFilePath)(input.template.id),
+            path: buildGeneratedDataFilePath(input.template.id),
             source: "platform",
         },
         {
@@ -494,7 +490,7 @@ function buildGeneratedScaffoldFiles(input) {
             kind: "layout",
             language: "tsx",
             locked: false,
-            path: (0, contracts_1.buildGeneratedAppShellPath)(input.template.id),
+            path: buildGeneratedAppShellPath(input.template.id),
             source: "platform",
         },
         {
@@ -502,7 +498,7 @@ function buildGeneratedScaffoldFiles(input) {
             kind: "component",
             language: "tsx",
             locked: false,
-            path: (0, contracts_1.buildGeneratedUiComponentPath)(input.template.id, "PrimaryButton"),
+            path: buildGeneratedUiComponentPath(input.template.id, "PrimaryButton"),
             source: "platform",
         },
         {
@@ -510,12 +506,12 @@ function buildGeneratedScaffoldFiles(input) {
             kind: "component",
             language: "tsx",
             locked: false,
-            path: (0, contracts_1.buildGeneratedUiComponentPath)(input.template.id, "SurfaceCard"),
+            path: buildGeneratedUiComponentPath(input.template.id, "SurfaceCard"),
             source: "platform",
         },
     ];
 }
-function buildScaffoldPromptBlock(template) {
+export function buildScaffoldPromptBlock(template) {
     return [
         "Shared generated scaffold files already exist and MUST be reused:",
         `- Theme: @/generated/${template.id}/theme`,

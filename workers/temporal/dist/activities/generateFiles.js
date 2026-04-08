@@ -1,15 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateFiles = generateFiles;
-const engine_1 = require("@beomz-studio/engine");
-const operations_1 = require("@beomz-studio/operations");
-const prompt_policies_1 = require("@beomz-studio/prompt-policies");
-const contracts_1 = require("@beomz-studio/contracts");
-const studio_db_1 = require("@beomz-studio/studio-db");
-const config_js_1 = require("../config.js");
-const paths_js_1 = require("../shared/paths.js");
-const generatedSurface_js_1 = require("../shared/generatedSurface.js");
-const iterationContext_js_1 = require("../shared/iterationContext.js");
+import { AnthropicStreamingModel, GenerationEngine, } from "@beomz-studio/engine";
+import { projectIterationOperation } from "@beomz-studio/operations";
+import { getInitialBuildPromptPolicy, getIterationPromptPolicy, } from "@beomz-studio/prompt-policies";
+import { createEmptyBuilderV3TraceMetadata, normalizeGeneratedPath, } from "@beomz-studio/contracts";
+import { createStudioDbClient } from "@beomz-studio/studio-db";
+import { getAnthropicRuntimeConfig } from "../config.js";
+import { buildGeneratedPageComponentName, buildGeneratedPageFilePath, } from "../shared/paths.js";
+import { buildGeneratedScaffoldFiles, buildScaffoldPromptBlock, } from "../shared/generatedSurface.js";
+import { buildIterationPromptBlock, buildLayoutFingerprint, classifyIterationIntent, } from "../shared/iterationContext.js";
 function buildSystemPrompt(policy, mode) {
     return [
         mode === "iteration"
@@ -24,14 +21,14 @@ function buildTemplatePageContext(input) {
     return JSON.stringify(input.template.pages.map((page) => ({
         pageId: page.id,
         label: page.name,
-        path: (0, paths_js_1.buildGeneratedPageFilePath)(input.template.id, page.id),
+        path: buildGeneratedPageFilePath(input.template.id, page.id),
         routePath: page.path,
         summary: page.summary,
     })), null, 2);
 }
 function buildUserPrompt(input, page) {
-    const filePath = (0, paths_js_1.buildGeneratedPageFilePath)(input.template.id, page.id);
-    const componentName = (0, paths_js_1.buildGeneratedPageComponentName)(input.template.id, page.id);
+    const filePath = buildGeneratedPageFilePath(input.template.id, page.id);
+    const componentName = buildGeneratedPageComponentName(input.template.id, page.id);
     return [
         `Project name: ${input.project.name}`,
         `Prompt: ${input.plan.normalizedPrompt}`,
@@ -39,7 +36,7 @@ function buildUserPrompt(input, page) {
         `Template: ${input.template.name}`,
         `Template description: ${input.template.description}`,
         `Template prompt hints: ${input.template.promptHints.join(" | ")}`,
-        (0, generatedSurface_js_1.buildScaffoldPromptBlock)(input.template),
+        buildScaffoldPromptBlock(input.template),
         "Full template page set for consistency across navigation and tone:",
         buildTemplatePageContext(input),
         "Generate exactly one standalone TSX page file for this page:",
@@ -61,16 +58,16 @@ function buildUserPrompt(input, page) {
     ].join("\n\n");
 }
 function buildIterationUserPrompt(input) {
-    const intent = (0, iterationContext_js_1.classifyIterationIntent)(input.plan.normalizedPrompt);
-    const fingerprint = (0, iterationContext_js_1.buildLayoutFingerprint)(input.template, input.existingFiles);
+    const intent = classifyIterationIntent(input.plan.normalizedPrompt);
+    const fingerprint = buildLayoutFingerprint(input.template, input.existingFiles);
     return [
         `Project name: ${input.project.name}`,
         `User request: ${input.plan.normalizedPrompt}`,
         `Intent summary: ${input.plan.intentSummary}`,
         `Template: ${input.template.name}`,
         `Template description: ${input.template.description}`,
-        (0, generatedSurface_js_1.buildScaffoldPromptBlock)(input.template),
-        (0, iterationContext_js_1.buildIterationPromptBlock)({ fingerprint, intent }),
+        buildScaffoldPromptBlock(input.template),
+        buildIterationPromptBlock({ fingerprint, intent }),
         "Current files are already mounted in the virtual filesystem and are the source of truth.",
         "Use tool actions to inspect the current app, make the minimum required edits, and finish with a concise summary.",
     ].join("\n\n");
@@ -133,7 +130,7 @@ function isRecord(value) {
 function readBuilderTraceMetadata(metadata) {
     const candidate = metadata.builderTrace;
     if (!isRecord(candidate)) {
-        return (0, contracts_1.createEmptyBuilderV3TraceMetadata)();
+        return createEmptyBuilderV3TraceMetadata();
     }
     const events = Array.isArray(candidate.events) ? candidate.events : [];
     return {
@@ -147,7 +144,7 @@ function readBuilderTraceMetadata(metadata) {
     };
 }
 async function appendAssistantDeltaEvent(input) {
-    const db = (0, studio_db_1.createStudioDbClient)();
+    const db = createStudioDbClient();
     const currentGeneration = await db.findGenerationById(input.buildId);
     if (!currentGeneration) {
         throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
@@ -175,7 +172,7 @@ async function appendAssistantDeltaEvent(input) {
     });
 }
 async function persistAssistantResponseMetadata(input) {
-    const db = (0, studio_db_1.createStudioDbClient)();
+    const db = createStudioDbClient();
     const currentGeneration = await db.findGenerationById(input.buildId);
     if (!currentGeneration) {
         throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
@@ -190,7 +187,7 @@ async function persistAssistantResponseMetadata(input) {
     });
 }
 async function streamAnthropicMessage(input) {
-    const config = (0, config_js_1.getAnthropicRuntimeConfig)();
+    const config = getAnthropicRuntimeConfig();
     if (!config.ANTHROPIC_API_KEY) {
         throw new Error("ANTHROPIC_API_KEY is not configured.");
     }
@@ -319,24 +316,24 @@ function normalizeComparableContent(content) {
     return content.replace(/\r\n/g, "\n").trim();
 }
 function getMaterialChangedPaths(existingFiles, nextFiles) {
-    const existingByPath = new Map(existingFiles.map((file) => [(0, contracts_1.normalizeGeneratedPath)(file.path), normalizeComparableContent(file.content)]));
+    const existingByPath = new Map(existingFiles.map((file) => [normalizeGeneratedPath(file.path), normalizeComparableContent(file.content)]));
     return nextFiles
         .filter((file) => {
-        const normalizedPath = (0, contracts_1.normalizeGeneratedPath)(file.path);
+        const normalizedPath = normalizeGeneratedPath(file.path);
         const previous = existingByPath.get(normalizedPath);
         if (previous === undefined) {
             return true;
         }
         return previous !== normalizeComparableContent(file.content);
     })
-        .map((file) => (0, contracts_1.normalizeGeneratedPath)(file.path));
+        .map((file) => normalizeGeneratedPath(file.path));
 }
-async function generateFiles(input) {
-    const config = (0, config_js_1.getAnthropicRuntimeConfig)();
+export async function generateFiles(input) {
+    const config = getAnthropicRuntimeConfig();
     const isIteration = input.existingFiles.length > 0;
     const policy = isIteration
-        ? (0, prompt_policies_1.getIterationPromptPolicy)(input.template.id)
-        : (0, prompt_policies_1.getInitialBuildPromptPolicy)(input.template.id);
+        ? getIterationPromptPolicy(input.template.id)
+        : getInitialBuildPromptPolicy(input.template.id);
     const files = [];
     const assistantResponseParts = [];
     const assistantResponsesByPage = [];
@@ -345,26 +342,26 @@ async function generateFiles(input) {
         if (!config.ANTHROPIC_API_KEY) {
             throw new Error("ANTHROPIC_API_KEY is not configured.");
         }
-        const model = new engine_1.AnthropicStreamingModel({
+        const model = new AnthropicStreamingModel({
             apiKey: config.ANTHROPIC_API_KEY,
             baseUrl: config.ANTHROPIC_BASE_URL,
             maxTokens: config.ANTHROPIC_MAX_TOKENS,
             model: config.ANTHROPIC_MODEL,
             timeoutMs: 180_000,
         });
-        const engine = new engine_1.GenerationEngine({
+        const engine = new GenerationEngine({
             actor: input.actor,
             generationId: input.buildId,
             initialFiles: input.existingFiles.map((file) => ({
                 content: file.content,
-                path: (0, contracts_1.normalizeGeneratedPath)(file.path),
+                path: normalizeGeneratedPath(file.path),
             })),
             maxTurns: 30,
             model,
-            operation: operations_1.projectIterationOperation,
+            operation: projectIterationOperation,
             persistence: false,
             prompt: buildIterationUserPrompt(input),
-            promptPolicy: (0, prompt_policies_1.getIterationPromptPolicy)(input.template.id),
+            promptPolicy: getIterationPromptPolicy(input.template.id),
             project: input.project,
             template: input.template,
         });
@@ -414,7 +411,7 @@ async function generateFiles(input) {
             warnings: [],
         };
     }
-    const scaffoldFiles = (0, generatedSurface_js_1.buildGeneratedScaffoldFiles)({
+    const scaffoldFiles = buildGeneratedScaffoldFiles({
         project: input.project,
         template: input.template,
     });
@@ -452,7 +449,7 @@ async function generateFiles(input) {
             text,
         });
         files.push({
-            path: (0, paths_js_1.buildGeneratedPageFilePath)(input.template.id, page.id),
+            path: buildGeneratedPageFilePath(input.template.id, page.id),
             kind: "route",
             language: "tsx",
             content: content.trim(),

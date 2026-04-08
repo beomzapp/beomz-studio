@@ -6,7 +6,26 @@
   "description": "Temporal worker for Beomz Studio.",
   "scripts": {
     "preinstall": "echo 'skipping'",
+    "build": "tsc -p tsconfig.json",
     "start": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@beomz-studio/contracts": "workspace:*",
+    "@beomz-studio/engine": "workspace:*",
+    "@beomz-studio/operations": "workspace:*",
+    "@beomz-studio/prompt-policies": "workspace:*",
+    "@beomz-studio/studio-db": "workspace:*",
+    "@beomz-studio/templates": "workspace:*",
+    "@temporalio/client": "^1.13.0",
+    "@temporalio/worker": "^1.13.0",
+    "@temporalio/workflow": "^1.13.0",
+    "minimatch": "^10.1.1",
+    "typescript": "^5.7.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2"
   },
   "engines": {
     "node": ">=20"
