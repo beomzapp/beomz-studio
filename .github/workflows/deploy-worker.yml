@@ -12,6 +12,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      matrix:
+        host: ${{ fromJson(vars.WORKER_HOSTS) }}
 
     steps:
       - name: Checkout
@@ -34,10 +37,10 @@ jobs:
       - name: Build worker + dependencies
         run: pnpm --filter @beomz-studio/temporal-worker... build
 
-      - name: Deploy to DO VPS
+      - name: Deploy to worker ${{ matrix.host }}
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.DO_HOST }}
+          host: ${{ matrix.host }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
           timeout: 300s
@@ -48,5 +51,5 @@ jobs:
             pnpm --filter @beomz-studio/temporal-worker... build
             pm2 restart temporal-worker
             pm2 save
-            echo "Worker restarted at $(date)"
+            echo "Worker restarted at $(date) on $(hostname)"
             pm2 status
