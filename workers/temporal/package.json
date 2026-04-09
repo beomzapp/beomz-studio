@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Temporal worker for Beomz Studio",
+
   "scripts": {
     "preinstall": "echo 'skipping'",
     "build": "tsc -p tsconfig.json",
