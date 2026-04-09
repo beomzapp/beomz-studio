@@ -991,7 +991,7 @@ export class GenerationEngine {
       : [buildUserTextMessage(this.options.prompt)];
 
     try {
-      while (turn < (this.options.maxTurns ?? 12)) {
+      while (turn < (this.options.maxTurns ?? 30)) {
         turn += 1;
 
         const promptFrame = buildSystemPromptFrame({
@@ -1162,7 +1162,7 @@ export class GenerationEngine {
 
       throw new GenerationEngineError(
         FailureReason.GENERATION_TIMEOUT,
-        `Generation exceeded ${this.options.maxTurns ?? 12} turns without finishing.`,
+        `Generation exceeded ${this.options.maxTurns ?? 30} turns without finishing.`,
       );
     } catch (error) {
       const engineError = toGenerationEngineError(error, FailureReason.INVALID_OUTPUT);
