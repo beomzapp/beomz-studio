@@ -4,12 +4,41 @@ on:
   push:
     branches: [main]
     paths:
+      - "apps/api/**"
+      - "apps/web/**"
       - "workers/temporal/**"
       - "packages/**"
       - "pnpm-lock.yaml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      web_api: ${{ steps.filter.outputs.web_api }}
+      worker: ${{ steps.filter.outputs.worker }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            worker:
+              - "workers/temporal/**"
+              - "packages/**"
+              - "pnpm-lock.yaml"
+            web_api:
+              - "apps/api/**"
+              - "apps/web/**"
+              - "packages/**"
+              - "pnpm-lock.yaml"
+
   deploy:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -53,3 +82,50 @@ jobs:
             pm2 save
             echo "Worker restarted at $(date) on $(hostname)"
             pm2 status
+
+  deploy-web-api:
+    needs: changes
+    if: needs.changes.outputs.web_api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build web
+        run: pnpm --filter @beomz-studio/web build
+
+      - name: Build API
+        run: pnpm --filter @beomz-studio/api build
+
+      - name: Deploy web + API to DO VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.WEB_API_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          timeout: 300s
+          script: |
+            cd ~/beomz-studio
+            git pull origin main
+            pnpm install --no-frozen-lockfile
+            pnpm --filter @beomz-studio/temporal-worker... build
+            pnpm --filter @beomz-studio/api build
+            pnpm --filter @beomz-studio/web build
+            pm2 restart beomz-api beomz-web
+            pm2 save
