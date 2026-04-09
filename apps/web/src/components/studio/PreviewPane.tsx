@@ -224,13 +224,6 @@ export function PreviewPane({
         srcDoc: undefined
 };
     }
-    if (remoteResponse?.fallbackHtml) {
-      return {
-        key: `${remoteResponse.session.id}:fallback`,
-        src: undefined,
-        srcDoc: remoteResponse.fallbackHtml
-};
-    }
     return null;
   }, [remoteResponse]);
 
@@ -307,11 +300,6 @@ export function PreviewPane({
           return;
         }
 
-        if (response.fallbackHtml) {
-          setPreviewMode("remote");
-          return;
-        }
-
         if (response.session.status === "booting") {
           scheduleRetry();
         }
@@ -375,6 +363,13 @@ export function PreviewPane({
           title="Beomz Studio Preview"
          
         />
+      ) : files && files.length > 0 ? (
+        <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
+          <div className="flex flex-col items-center gap-3 text-center px-6">
+            <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
+            <p className="text-xs text-[#9ca3af]">Your files are ready in the Code tab</p>
+          </div>
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
           <div className="flex flex-col items-center gap-3 text-center">
@@ -426,6 +421,11 @@ export function PreviewPane({
                 title={`${viewMode} preview`}
                
               />
+            ) : files && files.length > 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
+                <p className="text-xs text-[#9ca3af]">Your files are ready in the Code tab</p>
+              </div>
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#d1d5db]">
