@@ -1,0 +1,52 @@
+name: Deploy Temporal Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workers/temporal/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build worker + dependencies
+        run: pnpm --filter @beomz-studio/temporal-worker... build
+
+      - name: Deploy to DO VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          timeout: 300s
+          script: |
+            cd ~/beomz-studio
+            git pull origin main
+            pnpm install --no-frozen-lockfile
+            pnpm --filter @beomz-studio/temporal-worker... build
+            pm2 restart temporal-worker
+            pm2 save
+            echo "Worker restarted at $(date)"
+            pm2 status
