@@ -1,4 +1,4 @@
-import type { InitialBuildPlan } from "./types.js";
+import type { InitialBuildPlan } from "@beomz-studio/contracts";
 
 const promptStopWords = new Set([
   "a",

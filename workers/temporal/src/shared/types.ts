@@ -1,30 +1,24 @@
 import type {
+  BuildResultSource,
   BuilderV3TracePatch,
-  FileSource,
+  GenerateFilesProjectContext,
+  InitialBuildPlan,
+  InitialBuildWorkflowInput,
+  InitialBuildWorkflowResult,
   GenerationStatus,
-  InitialBuildOutput,
-  OperationActor,
-  Project,
   ProjectStatus,
   StudioFile,
   TemplateDefinition,
   TemplateId,
+  TemplateSelectionResult,
 } from "@beomz-studio/contracts";
-
-export type BuildResultSource = Extract<FileSource, "ai" | "platform">;
-
-export interface InitialBuildPlan {
-  normalizedPrompt: string;
-  projectNameSuggestion: string;
-  intentSummary: string;
-  keywords: readonly string[];
-}
-
-export interface TemplateSelectionResult {
-  template: TemplateDefinition;
-  reason: string;
-  scores: Record<TemplateId, number>;
-}
+export type {
+  BuildResultSource,
+  InitialBuildPlan,
+  InitialBuildWorkflowInput,
+  InitialBuildWorkflowResult,
+  TemplateSelectionResult,
+} from "@beomz-studio/contracts";
 
 export interface GeneratedBuildDraft {
   files: readonly StudioFile[];
@@ -55,23 +49,6 @@ export interface BuildValidationResult {
   errors: readonly ValidationIssue[];
 }
 
-export interface InitialBuildWorkflowInput {
-  buildId: string;
-  projectId: string;
-  actor: OperationActor;
-  prompt: string;
-  projectName: string;
-  requestedAt: string;
-  existingFiles: readonly StudioFile[];
-  provisionalTemplateId?: TemplateId;
-}
-
-export interface InitialBuildWorkflowResult extends InitialBuildOutput {
-  template: TemplateDefinition;
-  source: BuildResultSource;
-  validationWarnings: readonly string[];
-}
-
 export interface TemplateSelectActivityInput {
   prompt: string;
   plan: InitialBuildPlan;
@@ -82,8 +59,8 @@ export interface GenerateFilesActivityInput {
   prompt: string;
   plan: InitialBuildPlan;
   template: TemplateDefinition;
-  actor: OperationActor;
-  project: Pick<Project, "id" | "name" | "templateId" | "previewEntryPath" | "status" | "orgId">;
+  actor: InitialBuildWorkflowInput["actor"];
+  project: GenerateFilesProjectContext;
   existingFiles: readonly StudioFile[];
 }
 
@@ -96,7 +73,7 @@ export interface FallbackScaffoldActivityInput {
   prompt: string;
   plan: InitialBuildPlan;
   template: TemplateDefinition;
-  project: Pick<Project, "id" | "name" | "templateId" | "previewEntryPath" | "status" | "orgId">;
+  project: GenerateFilesProjectContext;
   reason: string;
 }
 

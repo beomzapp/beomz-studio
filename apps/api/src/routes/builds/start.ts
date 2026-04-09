@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import { initialBuildOperation, projectIterationOperation } from "@beomz-studio/operations";
-import type { BuilderV3TraceMetadata, PlanStep } from "@beomz-studio/contracts";
+import type {
+  BuilderV3TraceMetadata,
+  InitialBuildWorkflowInput,
+  OrgPlan,
+  PlanStep,
+} from "@beomz-studio/contracts";
 import {
   INITIAL_BUILD_WORKFLOW_TYPE,
   PROJECT_ITERATION_WORKFLOW_TYPE,
@@ -61,6 +66,18 @@ function derivePlanKeywords(steps: readonly PlanStep[] | undefined): string[] | 
     .filter((keyword) => keyword.length >= 3)
     .filter((keyword, index, items) => items.indexOf(keyword) === index)
     .slice(0, 12);
+}
+
+function toOrgPlan(plan: string): OrgPlan {
+  switch (plan) {
+    case "free":
+    case "starter":
+    case "pro":
+    case "business":
+      return plan;
+    default:
+      return "free";
+  }
 }
 
 function createInitialBuilderTrace(
@@ -223,30 +240,30 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   try {
     const temporalClient = await getTemporalClient();
 
-    await temporalClient.workflow.start(workflowType, {
-      args: [
-        {
-          actor: {
-            org: {
-              id: orgContext.org.id,
-              name: orgContext.org.name,
-              plan: orgContext.org.plan,
-            },
-            user: {
-              email: orgContext.user.email,
-              id: orgContext.user.id,
-              platformUserId: orgContext.user.platform_user_id,
-            },
-          },
-          buildId,
-          existingFiles,
-          projectId,
-          projectName,
-          prompt: effectivePrompt,
-          provisionalTemplateId: selection.template.id,
-          requestedAt,
+    const workflowInput: InitialBuildWorkflowInput = {
+      actor: {
+        org: {
+          id: orgContext.org.id,
+          name: orgContext.org.name,
+          plan: toOrgPlan(orgContext.org.plan),
         },
-      ],
+        user: {
+          email: orgContext.user.email,
+          id: orgContext.user.id,
+          platformUserId: orgContext.user.platform_user_id,
+        },
+      },
+      buildId,
+      existingFiles,
+      projectId,
+      projectName,
+      prompt: effectivePrompt,
+      provisionalTemplateId: selection.template.id,
+      requestedAt,
+    };
+
+    await temporalClient.workflow.start(workflowType, {
+      args: [workflowInput],
       taskQueue: getInitialBuildTaskQueue(),
       workflowId,
     });

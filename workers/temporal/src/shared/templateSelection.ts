@@ -1,7 +1,5 @@
-import type { TemplateId } from "@beomz-studio/contracts";
+import type { InitialBuildPlan, TemplateId, TemplateSelectionResult } from "@beomz-studio/contracts";
 import { listTemplateDefinitions } from "@beomz-studio/templates";
-
-import type { InitialBuildPlan, TemplateSelectionResult } from "./types.js";
 
 const templateSignals: Record<TemplateId, readonly string[]> = {
   "marketing-website": [
