@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "../../lib/cn";
+import { createOrResumePreviewSession } from "../../lib/api";
 import { buildStudioPreviewHtml } from "../../lib/studio-preview";
 
 // ─────────────────────────────────────────────
@@ -148,6 +149,9 @@ interface PreviewPaneProps {
   publishedSlug?: string | null;
 }
 
+const PREVIEW_SESSION_RETRY_DELAY_MS = 1_500;
+const PREVIEW_SESSION_RETRY_LIMIT = 20;
+
 export function PreviewPane({
   files,
   generationId,
@@ -250,6 +254,86 @@ export function PreviewPane({
     setRemoteResponse(null);
   }, [generationId, project?.id]);
 
+  useEffect(() => {
+    if (!project?.id || !generationId) {
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimeoutId: number | null = null;
+    let attempts = 0;
+
+    const clearRetry = () => {
+      if (retryTimeoutId !== null) {
+        window.clearTimeout(retryTimeoutId);
+        retryTimeoutId = null;
+      }
+    };
+
+    const scheduleRetry = () => {
+      if (cancelled) {
+        return;
+      }
+
+      if (attempts >= PREVIEW_SESSION_RETRY_LIMIT) {
+        setRemoteError("Preview is taking longer than expected to start.");
+        return;
+      }
+
+      retryTimeoutId = window.setTimeout(() => {
+        retryTimeoutId = null;
+        void loadRemotePreview();
+      }, PREVIEW_SESSION_RETRY_DELAY_MS);
+    };
+
+    const loadRemotePreview = async () => {
+      attempts += 1;
+
+      try {
+        const response = await createOrResumePreviewSession({
+          generationId,
+          projectId: project.id,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setRemoteResponse(response);
+        setRemoteError(response.error ?? null);
+
+        if (response.session.provider === "e2b" && response.session.url) {
+          setPreviewMode("remote");
+          return;
+        }
+
+        if (response.fallbackHtml) {
+          setPreviewMode("remote");
+          return;
+        }
+
+        if (response.session.status === "booting") {
+          scheduleRetry();
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setRemoteError(
+          error instanceof Error ? error.message : "Failed to start preview session.",
+        );
+      }
+    };
+
+    void loadRemotePreview();
+
+    return () => {
+      cancelled = true;
+      clearRetry();
+    };
+  }, [generationId, project?.id, refreshToken]);
+
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
     if (viewMode === "tablet") setTabletPortrait((prev) => !prev);
@@ -310,7 +394,6 @@ export function PreviewPane({
     const isMobile = viewMode === "mobile";
     const vpW = isMobile ? mobileViewportWidth : tabletViewportWidth;
     const vpH = isMobile ? mobileViewportHeight : tabletViewportHeight;
-    const html = isMobile ? mobileHtml : tabletHtml;
     const Frame = isMobile ? PhoneFrame : TabletFrame;
 
     const frameProps = isMobile
@@ -322,10 +405,13 @@ export function PreviewPane({
         <div style={{ transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.2s ease" }}>
           {/* @ts-expect-error -- Frame union, props are compatible */}
           <Frame {...frameProps}>
-            {html ? (
+            {activeFrame ? (
               <iframe
-                key={`${viewMode}-${refreshToken}`}
-                srcDoc={html}
+                key={`${activeFrame.key}:${viewMode}:${refreshToken}`}
+                allow="clipboard-read; clipboard-write"
+                referrerPolicy="no-referrer"
+                src={activeFrame.src}
+                srcDoc={activeFrame.srcDoc}
                 width={String(vpW)}
                 height={String(vpH)}
                 style={{
@@ -336,7 +422,7 @@ export function PreviewPane({
                   width: `${vpW}px`,
                   height: `${vpH}px`
 }}
-                sandbox="allow-scripts allow-same-origin allow-forms"
+                sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
                 title={`${viewMode} preview`}
                
               />
