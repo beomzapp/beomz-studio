@@ -84,10 +84,12 @@ jobs:
             pm2 status
 
   deploy-web-api:
-    needs: changes
-    if: needs.changes.outputs.web_api == 'true'
+    if: |
+      contains(toJson(github.event.commits[0].modified), 'apps/web') ||
+      contains(toJson(github.event.commits[0].modified), 'apps/api') ||
+      contains(toJson(github.event.commits[0].modified), 'packages/')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -107,11 +109,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build web
-        run: pnpm --filter @beomz-studio/web build
+      - name: Build worker + dependencies
+        run: pnpm --filter @beomz-studio/temporal-worker... build
 
       - name: Build API
         run: pnpm --filter @beomz-studio/api build
+
+      - name: Build web
+        run: pnpm --filter @beomz-studio/web build
 
       - name: Deploy web + API to DO VPS
         uses: appleboy/ssh-action@v1
@@ -119,7 +124,7 @@ jobs:
           host: ${{ secrets.WEB_API_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
-          timeout: 300s
+          timeout: 600s
           script: |
             cd ~/beomz-studio
             git pull origin main
@@ -129,3 +134,5 @@ jobs:
             pnpm --filter @beomz-studio/web build
             pm2 restart beomz-api beomz-web
             pm2 save
+            echo "Web+API restarted at $(date)"
+            pm2 status
