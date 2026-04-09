@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "pnpm --filter @beomz-studio/contracts build && pnpm --filter @beomz-studio/templates build && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
