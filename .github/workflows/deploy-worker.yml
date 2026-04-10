@@ -1,6 +1,7 @@
 name: Deploy Temporal Worker
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
