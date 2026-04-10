@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/workflows/deploy-worker.yml"
       - "apps/api/**"
       - "apps/web/**"
       - "workers/preview-e2b/**"
@@ -30,6 +31,7 @@ jobs:
         with:
           filters: |
             worker:
+              - ".github/workflows/deploy-worker.yml"
               - "workers/temporal/**"
               - "packages/**"
               - "pnpm-lock.yaml"
@@ -76,17 +78,49 @@ jobs:
 
       - name: Deploy to worker ${{ matrix.host }}
         uses: appleboy/ssh-action@v1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
           host: ${{ matrix.host }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
+          envs: ANTHROPIC_API_KEY
           timeout: 300s
           script: |
+            if [ -z "${ANTHROPIC_API_KEY}" ]; then
+              echo "ANTHROPIC_API_KEY GitHub secret is required for worker deploys." >&2
+              exit 1
+            fi
             cd ~/beomz-studio
             git pull origin main
             pnpm install --no-frozen-lockfile
             pnpm --filter @beomz-studio/temporal-worker... build
-            pm2 restart temporal-worker
+            python3 - <<'PY'
+            from pathlib import Path
+            import os
+
+            env_path = Path("workers/temporal/.env")
+            anthropic_key = os.environ["ANTHROPIC_API_KEY"]
+            existing_lines = env_path.read_text().splitlines() if env_path.exists() else []
+            updated_lines = []
+            replaced = False
+
+            for line in existing_lines:
+                if line.startswith("ANTHROPIC_API_KEY="):
+                    updated_lines.append(f"ANTHROPIC_API_KEY={anthropic_key}")
+                    replaced = True
+                else:
+                    updated_lines.append(line)
+
+            if not replaced:
+                updated_lines.append(f"ANTHROPIC_API_KEY={anthropic_key}")
+
+            env_path.write_text("\n".join(updated_lines) + "\n")
+            PY
+            set -a
+            source workers/temporal/.env
+            set +a
+            pm2 restart temporal-worker --update-env
             pm2 save
             echo "Worker restarted at $(date) on $(hostname)"
             pm2 status

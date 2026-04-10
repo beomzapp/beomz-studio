@@ -19,4 +19,5 @@ COPY workspace/apps ./apps
 
 RUN mkdir -p apps/web/src/app/generated apps/web/src/.beomz
 
-RUN pnpm install
+RUN pnpm install \
+  && chmod -R a+rwX /workspace
