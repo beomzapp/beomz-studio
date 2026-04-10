@@ -303,6 +303,14 @@ async function unwrapSingle<T>(response: PostgrestSingleResponse<T>): Promise<T>
   return response.data;
 }
 
+async function unwrapMaybeSingle<T>(response: PostgrestSingleResponse<T>): Promise<T | null> {
+  if (response.error) {
+    throw new Error(response.error.message);
+  }
+
+  return response.data;
+}
+
 export class StudioDbClient {
   constructor(private readonly client: StudioSupabaseClient) {}
 
@@ -421,7 +429,7 @@ export class StudioDbClient {
     return response.data;
   }
 
-  async updateProject(id: string, patch: ProjectUpdate): Promise<ProjectRow> {
+  async updateProject(id: string, patch: ProjectUpdate): Promise<ProjectRow | null> {
     const response = await this.client
       .from("projects")
       .update({
@@ -430,9 +438,9 @@ export class StudioDbClient {
       })
       .eq("id", id)
       .select("*")
-      .single();
+      .maybeSingle();
 
-    return unwrapSingle(response);
+    return unwrapMaybeSingle(response);
   }
 
   async createGeneration(

@@ -65,6 +65,10 @@ buildsRestoreRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     updated_at: restoredAt,
   });
 
+  if (!restoredProjectRow) {
+    return c.json({ error: "Build not found." }, 404);
+  }
+
   return c.json({
     build: mapGenerationRowToBuild(restoredBuildRow),
     project: mapProjectRowToProject(restoredProjectRow),

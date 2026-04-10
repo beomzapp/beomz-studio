@@ -1,7 +1,78 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { createEmptyBuilderV3TraceMetadata, } from "@beomz-studio/contracts";
-import { createStudioDbClient } from "@beomz-studio/studio-db";
+import { createStudioDbClient, } from "@beomz-studio/studio-db";
+const TEMPLATE_SCHEMA_CACHE_RETRY_DELAY_MS = 750;
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isTemplateSchemaCacheError(error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    return message.includes("schema cache") && message.includes("template");
+}
+function buildProjectUpdatePatch(projectPatch) {
+    if (!projectPatch) {
+        return {};
+    }
+    return {
+        ...(projectPatch.name !== undefined ? { name: projectPatch.name } : {}),
+        ...(projectPatch.status !== undefined ? { status: projectPatch.status } : {}),
+        ...(projectPatch.template !== undefined && projectPatch.template !== null
+            ? { template: projectPatch.template }
+            : {}),
+    };
+}
+function hasProjectUpdateFields(patch) {
+    return Object.keys(patch).length > 0;
+}
+async function updateProjectSafely(db, input, projectId, projectPatch, wait, logger) {
+    if (!hasProjectUpdateFields(projectPatch)) {
+        return;
+    }
+    const warnMissingProject = () => {
+        logger?.warn([
+            `persistBuildState: skipped project update for build ${input.buildId}.`,
+            `No project row matched projectId=${projectId}.`,
+            `Workflow input projectId=${input.projectId}.`,
+        ].join(" "));
+    };
+    const applyProjectPatch = async (patch) => {
+        const updatedProject = await db.updateProject(projectId, patch);
+        if (!updatedProject) {
+            warnMissingProject();
+            return false;
+        }
+        return true;
+    };
+    try {
+        await applyProjectPatch(projectPatch);
+        return;
+    }
+    catch (error) {
+        if (!("template" in projectPatch) || !isTemplateSchemaCacheError(error)) {
+            throw error;
+        }
+    }
+    await wait(TEMPLATE_SCHEMA_CACHE_RETRY_DELAY_MS);
+    try {
+        const didRetrySucceed = await applyProjectPatch(projectPatch);
+        if (didRetrySucceed) {
+            return;
+        }
+    }
+    catch (retryError) {
+        if (!isTemplateSchemaCacheError(retryError)) {
+            throw retryError;
+        }
+    }
+    const { template: _ignoredTemplate, ...patchWithoutTemplate } = projectPatch;
+    if (!hasProjectUpdateFields(patchWithoutTemplate)) {
+        logger?.warn(`persistBuildState: skipped template-only project update for build ${input.buildId} because the PostgREST schema cache is stale.`);
+        return;
+    }
+    const didFallbackSucceed = await applyProjectPatch(patchWithoutTemplate);
+    if (didFallbackSucceed) {
+        logger?.warn(`persistBuildState: retried project update for build ${input.buildId} without the template column because the PostgREST schema cache is stale.`);
+    }
 }
 function readBuilderTraceMetadata(metadata) {
     const candidate = metadata.builderTrace;
@@ -19,21 +90,26 @@ function readBuilderTraceMetadata(metadata) {
         fallbackUsed: candidate.fallbackUsed === true,
     };
 }
-export async function persistBuildState(input) {
-    const db = createStudioDbClient();
-    if (input.projectPatch) {
-        await db.updateProject(input.projectId, {
-            name: input.projectPatch.name,
-            status: input.projectPatch.status,
-            template: input.projectPatch.template,
-        });
-    }
-    if (!input.generationPatch) {
-        return;
-    }
+export async function persistBuildStateWithClient(input, { db, logger, wait = async (ms) => {
+    await delay(ms);
+}, }) {
     const currentGeneration = await db.findGenerationById(input.buildId);
     if (!currentGeneration) {
         throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
+    }
+    const resolvedProjectId = currentGeneration.project_id;
+    if (resolvedProjectId !== input.projectId) {
+        logger?.warn([
+            `persistBuildState: build ${input.buildId} received projectId=${input.projectId}`,
+            `but generation ${input.buildId} is linked to projectId=${resolvedProjectId}.`,
+            "Using the generation row as the source of truth.",
+        ].join(" "));
+    }
+    if (input.projectPatch) {
+        await updateProjectSafely(db, input, resolvedProjectId, buildProjectUpdatePatch(input.projectPatch), wait, logger);
+    }
+    if (!input.generationPatch) {
+        return;
     }
     const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
     const mergedMetadata = input.generationPatch.metadata
@@ -69,5 +145,11 @@ export async function persistBuildState(input) {
         summary: input.generationPatch.summary,
         template_id: input.generationPatch.templateId,
         warnings: input.generationPatch.warnings,
+    });
+}
+export async function persistBuildState(input) {
+    await persistBuildStateWithClient(input, {
+        db: createStudioDbClient(),
+        logger: console,
     });
 }

@@ -213,6 +213,10 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     });
   }
 
+  if (!projectRow) {
+    return c.json({ error: "Project not found." }, 404);
+  }
+
   const generationRow = await orgContext.db.createGeneration({
     completed_at: null,
     error: null,
