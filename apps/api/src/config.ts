@@ -8,7 +8,7 @@ const envSchema = z.object({
     .string()
     .url()
     .default(
-      "https://labutmadyprdhfqywwdn.supabase.co/auth/v1/.well-known/jwks.json",
+      "https://srflynvdrsdazxvcxmzb.supabase.co/auth/v1/.well-known/jwks.json",
     ),
   STUDIO_SUPABASE_URL: z.string().url(),
   STUDIO_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
