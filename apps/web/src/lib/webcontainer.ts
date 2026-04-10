@@ -29,9 +29,11 @@ const WORKSPACE_PACKAGE_JSON = JSON.stringify(
       "tailwind-merge": "^2.0.0",
     },
     devDependencies: {
+      "@tailwindcss/vite": "^4.2.2",
       "@types/react": "^19.2.2",
       "@types/react-dom": "^19.2.2",
       "@vitejs/plugin-react": "^6.0.1",
+      tailwindcss: "^4.2.2",
       typescript: "^5.9.3",
       vite: "^8.0.1",
     },
@@ -66,11 +68,12 @@ const WORKSPACE_TSCONFIG = JSON.stringify(
 
 const WORKSPACE_VITE_CONFIG = `// @ts-nocheck
 import path from "node:path";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "apps/web/src"),
@@ -91,9 +94,6 @@ const WORKSPACE_INDEX_HTML = `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Beomz Preview</title>
-    <!-- Tailwind play CDN: scans the DOM via MutationObserver and generates
-         utility CSS on the fly so generated TSX classes are applied. -->
-    <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
     <div id="root"></div>
@@ -162,7 +162,9 @@ export function PreviewApp() {
 }
 `;
 
-const WORKSPACE_PREVIEW_STYLES_CSS = `*, *::before, *::after { box-sizing: border-box; }
+const WORKSPACE_PREVIEW_STYLES_CSS = `@import "tailwindcss";
+
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;

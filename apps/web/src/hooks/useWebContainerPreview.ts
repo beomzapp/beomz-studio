@@ -79,9 +79,11 @@ export function useWebContainerPreview(
                       "tailwind-merge": "^2.0.0",
                     },
                     devDependencies: {
+                      "@tailwindcss/vite": "^4.2.2",
                       "@types/react": "^19.2.2",
                       "@types/react-dom": "^19.2.2",
                       "@vitejs/plugin-react": "^6.0.1",
+                      tailwindcss: "^4.2.2",
                       typescript: "^5.9.3",
                       vite: "^8.0.1",
                     },
