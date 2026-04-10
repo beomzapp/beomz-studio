@@ -1,4 +1,4 @@
-import { Sandbox, type ProcessInfo } from "e2b";
+import { type CommandResult, type ProcessInfo, type Sandbox } from "e2b";
 
 import type {
   PreviewRuntimeContract,
@@ -14,6 +14,11 @@ import {
   buildPreviewWorkspaceWrites,
   mergePreviewFiles,
 } from "../runtime/files.js";
+import {
+  buildPreviewSandboxMetadata,
+  connectCompatiblePreviewSandbox,
+  createPreviewSandbox,
+} from "./previewSandbox.js";
 
 export interface CreatePreviewSessionInput {
   previewId: string;
@@ -43,29 +48,18 @@ function isPreviewReadyLogLine(line: string): boolean {
 }
 
 async function connectOrCreateSandbox(input: CreatePreviewSessionInput) {
-  const config = getPreviewRuntimeConfig();
-
   if (input.sandboxId) {
-    try {
-      const sandbox = await Sandbox.connect(input.sandboxId, {
-        timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
-      });
-      await sandbox.setTimeout(config.E2B_PREVIEW_TIMEOUT_MS);
+    const sandbox = await connectCompatiblePreviewSandbox(input.sandboxId);
+    if (sandbox) {
       return sandbox;
-    } catch {
-      // Fall through to a fresh sandbox if the old one cannot be resumed.
     }
   }
 
-  return Sandbox.create(config.E2B_PREVIEW_TEMPLATE, {
-    metadata: {
-      generationId: input.generation.id,
-      previewId: input.previewId,
-      projectId: input.project.id,
-      templateId: input.project.templateId,
-    },
-    timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
-  });
+  return createPreviewSandbox(buildPreviewSandboxMetadata({
+    generationId: input.generation.id,
+    previewId: input.previewId,
+    project: input.project,
+  }));
 }
 
 function buildPreviewUrl(sandbox: Sandbox, port: number): string {
@@ -76,7 +70,7 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
   const config = getPreviewRuntimeConfig();
   const processes = await sandbox.commands.list();
 
-  if (processes.some((processInfo) => isRunnerProcess(processInfo, config.E2B_PREVIEW_RUNNER_PATH))) {
+  if (processes.some((processInfo: ProcessInfo) => isRunnerProcess(processInfo, config.E2B_PREVIEW_RUNNER_PATH))) {
     return;
   }
 
@@ -122,14 +116,14 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
         BEOMZ_PREVIEW_PORT: String(config.E2B_PREVIEW_PORT),
         BEOMZ_PREVIEW_WORKDIR: config.E2B_PREVIEW_WORKDIR,
       },
-      onStdout: (line) => {
+      onStdout: (line: string) => {
         runnerLogs.push(`[runner stdout] ${line}`);
         console.log("[runner stdout]", line);
         if (isPreviewReadyLogLine(line)) {
           resolveReady?.();
         }
       },
-      onStderr: (line) => {
+      onStderr: (line: string) => {
         runnerLogs.push(`[runner stderr] ${line}`);
         console.error("[runner stderr]", line);
       },
@@ -137,7 +131,7 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
     },
   );
 
-  void runnerHandle.wait().then((result) => {
+  void runnerHandle.wait().then((result: CommandResult) => {
     const exitMessage = `Preview runner exited before Vite became ready (exit ${result.exitCode ?? "unknown"}).`;
     console.error("[runner] process exited", { exitCode: result.exitCode });
     rejectReady?.(
@@ -145,7 +139,7 @@ async function ensureRunner(sandbox: Sandbox): Promise<void> {
         `${exitMessage} Logs:\n${runnerLogs.join("\n")}`,
       ),
     );
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : "Unknown preview runner exit error.";
     rejectReady?.(
       new Error(`Preview runner failed before Vite became ready: ${message}\n${runnerLogs.join("\n")}`),

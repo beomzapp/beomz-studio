@@ -1,5 +1,3 @@
-import { Sandbox } from "e2b";
-
 import type {
   PreviewPatch,
   PreviewRuntimeContract,
@@ -14,6 +12,7 @@ import {
   buildPreviewWorkspaceWrites,
   mergePreviewFiles,
 } from "../runtime/files.js";
+import { connectCompatiblePreviewSandbox } from "./previewSandbox.js";
 
 export interface PatchPreviewFilesInput {
   previewId: string;
@@ -35,11 +34,10 @@ export async function patchPreviewFiles(
   input: PatchPreviewFilesInput,
 ): Promise<PatchPreviewFilesResult> {
   const config = getPreviewRuntimeConfig();
-  const sandbox = await Sandbox.connect(input.sandboxId, {
-    timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
-  });
-
-  await sandbox.setTimeout(config.E2B_PREVIEW_TIMEOUT_MS);
+  const sandbox = await connectCompatiblePreviewSandbox(input.sandboxId);
+  if (!sandbox) {
+    throw new Error("Preview sandbox is using an outdated template and must be recreated.");
+  }
 
   const provisionalSession = {
     createdAt: new Date().toISOString(),

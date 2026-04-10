@@ -1,5 +1,3 @@
-import { Sandbox } from "e2b";
-
 import type {
   Project,
   PublishArtifact,
@@ -15,6 +13,11 @@ import {
   buildPreviewWorkspaceWrites,
   mergePreviewFiles,
 } from "../runtime/files.js";
+import {
+  buildPreviewSandboxMetadata,
+  connectCompatiblePreviewSandbox,
+  createPreviewSandbox,
+} from "./previewSandbox.js";
 
 export interface BuildPublishArtifactInput {
   project: Pick<Project, "id" | "name" | "templateId">;
@@ -29,17 +32,16 @@ export async function buildPublishArtifact(
   input: BuildPublishArtifactInput,
 ): Promise<PublishArtifact> {
   const config = getPreviewRuntimeConfig();
-  const sandbox = input.sandboxId
-    ? await Sandbox.connect(input.sandboxId, {
-      timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
-    })
-    : await Sandbox.create(config.E2B_PREVIEW_TEMPLATE, {
-      metadata: {
-        artifactGenerationId: input.generation.id,
-        artifactProjectId: input.project.id,
-      },
-      timeoutMs: config.E2B_PREVIEW_TIMEOUT_MS,
-    });
+  const sandbox =
+    (input.sandboxId
+      ? await connectCompatiblePreviewSandbox(input.sandboxId)
+      : null)
+    ?? await createPreviewSandbox(buildPreviewSandboxMetadata({
+      artifactGenerationId: input.generation.id,
+      artifactProjectId: input.project.id,
+      generationId: input.generation.id,
+      project: input.project,
+    }));
 
   await sandbox.setTimeout(config.E2B_PREVIEW_TIMEOUT_MS);
 

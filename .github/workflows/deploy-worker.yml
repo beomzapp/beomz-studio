@@ -6,6 +6,7 @@ on:
     paths:
       - "apps/api/**"
       - "apps/web/**"
+      - "workers/preview-e2b/**"
       - "workers/temporal/**"
       - "packages/**"
       - "pnpm-lock.yaml"
@@ -16,6 +17,7 @@ jobs:
     outputs:
       web_api: ${{ steps.filter.outputs.web_api }}
       worker: ${{ steps.filter.outputs.worker }}
+      preview_template: ${{ steps.filter.outputs.preview_template }}
 
     steps:
       - name: Checkout
@@ -33,7 +35,12 @@ jobs:
             web_api:
               - "apps/api/**"
               - "apps/web/**"
+              - "workers/preview-e2b/**"
               - "packages/**"
+              - "pnpm-lock.yaml"
+            preview_template:
+              - "workers/preview-e2b/src/templates/**"
+              - "workers/preview-e2b/package.json"
               - "pnpm-lock.yaml"
 
   deploy:
@@ -84,10 +91,8 @@ jobs:
             pm2 status
 
   deploy-web-api:
-    if: |
-      contains(toJson(github.event.commits[0].modified), 'apps/web') ||
-      contains(toJson(github.event.commits[0].modified), 'apps/api') ||
-      contains(toJson(github.event.commits[0].modified), 'packages/')
+    needs: changes
+    if: needs.changes.outputs.web_api == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -117,6 +122,17 @@ jobs:
 
       - name: Build web
         run: pnpm --filter @beomz-studio/web build
+
+      - name: Publish E2B preview template
+        if: needs.changes.outputs.preview_template == 'true'
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+        run: |
+          if [ -z "${E2B_API_KEY}" ]; then
+            echo "E2B_API_KEY GitHub secret is required to publish preview template updates." >&2
+            exit 1
+          fi
+          pnpm --filter @beomz-studio/preview-e2b run build:template:vite-react
 
       - name: Deploy web + API to DO VPS
         uses: appleboy/ssh-action@v1
