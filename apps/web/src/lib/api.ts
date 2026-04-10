@@ -251,9 +251,10 @@ export async function streamBuildEvents(args: {
   const lastEventId = normalizeOptionalString(args.lastEventId);
   const accessToken = normalizeRequiredString(await getAccessToken(), "access token");
   const signal = isAbortSignalLike(args.signal) ? args.signal : undefined;
+  const apiBaseUrl = `${getApiBaseUrl()}/`;
   const sseUrl = new URL(
-    `/builds/${encodeURIComponent(buildId)}/events`,
-    `${getApiBaseUrl()}/`,
+    `builds/${encodeURIComponent(buildId)}/events`,
+    apiBaseUrl,
   );
 
   if (lastEventId) {
