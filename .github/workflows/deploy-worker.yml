@@ -118,7 +118,7 @@ jobs:
         run: pnpm --filter @beomz-studio/temporal-worker... build
 
       - name: Build API
-        run: pnpm --filter @beomz-studio/api build
+        run: pnpm --filter @beomz-studio/api... build
 
       - name: Build web
         run: pnpm --filter @beomz-studio/web build
@@ -146,7 +146,7 @@ jobs:
             git pull origin main
             pnpm install --no-frozen-lockfile
             pnpm --filter @beomz-studio/temporal-worker... build
-            pnpm --filter @beomz-studio/api build
+            pnpm --filter @beomz-studio/api... build
             pnpm --filter @beomz-studio/web build
             pm2 restart beomz-api beomz-web
             pm2 save
