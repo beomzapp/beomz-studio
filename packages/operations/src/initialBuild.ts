@@ -4,6 +4,7 @@ export const INITIAL_BUILD_ALLOWED_WRITE_GLOBS = [
   "apps/web/src/generated/**",
   "apps/web/src/app/generated/**",
   "apps/web/src/components/generated/**",
+  "apps/web/src/lib/utils.ts",
   "apps/web/src/styles/generated/**",
   "apps/web/public/generated/**",
 ] as const;
@@ -33,7 +34,7 @@ export const initialBuildOperation = {
   version: 1,
   owner: "platform",
   description:
-    "Create the first generated application surface inside approved web-generated directories only.",
+    "Create the first generated application surface inside approved generated directories plus the shared generated lib/utils helper.",
   allowedTemplates: [
     "marketing-website",
     "saas-dashboard",
@@ -54,7 +55,7 @@ export const initialBuildOperation = {
   validations: [
     {
       id: "allowed-scope-check",
-      description: "Reject writes outside the generated web directories.",
+      description: "Reject writes outside approved generated directories and the shared generated lib/utils helper.",
       blocking: true,
     },
     {
