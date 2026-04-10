@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import {
   createClient,
   type PostgrestSingleResponse,
@@ -21,6 +23,7 @@ const envSchema = z.object({
 });
 
 const studioDbConfig = envSchema.parse(process.env);
+const GENERATIONS_SCHEMA_CACHE_RETRY_DELAY_MS = 750;
 
 export interface UserRow extends Record<string, unknown> {
   id: string;
@@ -291,6 +294,21 @@ export interface StudioDatabase {
 
 export type StudioSupabaseClient = SupabaseClient<StudioDatabase>;
 
+function isGenerationsSchemaCacheError(message: string): boolean {
+  const normalizedMessage = message.toLowerCase();
+  return normalizedMessage.includes("schema cache")
+    && normalizedMessage.includes("public.generations");
+}
+
+async function attemptPostgrestSchemaReload(
+  client: StudioSupabaseClient,
+): Promise<void> {
+  const response = await (client as SupabaseClient<any>).rpc("notify_reload", {});
+  if (response.error) {
+    return;
+  }
+}
+
 async function unwrapSingle<T>(response: PostgrestSingleResponse<T>): Promise<T> {
   if (response.error) {
     throw new Error(response.error.message);
@@ -456,11 +474,20 @@ export class StudioDbClient {
   }
 
   async findGenerationById(id: string): Promise<GenerationRow | null> {
-    const response = await this.client
+    const findGeneration = async () => this.client
+      .schema("public")
       .from("generations")
       .select("*")
       .eq("id", id)
       .maybeSingle();
+
+    let response = await findGeneration();
+
+    if (response.error && isGenerationsSchemaCacheError(response.error.message)) {
+      await attemptPostgrestSchemaReload(this.client).catch(() => undefined);
+      await delay(GENERATIONS_SCHEMA_CACHE_RETRY_DELAY_MS);
+      response = await findGeneration();
+    }
 
     if (response.error) {
       throw new Error(response.error.message);
@@ -637,6 +664,9 @@ export function createStudioDbClient(): StudioDbClient {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+      db: {
+        schema: "public",
       },
     },
   );
