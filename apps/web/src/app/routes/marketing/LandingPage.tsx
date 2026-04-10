@@ -247,18 +247,6 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
-  // Get user initials for avatar
-  const userName = session?.user?.user_metadata?.full_name
-    ?? session?.user?.user_metadata?.name
-    ?? session?.user?.email
-    ?? "";
-  const userFirstName = userName.split(" ")[0] || "";
-  const userInitials = userName
-    .split(" ")
-    .slice(0, 2)
-    .map((n: string) => n[0]?.toUpperCase() ?? "")
-    .join("");
-
   return (
     <div className="h-screen overflow-hidden bg-bg">
       <div className="relative h-screen">
@@ -279,28 +267,7 @@ export function LandingPage() {
               Docs
             </a>
             {session ? (
-              <div className="flex items-center gap-4">
-                {/* Credits pill */}
-                <span className="rounded-full border border-white/10 px-2.5 py-1 text-xs text-white/40 font-mono">
-                  &#9889; 247 credits
-                </span>
-                {/* Dashboard link */}
-                <Link
-                  to="/studio/home"
-                  className="text-sm text-white/40 transition-colors hover:text-white/70"
-                >
-                  Dashboard &rarr;
-                </Link>
-                {/* GlobalNav for authenticated user actions */}
-                <GlobalNav variant="light" />
-                {/* User avatar + name */}
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
-                    {userInitials || "U"}
-                  </div>
-                  <span className="text-sm text-white/60">{userFirstName}</span>
-                </div>
-              </div>
+              <GlobalNav variant="light" />
             ) : (
               <div className="flex items-center gap-3">
                 <Link
