@@ -1,12 +1,29 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEMPLATE_ROOT = resolve(__dirname);
 const LEGACY_TEMPLATE_NAME = "beomz-vite-react";
 const TEMPLATE_CONTENT_PATHS = ["Dockerfile", "runner.ts", "workspace"] as const;
+
+function resolveTemplateRoot(): string {
+  const candidateRoots = [
+    resolve(__dirname),
+    resolve(__dirname, "../../../src/templates/vite-react"),
+  ];
+
+  const matchingRoot = candidateRoots.find((candidateRoot) =>
+    TEMPLATE_CONTENT_PATHS.every((entry) => existsSync(resolve(candidateRoot, entry))));
+
+  if (!matchingRoot) {
+    throw new Error("Unable to resolve the vite-react preview template source files.");
+  }
+
+  return matchingRoot;
+}
+
+const TEMPLATE_ROOT = resolveTemplateRoot();
 
 function normalizeRelativePath(filePath: string): string {
   return relative(TEMPLATE_ROOT, filePath).replaceAll("\\", "/");
