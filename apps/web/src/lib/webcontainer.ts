@@ -91,6 +91,9 @@ const WORKSPACE_INDEX_HTML = `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Beomz Preview</title>
+    <!-- Tailwind play CDN: scans the DOM via MutationObserver and generates
+         utility CSS on the fly so generated TSX classes are applied. -->
+    <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
     <div id="root"></div>
