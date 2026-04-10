@@ -151,6 +151,9 @@ interface PreviewPaneProps {
 
 const PREVIEW_SESSION_RETRY_DELAY_MS = 1_500;
 const PREVIEW_SESSION_RETRY_LIMIT = 20;
+// Keep-alive heartbeat: extend the E2B sandbox before it can time out.
+// E2B_PREVIEW_TIMEOUT_MS defaults to 30 minutes; ping every 4 minutes.
+const PREVIEW_HEARTBEAT_INTERVAL_MS = 4 * 60 * 1_000;
 
 export function PreviewPane({
   files,
@@ -292,13 +295,16 @@ export function PreviewPane({
           return;
         }
 
-        setRemoteResponse(response);
-        setRemoteError(response.error ?? null);
-
         if (response.session.provider === "e2b" && response.session.url) {
+          // Only persist the response when we have a real E2B URL — booting/local
+          // responses must never overwrite an already-established session.
+          setRemoteResponse(response);
+          setRemoteError(null);
           setPreviewMode("remote");
           return;
         }
+
+        setRemoteError(response.error ?? null);
 
         if (response.session.status === "booting") {
           scheduleRetry();
@@ -321,6 +327,29 @@ export function PreviewPane({
       clearRetry();
     };
   }, [generationId, project?.id, refreshToken]);
+
+  // Heartbeat: re-ping the session API on an interval so the E2B sandbox
+  // timeout is continuously extended and the session stays alive.
+  useEffect(() => {
+    if (previewMode !== "remote" || !project?.id || !generationId) return;
+
+    const heartbeatId = window.setInterval(async () => {
+      try {
+        const response = await createOrResumePreviewSession({
+          generationId,
+          projectId: project.id,
+        });
+        // Refresh the stored URL only if we get a reconnected/new sandbox URL.
+        if (response.session.provider === "e2b" && response.session.url) {
+          setRemoteResponse(response);
+        }
+      } catch {
+        // Heartbeat errors are non-fatal — don't fall back on a failed keep-alive.
+      }
+    }, PREVIEW_HEARTBEAT_INTERVAL_MS);
+
+    return () => { window.clearInterval(heartbeatId); };
+  }, [previewMode, generationId, project?.id]);
 
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
