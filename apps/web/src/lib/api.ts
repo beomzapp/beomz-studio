@@ -4,8 +4,6 @@ import type {
   BuilderV3TraceMetadata,
   CreatePlanSessionRequest,
   CreatePlanSessionResponse,
-  CreatePreviewSessionRequest,
-  CreatePreviewSessionResponse,
   GetLatestActivePlanSessionResponse,
   GetPlanSessionResponse,
   GenerationStatus,
@@ -425,13 +423,4 @@ export async function streamBuildEvents(args: {
   } finally {
     removeReaderAbortListener();
   }
-}
-
-export function createOrResumePreviewSession(
-  body: CreatePreviewSessionRequest,
-): Promise<CreatePreviewSessionResponse> {
-  return requestJson<CreatePreviewSessionResponse>("/previews/session", {
-    body: JSON.stringify(body),
-    method: "POST",
-  });
 }

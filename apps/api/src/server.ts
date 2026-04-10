@@ -17,8 +17,6 @@ import planAnalyzeRoute from "./routes/plan/analyze.js";
 import planClarifyRoute from "./routes/plan/clarify.js";
 import planGenerateRoute from "./routes/plan/generate.js";
 import planSessionRoute from "./routes/plan/session.js";
-import previewsSessionRoute from "./routes/previews/session.js";
-
 const app = new Hono();
 
 app.use(
@@ -51,7 +49,6 @@ app.route("/plan/analyze", planAnalyzeRoute);
 app.route("/plan/clarify", planClarifyRoute);
 app.route("/plan/generate", planGenerateRoute);
 app.route("/plan/session", planSessionRoute);
-app.route("/previews/session", previewsSessionRoute);
 
 serve(
   {

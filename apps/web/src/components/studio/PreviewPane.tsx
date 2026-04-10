@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
-import type { CreatePreviewSessionResponse, Project, StudioFile } from "@beomz-studio/contracts";
+import { useCallback, useMemo, useState } from "react";
+import type { Project, StudioFile } from "@beomz-studio/contracts";
 import {
   Monitor,
   Smartphone,
   Tablet,
-  RefreshCw
+  RefreshCw,
+  Zap,
 } from "lucide-react";
 
 import { cn } from "../../lib/cn";
-import { createOrResumePreviewSession } from "../../lib/api";
 import { buildStudioPreviewHtml } from "../../lib/studio-preview";
+import { useWebContainerPreview } from "../../hooks/useWebContainerPreview";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -70,7 +71,7 @@ function PhoneFrame({
           height: stageHeight,
           transform: `scale(${phoneScale})`,
           transformOrigin: "top left"
-}}
+        }}
       >
         <div
           className="flex h-full w-full flex-col overflow-hidden bg-white"
@@ -119,7 +120,7 @@ function TabletFrame({
           height: stageHeight,
           transform: `scale(${stageScale})`,
           transformOrigin: "top left"
-}}
+        }}
       >
         <div className="flex flex-1 flex-col overflow-hidden bg-white" style={{ borderRadius: 12 }}>
           {children}
@@ -149,12 +150,6 @@ interface PreviewPaneProps {
   publishedSlug?: string | null;
 }
 
-const PREVIEW_SESSION_RETRY_DELAY_MS = 1_500;
-const PREVIEW_SESSION_RETRY_LIMIT = 20;
-// Keep-alive heartbeat: extend the E2B sandbox before it can time out.
-// E2B_PREVIEW_TIMEOUT_MS defaults to 30 minutes; ping every 4 minutes.
-const PREVIEW_HEARTBEAT_INTERVAL_MS = 4 * 60 * 1_000;
-
 export function PreviewPane({
   files,
   generationId,
@@ -163,11 +158,7 @@ export function PreviewPane({
   refreshToken = 0,
   publishedSlug
 }: PreviewPaneProps) {
-  // Show building overlay when project exists but no preview files yet
   const isBuilding = !!(project?.id && (!files || files.length === 0));
-  const [previewMode, setPreviewMode] = useState<"inline" | "remote">("inline");
-  const [, setRemoteError] = useState<string | null>(null);
-  const [remoteResponse, setRemoteResponse] = useState<CreatePreviewSessionResponse | null>(null);
 
   // Viewport state
   const [viewMode, setViewMode] = useState<"web" | "tablet" | "mobile">("web");
@@ -180,6 +171,13 @@ export function PreviewPane({
   const tabletViewportWidth = tabletPortrait ? 768 : 1024;
   const tabletViewportHeight = tabletPortrait ? 1024 : 768;
 
+  // ── WebContainer (primary preview) ──────────────────────────────────────
+  const { status: wcStatus, previewUrl, progressMessage } = useWebContainerPreview(
+    files,
+    project,
+  );
+
+  // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──
   const inlineHtml = useMemo(() => {
     if (!project || !files || files.length === 0) return null;
     try {
@@ -202,8 +200,20 @@ export function PreviewPane({
     [inlineHtml],
   );
 
-  const inlineFrame = useMemo(() => {
+  // Active frame: prefer WebContainer URL when the dev server is ready;
+  // fall back to inline srcDoc otherwise.
+  const useWebContainer = wcStatus === "ready" && previewUrl !== null;
+
+  const activeFrame = useMemo(() => {
     if (!project || !files || files.length === 0) return null;
+
+    if (useWebContainer && previewUrl) {
+      return {
+        key: `wc:${project.id}:${generationId ?? "draft"}`,
+        src: previewUrl,
+        srcDoc: undefined,
+      };
+    }
 
     const html =
       viewMode === "mobile" ? mobileHtml
@@ -215,141 +225,13 @@ export function PreviewPane({
     return {
       key: `inline:${project.id}:${generationId ?? "draft"}:${refreshToken}:${viewMode}`,
       src: undefined,
-      srcDoc: html
-};
-  }, [files, generationId, project, refreshToken, viewMode, mobileHtml, tabletHtml, webHtml]);
-
-  const remoteFrame = useMemo(() => {
-    if (remoteResponse?.session.provider === "e2b" && remoteResponse.session.url) {
-      return {
-        key: `${remoteResponse.session.id}:${remoteResponse.session.url}`,
-        src: remoteResponse.session.url,
-        srcDoc: undefined
-};
-    }
-    return null;
-  }, [remoteResponse]);
-
-  const activeFrame =
-    previewMode === "remote" && remoteFrame
-      ? remoteFrame
-      : inlineFrame;
-
-
-  useEffect(() => {
-    function handlePreviewMessage(event: MessageEvent) {
-      if (event.data?.type !== "beomz-preview-ready") return;
-    }
-    window.addEventListener("message", handlePreviewMessage);
-    return () => { window.removeEventListener("message", handlePreviewMessage); };
-  }, []);
-
-  useEffect(() => {
-    setPreviewMode("inline");
-    setRemoteError(null);
-    setRemoteResponse(null);
-  }, [generationId, project?.id]);
-
-  useEffect(() => {
-    if (!project?.id || !generationId) {
-      return;
-    }
-
-    let cancelled = false;
-    let retryTimeoutId: number | null = null;
-    let attempts = 0;
-
-    const clearRetry = () => {
-      if (retryTimeoutId !== null) {
-        window.clearTimeout(retryTimeoutId);
-        retryTimeoutId = null;
-      }
+      srcDoc: html,
     };
-
-    const scheduleRetry = () => {
-      if (cancelled) {
-        return;
-      }
-
-      if (attempts >= PREVIEW_SESSION_RETRY_LIMIT) {
-        setRemoteError("Preview is taking longer than expected to start.");
-        return;
-      }
-
-      retryTimeoutId = window.setTimeout(() => {
-        retryTimeoutId = null;
-        void loadRemotePreview();
-      }, PREVIEW_SESSION_RETRY_DELAY_MS);
-    };
-
-    const loadRemotePreview = async () => {
-      attempts += 1;
-
-      try {
-        const response = await createOrResumePreviewSession({
-          generationId,
-          projectId: project.id,
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        if (response.session.provider === "e2b" && response.session.url) {
-          // Only persist the response when we have a real E2B URL — booting/local
-          // responses must never overwrite an already-established session.
-          setRemoteResponse(response);
-          setRemoteError(null);
-          setPreviewMode("remote");
-          return;
-        }
-
-        setRemoteError(response.error ?? null);
-
-        if (response.session.status === "booting") {
-          scheduleRetry();
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setRemoteError(
-          error instanceof Error ? error.message : "Failed to start preview session.",
-        );
-      }
-    };
-
-    void loadRemotePreview();
-
-    return () => {
-      cancelled = true;
-      clearRetry();
-    };
-  }, [generationId, project?.id, refreshToken]);
-
-  // Heartbeat: re-ping the session API on an interval so the E2B sandbox
-  // timeout is continuously extended and the session stays alive.
-  useEffect(() => {
-    if (previewMode !== "remote" || !project?.id || !generationId) return;
-
-    const heartbeatId = window.setInterval(async () => {
-      try {
-        const response = await createOrResumePreviewSession({
-          generationId,
-          projectId: project.id,
-        });
-        // Refresh the stored URL only if we get a reconnected/new sandbox URL.
-        if (response.session.provider === "e2b" && response.session.url) {
-          setRemoteResponse(response);
-        }
-      } catch {
-        // Heartbeat errors are non-fatal — don't fall back on a failed keep-alive.
-      }
-    }, PREVIEW_HEARTBEAT_INTERVAL_MS);
-
-    return () => { window.clearInterval(heartbeatId); };
-  }, [previewMode, generationId, project?.id]);
+  }, [
+    useWebContainer, previewUrl,
+    files, generationId, project, refreshToken, viewMode,
+    mobileHtml, tabletHtml, webHtml,
+  ]);
 
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
@@ -376,8 +258,17 @@ export function PreviewPane({
           <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
           <div className="h-3 w-3 rounded-full bg-[#28c840]" />
         </div>
-        <div className="flex-1 rounded-md border border-[#e5e5e5] bg-white px-3 py-1 text-xs text-[#9ca3af]">
-          {urlBarText}
+        <div className="flex flex-1 items-center gap-2 rounded-md border border-[#e5e5e5] bg-white px-3 py-1">
+          <span className="flex-1 text-xs text-[#9ca3af]">{urlBarText}</span>
+          {wcStatus === "ready" && (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-[#22c55e]">
+              <Zap size={9} />
+              Live
+            </span>
+          )}
+          {(wcStatus === "booting" || wcStatus === "installing" || wcStatus === "starting") && (
+            <span className="text-[10px] text-[#9ca3af]">{progressMessage}</span>
+          )}
         </div>
       </div>
       {activeFrame ? (
@@ -390,7 +281,6 @@ export function PreviewPane({
           src={activeFrame.src}
           srcDoc={activeFrame.srcDoc}
           title="Beomz Studio Preview"
-         
         />
       ) : files && files.length > 0 ? (
         <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
@@ -445,10 +335,9 @@ export function PreviewPane({
                   overflowY: "auto",
                   width: `${vpW}px`,
                   height: `${vpH}px`
-}}
+                }}
                 sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
                 title={`${viewMode} preview`}
-               
               />
             ) : files && files.length > 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
