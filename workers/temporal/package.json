@@ -25,6 +25,7 @@
     "@beomz-studio/prompt-policies": "workspace:*",
     "@beomz-studio/studio-db": "workspace:*",
     "@beomz-studio/templates": "workspace:*",
+    "@beomz-studio/validators": "workspace:*",
     "@temporalio/client": "^1.13.0",
     "@temporalio/worker": "^1.13.0",
     "@temporalio/workflow": "^1.13.0",

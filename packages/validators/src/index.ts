@@ -8,6 +8,10 @@ export type {
 
 export { validateInitialBuild } from "./initialBuildValidator.js";
 export {
+  APPROVED_GENERATED_IMPORTS,
+  validateGeneratedFileGuardrails,
+} from "./generatedFileGuardrails.js";
+export {
   validateShellIntegrity,
   shellValidationResult,
 } from "./shellValidator.js";

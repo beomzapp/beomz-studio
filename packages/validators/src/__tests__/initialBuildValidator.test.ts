@@ -4,7 +4,16 @@ import { validateInitialBuild } from "../initialBuildValidator.js";
 describe("initialBuildValidator", () => {
   it("passes with valid files in allowed scope", () => {
     const result = validateInitialBuild(
-      ["src/pages/Home.tsx", "src/pages/Pricing.tsx", "src/App.tsx"],
+      [
+        "apps/web/src/generated/marketing-website/app.manifest.json",
+        "apps/web/src/generated/marketing-website/theme.ts",
+        "apps/web/src/generated/marketing-website/data.ts",
+        "apps/web/src/generated/marketing-website/navigation.ts",
+        "apps/web/src/components/generated/marketing-website/AppShell.tsx",
+        "apps/web/src/components/generated/marketing-website/ui/PrimaryButton.tsx",
+        "apps/web/src/components/generated/marketing-website/ui/SurfaceCard.tsx",
+        "apps/web/src/app/generated/marketing-website/home.tsx",
+      ],
       "marketing-website"
     );
     expect(result.valid).toBe(true);

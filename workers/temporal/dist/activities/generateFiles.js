@@ -3,10 +3,13 @@ import { projectIterationOperation } from "@beomz-studio/operations";
 import { getInitialBuildPromptPolicy, getIterationPromptPolicy, } from "@beomz-studio/prompt-policies";
 import { createEmptyBuilderV3TraceMetadata, normalizeGeneratedPath, } from "@beomz-studio/contracts";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
+import { APPROVED_GENERATED_IMPORTS, validateGeneratedFileGuardrails, } from "@beomz-studio/validators";
 import { getAnthropicRuntimeConfig } from "../config.js";
 import { buildGeneratedPageComponentName, buildGeneratedPageFilePath, } from "../shared/paths.js";
 import { buildGeneratedScaffoldFiles, buildScaffoldPromptBlock, } from "../shared/generatedSurface.js";
 import { buildIterationPromptBlock, buildLayoutFingerprint, classifyIterationIntent, } from "../shared/iterationContext.js";
+const APPROVED_SANDBOX_PACKAGE_RULE = `Approved sandbox packages for generated app code: ${APPROVED_GENERATED_IMPORTS.join(", ")}.`;
+const BANNED_SANDBOX_IMPORT_RULE = "Never import from react-icons, @heroicons, or any other package that is not in the approved sandbox package list.";
 function buildSystemPrompt(policy, mode) {
     return [
         mode === "iteration"
@@ -15,6 +18,8 @@ function buildSystemPrompt(policy, mode) {
         policy.systemPrompt,
         "Non-negotiable constraints:",
         ...policy.constraints.map((constraint) => `- ${constraint}`),
+        `- ${APPROVED_SANDBOX_PACKAGE_RULE}`,
+        `- ${BANNED_SANDBOX_IMPORT_RULE}`,
     ].join("\n");
 }
 function buildTemplatePageContext(input) {
@@ -51,7 +56,10 @@ function buildUserPrompt(input, page) {
             requiresAuth: page.requiresAuth,
         }, null, 2),
         "The page MUST import AppShell from the generated scaffold and wrap route-specific content inside it.",
+        "Import AppShell with a default import, not a namespace import.",
         "Use shared generated theme/data/ui modules where helpful. Do not re-create shell navigation, footer, mobile drawer, or topbar inside the route file.",
+        APPROVED_SANDBOX_PACKAGE_RULE,
+        BANNED_SANDBOX_IMPORT_RULE,
         "Output ONLY the complete TSX file contents for that one page.",
         `The file must default export a React component named ${componentName}.`,
         "Do not return JSON, markdown fences, explanations, or any prose outside the TSX file.",
@@ -328,6 +336,13 @@ function getMaterialChangedPaths(existingFiles, nextFiles) {
     })
         .map((file) => normalizeGeneratedPath(file.path));
 }
+function assertGeneratedFileGuardrails(files) {
+    const result = validateGeneratedFileGuardrails(files);
+    if (result.valid) {
+        return;
+    }
+    throw new Error(`Generated file guardrails failed:\n${result.errors.join("\n")}`);
+}
 export async function generateFiles(input) {
     const config = getAnthropicRuntimeConfig();
     const isIteration = input.existingFiles.length > 0;
@@ -397,6 +412,8 @@ export async function generateFiles(input) {
             assistantResponsesByPage,
         });
         const changedPaths = getMaterialChangedPaths(input.existingFiles, finalFiles);
+        const changedFiles = finalFiles.filter((file) => changedPaths.includes(normalizeGeneratedPath(file.path)));
+        assertGeneratedFileGuardrails(changedFiles);
         return {
             assistantResponseText: assistantResponseParts.join(""),
             assistantResponsesByPage,
@@ -457,6 +474,7 @@ export async function generateFiles(input) {
             source: "ai",
         });
     }
+    assertGeneratedFileGuardrails(files);
     return {
         assistantResponseText: assistantResponseParts.join(""),
         assistantResponsesByPage,

@@ -338,6 +338,9 @@ importers:
       '@beomz-studio/templates':
         specifier: workspace:*
         version: link:../../packages/templates
+      '@beomz-studio/validators':
+        specifier: workspace:*
+        version: link:../../packages/validators
       '@temporalio/client':
         specifier: ^1.13.0
         version: 1.15.0

@@ -15,6 +15,10 @@ import {
   type TemplatePage,
 } from "@beomz-studio/contracts";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
+import {
+  APPROVED_GENERATED_IMPORTS,
+  validateGeneratedFileGuardrails,
+} from "@beomz-studio/validators";
 
 import { getAnthropicRuntimeConfig } from "../config.js";
 import {
@@ -60,6 +64,10 @@ type AnthropicStreamEvent =
       [key: string]: unknown;
     };
 
+const APPROVED_SANDBOX_PACKAGE_RULE = `Approved sandbox packages for generated app code: ${APPROVED_GENERATED_IMPORTS.join(", ")}.`;
+const BANNED_SANDBOX_IMPORT_RULE =
+  "Never import from react-icons, @heroicons, or any other package that is not in the approved sandbox package list.";
+
 function buildSystemPrompt(policy: PromptPolicyLike, mode: "initial" | "iteration"): string {
   return [
     mode === "iteration"
@@ -68,6 +76,8 @@ function buildSystemPrompt(policy: PromptPolicyLike, mode: "initial" | "iteratio
     policy.systemPrompt,
     "Non-negotiable constraints:",
     ...policy.constraints.map((constraint) => `- ${constraint}`),
+    `- ${APPROVED_SANDBOX_PACKAGE_RULE}`,
+    `- ${BANNED_SANDBOX_IMPORT_RULE}`,
   ].join("\n");
 }
 
@@ -114,7 +124,10 @@ function buildUserPrompt(
       2,
     ),
     "The page MUST import AppShell from the generated scaffold and wrap route-specific content inside it.",
+    "Import AppShell with a default import, not a namespace import.",
     "Use shared generated theme/data/ui modules where helpful. Do not re-create shell navigation, footer, mobile drawer, or topbar inside the route file.",
+    APPROVED_SANDBOX_PACKAGE_RULE,
+    BANNED_SANDBOX_IMPORT_RULE,
     "Output ONLY the complete TSX file contents for that one page.",
     `The file must default export a React component named ${componentName}.`,
     "Do not return JSON, markdown fences, explanations, or any prose outside the TSX file.",
@@ -475,6 +488,15 @@ function getMaterialChangedPaths(
     .map((file) => normalizeGeneratedPath(file.path));
 }
 
+function assertGeneratedFileGuardrails(files: readonly StudioFile[]): void {
+  const result = validateGeneratedFileGuardrails(files);
+  if (result.valid) {
+    return;
+  }
+
+  throw new Error(`Generated file guardrails failed:\n${result.errors.join("\n")}`);
+}
+
 export async function generateFiles(
   input: GenerateFilesActivityInput,
 ): Promise<GeneratedBuildDraft> {
@@ -553,6 +575,10 @@ export async function generateFiles(
       assistantResponsesByPage,
     });
     const changedPaths = getMaterialChangedPaths(input.existingFiles, finalFiles);
+    const changedFiles = finalFiles.filter((file) =>
+      changedPaths.includes(normalizeGeneratedPath(file.path))
+    );
+    assertGeneratedFileGuardrails(changedFiles);
 
     return {
       assistantResponseText: assistantResponseParts.join(""),
@@ -621,6 +647,8 @@ export async function generateFiles(
       source: "ai" as const,
     });
   }
+
+  assertGeneratedFileGuardrails(files);
 
   return {
     assistantResponseText: assistantResponseParts.join(""),

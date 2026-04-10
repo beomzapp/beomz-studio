@@ -233,7 +233,7 @@ interface PrimaryButtonProps {
   type?: "button" | "submit";
 }
 
-export function PrimaryButton({
+function PrimaryButton({
   children,
   className = "",
   onClick,
@@ -249,6 +249,9 @@ export function PrimaryButton({
     </button>
   );
 }
+
+export default PrimaryButton;
+export { PrimaryButton };
 `;
 }
 
@@ -262,7 +265,7 @@ interface SurfaceCardProps {
   eyebrow?: string;
 }
 
-export function SurfaceCard({ children, className = "", title, eyebrow }: SurfaceCardProps) {
+function SurfaceCard({ children, className = "", title, eyebrow }: SurfaceCardProps) {
   return (
     <section className={\`rounded-3xl border border-inherit bg-inherit p-5 shadow-sm \${className}\`}>
       {eyebrow ? (
@@ -275,6 +278,9 @@ export function SurfaceCard({ children, className = "", title, eyebrow }: Surfac
     </section>
   );
 }
+
+export default SurfaceCard;
+export { SurfaceCard };
 `;
 }
 
@@ -293,7 +299,7 @@ interface AppShellProps {
   subtitle?: string;
 }
 
-export function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
+function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const bottomNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav).slice(0, 5), []);
 
   return (
@@ -328,6 +334,9 @@ export function AppShell({ children, currentPath, title, subtitle }: AppShellPro
     </div>
   );
 }
+
+export default AppShell;
+export { AppShell };
 `;
   }
 
@@ -346,7 +355,7 @@ interface AppShellProps {
   subtitle?: string;
 }
 
-export function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
+function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const primaryNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav), []);
 
@@ -391,6 +400,9 @@ export function AppShell({ children, currentPath, title, subtitle }: AppShellPro
     </div>
   );
 }
+
+export default AppShell;
+export { AppShell };
 `;
   }
 
@@ -407,7 +419,7 @@ interface AppShellProps {
   subtitle?: string;
 }
 
-export function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
+function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const primaryNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav), []);
 
@@ -479,6 +491,9 @@ export function AppShell({ children, currentPath, title, subtitle }: AppShellPro
     </div>
   );
 }
+
+export default AppShell;
+export { AppShell };
 `;
 }
 
@@ -558,7 +573,7 @@ export function buildScaffoldPromptBlock(template: TemplateDefinition): string {
     `- App shell: @/components/generated/${template.id}/AppShell`,
     `- Primary button: @/components/generated/${template.id}/ui/PrimaryButton`,
     `- Surface card: @/components/generated/${template.id}/ui/SurfaceCard`,
-    "Route files must import AppShell and keep only route-specific content inside it.",
+    "Route files must import AppShell with a default import and keep only route-specific content inside it.",
     "Do not recreate sidebar, topbar, footer navigation, mobile drawer, or bottom tab chrome inside a route file.",
     "Use the shared scaffold for theme, navigation, and repeated UI instead of redefining those patterns in every page.",
   ].join("\n");
