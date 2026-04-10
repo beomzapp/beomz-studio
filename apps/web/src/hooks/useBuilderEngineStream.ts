@@ -59,7 +59,7 @@ export function useBuilderEngineStream() {
     buildId,
     signal,
     lastEventId = null,
-    firstEventTimeoutMs = 5_000,
+    firstEventTimeoutMs = 15_000,
     pollIntervalMs = 2_000,
     onBuildStatus,
     onEvent,
