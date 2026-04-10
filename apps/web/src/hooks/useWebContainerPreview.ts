@@ -149,7 +149,7 @@ export function useWebContainerPreview(
         const devProcess = await wc.spawn("npm", ["run", "dev"]);
         instance.devProcess = devProcess;
 
-        wc.on("server-ready", (_port, url) => {
+        wc.on("server-ready", (_port: number, url: string) => {
           setPreviewUrl(url);
           setStatus("ready");
         });
