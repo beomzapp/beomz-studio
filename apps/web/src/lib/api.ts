@@ -73,10 +73,15 @@ export async function getAccessToken(): Promise<string> {
       .getSession()
       .then(({ data: { session } }) => {
         if (!session?.access_token) {
+          console.error("[getAccessToken] No access token. Session object:", JSON.stringify(session, null, 2));
           throw new Error("A valid platform session is required.");
         }
 
         return session.access_token;
+      })
+      .catch((error) => {
+        console.error("[getAccessToken] Failed:", error?.message ?? error, "| Full error:", error);
+        throw error;
       })
       .finally(() => {
         accessTokenPromise = null;
@@ -199,7 +204,9 @@ export async function streamBuildEvents(args: {
   const query = args.lastEventId
     ? `?lastEventId=${encodeURIComponent(args.lastEventId)}`
     : "";
-  const response = await fetch(`${getApiBaseUrl()}/builds/${args.buildId}/events${query}`, {
+  const sseUrl = `${getApiBaseUrl()}/builds/${args.buildId}/events${query}`;
+  console.log("[SSE] Attempting fetch:", sseUrl);
+  const response = await fetch(sseUrl, {
     headers: {
       accept: "text/event-stream",
       authorization: `Bearer ${accessToken}`,
