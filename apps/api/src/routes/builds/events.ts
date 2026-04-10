@@ -12,6 +12,9 @@ import { readBuildMetadata, readBuildTraceMetadata } from "./shared.js";
 
 const buildsEventsRoute = new Hono();
 const BUILD_EVENT_POLL_INTERVAL_MS = 250;
+const BUILD_EVENT_START_RETRY_ATTEMPTS = 10;
+const BUILD_EVENT_START_RETRY_INTERVAL_MS = 500;
+const BUILD_EVENT_KEEPALIVE_INTERVAL_MS = 5_000;
 const TERMINAL_EVENT_RETRY_LIMIT = 2;
 
 function sliceEventsAfterEventId<T extends { id: string }>(
@@ -84,6 +87,45 @@ function buildTerminalSafetyEvent(
   };
 }
 
+async function findGenerationByIdWithRetry(
+  db: OrgContext["db"],
+  buildId: string,
+  signal: AbortSignal,
+) {
+  const lookupGeneration = async () => {
+    try {
+      return await db.findGenerationById(buildId);
+    } catch {
+      // The workflow can start before the generation row becomes visible.
+      return null;
+    }
+  };
+
+  const initialGenerationRow = await lookupGeneration();
+  if (initialGenerationRow) {
+    return initialGenerationRow;
+  }
+
+  for (let attempt = 0; attempt < BUILD_EVENT_START_RETRY_ATTEMPTS; attempt += 1) {
+    const didWait = await delay(BUILD_EVENT_START_RETRY_INTERVAL_MS, undefined, {
+      signal,
+    })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!didWait) {
+      break;
+    }
+
+    const generationRow = await lookupGeneration();
+    if (generationRow) {
+      return generationRow;
+    }
+  }
+
+  return null;
+}
+
 buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
   const buildId = c.req.param("id");
@@ -92,7 +134,11 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json({ error: "Build id is required." }, 400);
   }
 
-  const generationRow = await orgContext.db.findGenerationById(buildId);
+  const generationRow = await findGenerationByIdWithRetry(
+    orgContext.db,
+    buildId,
+    c.req.raw.signal,
+  );
   if (!generationRow) {
     return c.json({ error: "Build not found." }, 404);
   }
@@ -108,6 +154,7 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     let lastSentEventId = requestedLastEventId;
     let streamOpen = true;
     let completedPollsWithoutTerminal = 0;
+    let lastStreamWriteAt = Date.now();
 
     const writeEvent = async (event: { data: string; event: string; id: string }) => {
       if (!streamOpen || c.req.raw.signal.aborted) {
@@ -116,11 +163,42 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
       try {
         await sse.writeSSE(event);
+        lastStreamWriteAt = Date.now();
         return true;
       } catch {
         streamOpen = false;
         return false;
       }
+    };
+
+    const writeKeepalive = async () => {
+      if (!streamOpen || c.req.raw.signal.aborted) {
+        return false;
+      }
+
+      try {
+        await sse.write(": keepalive\n\n");
+        lastStreamWriteAt = Date.now();
+        return true;
+      } catch {
+        streamOpen = false;
+        return false;
+      }
+    };
+
+    const waitForNextPoll = async () => {
+      if (Date.now() - lastStreamWriteAt >= BUILD_EVENT_KEEPALIVE_INTERVAL_MS) {
+        const didWriteKeepalive = await writeKeepalive();
+        if (!didWriteKeepalive) {
+          return false;
+        }
+      }
+
+      return delay(BUILD_EVENT_POLL_INTERVAL_MS, undefined, {
+        signal: c.req.raw.signal,
+      })
+        .then(() => true)
+        .catch(() => false);
     };
 
     while (!c.req.raw.signal.aborted && streamOpen) {
@@ -170,9 +248,10 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
         completedPollsWithoutTerminal += 1;
         if (completedPollsWithoutTerminal <= TERMINAL_EVENT_RETRY_LIMIT) {
-          await delay(BUILD_EVENT_POLL_INTERVAL_MS, undefined, {
-            signal: c.req.raw.signal,
-          }).catch(() => undefined);
+          const shouldContinue = await waitForNextPoll();
+          if (!shouldContinue) {
+            return;
+          }
           continue;
         }
 
@@ -203,9 +282,10 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       }
 
       completedPollsWithoutTerminal = 0;
-      await delay(BUILD_EVENT_POLL_INTERVAL_MS, undefined, {
-        signal: c.req.raw.signal,
-      }).catch(() => undefined);
+      const shouldContinue = await waitForNextPoll();
+      if (!shouldContinue) {
+        return;
+      }
     }
   });
 });
