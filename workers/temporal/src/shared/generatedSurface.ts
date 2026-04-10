@@ -234,7 +234,39 @@ export type GeneratedData = typeof generatedData;
 `;
 }
 
-function buildPrimaryButtonFile(): string {
+function buildPrimaryButtonFile(template: TemplateDefinition): string {
+  if (template.id === "interactive-tool") {
+    return `import type { ReactNode } from "react";
+
+interface PrimaryButtonProps {
+  children: ReactNode;
+  className?: string;
+  onClick?: () => void;
+  type?: "button" | "submit";
+}
+
+function PrimaryButton({
+  children,
+  className = "",
+  onClick,
+  type = "button",
+}: PrimaryButtonProps) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      className={\`inline-flex items-center justify-center rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-orange-600 \${className}\`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default PrimaryButton;
+export { PrimaryButton };
+`;
+  }
+
   return `import type { ReactNode } from "react";
 
 interface PrimaryButtonProps {
@@ -266,7 +298,36 @@ export { PrimaryButton };
 `;
 }
 
-function buildSurfaceCardFile(): string {
+function buildSurfaceCardFile(template: TemplateDefinition): string {
+  if (template.id === "interactive-tool") {
+    return `import type { ReactNode } from "react";
+
+interface SurfaceCardProps {
+  children: ReactNode;
+  className?: string;
+  title?: string;
+  eyebrow?: string;
+}
+
+function SurfaceCard({ children, className = "", title, eyebrow }: SurfaceCardProps) {
+  return (
+    <section className={\`rounded-xl border border-gray-700 bg-gray-900 p-4 \${className}\`}>
+      {eyebrow ? (
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500">
+          {eyebrow}
+        </div>
+      ) : null}
+      {title ? <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2> : null}
+      <div className={title || eyebrow ? "mt-3" : ""}>{children}</div>
+    </section>
+  );
+}
+
+export default SurfaceCard;
+export { SurfaceCard };
+`;
+  }
+
   return `import type { ReactNode } from "react";
 
 interface SurfaceCardProps {
@@ -361,6 +422,51 @@ export { AppShell };
 `;
   }
 
+  if (template.id === "interactive-tool") {
+    return `import { useMemo, type ReactNode } from "react";
+
+import { generatedNavigation } from "@/generated/${template.id}/navigation";
+
+interface AppShellProps {
+  children: ReactNode;
+  currentPath: string;
+  title: string;
+  subtitle?: string;
+}
+
+function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
+  const primaryNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav), []);
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white">
+      <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-900">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
+          <div className="text-base font-semibold">${projectName}</div>
+          <nav className="flex items-center gap-1">
+            {primaryNav.map((item) => (
+              <span
+                key={item.id}
+                className={\`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors \${item.href === currentPath ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white"}\`}
+              >
+                {item.label}
+              </span>
+            ))}
+          </nav>
+        </div>
+      </header>
+      <main className="mx-auto max-w-4xl px-6 py-8">
+        {subtitle ? <p className="mb-6 text-sm text-gray-400">{subtitle}</p> : null}
+        {children}
+      </main>
+    </div>
+  );
+}
+
+export default AppShell;
+export { AppShell };
+`;
+  }
+
   if (template.shell === "website") {
     return `import { useMemo, useState, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
@@ -385,7 +491,6 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
       <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-orange-300">Generated</div>
             <div className="text-lg font-semibold">${projectName}</div>
           </div>
           <nav className="hidden items-center gap-6 md:flex">
@@ -412,10 +517,6 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
       </header>
 
       <main className="mx-auto flex min-h-[calc(100vh-72px)] max-w-6xl flex-col gap-8 px-6 py-8">
-        <section className="rounded-[32px] border border-white/10 bg-zinc-900 p-8">
-          <div className="text-sm uppercase tracking-[0.28em] text-orange-300">{title}</div>
-          {subtitle ? <p className="mt-3 max-w-3xl text-base text-zinc-300">{subtitle}</p> : null}
-        </section>
         {children}
       </main>
     </div>
@@ -449,7 +550,6 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
       <div className="flex min-h-screen">
         <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white px-4 py-5 lg:flex">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">Generated</div>
             <div className="mt-2 text-2xl font-semibold text-slate-900">${projectName}</div>
           </div>
           <nav className="mt-8 space-y-2">
@@ -574,7 +674,7 @@ export function buildGeneratedScaffoldFiles(input: {
       source: "platform",
     },
     {
-      content: buildPrimaryButtonFile().trim(),
+      content: buildPrimaryButtonFile(input.template).trim(),
       kind: "component",
       language: "tsx",
       locked: false,
@@ -582,7 +682,7 @@ export function buildGeneratedScaffoldFiles(input: {
       source: "platform",
     },
     {
-      content: buildSurfaceCardFile().trim(),
+      content: buildSurfaceCardFile(input.template).trim(),
       kind: "component",
       language: "tsx",
       locked: false,
