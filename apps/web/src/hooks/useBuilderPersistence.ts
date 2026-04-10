@@ -6,6 +6,37 @@ interface PersistedBuilderState {
   previewGenerationId?: string | null;
 }
 
+function normalizePersistedString(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizePersistedState(value: unknown): PersistedBuilderState | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    buildId: normalizePersistedString(record.buildId),
+    lastEventId: normalizePersistedString(record.lastEventId),
+    previewGenerationId: normalizePersistedString(record.previewGenerationId),
+  };
+}
+
 function getStorageKey(projectId: string): string {
   return `beomz.builder-v3.${projectId}`;
 }
@@ -22,7 +53,7 @@ export function useBuilderPersistence(projectId: string | null) {
     }
 
     try {
-      return JSON.parse(raw) as PersistedBuilderState;
+      return normalizePersistedState(JSON.parse(raw));
     } catch {
       return null;
     }
@@ -33,7 +64,12 @@ export function useBuilderPersistence(projectId: string | null) {
       return;
     }
 
-    window.sessionStorage.setItem(getStorageKey(projectId), JSON.stringify(state));
+    const normalizedState = normalizePersistedState(state);
+    if (!normalizedState) {
+      return;
+    }
+
+    window.sessionStorage.setItem(getStorageKey(projectId), JSON.stringify(normalizedState));
   }, [projectId]);
 
   const clearState = useCallback(() => {

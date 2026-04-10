@@ -63,6 +63,53 @@ export interface StartBuildResponse {
 const DEFAULT_API_BASE_URL = "https://beomz-studioapi-production.up.railway.app";
 let accessTokenPromise: Promise<string> | null = null;
 
+function normalizeRequiredString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string.`);
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new Error(`${label} is required.`);
+  }
+
+  return normalized;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function isAbortSignalLike(value: unknown): value is AbortSignal {
+  return typeof value === "object"
+    && value !== null
+    && "aborted" in value
+    && typeof value.aborted === "boolean"
+    && "addEventListener" in value
+    && typeof value.addEventListener === "function"
+    && "removeEventListener" in value
+    && typeof value.removeEventListener === "function";
+}
+
+function toLoggedError(error: unknown): { message: string; name: string } {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name,
+    };
+  }
+
+  return {
+    message: String(error),
+    name: typeof error,
+  };
+}
+
 export function getApiBaseUrl(): string {
   return (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
 }
@@ -200,20 +247,99 @@ export async function streamBuildEvents(args: {
   signal?: AbortSignal;
   onEvent?: (event: BuilderV3Event) => void;
 }): Promise<void> {
-  const accessToken = await getAccessToken();
-  const query = args.lastEventId
-    ? `?lastEventId=${encodeURIComponent(args.lastEventId)}`
-    : "";
-  const sseUrl = `${getApiBaseUrl()}/builds/${args.buildId}/events${query}`;
-  console.log("[SSE] Attempting fetch:", sseUrl, "| signal.aborted:", args.signal?.aborted ?? "no signal");
-  const response = await fetch(sseUrl, {
-    headers: {
-      accept: "text/event-stream",
-      authorization: `Bearer ${accessToken}`,
-    },
-    method: "GET",
-    signal: args.signal,
+  const buildId = normalizeRequiredString(args.buildId, "buildId");
+  const lastEventId = normalizeOptionalString(args.lastEventId);
+  const accessToken = normalizeRequiredString(await getAccessToken(), "access token");
+  const signal = isAbortSignalLike(args.signal) ? args.signal : undefined;
+  const sseUrl = new URL(
+    `/builds/${encodeURIComponent(buildId)}/events`,
+    `${getApiBaseUrl()}/`,
+  );
+
+  if (lastEventId) {
+    sseUrl.searchParams.set("lastEventId", lastEventId);
+  }
+
+  const headers = new Headers({
+    accept: "text/event-stream",
+    authorization: `Bearer ${accessToken}`,
   });
+  const loggedHeaders = Object.fromEntries(headers.entries());
+
+  console.log("[SSE] Prepared fetch args:", {
+    buildId,
+    headers: loggedHeaders,
+    lastEventId,
+    rawLastEventId: args.lastEventId,
+    rawLastEventIdType: args.lastEventId === null ? "null" : typeof args.lastEventId,
+    signalAborted: signal?.aborted ?? false,
+    signalConstructor: signal?.constructor?.name ?? "none",
+    url: sseUrl.toString(),
+  });
+
+  const fetchAbortController = new AbortController();
+  const forwardAbort = () => {
+    fetchAbortController.abort(signal?.reason);
+  };
+
+  if (signal?.aborted) {
+    forwardAbort();
+  } else if (signal) {
+    signal.addEventListener("abort", forwardAbort, { once: true });
+  }
+
+  const fetchInitBase: RequestInit = {
+    headers,
+    method: "GET",
+  };
+
+  let response: Response;
+  let usingSignalFallback = false;
+  try {
+    console.log("[SSE] Attempting fetch:", sseUrl.toString(), "| signal.aborted:", fetchAbortController.signal.aborted);
+    response = await fetch(sseUrl, {
+      ...fetchInitBase,
+      signal: fetchAbortController.signal,
+    });
+  } catch (error) {
+    const loggedError = toLoggedError(error);
+    console.error("[SSE] Primary fetch failed before response:", loggedError);
+
+    if (signal?.aborted || loggedError.name === "AbortError") {
+      throw error;
+    }
+
+    try {
+      response = await fetch(sseUrl, fetchInitBase);
+      usingSignalFallback = true;
+      console.warn("[SSE] Retry without signal reached the network:", {
+        ok: response.ok,
+        status: response.status,
+      });
+    } catch (retryError) {
+      const loggedRetryError = toLoggedError(retryError);
+      console.error("[SSE] Retry without signal also failed:", loggedRetryError);
+
+      try {
+        const probeResponse = await fetch(sseUrl, { method: "GET" });
+        console.warn("[SSE] Minimal probe fetch result:", {
+          ok: probeResponse.ok,
+          status: probeResponse.status,
+        });
+        if (probeResponse.body) {
+          await probeResponse.body.cancel().catch(() => undefined);
+        }
+      } catch (probeError) {
+        console.error("[SSE] Minimal probe fetch failed:", toLoggedError(probeError));
+      }
+
+      throw new Error(`${loggedError.name}: ${loggedError.message}`);
+    }
+  } finally {
+    if (signal) {
+      signal.removeEventListener("abort", forwardAbort);
+    }
+  }
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null) as { error?: string } | null;
@@ -228,6 +354,22 @@ export async function streamBuildEvents(args: {
   const decoder = new TextDecoder();
   let buffer = "";
   let dataLines: string[] = [];
+  let removeReaderAbortListener = () => undefined;
+
+  if (usingSignalFallback && signal) {
+    const cancelReaderOnAbort = () => {
+      void reader.cancel(signal.reason).catch(() => undefined);
+    };
+
+    if (signal.aborted) {
+      cancelReaderOnAbort();
+    } else {
+      signal.addEventListener("abort", cancelReaderOnAbort, { once: true });
+      removeReaderAbortListener = () => {
+        signal.removeEventListener("abort", cancelReaderOnAbort);
+      };
+    }
+  }
 
   const flushEvent = () => {
     if (dataLines.length === 0) {
@@ -244,39 +386,43 @@ export async function streamBuildEvents(args: {
     }
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      flushEvent();
-      return;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-
+  try {
     while (true) {
-      const lineBreakIndex = buffer.indexOf("\n");
-      if (lineBreakIndex === -1) {
-        break;
-      }
-
-      const rawLine = buffer.slice(0, lineBreakIndex);
-      buffer = buffer.slice(lineBreakIndex + 1);
-      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-
-      if (line.length === 0) {
+      const { done, value } = await reader.read();
+      if (done) {
         flushEvent();
-        continue;
+        return;
       }
 
-      if (line.startsWith("id:") || line.startsWith("event:")) {
-        continue;
-      }
+      buffer += decoder.decode(value, { stream: true });
 
-      if (line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trim());
-        continue;
+      while (true) {
+        const lineBreakIndex = buffer.indexOf("\n");
+        if (lineBreakIndex === -1) {
+          break;
+        }
+
+        const rawLine = buffer.slice(0, lineBreakIndex);
+        buffer = buffer.slice(lineBreakIndex + 1);
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+
+        if (line.length === 0) {
+          flushEvent();
+          continue;
+        }
+
+        if (line.startsWith("id:") || line.startsWith("event:")) {
+          continue;
+        }
+
+        if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+          continue;
+        }
       }
     }
+  } finally {
+    removeReaderAbortListener();
   }
 }
 

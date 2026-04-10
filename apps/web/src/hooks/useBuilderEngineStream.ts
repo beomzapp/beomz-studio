@@ -15,6 +15,15 @@ import {
 } from "../lib/builder-v3/events";
 import type { BuilderTransportState } from "./useBuilderSessionHealth";
 
+function normalizeOptionalEventId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timeoutId = window.setTimeout(() => resolve(), ms);
@@ -66,7 +75,16 @@ export function useBuilderEngineStream() {
     onTransportChange,
     onStreamError,
   }: SubscribeToBuildArgs): Promise<{ lastEventId: string | null }> => {
-    let latestEventId = lastEventId;
+    const normalizedInitialEventId = normalizeOptionalEventId(lastEventId);
+    if (lastEventId !== normalizedInitialEventId) {
+      console.warn("[subscribeToBuild] Dropping invalid lastEventId before SSE subscribe.", {
+        buildId,
+        rawLastEventId: lastEventId,
+        rawLastEventIdType: lastEventId === null ? "null" : typeof lastEventId,
+      });
+    }
+
+    let latestEventId = normalizedInitialEventId;
     let terminal = false;
     let firstEventReceived = false;
     let pollingStarted = false;
@@ -127,7 +145,13 @@ export function useBuilderEngineStream() {
 
     while (!terminal && !signal?.aborted) {
       try {
-        console.log("[subscribeToBuild] Entering SSE attempt. signal.aborted:", signal?.aborted ?? "no signal");
+        console.log("[subscribeToBuild] Entering SSE attempt.", {
+          buildId,
+          lastEventId: latestEventId,
+          lastEventIdType: latestEventId === null ? "null" : typeof latestEventId,
+          signalAborted: signal?.aborted ?? false,
+          signalConstructor: signal?.constructor?.name ?? "none",
+        });
         onTransportChange?.(firstEventReceived ? "reconnecting" : "streaming");
         await streamBuildEvents({
           buildId,
