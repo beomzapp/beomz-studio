@@ -135,6 +135,96 @@ function stripNonTsxEnvelope(text) {
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function toErrorMessage(error) {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    if (typeof error === "string") {
+        return error;
+    }
+    return "Generation failed";
+}
+function isTransientGenerationError(error) {
+    const message = toErrorMessage(error).toLowerCase();
+    if (message.length === 0) {
+        return false;
+    }
+    return [
+        "connection error.",
+        "network error",
+        "socket hang up",
+        "econnreset",
+        "etimedout",
+        "fetch failed",
+        "upstream connect error",
+        "overloaded",
+        "temporarily unavailable",
+        "stream disconnected",
+        "terminated",
+        "aborted",
+    ].some((needle) => message.includes(needle));
+}
+function hasBuildValidationSignal(normalizedMessage) {
+    return (normalizedMessage.includes("validation failed")
+        || normalizedMessage.includes("guardrails failed")
+        || normalizedMessage.includes("missing default export")
+        || normalizedMessage.includes("missing ")
+        || normalizedMessage.includes("empty code content")
+        || normalizedMessage.includes("no text content")
+        || normalizedMessage.includes("unavailable sandbox package")
+        || normalizedMessage.includes("imports a banned package"));
+}
+function classifyGenerationError(error) {
+    const rawMessage = toErrorMessage(error);
+    const normalized = rawMessage.toLowerCase();
+    if (normalized.includes("unauthorized")
+        || normalized.includes("authentication")
+        || normalized.includes("invalid x-api-key")
+        || normalized.includes("api key")) {
+        return {
+            code: "auth_required",
+            message: rawMessage,
+            rawMessage,
+        };
+    }
+    if (hasBuildValidationSignal(normalized)) {
+        return {
+            code: "build_validation",
+            message: rawMessage,
+            rawMessage,
+        };
+    }
+    if (normalized.includes("timeout")
+        || normalized.includes("timed out")
+        || normalized.includes("stalled")
+        || normalized.includes("hard timeout")) {
+        return {
+            code: "upstream_timeout",
+            message: "The AI model took too long to respond, so generation could not finish in time.",
+            rawMessage,
+        };
+    }
+    if (isTransientGenerationError(error)
+        || normalized.includes("connection error")
+        || normalized.includes("stream disconnected")) {
+        return {
+            code: "upstream_connection",
+            message: "The AI model connection dropped while generating files.",
+            rawMessage,
+        };
+    }
+    return {
+        code: "unknown",
+        message: rawMessage,
+        rawMessage,
+    };
+}
+function combineGenerationErrors(...errors) {
+    const messages = errors
+        .map((error) => toErrorMessage(error).trim())
+        .filter((message, index, all) => message.length > 0 && all.indexOf(message) === index);
+    return new Error(messages.join(" | ") || "Generation failed");
+}
 function readBuilderTraceMetadata(metadata) {
     const candidate = metadata.builderTrace;
     if (!isRecord(candidate)) {
@@ -288,16 +378,33 @@ async function streamAnthropicMessage(input) {
             dataLines.push(line.slice(5).trim());
         }
     };
-    while (true) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-        await consumeBuffer(done);
-        if (done) {
-            await flushEvent();
-            break;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+            await consumeBuffer(done);
+            if (done) {
+                await flushEvent();
+                break;
+            }
         }
     }
-    return textParts.join("");
+    catch (error) {
+        try {
+            await consumeBuffer(true);
+            await flushEvent();
+        }
+        catch (flushError) {
+            throw combineGenerationErrors(error, flushError);
+        }
+        return {
+            text: textParts.join(""),
+            streamError: classifyGenerationError(error),
+        };
+    }
+    return {
+        text: textParts.join(""),
+    };
 }
 function parseGeneratedFileContent(input) {
     const extractedContent = extractCodePayload(input.text);
@@ -352,6 +459,7 @@ export async function generateFiles(input) {
     const files = [];
     const assistantResponseParts = [];
     const assistantResponsesByPage = [];
+    const warnings = [];
     let streamSequence = 0;
     if (isIteration) {
         if (!config.ANTHROPIC_API_KEY) {
@@ -425,7 +533,7 @@ export async function generateFiles(input) {
                 || (changedPaths.length > 0
                     ? `Updated ${changedPaths.length} file${changedPaths.length === 1 ? "" : "s"} in ${input.project.name}.`
                     : `No file changes were needed for ${input.project.name}.`),
-            warnings: [],
+            warnings,
         };
     }
     const scaffoldFiles = buildGeneratedScaffoldFiles({
@@ -434,7 +542,7 @@ export async function generateFiles(input) {
     });
     files.push(...scaffoldFiles);
     for (const page of input.template.pages) {
-        const text = await streamAnthropicMessage({
+        const streamResult = await streamAnthropicMessage({
             system: buildSystemPrompt(policy, "initial"),
             userMessage: buildUserPrompt(input, page),
             onTextDelta: async (delta) => {
@@ -447,7 +555,11 @@ export async function generateFiles(input) {
                 });
             },
         });
+        const text = streamResult.text;
         if (text.trim().length === 0) {
+            if (streamResult.streamError) {
+                throw new Error(streamResult.streamError.message);
+            }
             throw new Error(`Anthropic returned no text content for page ${page.id}.`);
         }
         assistantResponsesByPage.push({
@@ -459,20 +571,48 @@ export async function generateFiles(input) {
             assistantResponseText: assistantResponseParts.join(""),
             assistantResponsesByPage,
         });
-        const content = parseGeneratedFileContent({
-            config,
-            page,
-            templateId: input.template.id,
-            text,
-        });
-        files.push({
+        let content;
+        try {
+            content = parseGeneratedFileContent({
+                config,
+                page,
+                templateId: input.template.id,
+                text,
+            });
+        }
+        catch (parseError) {
+            if (streamResult.streamError) {
+                throw new Error(classifyGenerationError(combineGenerationErrors(streamResult.streamError.rawMessage, parseError)).message);
+            }
+            throw parseError;
+        }
+        const nextFile = {
             path: buildGeneratedPageFilePath(input.template.id, page.id),
             kind: "route",
             language: "tsx",
             content: content.trim(),
             locked: false,
             source: "ai",
-        });
+        };
+        try {
+            assertGeneratedFileGuardrails([nextFile]);
+        }
+        catch (validationError) {
+            if (streamResult.streamError) {
+                throw new Error(classifyGenerationError(combineGenerationErrors(streamResult.streamError.rawMessage, validationError)).message);
+            }
+            throw validationError;
+        }
+        if (streamResult.streamError) {
+            warnings.push(`Recovered ${page.name} after a model stream failure and kept the validated page output.`);
+            console.warn("Recovered generated page after stream error.", {
+                errorCode: streamResult.streamError.code,
+                errorMessage: streamResult.streamError.rawMessage,
+                pageId: page.id,
+                templateId: input.template.id,
+            });
+        }
+        files.push(nextFile);
     }
     assertGeneratedFileGuardrails(files);
     return {
@@ -482,6 +622,6 @@ export async function generateFiles(input) {
         previewEntryPath: input.template.previewEntryPath,
         source: "ai",
         summary: `Generated ${files.length} scaffold and route files for ${input.template.name}.`,
-        warnings: [],
+        warnings,
     };
 }
