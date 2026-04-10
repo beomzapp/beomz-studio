@@ -33,6 +33,13 @@ export function useWebContainerPreview(
   const viteStartedRef = useRef(false);
   const prevFilesRef = useRef<readonly StudioFile[] | null>(null);
 
+  // Live refs so the boot closure (which has [] deps and captures stale values)
+  // can always read the most-recent files/project at any point in time.
+  const filesRef = useRef(files);
+  const projectRef = useRef(project);
+  filesRef.current = files;
+  projectRef.current = project;
+
   // ── Eager boot + npm install ──────────────────────────────────────────────
   useEffect(() => {
     if (!isWebContainerSupported()) return;
@@ -103,9 +110,13 @@ export function useWebContainerPreview(
           instance.installedAt = Date.now();
         }
 
-        // If files already arrived while we were booting, start Vite now.
-        if (files && files.length > 0 && project?.id) {
-          void startVite(instance, files, project);
+        // Read from live refs, NOT from the stale closure capture — this is
+        // critical for the page-reload case where files arrive from the API
+        // while npm install is in progress and the closure still sees null.
+        const currentFiles = filesRef.current;
+        const currentProject = projectRef.current;
+        if (currentFiles && currentFiles.length > 0 && currentProject?.id) {
+          void startVite(instance, currentFiles, currentProject);
         } else {
           setStatus("idle");
           setProgressMessage("Waiting for build…");
