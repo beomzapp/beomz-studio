@@ -9,6 +9,7 @@ describe("initialBuildValidator", () => {
         "apps/web/src/generated/marketing-website/theme.ts",
         "apps/web/src/generated/marketing-website/data.ts",
         "apps/web/src/generated/marketing-website/navigation.ts",
+        "apps/web/src/lib/utils.ts",
         "apps/web/src/components/generated/marketing-website/AppShell.tsx",
         "apps/web/src/components/generated/marketing-website/ui/PrimaryButton.tsx",
         "apps/web/src/components/generated/marketing-website/ui/SurfaceCard.tsx",

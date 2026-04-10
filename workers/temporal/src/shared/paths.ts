@@ -8,6 +8,7 @@ export {
   buildGeneratedPageFilePath,
   buildGeneratedThemeFilePath,
   buildGeneratedUiComponentPath,
+  buildGeneratedUtilsPath,
   buildRequiredGeneratedScaffoldPaths,
   normalizeGeneratedPath,
 } from "@beomz-studio/contracts";

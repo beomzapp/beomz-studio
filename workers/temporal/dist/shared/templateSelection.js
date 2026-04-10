@@ -1,16 +1,22 @@
 import { listTemplateDefinitions } from "@beomz-studio/templates";
 const templateSignals = {
     "marketing-website": [
+        "company site",
         "contact",
         "cta",
         "hero",
+        "landing page",
         "landing",
         "launch",
         "marketing",
+        "marketing site",
         "pricing",
+        "product page",
         "public",
+        "saas homepage",
         "waitlist",
         "website",
+        "website for my",
     ],
     "saas-dashboard": [
         "account manager",
@@ -21,7 +27,6 @@ const templateSignals = {
         "customer",
         "deal",
         "deals",
-        "dashboard",
         "lead",
         "leads",
         "metrics",
@@ -34,16 +39,27 @@ const templateSignals = {
     ],
     "workspace-task": [
         "backlog",
+        "budget",
         "board",
+        "calculator",
         "collaboration",
+        "converter",
+        "dashboard",
+        "game",
         "kanban",
+        "manager",
+        "planner",
         "project",
         "sprint",
         "task",
         "team",
+        "timer",
         "todo",
+        "tool",
+        "tracker",
         "workflow",
         "workspace",
+        "app",
     ],
     "mobile-app": [
         "calories",
@@ -144,7 +160,7 @@ function scoreTemplate(prompt, plan, templateId) {
     const planHaystack = plan ? `${plan.intentSummary.toLowerCase()} ${plan.keywords.join(" ")}` : "";
     let score = countMatches(promptLower, templateSignals[templateId]);
     score += countMatches(planHaystack, templateSignals[templateId]);
-    if (templateId === "marketing-website" && score === 0) {
+    if (templateId === "workspace-task" && score === 0) {
         score += 1;
     }
     return score;

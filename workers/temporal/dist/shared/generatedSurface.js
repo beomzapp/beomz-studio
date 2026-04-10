@@ -1,4 +1,4 @@
-import { buildGeneratedAppShellPath, buildGeneratedDataFilePath, buildGeneratedManifest, buildGeneratedManifestPath, buildGeneratedNavigationFilePath, buildGeneratedThemeFilePath, buildGeneratedUiComponentPath, } from "@beomz-studio/contracts";
+import { buildGeneratedAppShellPath, buildGeneratedDataFilePath, buildGeneratedManifest, buildGeneratedManifestPath, buildGeneratedNavigationFilePath, buildGeneratedThemeFilePath, buildGeneratedUiComponentPath, buildGeneratedUtilsPath, } from "@beomz-studio/contracts";
 function serialize(value) {
     return JSON.stringify(value, null, 2);
 }
@@ -255,6 +255,15 @@ export default SurfaceCard;
 export { SurfaceCard };
 `;
 }
+function buildUtilsFile() {
+    return `import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+`;
+}
 function buildAppShellFile(template, projectName) {
     if (template.id === "mobile-app") {
         return `import { useMemo, type ReactNode } from "react";
@@ -501,6 +510,14 @@ export function buildGeneratedScaffoldFiles(input) {
             source: "platform",
         },
         {
+            content: buildUtilsFile().trim(),
+            kind: "component",
+            language: "ts",
+            locked: false,
+            path: buildGeneratedUtilsPath(),
+            source: "platform",
+        },
+        {
             content: buildAppShellFile(input.template, input.project.name).trim(),
             kind: "layout",
             language: "tsx",
@@ -533,10 +550,12 @@ export function buildScaffoldPromptBlock(template) {
         `- Navigation: @/generated/${template.id}/navigation`,
         `- Data: @/generated/${template.id}/data`,
         `- Route manifest JSON: @/generated/${template.id}/app.manifest.json`,
+        "- Utility helpers: @/lib/utils (exports cn for className composition)",
         `- App shell: @/components/generated/${template.id}/AppShell`,
         `- Primary button: @/components/generated/${template.id}/ui/PrimaryButton`,
         `- Surface card: @/components/generated/${template.id}/ui/SurfaceCard`,
         "Route files must import AppShell with a default import and keep only route-specific content inside it.",
+        "If you need className composition, import cn from @/lib/utils instead of redefining helper utilities.",
         "Do not recreate sidebar, topbar, footer navigation, mobile drawer, or bottom tab chrome inside a route file.",
         "Use the shared scaffold for theme, navigation, and repeated UI instead of redefining those patterns in every page.",
     ].join("\n");

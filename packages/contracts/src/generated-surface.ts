@@ -50,6 +50,10 @@ export function buildGeneratedNavigationFilePath(templateId: TemplateId): string
   return `apps/web/src/generated/${templateId}/navigation.ts`;
 }
 
+export function buildGeneratedUtilsPath(): string {
+  return "apps/web/src/lib/utils.ts";
+}
+
 export function buildGeneratedPageFilePath(templateId: TemplateId, pageId: string): string {
   return `apps/web/src/app/generated/${templateId}/${pageId}.tsx`;
 }
@@ -172,6 +176,7 @@ export function buildRequiredGeneratedScaffoldPaths(
     buildGeneratedThemeFilePath(template.id),
     buildGeneratedDataFilePath(template.id),
     buildGeneratedNavigationFilePath(template.id),
+    buildGeneratedUtilsPath(),
     buildGeneratedAppShellPath(template.id),
     buildGeneratedUiComponentPath(template.id, "PrimaryButton"),
     buildGeneratedUiComponentPath(template.id, "SurfaceCard"),

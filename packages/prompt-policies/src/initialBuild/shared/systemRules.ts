@@ -14,6 +14,7 @@ export const sharedInitialBuildSystemRules = [
   "All buttons must use explicit action labels such as Save Changes, Add Task, Send Message, View Invoice, or Start Free Trial.",
   "Never put the entire app in one component. Split the experience into logical subcomponents such as Sidebar, TopBar, PageContent, Card, Modal, FeedItem, ProductGrid, or FormStep.",
   "The generated app must include a stable scaffold: route manifest, theme/tokens file, navigation config, shared data file, AppShell layout component, and shared UI primitives before or alongside route files.",
+  "The generated scaffold already provides @/lib/utils with a cn helper. Reuse it for className composition instead of reimplementing utility helpers.",
   "Route files should contain route-specific content only. Shared navigation, shell layout, responsive frame logic, and repeated UI primitives belong in the scaffold files, not duplicated inside each page.",
   "If you touch AppShell or a shared UI module, preserve its default export so route files can import it safely.",
   "Favor editing theme, navigation, AppShell, or shared UI modules for global changes instead of rewriting every route file.",
