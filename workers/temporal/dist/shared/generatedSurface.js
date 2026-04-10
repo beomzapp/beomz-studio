@@ -44,6 +44,8 @@ function iconForPage(page) {
             return "Sparkles";
         case "data-table":
             return "TableProperties";
+        case "tool":
+            return "Wrench";
         default:
             return "ChevronRight";
     }
@@ -180,13 +182,21 @@ function buildDataFile(template, projectName) {
                                 { id: "step-3", title: "Invite collaborators", description: "Start with the people who need visibility now." },
                             ],
                         }
-                        : {
-                            records: [
-                                { id: "rec-1", title: "Northstar Health", value: "$24,500", owner: "Ava Thompson" },
-                                { id: "rec-2", title: "Harbor Commerce", value: "$18,200", owner: "Marcus Rodriguez" },
-                                { id: "rec-3", title: "Atlas Studio", value: "$9,400", owner: "Sarah Chen" },
-                            ],
-                        };
+                        : template.id === "interactive-tool"
+                            ? {
+                                history: [
+                                    { id: "h1", label: "512 ÷ 8", result: "64", timestamp: "Just now" },
+                                    { id: "h2", label: "1,024 × 3.14", result: "3,215.36", timestamp: "2 min ago" },
+                                    { id: "h3", label: "250 + 175", result: "425", timestamp: "5 min ago" },
+                                ],
+                            }
+                            : {
+                                records: [
+                                    { id: "rec-1", title: "Northstar Health", value: "$24,500", owner: "Ava Thompson" },
+                                    { id: "rec-2", title: "Harbor Commerce", value: "$18,200", owner: "Marcus Rodriguez" },
+                                    { id: "rec-3", title: "Atlas Studio", value: "$9,400", owner: "Sarah Chen" },
+                                ],
+                            };
     return `export const generatedData = ${serialize({
         ...shared,
         ...domainSpecific,

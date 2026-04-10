@@ -8,7 +8,8 @@ export type TemplateId =
   | "portfolio"
   | "blog-cms"
   | "onboarding-flow"
-  | "data-table-app";
+  | "data-table-app"
+  | "interactive-tool";
 
 export type TemplateShell = "website" | "dashboard" | "workspace";
 
@@ -32,7 +33,8 @@ export type TemplatePageKind =
   | "articles"
   | "article"
   | "onboarding-step"
-  | "data-table";
+  | "data-table"
+  | "tool";
 
 export interface TemplatePage {
   id: string;

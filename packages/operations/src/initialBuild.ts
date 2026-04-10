@@ -46,6 +46,7 @@ export const initialBuildOperation = {
     "blog-cms",
     "onboarding-flow",
     "data-table-app",
+    "interactive-tool",
   ],
   writeScope: {
     allowedGlobs: INITIAL_BUILD_ALLOWED_WRITE_GLOBS,
@@ -85,5 +86,6 @@ export const initialBuildOperation = {
     "Build a blog for a startup founder writing weekly essays.",
     "Build a multi-step onboarding wizard for a fintech signup flow.",
     "Build an inventory management console with sortable data tables.",
+    "Build an interactive calculator or counter tool.",
   ],
 } satisfies OperationContract<InitialBuildInput, InitialBuildOutput>;

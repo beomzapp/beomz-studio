@@ -450,6 +450,41 @@ const dataTableAppTemplate = {
   ],
 } as const satisfies TemplateDefinition;
 
+const interactiveToolTemplate = {
+  id: "interactive-tool",
+  name: "Interactive Tool",
+  description: "A focused single-purpose interactive utility, calculator, counter, or game app.",
+  shell: "website",
+  defaultProjectName: "Interactive Tool",
+  previewEntryPath: "/",
+  promptHints: [
+    "Build the primary interactive surface with clear inputs, controls, outputs, and live state.",
+    "Keep the interface focused and immediate — minimize navigation and prioritize the core interaction.",
+  ],
+  pages: [
+    {
+      id: "tool",
+      name: "Tool",
+      path: "/",
+      kind: "tool",
+      summary: "The primary interactive surface: inputs, controls, outputs, and live state.",
+      navigationLabel: "Tool",
+      inPrimaryNav: true,
+      requiresAuth: false,
+    },
+    {
+      id: "settings",
+      name: "Settings",
+      path: "/settings",
+      kind: "settings",
+      summary: "Tool configuration: precision, units, display preferences, and reset controls.",
+      navigationLabel: "Settings",
+      inPrimaryNav: true,
+      requiresAuth: false,
+    },
+  ],
+} as const satisfies TemplateDefinition;
+
 export const TEMPLATE_REGISTRY = [
   marketingWebsiteTemplate,
   saasDashboardTemplate,
@@ -461,6 +496,7 @@ export const TEMPLATE_REGISTRY = [
   blogCmsTemplate,
   onboardingFlowTemplate,
   dataTableAppTemplate,
+  interactiveToolTemplate,
 ] as const satisfies readonly TemplateDefinition[];
 
 const templateRegistryById = TEMPLATE_REGISTRY.reduce<Record<TemplateId, TemplateDefinition>>(

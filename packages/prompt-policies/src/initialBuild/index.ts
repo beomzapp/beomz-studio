@@ -13,6 +13,7 @@ import { portfolioInitialBuildPolicy } from "./portfolio.js";
 import { saasDashboardInitialBuildPolicy } from "./saasDashboard.js";
 import { socialAppInitialBuildPolicy } from "./socialApp.js";
 import { workspaceTaskInitialBuildPolicy } from "./workspaceTask.js";
+import { interactiveToolInitialBuildPolicy } from "./interactiveTool.js";
 
 export type { InitialBuildPromptPolicy } from "./marketingWebsite.js";
 export { sharedInitialBuildSystemRules } from "./shared/systemRules.js";
@@ -28,6 +29,7 @@ export const INITIAL_BUILD_PROMPT_POLICIES = [
   blogCmsInitialBuildPolicy,
   onboardingFlowInitialBuildPolicy,
   dataTableAppInitialBuildPolicy,
+  interactiveToolInitialBuildPolicy,
 ] as const satisfies readonly InitialBuildPromptPolicy[];
 
 const policiesByTemplateId = INITIAL_BUILD_PROMPT_POLICIES.reduce<
