@@ -281,7 +281,7 @@ interface SurfaceCardProps {
 
 function SurfaceCard({ children, className = "", title, eyebrow }: SurfaceCardProps) {
   return (
-    <section className={\`rounded-xl border border-gray-700 bg-gray-900 p-4 \${className}\`}>
+    <section className={\`rounded-xl border border-gray-700 bg-gray-900 p-6 \${className}\`}>
       {eyebrow ? (
         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500">
           {eyebrow}
@@ -410,12 +410,13 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
           <div className="text-base font-semibold">${projectName}</div>
           <nav className="flex items-center gap-1">
             {primaryNav.map((item) => (
-              <span
+              <a
                 key={item.id}
-                className={\`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors \${item.href === currentPath ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white"}\`}
+                href={item.href}
+                className={\`rounded-lg px-3 py-1.5 text-sm font-medium no-underline transition-colors \${item.href === currentPath ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white"}\`}
               >
                 {item.label}
-              </span>
+              </a>
             ))}
           </nav>
         </div>
@@ -460,9 +461,9 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
           </div>
           <nav className="hidden items-center gap-6 md:flex">
             {primaryNav.map((item) => (
-              <span key={item.id} className={\`text-sm \${item.href === currentPath ? "text-white" : "text-zinc-400"}\`}>
+              <a key={item.id} href={item.href} className={\`text-sm no-underline \${item.href === currentPath ? "text-white" : "text-zinc-400 hover:text-white"}\`}>
                 {item.label}
-              </span>
+              </a>
             ))}
             <PrimaryButton className="bg-orange-500 text-black">Start Free Trial</PrimaryButton>
           </nav>

@@ -143,10 +143,12 @@ function resolveActiveRoute() {
 
 function EmptyRoute() {
   return (
-    <section className="beomz-stage">
-      <div className="beomz-eyebrow">Preview route missing</div>
-      <h1>This route has not been generated yet.</h1>
-    </section>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0a0a0a", color: "#9ca3af" }}>
+      <div style={{ textAlign: "center" }}>
+        <p style={{ fontSize: "16px", fontWeight: 500, color: "#e5e7eb", margin: 0 }}>Route not found</p>
+        <p style={{ fontSize: "14px", marginTop: "8px", color: "#9ca3af" }}>This route has not been generated yet.</p>
+      </div>
+    </div>
   );
 }
 
@@ -156,186 +158,18 @@ export function PreviewApp() {
     generatedModules[resolveModuleKey(activeRoute.filePath)]?.default ??
     EmptyRoute;
 
-  return (
-    <div className={\`preview-shell shell-\${runtime.shell}\`}>
-      <header className="preview-header">
-        <div>
-          <div className="beomz-eyebrow">{runtime.shell} shell</div>
-          <h1>{runtime.project.name}</h1>
-        </div>
-        <nav className="preview-nav">
-          {runtime.navigation.map((item) => (
-            <a
-              key={item.id}
-              href={item.href}
-              className={item.href === activeRoute.path ? "active" : undefined}
-            >
-              {item.label}
-            </a>
-          ))}
-        </nav>
-      </header>
-
-      <div className="preview-body">
-        {runtime.shell === "website" ? null : (
-          <aside className="preview-sidebar">
-            {runtime.routes.map((route) => (
-              <a
-                key={route.id}
-                href={route.path}
-                className={
-                  route.path === activeRoute.path ? "active" : undefined
-                }
-              >
-                <strong>{route.label}</strong>
-                <span>{route.summary}</span>
-              </a>
-            ))}
-          </aside>
-        )}
-
-        <main className="preview-main">
-          <div className="preview-route-meta">
-            <div className="beomz-eyebrow">Live route</div>
-            <h2>{activeRoute.label}</h2>
-            <p>{activeRoute.summary}</p>
-          </div>
-          <ActiveRoute />
-        </main>
-      </div>
-    </div>
-  );
+  return <ActiveRoute />;
 }
 `;
 
-const WORKSPACE_PREVIEW_STYLES_CSS = `:root {
-  color-scheme: dark;
-  font-family: "Geist Sans", system-ui, sans-serif;
-  --bg: #050816;
-  --panel: rgba(13, 20, 42, 0.94);
-  --panel-soft: rgba(255, 255, 255, 0.04);
-  --border: rgba(255, 255, 255, 0.08);
-  --text: rgba(255, 255, 255, 0.94);
-  --muted: rgba(255, 255, 255, 0.62);
-  --accent: #f97316;
-}
-
-* { box-sizing: border-box; }
+const WORKSPACE_PREVIEW_STYLES_CSS = `*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at top, rgba(249, 115, 22, 0.2), transparent 42%),
-    linear-gradient(160deg, #050816 0%, #0d1630 48%, #050816 100%);
-  color: var(--text);
+  font-family: "Geist Sans", system-ui, -apple-system, sans-serif;
 }
 
 a { color: inherit; }
-
-.preview-shell { min-height: 100vh; padding: 20px; }
-
-.preview-header,
-.preview-sidebar,
-.preview-main,
-.beomz-card,
-.beomz-stage {
-  border: 1px solid var(--border);
-  background: var(--panel);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-}
-
-.preview-header {
-  border-radius: 28px;
-  padding: 22px 24px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.preview-header h1, .preview-route-meta h2, .beomz-stage h1 { margin: 0; }
-
-.preview-nav { display: flex; flex-wrap: wrap; gap: 10px; }
-
-.preview-nav a, .preview-sidebar a {
-  text-decoration: none;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  transition: border-color 180ms ease, color 180ms ease, background 180ms ease;
-}
-
-.preview-nav a { padding: 10px 14px; border-radius: 999px; }
-
-.preview-nav a.active, .preview-sidebar a.active {
-  border-color: rgba(249, 115, 22, 0.55);
-  color: var(--text);
-  background: rgba(249, 115, 22, 0.12);
-}
-
-.preview-body {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 18px;
-  margin-top: 18px;
-}
-
-.shell-website .preview-body { display: block; }
-
-.preview-sidebar {
-  border-radius: 24px;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.preview-sidebar a {
-  padding: 14px 16px;
-  border-radius: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.preview-sidebar span, .preview-route-meta p, .beomz-stage p, .beomz-card span {
-  color: var(--muted);
-}
-
-.preview-main {
-  border-radius: 24px;
-  padding: 24px;
-  min-height: calc(100vh - 144px);
-}
-
-.preview-route-meta { margin-bottom: 20px; }
-
-.beomz-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 12px;
-}
-
-.beomz-stage { border-radius: 28px; padding: 28px; }
-
-.beomz-stage-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-top: 22px;
-}
-
-.beomz-card { border-radius: 20px; padding: 16px; }
-.beomz-card strong { display: block; margin-top: 8px; }
-
-@media (max-width: 900px) {
-  .preview-header { flex-direction: column; }
-  .preview-body { grid-template-columns: 1fr; }
-  .preview-main { min-height: auto; }
-}
 `;
 
 // ─── FileSystemTree helper ────────────────────────────────────────────────────
