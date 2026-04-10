@@ -205,7 +205,7 @@ export async function streamBuildEvents(args: {
     ? `?lastEventId=${encodeURIComponent(args.lastEventId)}`
     : "";
   const sseUrl = `${getApiBaseUrl()}/builds/${args.buildId}/events${query}`;
-  console.log("[SSE] Attempting fetch:", sseUrl);
+  console.log("[SSE] Attempting fetch:", sseUrl, "| signal.aborted:", args.signal?.aborted ?? "no signal");
   const response = await fetch(sseUrl, {
     headers: {
       accept: "text/event-stream",

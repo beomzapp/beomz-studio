@@ -127,6 +127,7 @@ export function useBuilderEngineStream() {
 
     while (!terminal && !signal?.aborted) {
       try {
+        console.log("[subscribeToBuild] Entering SSE attempt. signal.aborted:", signal?.aborted ?? "no signal");
         onTransportChange?.(firstEventReceived ? "reconnecting" : "streaming");
         await streamBuildEvents({
           buildId,
