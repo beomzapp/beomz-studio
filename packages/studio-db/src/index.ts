@@ -101,6 +101,25 @@ export interface PlanSessionRow extends Record<string, unknown> {
   updated_at: string;
 }
 
+export interface BuildTelemetryRow extends Record<string, unknown> {
+  id: string;
+  project_id: string;
+  user_id: string;
+  prompt: string;
+  template_used: string;
+  palette_used: string | null;
+  files_generated: number;
+  succeeded: boolean;
+  fallback_reason: string | null;
+  error_log: Record<string, unknown> | null;
+  generation_time_ms: number | null;
+  credits_used: number;
+  user_iterated: boolean;
+  iteration_count: number;
+  model_used: string | null;
+  created_at: string;
+}
+
 export interface UserInsert extends Record<string, unknown> {
   id?: string;
   email: string;
@@ -242,6 +261,43 @@ export interface PlanSessionUpdate extends Record<string, unknown> {
   updated_at?: string;
 }
 
+export interface BuildTelemetryInsert extends Record<string, unknown> {
+  id: string;
+  project_id: string;
+  user_id: string;
+  prompt: string;
+  template_used: string;
+  palette_used?: string | null;
+  files_generated?: number;
+  succeeded: boolean;
+  fallback_reason?: string | null;
+  error_log?: Record<string, unknown> | null;
+  generation_time_ms?: number | null;
+  credits_used?: number;
+  user_iterated?: boolean;
+  iteration_count?: number;
+  model_used?: string | null;
+  created_at?: string;
+}
+
+export interface BuildTelemetryUpdate extends Record<string, unknown> {
+  project_id?: string;
+  user_id?: string;
+  prompt?: string;
+  template_used?: string;
+  palette_used?: string | null;
+  files_generated?: number;
+  succeeded?: boolean;
+  fallback_reason?: string | null;
+  error_log?: Record<string, unknown> | null;
+  generation_time_ms?: number | null;
+  credits_used?: number;
+  user_iterated?: boolean;
+  iteration_count?: number;
+  model_used?: string | null;
+  created_at?: string;
+}
+
 export interface StudioDatabase {
   public: {
     Views: Record<string, never>;
@@ -277,6 +333,12 @@ export interface StudioDatabase {
         Row: PreviewRow;
         Insert: PreviewInsert;
         Update: PreviewUpdate;
+        Relationships: [];
+      };
+      build_telemetry: {
+        Row: BuildTelemetryRow;
+        Insert: BuildTelemetryInsert;
+        Update: BuildTelemetryUpdate;
         Relationships: [];
       };
       plan_sessions: {
@@ -652,6 +714,48 @@ export class StudioDbClient {
         updated_at: patch.updated_at ?? new Date().toISOString(),
       })
       .eq("id", id)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async findBuildTelemetryById(id: string): Promise<BuildTelemetryRow | null> {
+    const response = await this.client
+      .from("build_telemetry")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async listBuildTelemetryByProjectId(projectId: string): Promise<BuildTelemetryRow[]> {
+    const response = await this.client
+      .from("build_telemetry")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data ?? [];
+  }
+
+  async upsertBuildTelemetry(
+    input: BuildTelemetryInsert,
+  ): Promise<BuildTelemetryRow> {
+    const response = await this.client
+      .from("build_telemetry")
+      .upsert(input, {
+        onConflict: "id",
+      })
       .select("*")
       .single();
 

@@ -356,7 +356,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       user_iterated: isIteration,
       iteration_count: isIteration ? 1 : 0,
       model_used: null,
-    });
+    }).catch(() => undefined);
 
     return c.json(
       {
