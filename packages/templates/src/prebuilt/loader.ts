@@ -40,6 +40,26 @@ import { manifest as diceRollerManifest } from "../dice-roller/manifest.js";
 import { files as diceRollerFiles } from "../dice-roller/files.js";
 import { manifest as randomGeneratorManifest } from "../random-generator/manifest.js";
 import { files as randomGeneratorFiles } from "../random-generator/files.js";
+import { manifest as stopwatchManifest } from "../stopwatch/manifest.js";
+import { files as stopwatchFiles } from "../stopwatch/files.js";
+import { manifest as worldClockManifest } from "../world-clock/manifest.js";
+import { files as worldClockFiles } from "../world-clock/files.js";
+import { manifest as intervalTimerManifest } from "../interval-timer/manifest.js";
+import { files as intervalTimerFiles } from "../interval-timer/files.js";
+import { manifest as unitConverterManifest } from "../unit-converter/manifest.js";
+import { files as unitConverterFiles } from "../unit-converter/files.js";
+import { manifest as currencyConverterManifest } from "../currency-converter/manifest.js";
+import { files as currencyConverterFiles } from "../currency-converter/files.js";
+import { manifest as weightTrackerManifest } from "../weight-tracker/manifest.js";
+import { files as weightTrackerFiles } from "../weight-tracker/files.js";
+import { manifest as sleepTrackerManifest } from "../sleep-tracker/manifest.js";
+import { files as sleepTrackerFiles } from "../sleep-tracker/files.js";
+import { manifest as readingListManifest } from "../reading-list/manifest.js";
+import { files as readingListFiles } from "../reading-list/files.js";
+import { manifest as jobBoardManifest } from "../job-board/manifest.js";
+import { files as jobBoardFiles } from "../job-board/files.js";
+import { manifest as productCatalogManifest } from "../product-catalog/manifest.js";
+import { files as productCatalogFiles } from "../product-catalog/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -62,6 +82,16 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: colorPickerManifest, files: colorPickerFiles },
   { manifest: diceRollerManifest, files: diceRollerFiles },
   { manifest: randomGeneratorManifest, files: randomGeneratorFiles },
+  { manifest: stopwatchManifest, files: stopwatchFiles },
+  { manifest: worldClockManifest, files: worldClockFiles },
+  { manifest: intervalTimerManifest, files: intervalTimerFiles },
+  { manifest: unitConverterManifest, files: unitConverterFiles },
+  { manifest: currencyConverterManifest, files: currencyConverterFiles },
+  { manifest: weightTrackerManifest, files: weightTrackerFiles },
+  { manifest: sleepTrackerManifest, files: sleepTrackerFiles },
+  { manifest: readingListManifest, files: readingListFiles },
+  { manifest: jobBoardManifest, files: jobBoardFiles },
+  { manifest: productCatalogManifest, files: productCatalogFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
