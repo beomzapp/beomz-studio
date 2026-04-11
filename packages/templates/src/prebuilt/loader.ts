@@ -152,6 +152,26 @@ import { manifest as quizBuilderManifest } from "../quiz-builder/manifest.js";
 import { files as quizBuilderFiles } from "../quiz-builder/files.js";
 import { manifest as unitConverterProManifest } from "../unit-converter-pro/manifest.js";
 import { files as unitConverterProFiles } from "../unit-converter-pro/files.js";
+import { manifest as crmDashboardManifest } from "../crm-dashboard/manifest.js";
+import { files as crmDashboardFiles } from "../crm-dashboard/files.js";
+import { manifest as projectManagementManifest } from "../project-management/manifest.js";
+import { files as projectManagementFiles } from "../project-management/files.js";
+import { manifest as hrPortalManifest } from "../hr-portal/manifest.js";
+import { files as hrPortalFiles } from "../hr-portal/files.js";
+import { manifest as analyticsDashboardManifest } from "../analytics-dashboard/manifest.js";
+import { files as analyticsDashboardFiles } from "../analytics-dashboard/files.js";
+import { manifest as inventorySystemManifest } from "../inventory-system/manifest.js";
+import { files as inventorySystemFiles } from "../inventory-system/files.js";
+import { manifest as supportTicketsManifest } from "../support-tickets/manifest.js";
+import { files as supportTicketsFiles } from "../support-tickets/files.js";
+import { manifest as adminPanelManifest } from "../admin-panel/manifest.js";
+import { files as adminPanelFiles } from "../admin-panel/files.js";
+import { manifest as salesPipelineManifest } from "../sales-pipeline/manifest.js";
+import { files as salesPipelineFiles } from "../sales-pipeline/files.js";
+import { manifest as onboardingFlowManifest } from "../onboarding-flow/manifest.js";
+import { files as onboardingFlowFiles } from "../onboarding-flow/files.js";
+import { manifest as reportsDashboardManifest } from "../reports-dashboard/manifest.js";
+import { files as reportsDashboardFiles } from "../reports-dashboard/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -230,6 +250,16 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: dailyStandupManifest, files: dailyStandupFiles },
   { manifest: quizBuilderManifest, files: quizBuilderFiles },
   { manifest: unitConverterProManifest, files: unitConverterProFiles },
+  { manifest: crmDashboardManifest, files: crmDashboardFiles },
+  { manifest: projectManagementManifest, files: projectManagementFiles },
+  { manifest: hrPortalManifest, files: hrPortalFiles },
+  { manifest: analyticsDashboardManifest, files: analyticsDashboardFiles },
+  { manifest: inventorySystemManifest, files: inventorySystemFiles },
+  { manifest: supportTicketsManifest, files: supportTicketsFiles },
+  { manifest: adminPanelManifest, files: adminPanelFiles },
+  { manifest: salesPipelineManifest, files: salesPipelineFiles },
+  { manifest: onboardingFlowManifest, files: onboardingFlowFiles },
+  { manifest: reportsDashboardManifest, files: reportsDashboardFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
