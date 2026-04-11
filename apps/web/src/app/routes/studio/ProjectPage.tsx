@@ -17,6 +17,7 @@ import {
   BuilderModals,
   DatabasePanel,
   IntegrationsPanel,
+  AVAILABLE_MODELS,
   type ChatMessage,
   type ActiveView,
   type ModelId,
@@ -84,7 +85,17 @@ export function ProjectPage() {
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [isAiCustomising, setIsAiCustomising] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL);
+  const [selectedModel, setSelectedModel] = useState<ModelId>(() => {
+    try {
+      const stored = localStorage.getItem("beomz-model");
+      if (stored && AVAILABLE_MODELS.some((m) => m.id === stored)) {
+        return stored as ModelId;
+      }
+    } catch {
+      // localStorage not available (e.g. private browsing with storage blocked)
+    }
+    return DEFAULT_MODEL;
+  });
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
@@ -416,6 +427,11 @@ export function ProjectPage() {
     setStreamingText("");
     setTransport("idle");
   }, [setTransport]);
+
+  const handleModelChange = useCallback((model: ModelId) => {
+    setSelectedModel(model);
+    try { localStorage.setItem("beomz-model", model); } catch {}
+  }, []);
 
   const handleRefreshPreview = useCallback(() => {
     setPreviewRefreshKey((c) => c + 1);
@@ -803,7 +819,7 @@ export function ProjectPage() {
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
               selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
+              onModelChange={handleModelChange}
             />
           </div>
         </div>

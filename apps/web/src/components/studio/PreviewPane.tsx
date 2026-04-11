@@ -305,7 +305,7 @@ export function PreviewPane({
         <iframe
           key={activeFrame.key}
           allow="clipboard-read; clipboard-write"
-          className="flex-1 w-full bg-white"
+          className={cn("flex-1 w-full bg-white", isAiCustomising && "invisible")}
           referrerPolicy="no-referrer"
           sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
           src={activeFrame.src}
@@ -378,7 +378,8 @@ export function PreviewPane({
                   borderRadius: "inherit",
                   overflowY: "auto",
                   width: `${vpW}px`,
-                  height: `${vpH}px`
+                  height: `${vpH}px`,
+                  visibility: isAiCustomising ? "hidden" : "visible",
                 }}
                 sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
                 title={`${viewMode} preview`}
