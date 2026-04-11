@@ -192,6 +192,14 @@ import { manifest as statusPageManifest } from "../status-page/manifest.js";
 import { files as statusPageFiles } from "../status-page/files.js";
 import { manifest as feedbackBoardManifest } from "../feedback-board/manifest.js";
 import { files as feedbackBoardFiles } from "../feedback-board/files.js";
+import { manifest as aiChatInterfaceManifest } from "../ai-chat-interface/manifest.js";
+import { files as aiChatInterfaceFiles } from "../ai-chat-interface/files.js";
+import { manifest as kanbanProManifest } from "../kanban-pro/manifest.js";
+import { files as kanbanProFiles } from "../kanban-pro/files.js";
+import { manifest as landingPageSaasManifest } from "../landing-page-saas/manifest.js";
+import { files as landingPageSaasFiles } from "../landing-page-saas/files.js";
+import { manifest as socialDashboardManifest } from "../social-dashboard/manifest.js";
+import { files as socialDashboardFiles } from "../social-dashboard/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -290,6 +298,10 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: featureVotingManifest, files: featureVotingFiles },
   { manifest: statusPageManifest, files: statusPageFiles },
   { manifest: feedbackBoardManifest, files: feedbackBoardFiles },
+  { manifest: aiChatInterfaceManifest, files: aiChatInterfaceFiles },
+  { manifest: kanbanProManifest, files: kanbanProFiles },
+  { manifest: landingPageSaasManifest, files: landingPageSaasFiles },
+  { manifest: socialDashboardManifest, files: socialDashboardFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
