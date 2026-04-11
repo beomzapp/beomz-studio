@@ -163,7 +163,7 @@ export function TopBar({
                 setEditingName(false);
               }
             }}
-            className="min-w-0 max-w-[200px] border-b border-[#1a1a1a] bg-transparent text-sm font-semibold outline-none"
+            className="min-w-0 max-w-[200px] border-b border-[#1a1a1a] bg-transparent text-sm font-semibold text-[#1a1a1a] outline-none"
             autoFocus
           />
         ) : (

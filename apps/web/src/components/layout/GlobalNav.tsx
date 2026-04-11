@@ -7,6 +7,7 @@ import { Link } from "@tanstack/react-router";
 import { LogOut, Settings, LayoutDashboard } from "lucide-react";
 import { useAuth } from "../../lib/useAuth";
 import { supabase } from "../../lib/supabase";
+import { getApiBaseUrl } from "../../lib/api";
 
 interface GlobalNavProps {
   /** When true, uses light text (for dark backgrounds like landing page). Default false (dark text). */
@@ -39,7 +40,11 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
   if (!session) return null;
 
   const user = session.user;
-  const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
+  const rawAvatarUrl = user?.user_metadata?.avatar_url as string | undefined;
+  // Proxy Google avatars through our API to avoid COEP blocking
+  const avatarUrl = rawAvatarUrl?.includes("googleusercontent.com")
+    ? `${getApiBaseUrl()}/avatar?url=${encodeURIComponent(rawAvatarUrl)}`
+    : rawAvatarUrl;
   const fullName =
     (user?.user_metadata?.full_name as string | undefined)
     ?? (user?.user_metadata?.name as string | undefined)

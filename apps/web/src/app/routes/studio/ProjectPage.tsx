@@ -3,6 +3,38 @@
  * Preview / Code / Database / Integrations views.
  * Light mode — cream #faf9f6 throughout.
  */
+
+// ── Extract a meaningful project name from the user prompt ──────────────────
+const FILLER_WORDS = new Set([
+  "build", "create", "make", "design", "generate", "develop", "code",
+  "a", "an", "the", "my", "me", "app", "application", "website", "page",
+  "with", "for", "that", "has", "using", "in", "on", "of", "and",
+  "please", "can", "you", "i", "want", "need", "like", "something",
+]);
+
+function extractProjectName(prompt: string): string | null {
+  // Check for explicit "called X" or "named X" patterns
+  const namedMatch = prompt.match(/(?:called|named)\s+["']?([A-Z][A-Za-z0-9 ]{0,30})["']?/);
+  if (namedMatch) return namedMatch[1].trim();
+
+  // Check for all-caps brand name (3+ chars)
+  const capsMatch = prompt.match(/\b([A-Z]{3,15})\b/);
+  if (capsMatch) return capsMatch[1];
+
+  // Strip filler words, capitalise remaining
+  const words = prompt
+    .replace(/[^\w\s]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !FILLER_WORDS.has(w.toLowerCase()));
+
+  if (words.length === 0) return null;
+
+  // Take first 3 meaningful words, title-case them
+  return words
+    .slice(0, 3)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3Event, TemplateId } from "@beomz-studio/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -239,10 +271,35 @@ export function ProjectPage() {
       return { ...message, content: nextContent, traceEntries: nextEntries };
     });
 
+    if (event.type === "tool_use_started") {
+      setStreamingText("Planning your app\u2026");
+    }
+
+    if (event.type === "assistant_delta" || event.type === "tool_use_progress") {
+      setStreamingText("Customising with AI\u2026");
+    }
+
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
       setIsAiCustomising(true);
-      setStreamingText("Writing code...");
+
+      // Animate file writing progress
+      const fileCount = ("filesCount" in event ? event.filesCount : null) as number | null;
+      if (fileCount && fileCount > 0) {
+        let i = 1;
+        const tick = () => {
+          if (i <= fileCount) {
+            setStreamingText("Writing file " + i + " of " + fileCount + "\u2026");
+            i++;
+            setTimeout(tick, 300);
+          } else {
+            setStreamingText("Starting preview\u2026");
+          }
+        };
+        tick();
+      } else {
+        setStreamingText("Writing code\u2026");
+      }
       console.log("[SSE preview_ready] fetching build status for", buildId);
       void getBuildStatus(event.buildId)
         .then((status) => {
@@ -389,11 +446,21 @@ export function ProjectPage() {
       abortRef.current = controller;
       resetHealth();
       setIsStreaming(true);
-      setStreamingText("Selecting template...");
+      setStreamingText("Analysing your prompt\u2026");
       setPreviewGenerationId(null);
       setLastEventId(null);
       activeAssistantMessageIdRef.current = null;
       activeBuildIdRef.current = null;
+
+      // Auto-name from prompt if still "Untitled project"
+      let effectiveName = projectName;
+      if (projectName === "Untitled project") {
+        const extracted = extractProjectName(text);
+        if (extracted) {
+          effectiveName = extracted;
+          setProjectName(extracted);
+        }
+      }
 
       await startAndStreamBuild({
         body: {
@@ -401,7 +468,7 @@ export function ProjectPage() {
           model: selectedModel,
           prompt: text,
           projectId: projectId ?? undefined,
-          projectName: projectName !== "Untitled project" ? projectName : undefined,
+          projectName: effectiveName !== "Untitled project" ? effectiveName : undefined,
           summary: launchIntent?.approvedPlan?.summary,
           steps: launchIntent?.approvedPlan?.steps,
         },
