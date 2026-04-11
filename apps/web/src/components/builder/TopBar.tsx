@@ -3,6 +3,7 @@
  * White bg, center tab switcher (Preview | Code | Database | Integrations),
  * editable project name, publish states, Simple/Pro toggle.
  */
+import type React from "react";
 import { useState, useRef, useCallback } from "react";
 import {
   ChevronLeft,
@@ -16,6 +17,16 @@ import {
   Link2,
   PanelLeftClose,
   PanelLeftOpen,
+  BarChart2,
+  BookOpen,
+  Briefcase,
+  CheckSquare,
+  ListChecks,
+  ShoppingCart,
+  Sparkles,
+  Table,
+  Users,
+  Wrench,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
@@ -23,8 +34,29 @@ import { GlobalNav } from "../layout/GlobalNav";
 
 export type ActiveView = "preview" | "code" | "database" | "integrations";
 
+const PROJECT_ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  BarChart2,
+  BookOpen,
+  Briefcase,
+  CheckSquare,
+  Globe,
+  ListChecks,
+  Smartphone,
+  ShoppingCart,
+  Sparkles,
+  Table,
+  Users,
+  Wrench,
+};
+
+function ProjectIconRenderer({ name, size = 14 }: { name: string; size?: number }) {
+  const Icon = PROJECT_ICON_MAP[name] ?? Sparkles;
+  return <Icon size={size} />;
+}
+
 interface TopBarProps {
   projectName: string;
+  projectIcon?: string | null;
   onProjectNameChange?: (name: string) => void;
   onRefreshPreview?: () => void;
   userMode: "simple" | "pro";
@@ -61,6 +93,7 @@ const VIEW_TABS: { key: ActiveView; icon: typeof Smartphone; label: string }[] =
 
 export function TopBar({
   projectName,
+  projectIcon,
   onProjectNameChange,
   onRefreshPreview,
   userMode,
@@ -140,9 +173,14 @@ export function TopBar({
               setNameInput(projectName);
               setTimeout(() => nameInputRef.current?.select(), 0);
             }}
-            className="max-w-[200px] truncate text-sm font-semibold transition-colors hover:text-[#6b7280]"
+            className="flex items-center gap-1.5 max-w-[220px] truncate text-sm font-semibold transition-colors hover:text-[#6b7280]"
           >
-            {projectName}
+            {projectIcon && (
+              <span className="flex-none text-[#F97316]">
+                <ProjectIconRenderer name={projectIcon} size={14} />
+              </span>
+            )}
+            <span className="truncate">{projectName}</span>
           </button>
         )}
       </div>

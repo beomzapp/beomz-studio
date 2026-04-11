@@ -6,9 +6,11 @@ const promptStopWords = new Set([
   "and",
   "app",
   "build",
+  "create",
   "for",
   "from",
   "in",
+  "make",
   "of",
   "the",
   "to",
@@ -29,8 +31,8 @@ export function buildProjectNameFromPrompt(prompt: string, fallbackName: string)
     .replace(/\s+/g, " ")
     .split(" ")
     .map((token) => token.replace(/[^a-zA-Z0-9-]/g, ""))
-    .filter((token) => token.length > 2)
-    .slice(0, 4);
+    .filter((token) => token.length > 2 && !promptStopWords.has(token.toLowerCase()))
+    .slice(0, 3);
 
   if (tokens.length === 0) {
     return fallbackName;

@@ -204,10 +204,10 @@ export function PreviewPane({
   // fall back to inline srcDoc otherwise.
   const useWebContainer = wcStatus === "ready" && previewUrl !== null;
 
-  // Show a loading screen (instead of srcDoc) while WC is installing/starting
+  // Show a loading screen (instead of srcDoc) while WC is booting/installing/starting
   const wcIsLoading =
     !!(files && files.length > 0) &&
-    (wcStatus === "installing" || wcStatus === "starting");
+    (wcStatus === "booting" || wcStatus === "installing" || wcStatus === "starting");
 
   const activeFrame = useMemo(() => {
     if (!project || !files || files.length === 0) return null;
@@ -257,7 +257,7 @@ export function PreviewPane({
   const renderWebView = () => (
     <div className="flex h-full flex-col">
       {/* Browser chrome */}
-      <div className="flex flex-shrink-0 items-center gap-2 rounded-t-xl border border-b-0 border-[#e5e5e5] bg-[#f5f5f5] px-3 py-2">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-[#e5e5e5] bg-[#f5f5f5] px-3 py-2">
         <div className="flex gap-1.5">
           <div className="h-3 w-3 rounded-full bg-[#ff5f57]" />
           <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
@@ -278,7 +278,7 @@ export function PreviewPane({
       </div>
       {wcIsLoading ? (
         <div
-          className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5]"
+          className="flex flex-1 items-center justify-center"
           style={{ background: "#060612" }}
         >
           <div className="flex flex-col items-center gap-4">
@@ -296,7 +296,7 @@ export function PreviewPane({
         <iframe
           key={activeFrame.key}
           allow="clipboard-read; clipboard-write"
-          className="flex-1 w-full rounded-b-xl border border-[#e5e5e5] bg-white"
+          className="flex-1 w-full bg-white"
           referrerPolicy="no-referrer"
           sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
           src={activeFrame.src}
@@ -304,14 +304,14 @@ export function PreviewPane({
           title="Beomz Studio Preview"
         />
       ) : files && files.length > 0 ? (
-        <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
+        <div className="flex flex-1 items-center justify-center bg-white">
           <div className="flex flex-col items-center gap-3 text-center px-6">
             <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
             <p className="text-xs text-[#9ca3af]">Your files are ready in the Code tab</p>
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center rounded-b-xl border border-[#e5e5e5] bg-white">
+        <div className="flex flex-1 items-center justify-center bg-white">
           <div className="flex flex-col items-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#e5e5e5]">
               <Monitor className="h-5 w-5 text-[#d1d5db]" />
@@ -461,7 +461,7 @@ export function PreviewPane({
       </div>
 
       {/* Preview area */}
-      <div className="relative min-h-0 flex-1 overflow-auto p-4 md:p-6">
+      <div className={cn("relative min-h-0 flex-1 overflow-auto", viewMode !== "web" && "p-4 md:p-6")}>
         {viewMode === "web" ? renderWebView() : renderFramedView()}
       </div>
 

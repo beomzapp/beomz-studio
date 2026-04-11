@@ -59,6 +59,7 @@ export function ProjectPage() {
     id === "new" ? null : id,
   );
   const [projectName, setProjectName] = useState("Untitled project");
+  const [projectIcon, setProjectIcon] = useState<string | null>(null);
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
   const [activeView, setActiveView] = useState<ActiveView>("preview");
 
@@ -251,6 +252,7 @@ export function ProjectPage() {
     setBuild(status.build);
     setProjectId(status.project.id);
     setProjectName(status.project.name);
+    setProjectIcon(status.project.icon ?? null);
     if (status.result) setBuildResult(status.result);
     if (status.trace.previewReady || status.build.status === "completed") {
       setPreviewGenerationId(status.build.id);
@@ -304,6 +306,7 @@ export function ProjectPage() {
           setBuild(response.build);
           setProjectId(response.project.id);
           setProjectName(response.project.name);
+          setProjectIcon(response.project.icon ?? null);
           replayTraceEvents(response.build.id, response.trace.events, response.build.summary ?? "");
 
           if (response.trace.previewReady) {
@@ -389,6 +392,7 @@ export function ProjectPage() {
       activeBuildIdRef.current = status.build.id;
       setBuild(status.build);
       setProjectName(status.project.name);
+      setProjectIcon(status.project.icon ?? null);
       setProjectId(status.project.id);
       if (status.result) setBuildResult(status.result);
       setPreviewGenerationId(
@@ -704,6 +708,7 @@ export function ProjectPage() {
     <div className="flex h-full flex-col bg-[#faf9f6]">
       <TopBar
         projectName={projectName}
+        projectIcon={projectIcon}
         onProjectNameChange={setProjectName}
         onRefreshPreview={handleRefreshPreview}
         userMode={userMode}

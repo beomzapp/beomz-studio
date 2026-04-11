@@ -6,6 +6,7 @@ import type {
   InitialBuildWorkflowInput,
   OrgPlan,
   PlanStep,
+  TemplateId,
 } from "@beomz-studio/contracts";
 import {
   INITIAL_BUILD_WORKFLOW_TYPE,
@@ -29,6 +30,24 @@ import {
   readBuildTraceMetadata,
   startBuildRequestSchema,
 } from "./shared.js";
+
+const TEMPLATE_ICONS: Record<TemplateId, string> = {
+  "marketing-website": "Globe",
+  "saas-dashboard": "BarChart2",
+  "workspace-task": "CheckSquare",
+  "mobile-app": "Smartphone",
+  "social-app": "Users",
+  "ecommerce": "ShoppingCart",
+  "portfolio": "Briefcase",
+  "blog-cms": "BookOpen",
+  "onboarding-flow": "ListChecks",
+  "data-table-app": "Table",
+  "interactive-tool": "Wrench",
+};
+
+function getProjectIcon(templateId: TemplateId): string {
+  return TEMPLATE_ICONS[templateId] ?? "Sparkles";
+}
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown API error.";
@@ -202,6 +221,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       name: projectName,
       status: "queued",
       template: selection.template.id,
+      icon: getProjectIcon(selection.template.id),
     });
   } else {
     projectRow = await orgContext.db.createProject({
@@ -210,6 +230,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       org_id: orgContext.org.id,
       status: "queued",
       template: selection.template.id,
+      icon: getProjectIcon(selection.template.id),
     });
   }
 

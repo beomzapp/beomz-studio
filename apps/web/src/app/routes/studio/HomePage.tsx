@@ -3,6 +3,7 @@
  * Shows project grid, stats cards, empty state.
  * Light mode — uses StudioLayout sidebar (dark) as wrapper.
  */
+import type React from "react";
 import { useEffect, useState } from "react";
 import {
   Plus,
@@ -15,6 +16,17 @@ import {
   Pencil,
   Copy,
   Trash2,
+  BarChart2,
+  BookOpen,
+  Briefcase,
+  CheckSquare,
+  ListChecks,
+  ShoppingCart,
+  Smartphone,
+  Sparkles,
+  Table,
+  Users,
+  Wrench,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../../lib/cn";
@@ -24,9 +36,30 @@ import { useAuth } from "../../../lib/useAuth";
 interface ProjectCard {
   id: string;
   name: string;
+  icon: string | null;
   status: "draft" | "published" | "building";
   updatedAt: string;
   generationCount: number;
+}
+
+const PROJECT_ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  BarChart2,
+  BookOpen,
+  Briefcase,
+  CheckSquare,
+  Globe,
+  ListChecks,
+  Smartphone,
+  ShoppingCart,
+  Sparkles,
+  Table,
+  Users,
+  Wrench,
+};
+
+function ProjectIconBadge({ name, className }: { name: string | null; className?: string }) {
+  const Icon = (name ? PROJECT_ICON_MAP[name] : null) ?? Sparkles;
+  return <Icon size={28} className={className} />;
 }
 
 // Deterministic gradient from project ID
@@ -67,7 +100,7 @@ export function HomePage() {
       try {
         const { data } = await supabase
           .from("projects")
-          .select("id, name, status, updated_at")
+          .select("id, name, status, updated_at, icon")
           .order("updated_at", { ascending: false })
           .limit(20);
 
@@ -76,6 +109,7 @@ export function HomePage() {
             data.map((p) => ({
               id: p.id,
               name: p.name ?? "Untitled",
+              icon: (p.icon as string | null) ?? null,
               status: (p.status ?? "draft") as ProjectCard["status"],
               updatedAt: p.updated_at,
               generationCount: 0,
@@ -182,13 +216,14 @@ export function HomePage() {
                 })
               }
             >
-              {/* Gradient thumbnail */}
+              {/* Gradient thumbnail with icon */}
               <div
                 className={cn(
-                  "relative h-32 bg-gradient-to-br",
+                  "relative flex h-32 items-center justify-center bg-gradient-to-br",
                   projectGradient(project.id),
                 )}
               >
+                <ProjectIconBadge name={project.icon} className="text-white/80" />
                 {/* Status badge */}
                 <span
                   className={cn(

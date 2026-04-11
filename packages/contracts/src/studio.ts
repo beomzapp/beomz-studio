@@ -44,6 +44,7 @@ export interface Project {
   templateId: TemplateId;
   status: ProjectStatus;
   description?: string;
+  icon?: string | null;
   previewEntryPath: string;
   createdAt: string;
   updatedAt: string;

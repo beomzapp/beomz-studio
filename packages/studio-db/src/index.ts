@@ -54,6 +54,7 @@ export interface ProjectRow extends Record<string, unknown> {
   name: string;
   template: TemplateId;
   status: ProjectStatus;
+  icon: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -147,6 +148,7 @@ export interface ProjectInsert extends Record<string, unknown> {
   name: string;
   template: TemplateId;
   status: ProjectStatus;
+  icon?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -156,6 +158,7 @@ export interface ProjectUpdate extends Record<string, unknown> {
   name?: string;
   template?: TemplateId;
   status?: ProjectStatus;
+  icon?: string | null;
   created_at?: string;
   updated_at?: string;
 }

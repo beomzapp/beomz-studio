@@ -230,6 +230,7 @@ export function mapProjectRowToProject(row: ProjectRow): Project {
 
   return {
     createdAt: row.created_at,
+    icon: row.icon ?? null,
     id: row.id,
     name: row.name,
     orgId: row.org_id,
