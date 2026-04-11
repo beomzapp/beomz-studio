@@ -200,7 +200,7 @@ export function ProjectPage() {
       code: "code" in event ? event.code : undefined,
       id: event.id,
       buildId,
-      message: event.message,
+      message: "message" in event ? event.message : undefined,
     });
 
     activeBuildIdRef.current = buildId;
