@@ -194,6 +194,15 @@ export function ProjectPage() {
     const buildId = "buildId" in event ? event.buildId : activeBuildIdRef.current;
     if (!buildId) return;
 
+    // Log every SSE event for debugging
+    console.log("[SSE event]", {
+      type: event.type,
+      code: "code" in event ? event.code : undefined,
+      id: event.id,
+      buildId,
+      message: event.message,
+    });
+
     activeBuildIdRef.current = buildId;
     setLastEventId(event.id);
 
@@ -214,12 +223,21 @@ export function ProjectPage() {
 
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
+      console.log("[SSE preview_ready] fetching build status for", buildId);
       void getBuildStatus(event.buildId)
         .then((status) => {
+          console.log("[SSE preview_ready] getBuildStatus result", {
+            status: status.build.status,
+            hasResult: !!status.result,
+            fileCount: status.result?.files?.length ?? 0,
+          });
           if (status.result) setBuildResult(status.result);
           setPreviewGenerationId(event.buildId);
         })
-        .catch(() => { setPreviewGenerationId(event.buildId); });
+        .catch((err) => {
+          console.error("[SSE preview_ready] getBuildStatus failed", err);
+          setPreviewGenerationId(event.buildId);
+        });
     }
 
     if (event.type === "done" || event.type === "error") {
@@ -233,7 +251,25 @@ export function ProjectPage() {
       if (!lastUserPromptRef.current) {
         lastUserPromptRef.current = projectName || "build this app";
       }
-      if (bid) setPendingSummaryBuildId(bid);
+      if (bid) {
+        setPendingSummaryBuildId(bid);
+        console.log("[SSE done] fetching build status for", bid);
+        void getBuildStatus(bid)
+          .then((status) => {
+            console.log("[SSE done] getBuildStatus result", {
+              status: status.build.status,
+              hasResult: !!status.result,
+              fileCount: status.result?.files?.length ?? 0,
+            });
+            if (status.result) setBuildResult(status.result);
+            if (status.trace.previewReady || status.build.status === "completed") {
+              setPreviewGenerationId(bid);
+            }
+          })
+          .catch((err) => {
+            console.error("[SSE done] getBuildStatus failed — preview will not update", err);
+          });
+      }
 
       setMessages((prev) => {
         const lastUserMsg = [...prev].reverse().find((m) => m.role === "user");
@@ -245,6 +281,10 @@ export function ProjectPage() {
         }
         return prev;
       });
+    }
+
+    if (event.type === "error") {
+      console.error("[SSE error event]", event.message);
     }
   }, [appendTranscriptEntry, projectName, upsertAssistantMessage]);
 

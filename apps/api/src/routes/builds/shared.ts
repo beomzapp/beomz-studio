@@ -242,7 +242,17 @@ export function mapProjectRowToProject(row: ProjectRow): Project {
 }
 
 export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput | null {
-  if (row.status !== "completed") {
+  // Never return anything for terminal-failure states.
+  if (row.status === "failed" || row.status === "cancelled") {
+    return null;
+  }
+
+  // Return files as soon as they exist — even while the build is still
+  // "running" (e.g. right after scaffold_ready writes the template files).
+  // This lets the frontend mount the WebContainer preview immediately without
+  // waiting for the final "done" event.
+  const hasFiles = Array.isArray(row.files) && (row.files as unknown[]).length > 0;
+  if (!hasFiles && row.status !== "completed") {
     return null;
   }
 
