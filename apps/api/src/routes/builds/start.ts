@@ -30,6 +30,7 @@ import {
   readBuildTraceMetadata,
   startBuildRequestSchema,
 } from "./shared.js";
+import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 
 const TEMPLATE_ICONS: Record<TemplateId, string> = {
   "marketing-website": "Globe",
@@ -186,7 +187,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         scores: { [projectRow.template]: 1 },
         template: getTemplateDefinition(projectRow.template),
       }
-    : selectInitialBuildTemplate({ prompt: effectivePrompt });
+    : await slmMatchTemplate({ prompt: effectivePrompt });
   const projectName =
     (isIteration ? projectRow?.name : parsedBody.data.projectName?.trim())
     || (projectRow?.name)
@@ -204,17 +205,30 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   const initialMetadata = {
     builderTrace: initialBuilderTrace,
+    creditsUsed: 0,
     phase: "queued",
     planKeywords: derivePlanKeywords(planSteps),
     planSessionId,
     planSteps: planSteps ? [...planSteps] : undefined,
     planSummary,
     resultSource: undefined,
+    selectedTemplateId: selection.template.id,
     sourcePrompt,
+    templateUsed: selection.template.id,
     templateReason: selection.reason,
     templateScores: selection.scores,
+    userId: orgContext.user.id,
     workflowId,
   } satisfies Record<string, unknown>;
+
+  console.log("Build queued from API.", {
+    buildId,
+    operation,
+    prompt: sourcePrompt,
+    projectId,
+    templateId: selection.template.id,
+    userId: orgContext.user.id,
+  });
 
   if (projectRow) {
     projectRow = await orgContext.db.updateProject(projectId, {
@@ -302,21 +316,46 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     const failureReason = errorMessage.includes("timeout")
       ? "GENERATION_TIMEOUT" as const
       : "ANTHROPIC_ERROR" as const;
+    const completedAt = new Date().toISOString();
 
     await orgContext.db.updateGeneration(buildId, {
-      completed_at: new Date().toISOString(),
+      completed_at: completedAt,
       error: errorMessage,
       metadata: {
         ...initialMetadata,
+        fallbackReason: `workflow_start_failed: ${errorMessage}`,
+        fallbackTriggerReason: "workflow_start_failed",
         failureReason,
         phase: "failed",
         resultSource: "error",
         startError: errorMessage,
+        telemetryFallbackReason: `workflow_start_failed: ${errorMessage}`,
       },
       status: "failed",
     });
     await orgContext.db.updateProject(projectId, {
       status: "draft",
+    });
+    await orgContext.db.upsertBuildTelemetry({
+      id: buildId,
+      project_id: projectId,
+      user_id: orgContext.user.id,
+      prompt: sourcePrompt,
+      template_used: selection.template.id,
+      palette_used: null,
+      files_generated: 0,
+      succeeded: false,
+      fallback_reason: `workflow_start_failed: ${errorMessage}`,
+      error_log: {
+        error: errorMessage,
+        failureReason,
+        phase: "failed",
+      },
+      generation_time_ms: Math.max(0, Date.parse(completedAt) - Date.parse(requestedAt)),
+      credits_used: 0,
+      user_iterated: isIteration,
+      iteration_count: isIteration ? 1 : 0,
+      model_used: null,
     });
 
     return c.json(

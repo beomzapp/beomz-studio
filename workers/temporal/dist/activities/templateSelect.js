@@ -1,4 +1,4 @@
-import { selectInitialBuildTemplate } from "../shared/templateSelection.js";
+import { matchTemplateWithSlm } from "../lib/slmClient.js";
 export async function templateSelect(input) {
-    return selectInitialBuildTemplate(input);
+    return matchTemplateWithSlm({ prompt: input.prompt, plan: input.plan });
 }

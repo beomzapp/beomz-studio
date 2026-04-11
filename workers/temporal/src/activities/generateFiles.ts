@@ -37,6 +37,7 @@ import {
   buildLayoutFingerprint,
   classifyIterationIntent,
 } from "../shared/iterationContext.js";
+import { classifyPaletteWithSlm, keywordPaletteFallback } from "../lib/slmClient.js";
 import type {
   GenerateFilesActivityInput,
   GeneratedBuildDraft,
@@ -1458,7 +1459,19 @@ export async function generateFiles(
   const assistantResponsesByPage: Array<{ pageId: string; text: string }> = [];
   const warnings: string[] = [];
   const streamSequenceRef = { value: 0 };
-  const paletteSelection = selectPalette(input.plan.normalizedPrompt, input.template.id);
+
+  // Resolve palette via SLM sidecar; falls back to keyword heuristics automatically.
+  const slmPaletteResult = await classifyPaletteWithSlm(
+    input.plan.normalizedPrompt,
+    input.template.id,
+  );
+  const paletteSelection: PaletteSelection = slmPaletteResult.confidence > 0
+    ? {
+        colorPalette: getColorPalette(slmPaletteResult.palette as ColorPalette["id"]),
+        reason: `SLM palette classification (confidence ${slmPaletteResult.confidence.toFixed(2)}).`,
+      }
+    : selectPalette(input.plan.normalizedPrompt, input.template.id);
+
   const startedAt = Date.now();
   const startedAtIso = new Date(startedAt).toISOString();
 
