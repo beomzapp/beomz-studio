@@ -13,6 +13,7 @@ import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { AuthModal } from "../../../components/auth/AuthModal";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import { enhancePrompt } from "../../../lib/api";
 
 const SUGGESTIONS = [
   "a SaaS dashboard",
@@ -183,33 +184,10 @@ export function LandingPage() {
     const promptText = el.textContent?.trim();
     if (!promptText) return;
 
-    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-    if (!apiKey) return;
-
     setEnhancing(true);
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 200,
-          system:
-            "You are a prompt enhancer for an AI app/website builder. Take the user's rough idea and rewrite it as a clear, detailed build prompt in 1-2 sentences. Include the type of app, key features, and target user. Keep it concise but specific. Return ONLY the enhanced prompt, no preamble.",
-          messages: [{ role: "user", content: promptText }],
-        }),
-      });
-
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-
-      const data = await res.json();
-      const enhanced = data.content[0].text;
+      const enhanced = await enhancePrompt(promptText);
 
       el.textContent = "";
       updateFontSize();

@@ -240,6 +240,21 @@ export async function getLatestBuildIdForProject(projectId: string): Promise<str
   return response?.build?.id ?? null;
 }
 
+export async function enhancePrompt(prompt: string): Promise<string> {
+  const url = `${getApiBaseUrl()}/enhance`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Enhance failed with ${res.status}.`);
+  }
+  const data = await res.json() as { enhancedPrompt: string };
+  return data.enhancedPrompt;
+}
+
 export async function streamBuildEvents(args: {
   buildId: string;
   lastEventId?: string | null;
