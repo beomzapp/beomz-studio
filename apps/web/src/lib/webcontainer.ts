@@ -104,13 +104,16 @@ const WORKSPACE_INDEX_HTML = `<!doctype html>
 
 const WORKSPACE_MAIN_TSX = `import React from "react";
 import ReactDOM from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 
 import { PreviewApp } from "./preview/App";
 import "./preview/styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <PreviewApp />
+    <MemoryRouter>
+      <PreviewApp />
+    </MemoryRouter>
   </React.StrictMode>,
 );
 `;

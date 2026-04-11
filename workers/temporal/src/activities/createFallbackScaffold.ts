@@ -298,9 +298,9 @@ function buildWorkspacePageBody(
   if (page.kind === "board") {
     return `export default function ${componentName}() {
   const columns = ${serialize([
-    { title: "Backlog", items: ["Refine AI prompt policy", "Confirm preview states"] },
-    { title: "In Progress", items: ["Wire build workflow", "Persist build status"] },
-    { title: "Ready", items: ["Ship fallback scaffold", "Polish route copy"] },
+    { title: "To Do", items: ["Define project scope", "Gather requirements"] },
+    { title: "In Progress", items: ["Build core features", "Design key screens"] },
+    { title: "Done", items: ["Set up project structure", "Create initial wireframes"] },
   ])};
   const projectTitle = ${serialize(projectName)};
 
@@ -372,9 +372,9 @@ function buildWorkspacePageBody(
 
   return `export default function ${componentName}() {
   const tasks = ${serialize([
-    { title: "Review generated landing copy", owner: "Ari", due: "Today" },
-    { title: "Validate preview bootstrap", owner: "Sam", due: "Tomorrow" },
-    { title: "Tune fallback constraints", owner: "Nia", due: "This week" },
+    { title: "Add new item", owner: "Alex", due: "Today" },
+    { title: "Review progress", owner: "Sam", due: "Tomorrow" },
+    { title: "Update settings", owner: "Jordan", due: "This week" },
   ])};
   const projectTitle = ${serialize(projectName)};
 

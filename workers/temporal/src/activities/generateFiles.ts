@@ -640,6 +640,12 @@ function assertGeneratedFileGuardrails(files: readonly StudioFile[]): void {
     return;
   }
 
+  console.error("Generated file guardrails failed.", {
+    errorCount: result.errors.length,
+    errors: result.errors,
+    filePaths: files.map((file) => file.path),
+  });
+
   throw new Error(`Generated file guardrails failed:\n${result.errors.join("\n")}`);
 }
 

@@ -693,10 +693,39 @@ export function buildGeneratedScaffoldFiles(input: {
   ];
 }
 
+function getTemplateAccentHint(template: TemplateDefinition): string {
+  if (template.shell === "website") {
+    return "accent color: orange (#f97316) — use orange for CTAs, highlights, and active states.";
+  }
+  if (template.id === "mobile-app") {
+    return "accent color: blue (#2563eb) — use blue for interactive elements and active states.";
+  }
+  if (template.id === "interactive-tool") {
+    return "accent color: orange (#f97316) — use orange for buttons and active states.";
+  }
+  if (template.id === "ecommerce") {
+    return "accent color: blue (#2563eb) — use blue for buy buttons and product highlights.";
+  }
+  if (template.id === "workspace-task") {
+    return "accent color: blue (#2563eb) — use blue for task status, active nav, and action buttons.";
+  }
+  if (template.id === "saas-dashboard") {
+    return "accent color: blue (#2563eb) — use blue for metrics, charts, and CTAs.";
+  }
+  if (template.id === "blog-cms") {
+    return "accent color: blue (#2563eb) — use blue for links, tags, and active elements.";
+  }
+  if (template.id === "social-app") {
+    return "accent color: blue (#2563eb) — use blue for likes, follows, and interactive UI.";
+  }
+
+  return "accent color: blue (#2563eb) — use blue for interactive elements and active states.";
+}
+
 export function buildScaffoldPromptBlock(template: TemplateDefinition): string {
   return [
     "Shared generated scaffold files already exist and MUST be reused:",
-    `- Theme: @/generated/${template.id}/theme`,
+    `- Theme: @/generated/${template.id}/theme (${getTemplateAccentHint(template)})`,
     `- Navigation: @/generated/${template.id}/navigation`,
     `- Data: @/generated/${template.id}/data`,
     `- Route manifest JSON: @/generated/${template.id}/app.manifest.json`,
@@ -708,5 +737,6 @@ export function buildScaffoldPromptBlock(template: TemplateDefinition): string {
     "If you need className composition, import cn from @/lib/utils instead of redefining helper utilities.",
     "Do not recreate sidebar, topbar, footer navigation, mobile drawer, or bottom tab chrome inside a route file.",
     "Use the shared scaffold for theme, navigation, and repeated UI instead of redefining those patterns in every page.",
+    "Use the accent color specified in the Theme hint above for buttons, active nav items, badges, and highlights — do not hardcode a different accent color.",
   ].join("\n");
 }
