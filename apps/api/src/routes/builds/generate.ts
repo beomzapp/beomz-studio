@@ -713,12 +713,261 @@ function getDesignSystemSpec(designSystemId: string): string {
   return DESIGN_SYSTEM_SPECS[designSystemId] ?? "";
 }
 
+// ─── Palette → theme tokens ───────────────────────────────────────────────────
+// Each palette maps to concrete hex values for the theme.ts file.
+// These are injected into every build so iteration is surgical (only theme.ts
+// needs to change for color requests, not every component file).
+
+interface ThemeTokens {
+  primary: string;
+  primaryHover: string;
+  background: string;
+  surface: string;
+  sidebar: string;
+  border: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  accent: string;
+  accentHover: string;
+  success: string;
+  warning: string;
+  error: string;
+  info: string;
+  borderRadius: string;
+  borderRadiusLg: string;
+}
+
+const DEFAULT_THEME: ThemeTokens = {
+  primary: "#3b82f6",
+  primaryHover: "#2563eb",
+  background: "#f8fafc",
+  surface: "#ffffff",
+  sidebar: "#f1f5f9",
+  border: "#e2e8f0",
+  textPrimary: "#111827",
+  textSecondary: "#6b7280",
+  textMuted: "#9ca3af",
+  accent: "#6366f1",
+  accentHover: "#4f46e5",
+  success: "#10b981",
+  warning: "#f59e0b",
+  error: "#ef4444",
+  info: "#3b82f6",
+  borderRadius: "8px",
+  borderRadiusLg: "12px",
+};
+
+const PALETTE_THEME_TOKENS: Record<string, ThemeTokens> = {
+  "professional-blue": DEFAULT_THEME,
+
+  "crypto-dark": {
+    primary: "#6366f1",        primaryHover: "#4f46e5",
+    background: "#0c0c1a",     surface: "#13131f",
+    sidebar: "#0f0f1a",        border: "#1e1e3a",
+    textPrimary: "#e2e8f0",    textSecondary: "#94a3b8",   textMuted: "#475569",
+    accent: "#a855f7",         accentHover: "#9333ea",
+    success: "#22c55e",        warning: "#f59e0b",         error: "#ef4444",    info: "#6366f1",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "law-navy": {
+    primary: "#1e3a5f",        primaryHover: "#162c4a",
+    background: "#f5f5f0",     surface: "#ffffff",
+    sidebar: "#1e3a5f",        border: "#d1d5db",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#c9a84c",         accentHover: "#b8952e",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "4px",       borderRadiusLg: "8px",
+  },
+  "finance-green": {
+    primary: "#16a34a",        primaryHover: "#15803d",
+    background: "#f7faf8",     surface: "#ffffff",
+    sidebar: "#f0f7f1",        border: "#d1fae5",
+    textPrimary: "#111827",    textSecondary: "#374151",   textMuted: "#9ca3af",
+    accent: "#059669",         accentHover: "#047857",
+    success: "#16a34a",        warning: "#f59e0b",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "medical-blue": {
+    primary: "#0284c7",        primaryHover: "#0369a1",
+    background: "#f0f9ff",     surface: "#ffffff",
+    sidebar: "#e0f2fe",        border: "#bae6fd",
+    textPrimary: "#0c4a6e",    textSecondary: "#075985",   textMuted: "#94a3b8",
+    accent: "#06b6d4",         accentHover: "#0891b2",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#0284c7",
+    borderRadius: "8px",       borderRadiusLg: "16px",
+  },
+  "energy-red": {
+    primary: "#dc2626",        primaryHover: "#b91c1c",
+    background: "#fff5f5",     surface: "#ffffff",
+    sidebar: "#1a1a1a",        border: "#e5e7eb",
+    textPrimary: "#111827",    textSecondary: "#6b7280",   textMuted: "#9ca3af",
+    accent: "#f97316",         accentHover: "#ea580c",
+    success: "#10b981",        warning: "#f59e0b",         error: "#dc2626",    info: "#3b82f6",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "health-teal": {
+    primary: "#0d9488",        primaryHover: "#0f766e",
+    background: "#f0fdfa",     surface: "#ffffff",
+    sidebar: "#f0fdfa",        border: "#ccfbf1",
+    textPrimary: "#134e4a",    textSecondary: "#374151",   textMuted: "#9ca3af",
+    accent: "#14b8a6",         accentHover: "#0d9488",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#06b6d4",
+    borderRadius: "12px",      borderRadiusLg: "16px",
+  },
+  "warm-amber": {
+    primary: "#d97706",        primaryHover: "#b45309",
+    background: "#fffbeb",     surface: "#ffffff",
+    sidebar: "#fef3c7",        border: "#fde68a",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#f59e0b",         accentHover: "#d97706",
+    success: "#10b981",        warning: "#d97706",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "kids-yellow": {
+    primary: "#ca8a04",        primaryHover: "#a16207",
+    background: "#fefce8",     surface: "#ffffff",
+    sidebar: "#fef9c3",        border: "#fde047",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#f97316",         accentHover: "#ea580c",
+    success: "#10b981",        warning: "#ca8a04",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "12px",      borderRadiusLg: "20px",
+  },
+  "midnight-indigo": {
+    primary: "#4f46e5",        primaryHover: "#4338ca",
+    background: "#f5f3ff",     surface: "#ffffff",
+    sidebar: "#f5f3ff",        border: "#e0e7ff",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#7c3aed",         accentHover: "#6d28d9",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#4f46e5",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "retail-coral": {
+    primary: "#e11d48",        primaryHover: "#be123c",
+    background: "#fff1f2",     surface: "#ffffff",
+    sidebar: "#fff1f2",        border: "#fce7f3",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#f97316",         accentHover: "#ea580c",
+    success: "#10b981",        warning: "#f59e0b",         error: "#e11d48",    info: "#3b82f6",
+    borderRadius: "8px",       borderRadiusLg: "16px",
+  },
+  "rose-pink": {
+    primary: "#db2777",        primaryHover: "#be185d",
+    background: "#fdf2f8",     surface: "#ffffff",
+    sidebar: "#fce7f3",        border: "#fbcfe8",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#ec4899",         accentHover: "#db2777",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "12px",      borderRadiusLg: "20px",
+  },
+  "ocean-cyan": {
+    primary: "#0891b2",        primaryHover: "#0e7490",
+    background: "#ecfeff",     surface: "#ffffff",
+    sidebar: "#cffafe",        border: "#a5f3fc",
+    textPrimary: "#111827",    textSecondary: "#164e63",   textMuted: "#9ca3af",
+    accent: "#06b6d4",         accentHover: "#0891b2",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#0891b2",
+    borderRadius: "8px",       borderRadiusLg: "16px",
+  },
+  "nature-emerald": {
+    primary: "#059669",        primaryHover: "#047857",
+    background: "#f0fdf4",     surface: "#ffffff",
+    sidebar: "#dcfce7",        border: "#bbf7d0",
+    textPrimary: "#111827",    textSecondary: "#374151",   textMuted: "#9ca3af",
+    accent: "#16a34a",         accentHover: "#15803d",
+    success: "#059669",        warning: "#f59e0b",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "8px",       borderRadiusLg: "16px",
+  },
+  "gaming-neon": {
+    primary: "#a855f7",        primaryHover: "#9333ea",
+    background: "#050505",     surface: "#111111",
+    sidebar: "#0a0a0a",        border: "#1f1f1f",
+    textPrimary: "#f1f5f9",    textSecondary: "#94a3b8",   textMuted: "#475569",
+    accent: "#22d3ee",         accentHover: "#06b6d4",
+    success: "#22c55e",        warning: "#f59e0b",         error: "#f43f5e",    info: "#a855f7",
+    borderRadius: "4px",       borderRadiusLg: "8px",
+  },
+  "creative-purple": {
+    primary: "#7c3aed",        primaryHover: "#6d28d9",
+    background: "#faf5ff",     surface: "#ffffff",
+    sidebar: "#f5f3ff",        border: "#ede9fe",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#a855f7",         accentHover: "#9333ea",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#7c3aed",
+    borderRadius: "12px",      borderRadiusLg: "16px",
+  },
+  "startup-violet": {
+    primary: "#6d28d9",        primaryHover: "#5b21b6",
+    background: "#f5f3ff",     surface: "#ffffff",
+    sidebar: "#ede9fe",        border: "#ddd6fe",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#8b5cf6",         accentHover: "#7c3aed",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#6d28d9",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "news-charcoal": {
+    primary: "#1f2937",        primaryHover: "#111827",
+    background: "#f9fafb",     surface: "#ffffff",
+    sidebar: "#1f2937",        border: "#e5e7eb",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#ef4444",         accentHover: "#dc2626",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "4px",       borderRadiusLg: "8px",
+  },
+  "slate-neutral": {
+    primary: "#475569",        primaryHover: "#334155",
+    background: "#f8fafc",     surface: "#ffffff",
+    sidebar: "#f1f5f9",        border: "#e2e8f0",
+    textPrimary: "#0f172a",    textSecondary: "#475569",   textMuted: "#94a3b8",
+    accent: "#0ea5e9",         accentHover: "#0284c7",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#0ea5e9",
+    borderRadius: "6px",       borderRadiusLg: "10px",
+  },
+  "warm-orange": {
+    primary: "#ea580c",        primaryHover: "#c2410c",
+    background: "#fff7ed",     surface: "#ffffff",
+    sidebar: "#fff7ed",        border: "#fed7aa",
+    textPrimary: "#111827",    textSecondary: "#4b5563",   textMuted: "#9ca3af",
+    accent: "#f97316",         accentHover: "#ea580c",
+    success: "#10b981",        warning: "#ea580c",         error: "#ef4444",    info: "#3b82f6",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+};
+
+function buildThemeTs(paletteId: string): string {
+  const t = PALETTE_THEME_TOKENS[paletteId] ?? DEFAULT_THEME;
+  return [
+    "export const theme = {",
+    `  primary:        '${t.primary}',`,
+    `  primaryHover:   '${t.primaryHover}',`,
+    `  background:     '${t.background}',`,
+    `  surface:        '${t.surface}',`,
+    `  sidebar:        '${t.sidebar}',`,
+    `  border:         '${t.border}',`,
+    `  textPrimary:    '${t.textPrimary}',`,
+    `  textSecondary:  '${t.textSecondary}',`,
+    `  textMuted:      '${t.textMuted}',`,
+    `  accent:         '${t.accent}',`,
+    `  accentHover:    '${t.accentHover}',`,
+    `  success:        '${t.success}',`,
+    `  warning:        '${t.warning}',`,
+    `  error:          '${t.error}',`,
+    `  info:           '${t.info}',`,
+    `  borderRadius:   '${t.borderRadius}',`,
+    `  borderRadiusLg: '${t.borderRadiusLg}',`,
+    "} as const;",
+    "",
+    "export type Theme = typeof theme;",
+  ].join("\n");
+}
+
 // ─── Shared prompt builders ───────────────────────────────────────────────────
 
 function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
     : "";
+  const themeTsContent = buildThemeTs(paletteId);
   return [
     designBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
@@ -735,7 +984,7 @@ function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string
     "2. THEME:",
     "   light → productivity apps, data/admin tools, business software, management systems, dashboards",
     "   dark  → creative tools, entertainment, gaming, developer tools, crypto, music apps",
-    `   Palette accent: ${paletteId} — use this accent color for buttons, active states, badges, highlights`,
+    `   Palette accent: ${paletteId} — this palette's exact color tokens are in theme.ts (see STEP 4)`,
     "",
     "3. PAGES/SECTIONS — list every distinct section the app needs.",
     "   Asset management system → Assets, Work Orders, Team, Calendar",
@@ -753,7 +1002,7 @@ function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string
     "  App.tsx — root component containing:",
     "    • Sidebar with nav items (lucide-react icons + label), active state highlighting",
     "    • Main content area that renders the active page based on useState",
-    "    • Light theme: bg-white sidebar with border-r, bg-gray-50 main area",
+    "    • Use theme.sidebar for sidebar background, theme.border for the divider",
     "  PageName.tsx — one file per major section (e.g. AssetsPage.tsx, WorkOrdersPage.tsx)",
     "    • Full page content: heading, toolbar (search/filter/add button), data table or card grid",
     "    • Realistic sample data in the file as a typed const array",
@@ -772,7 +1021,11 @@ function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string
     "Code quality rules:",
     "  • All imports at top: import { useState, useEffect, useCallback, useMemo } from 'react'",
     "  • Icons: import { Home, Settings, Users } from 'lucide-react'  (ONLY lucide-react — no other icon lib)",
-    "  • Tailwind CSS for ALL styling — avoid inline style objects",
+    "  • Tailwind CSS for spacing/layout/typography — use theme object for ALL color values",
+    "  • import { theme } from './theme' at the top of every file that uses colors",
+    "  • Use style={{ backgroundColor: theme.surface, color: theme.textPrimary }} for layout sections",
+    "  • Use style={{ backgroundColor: theme.primary, color: '#fff' }} for primary buttons",
+    "  • Use theme.sidebar / theme.border / theme.textSecondary / theme.accent throughout",
     "  • TypeScript interfaces for every data entity",
     "  • Each file has a default export",
     "  • Imports between files: import AssetsPage from './AssetsPage'  (flat directory, no subdirs)",
@@ -791,7 +1044,13 @@ function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string
     "",
     "══ STEP 4: DELIVER ══",
     "Call deliver_customised_files with:",
-    "  files: App.tsx (always) + one file per major page for multi-page apps",
+    "  files[0]: theme.ts — ALWAYS include this exact file first (do not alter the structure, only tweak",
+    "            colors if needed to better match the app's aesthetic):",
+    "",
+    themeTsContent,
+    "",
+    "  files[1]: App.tsx",
+    "  files[2..]: one file per major page for multi-page apps",
     "  summary: one sentence — 'A light-theme asset management system with sidebar navigation covering Assets, Work Orders, Team, and Calendar.'",
   ].join("\n");
 }
@@ -952,12 +1211,18 @@ function buildIterationSystemPrompt(): string {
     "RULES:",
     "1. Return ONLY files that actually need to change. Do NOT return unchanged files.",
     "2. Preserve all existing structure, components, navigation, and logic unless the change requires touching them.",
-    "3. For color/theme changes: update Tailwind color classes (e.g. bg-blue-500 → bg-red-500) and hex/CSS color values.",
-    "4. For feature additions: add the minimal code in the relevant file(s) only.",
-    "5. For text/copy changes: update only the text content, nothing else.",
-    "6. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
-    "7. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
-    "8. Keep all existing functionality that the user did NOT ask to change.",
+    "3. For feature additions: add the minimal code in the relevant file(s) only.",
+    "4. For text/copy changes: update only the text content, nothing else.",
+    "5. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
+    "6. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
+    "7. Keep all existing functionality that the user did NOT ask to change.",
+    "",
+    "COLOR CHANGES (highest priority rule):",
+    "If the user asks to change colors, theme, accent, or visual style — ONLY return theme.ts.",
+    "Update the relevant token values in the theme object (e.g. primary, accent, background, sidebar).",
+    "Do NOT touch App.tsx or any page files — they all import from ./theme so HMR propagates automatically.",
+    "Example: 'change to red' → set primary: '#dc2626', primaryHover: '#b91c1c', accent: '#ef4444'",
+    "Example: 'dark mode' → set background: '#0f172a', surface: '#1e293b', sidebar: '#0f172a', textPrimary: '#f1f5f9'",
     "",
     "ADDING NEW PAGES OR COMPONENTS:",
     "When the user asks to add a new page or feature that requires a new file:",
@@ -967,12 +1232,13 @@ function buildIterationSystemPrompt(): string {
     "  c. Use flat import paths: import AssetDetailPage from './AssetDetailPage' (NOT './components/AssetDetailPage').",
     "  d. The new page file must have a default export.",
     "  e. Fill it with realistic sample data and working interactions — no placeholder content.",
+    "  f. Import { theme } from './theme' in the new file and use theme tokens for all colors.",
     "",
     "FILE NAMING:",
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
     "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Added AssetDetailPage with analytics dashboard and updated App.tsx navigation.'",
+    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'",
   ].join("\n");
 }
 
