@@ -1017,9 +1017,12 @@ function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
     : "";
   const themeTsContent = buildThemeTs(paletteId);
+  const variationSeed = Math.floor(Math.random() * 9000) + 1000;
   return [
     designBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
+    "",
+    `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
     "",
     "══ STEP 1: ANALYSE THE PROMPT ══",
     "Identify these four things before writing any code:",

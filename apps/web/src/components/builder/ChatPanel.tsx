@@ -597,15 +597,24 @@ export function ChatPanel({
                 </div>
                 <div className="min-w-0 flex-1 pt-0.5">
                   {displayStreamingText ? (
-                    <div className="text-sm leading-relaxed text-[#374151]">
-                      <MarkdownText text={displayStreamingText} />
-                      <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
-                    </div>
+                    displayStreamingText.endsWith("\u2026") || displayStreamingText.endsWith("...") ? (
+                      /* Step message — orange animated dot + text */
+                      <div className="flex items-center gap-2 py-0.5">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[#F97316] animate-pulse" />
+                        <span className="text-sm text-[#6b7280]">{displayStreamingText}</span>
+                      </div>
+                    ) : (
+                      /* Content text — normal rendering */
+                      <div className="text-sm leading-relaxed text-[#374151]">
+                        <MarkdownText text={displayStreamingText} />
+                        <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
+                      </div>
+                    )
                   ) : (
                     <div className="flex items-center gap-1.5 py-1">
                       <div className="flex gap-1">
                         {[0, 1, 2].map((i) => (
-                          <span key={i} className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                          <span key={i} className="h-1.5 w-1.5 rounded-full bg-[#F97316] animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                         ))}
                       </div>
                       <span className="text-xs text-[#9ca3af] ml-1">Thinking…</span>

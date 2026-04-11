@@ -166,6 +166,29 @@ export function ProjectPage() {
     setProjectId(id === "new" ? null : id);
   }, [id]);
 
+  // ── Chat message persistence via localStorage ────────────────────────────
+  // Restore messages when projectId is set (page load / navigation)
+  useEffect(() => {
+    if (!projectId) return;
+    try {
+      const stored = localStorage.getItem(`beomz.chat.${projectId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as ChatMessage[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      }
+    } catch { /* localStorage unavailable or corrupt */ }
+  }, [projectId]);
+
+  // Save messages whenever they change
+  useEffect(() => {
+    if (!projectId || messages.length === 0) return;
+    try {
+      localStorage.setItem(`beomz.chat.${projectId}`, JSON.stringify(messages));
+    } catch { /* localStorage full or unavailable */ }
+  }, [projectId, messages]);
+
   useEffect(() => {
     if (!projectId) return;
     saveState({
@@ -359,9 +382,16 @@ export function ProjectPage() {
             if (status.trace.previewReady || status.build.status === "completed") {
               setPreviewGenerationId(bid);
             }
-            // Completion card: summary + file list
-            const summary = event.message || status.build.summary || "Build complete.";
+            // Completion summary: natural prose
             const filePaths = (status.result?.files ?? []).map((f) => f.path);
+            const pageFiles = filePaths.filter((p) => /Page\.tsx$|Screen\.tsx$/i.test(p));
+            const pageNames = pageFiles.map((p) => {
+              const name = p.replace(/^.*\//, "").replace(/(Page|Screen)\.tsx$/i, "");
+              return name.replace(/([a-z])([A-Z])/g, "$1 $2");
+            });
+            const modelLabel = AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.label ?? "AI";
+            const pagesLine = pageNames.length > 0 ? "\n\n" + pageNames.map((n) => `**${n}**`).join(" · ") : "";
+            const summary = `**${projectName}** is ready.${pagesLine}\n\nBuilt with ${modelLabel} · ${filePaths.length} files`;
             setMessages((prev) => [
               ...prev,
               {
@@ -516,7 +546,16 @@ export function ProjectPage() {
     lastUserPromptRef.current = text;
     summaryAbortRef.current?.abort();
     abortRef.current?.abort();
-    setMessages((prev) => [...prev, userMessage]);
+
+    // Build a natural intro message
+    const nameForIntro = extractProjectName(text) || "your app";
+    const introMessage: ChatMessage = {
+      id: `assistant-intro-${Date.now()}`,
+      role: "assistant",
+      content: `I'm building **${nameForIntro}** for you. Let me analyse the requirements and start generating the code.`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage, introMessage]);
 
     void startBuildSession(text).catch((error) => {
       if (abortRef.current?.signal.aborted) return;
