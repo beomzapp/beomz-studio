@@ -221,7 +221,6 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       name: projectName,
       status: "queued",
       template: selection.template.id,
-      icon: getProjectIcon(selection.template.id),
     });
   } else {
     projectRow = await orgContext.db.createProject({
@@ -230,12 +229,18 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       org_id: orgContext.org.id,
       status: "queued",
       template: selection.template.id,
-      icon: getProjectIcon(selection.template.id),
     });
   }
 
   if (!projectRow) {
     return c.json({ error: "Project not found." }, 404);
+  }
+
+  // Best-effort: set icon after create/update (column may not exist yet pending migration).
+  const iconValue = getProjectIcon(selection.template.id);
+  await orgContext.db.updateProject(projectId, { icon: iconValue }).catch(() => undefined);
+  if (projectRow && !projectRow.icon) {
+    projectRow = { ...projectRow, icon: iconValue };
   }
 
   const generationRow = await orgContext.db.createGeneration({
