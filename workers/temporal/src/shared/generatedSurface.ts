@@ -1,4 +1,5 @@
 import type {
+  ColorPalette,
   GeneratedAppManifest,
   Project,
   StudioFile,
@@ -6,6 +7,7 @@ import type {
   TemplatePage,
 } from "@beomz-studio/contracts";
 import {
+  DEFAULT_COLOR_PALETTE,
   buildGeneratedAppShellPath,
   buildGeneratedDataFilePath,
   buildGeneratedManifest,
@@ -18,6 +20,10 @@ import {
 
 function serialize(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function withHexAlpha(hex: string, alpha: string): string {
+  return `${hex}${alpha}`;
 }
 
 function iconForPage(page: TemplatePage): string {
@@ -69,47 +75,24 @@ function iconForPage(page: TemplatePage): string {
   }
 }
 
-function buildThemeFile(template: TemplateDefinition): string {
-  const shellPalette =
-    template.shell === "website"
-      ? {
-          accent: "#f97316",
-          accentSoft: "bg-orange-500/10 text-orange-200",
-          background: "bg-zinc-950",
-          border: "border-white/10",
-          card: "bg-white/[0.04]",
-          input: "border border-white/10 bg-black/30 text-white placeholder:text-zinc-500",
-          muted: "text-zinc-400",
-          panel: "bg-zinc-900",
-          surfaceText: "text-white",
-        }
-      : template.id === "mobile-app"
-        ? {
-            accent: "#2563eb",
-            accentSoft: "bg-blue-500/10 text-blue-700",
-            background: "bg-slate-100",
-            border: "border-slate-200",
-            card: "bg-white",
-            input: "border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400",
-            muted: "text-slate-500",
-            panel: "bg-white",
-            surfaceText: "text-slate-900",
-          }
-        : {
-            accent: "#2563eb",
-            accentSoft: "bg-blue-500/10 text-blue-700",
-            background: "bg-slate-100",
-            border: "border-slate-200",
-            card: "bg-white",
-            input: "border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400",
-            muted: "text-slate-500",
-            panel: "bg-white",
-            surfaceText: "text-slate-900",
-          };
+function buildThemeFile(template: TemplateDefinition, colorPalette: ColorPalette): string {
+  const shellPalette = {
+    accent: colorPalette.accent,
+    accentSoft: `bg-[${withHexAlpha(colorPalette.accent, "1A")}] text-[${colorPalette.accent}]`,
+    background: `bg-[${colorPalette.background}]`,
+    border: `border-[${withHexAlpha(colorPalette.accent, "26")}]`,
+    card: "bg-white/[0.06]",
+    input: `border border-[${withHexAlpha(colorPalette.accent, "26")}] bg-black/20 text-white placeholder:text-white/40`,
+    muted: "text-white/70",
+    panel: "bg-white/[0.05]",
+    surfaceText: "text-white",
+  };
 
   return `export const generatedTheme = {
   colors: {
+    primary: ${serialize(colorPalette.primary)},
     accent: ${serialize(shellPalette.accent)},
+    background: ${serialize(colorPalette.background)},
   },
   classes: {
     accentSoft: ${serialize(shellPalette.accentSoft)},
@@ -121,6 +104,11 @@ function buildThemeFile(template: TemplateDefinition): string {
     panel: ${serialize(shellPalette.panel)},
     surfaceText: ${serialize(shellPalette.surfaceText)},
   },
+  palette: ${serialize({
+    bestFor: colorPalette.bestFor,
+    id: colorPalette.id,
+    label: colorPalette.label,
+  })},
   shell: ${serialize(template.shell)},
   templateId: ${serialize(template.id)},
 } as const;
@@ -234,7 +222,9 @@ export type GeneratedData = typeof generatedData;
 `;
 }
 
-function buildPrimaryButtonFile(template: TemplateDefinition): string {
+function buildPrimaryButtonFile(template: TemplateDefinition, colorPalette: ColorPalette): string {
+  const shadowColor = withHexAlpha(colorPalette.primary, "33");
+
   if (template.id === "interactive-tool") {
     return `import type { ReactNode } from "react";
 
@@ -255,7 +245,8 @@ function PrimaryButton({
     <button
       type={type}
       onClick={onClick}
-      className={\`inline-flex items-center justify-center rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-orange-600 \${className}\`}
+      style={{ backgroundColor: "${colorPalette.primary}", boxShadow: "0 18px 40px ${shadowColor}", color: "#FFFFFF" }}
+      className={\`inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition hover:opacity-90 \${className}\`}
     >
       {children}
     </button>
@@ -286,7 +277,8 @@ function PrimaryButton({
     <button
       type={type}
       onClick={onClick}
-      className={\`inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-medium shadow-sm transition hover:opacity-90 \${className}\`}
+      style={{ backgroundColor: "${colorPalette.primary}", boxShadow: "0 18px 40px ${shadowColor}", color: "#FFFFFF" }}
+      className={\`inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-medium transition hover:opacity-90 \${className}\`}
     >
       {children}
     </button>
@@ -298,7 +290,10 @@ export { PrimaryButton };
 `;
 }
 
-function buildSurfaceCardFile(template: TemplateDefinition): string {
+function buildSurfaceCardFile(template: TemplateDefinition, colorPalette: ColorPalette): string {
+  const borderColor = withHexAlpha(colorPalette.accent, "33");
+  const cardBackground = withHexAlpha("#FFFFFF", template.id === "interactive-tool" ? "08" : "06");
+
   if (template.id === "interactive-tool") {
     return `import type { ReactNode } from "react";
 
@@ -311,9 +306,12 @@ interface SurfaceCardProps {
 
 function SurfaceCard({ children, className = "", title, eyebrow }: SurfaceCardProps) {
   return (
-    <section className={\`rounded-xl border border-gray-700 bg-gray-900 p-6 \${className}\`}>
+    <section
+      style={{ backgroundColor: "${cardBackground}", borderColor: "${borderColor}" }}
+      className={\`rounded-xl border p-6 text-white shadow-[0_24px_60px_rgba(15,23,42,0.24)] \${className}\`}
+    >
       {eyebrow ? (
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: "${colorPalette.accent}" }}>
           {eyebrow}
         </div>
       ) : null}
@@ -339,9 +337,12 @@ interface SurfaceCardProps {
 
 function SurfaceCard({ children, className = "", title, eyebrow }: SurfaceCardProps) {
   return (
-    <section className={\`rounded-3xl border border-inherit bg-inherit p-5 shadow-sm \${className}\`}>
+    <section
+      style={{ backgroundColor: "${cardBackground}", borderColor: "${borderColor}" }}
+      className={\`rounded-3xl border p-5 text-white shadow-[0_24px_60px_rgba(15,23,42,0.18)] \${className}\`}
+    >
       {eyebrow ? (
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-inherit/60">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em]" style={{ color: "${colorPalette.accent}" }}>
           {eyebrow}
         </div>
       ) : null}
@@ -366,13 +367,20 @@ export function cn(...inputs: ClassValue[]) {
 `;
 }
 
-function buildAppShellFile(template: TemplateDefinition, projectName: string): string {
+function buildAppShellFile(template: TemplateDefinition, projectName: string, colorPalette: ColorPalette): string {
+  const borderColor = withHexAlpha(colorPalette.accent, "26");
+  const borderStrongColor = withHexAlpha(colorPalette.accent, "33");
+  const activeBackground = withHexAlpha(colorPalette.primary, "22");
+  const panelBackground = withHexAlpha("#FFFFFF", "06");
+  const panelBackgroundStrong = withHexAlpha("#FFFFFF", "08");
+  const mutedText = withHexAlpha("#FFFFFF", "B3");
+  const subtleText = withHexAlpha("#FFFFFF", "80");
+
   if (template.id === "mobile-app") {
     return `import { useMemo, type ReactNode } from "react";
 import { Bell, Menu, X } from "lucide-react";
 
 import { generatedNavigation } from "@/generated/${template.id}/navigation";
-import { generatedTheme } from "@/generated/${template.id}/theme";
 
 interface AppShellProps {
   children: ReactNode;
@@ -385,28 +393,43 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const bottomNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav).slice(0, 5), []);
 
   return (
-    <div className="mx-auto min-h-screen max-w-[390px] bg-slate-100 px-3 py-4">
-      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.16)]">
-        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-4">
-          <button className="rounded-full border border-slate-200 p-2 text-slate-600" aria-label="Open menu">
+    <div className="mx-auto min-h-screen max-w-[390px] px-3 py-4 text-white" style={{ backgroundColor: "${colorPalette.background}" }}>
+      <div
+        style={{ backgroundColor: "${panelBackgroundStrong}", borderColor: "${borderColor}" }}
+        className="overflow-hidden rounded-[32px] border shadow-[0_30px_80px_rgba(15,23,42,0.32)]"
+      >
+        <header className="flex items-center justify-between border-b px-4 py-4" style={{ borderColor: "${borderColor}" }}>
+          <button
+            className="rounded-full border p-2"
+            style={{ backgroundColor: "${panelBackground}", borderColor: "${borderColor}", color: "${mutedText}" }}
+            aria-label="Open menu"
+          >
             <Menu className="h-4 w-4" />
           </button>
           <div className="text-center">
-            <div className="text-sm font-semibold text-slate-900">{title}</div>
-            {subtitle ? <div className="text-xs text-slate-500">{subtitle}</div> : null}
+            <div className="text-sm font-semibold text-white">{title}</div>
+            {subtitle ? <div className="text-xs" style={{ color: "${subtleText}" }}>{subtitle}</div> : null}
           </div>
-          <button className="rounded-full border border-slate-200 p-2 text-slate-600" aria-label="Notifications">
+          <button
+            className="rounded-full border p-2"
+            style={{ backgroundColor: "${panelBackground}", borderColor: "${borderColor}", color: "${mutedText}" }}
+            aria-label="Notifications"
+          >
             <Bell className="h-4 w-4" />
           </button>
         </header>
 
-        <main className="min-h-[640px] bg-slate-50 px-4 py-5">{children}</main>
+        <main className="min-h-[640px] px-4 py-5" style={{ backgroundColor: "${withHexAlpha(colorPalette.background, "D9")}" }}>{children}</main>
 
-        <nav className="grid grid-cols-3 border-t border-slate-200 bg-white px-2 py-2">
+        <nav className="grid grid-cols-3 border-t px-2 py-2" style={{ backgroundColor: "${panelBackgroundStrong}", borderColor: "${borderColor}" }}>
           {bottomNav.map((item) => {
             const isActive = item.href === currentPath;
             return (
-              <button key={item.id} className={\`rounded-2xl px-2 py-2 text-xs font-medium \${isActive ? "bg-blue-50 text-blue-700" : "text-slate-500"}\`}>
+              <button
+                key={item.id}
+                style={isActive ? { backgroundColor: "${activeBackground}", color: "${colorPalette.accent}" } : { color: "${mutedText}" }}
+                className="rounded-2xl px-2 py-2 text-xs font-medium"
+              >
                 {item.label}
               </button>
             );
@@ -438,8 +461,8 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const primaryNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav), []);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-900">
+    <div className="min-h-screen text-white" style={{ backgroundColor: "${colorPalette.background}" }}>
+      <header className="sticky top-0 z-40 border-b" style={{ backgroundColor: "${withHexAlpha(colorPalette.background, "ED")}", borderColor: "${borderColor}" }}>
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
           <div className="text-base font-semibold">${projectName}</div>
           <nav className="flex items-center gap-1">
@@ -447,7 +470,8 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
               <a
                 key={item.id}
                 href={item.href}
-                className={\`rounded-lg px-3 py-1.5 text-sm font-medium no-underline transition-colors \${item.href === currentPath ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white"}\`}
+                style={item.href === currentPath ? { backgroundColor: "${activeBackground}", color: "${colorPalette.accent}" } : { color: "${mutedText}" }}
+                className="rounded-lg px-3 py-1.5 text-sm font-medium no-underline transition hover:opacity-90"
               >
                 {item.label}
               </a>
@@ -456,7 +480,7 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
         </div>
       </header>
       <main className="mx-auto max-w-4xl px-6 py-8">
-        {subtitle ? <p className="mb-6 text-sm text-gray-400">{subtitle}</p> : null}
+        {subtitle ? <p className="mb-6 text-sm" style={{ color: "${subtleText}" }}>{subtitle}</p> : null}
         {children}
       </main>
     </div>
@@ -473,7 +497,6 @@ export { AppShell };
 import { Menu, X } from "lucide-react";
 
 import { generatedNavigation } from "@/generated/${template.id}/navigation";
-import { generatedTheme } from "@/generated/${template.id}/theme";
 import { PrimaryButton } from "@/components/generated/${template.id}/ui/PrimaryButton";
 
 interface AppShellProps {
@@ -488,29 +511,34 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const primaryNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav), []);
 
   return (
-    <div className={\`min-h-screen \${generatedTheme.classes.background} \${generatedTheme.classes.surfaceText}\`}>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-zinc-950/85 backdrop-blur">
+    <div className="min-h-screen text-white" style={{ backgroundColor: "${colorPalette.background}" }}>
+      <header className="sticky top-0 z-40 border-b backdrop-blur" style={{ backgroundColor: "${withHexAlpha(colorPalette.background, "D9")}", borderColor: "${borderColor}" }}>
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div>
             <div className="text-lg font-semibold">${projectName}</div>
           </div>
           <nav className="hidden items-center gap-6 md:flex">
             {primaryNav.map((item) => (
-              <a key={item.id} href={item.href} className={\`text-sm no-underline \${item.href === currentPath ? "text-white" : "text-zinc-400 hover:text-white"}\`}>
+              <a
+                key={item.id}
+                href={item.href}
+                style={item.href === currentPath ? { color: "${colorPalette.accent}" } : { color: "${mutedText}" }}
+                className="text-sm no-underline transition hover:opacity-90"
+              >
                 {item.label}
               </a>
             ))}
-            <PrimaryButton className="bg-orange-500 text-black">Start Free Trial</PrimaryButton>
+            <PrimaryButton>Start Free Trial</PrimaryButton>
           </nav>
-          <button className="rounded-full border border-white/10 p-2 md:hidden" onClick={() => setOpen((value) => !value)}>
+          <button className="rounded-full border p-2 md:hidden" style={{ borderColor: "${borderColor}", backgroundColor: "${panelBackground}" }} onClick={() => setOpen((value) => !value)}>
             {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
         </div>
         {open ? (
-          <div className="border-t border-white/10 px-6 py-4 md:hidden">
+          <div className="border-t px-6 py-4 md:hidden" style={{ borderColor: "${borderColor}" }}>
             <div className="space-y-3">
               {primaryNav.map((item) => (
-                <div key={item.id} className="text-sm text-zinc-200">{item.label}</div>
+                <div key={item.id} className="text-sm" style={{ color: "${mutedText}" }}>{item.label}</div>
               ))}
             </div>
           </div>
@@ -533,7 +561,6 @@ export { AppShell };
 import { Bell, Menu, Search, X } from "lucide-react";
 
 import { generatedNavigation } from "@/generated/${template.id}/navigation";
-import { generatedTheme } from "@/generated/${template.id}/theme";
 
 interface AppShellProps {
   children: ReactNode;
@@ -547,60 +574,64 @@ function AppShell({ children, currentPath, title, subtitle }: AppShellProps) {
   const primaryNav = useMemo(() => generatedNavigation.filter((item) => item.inPrimaryNav), []);
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen text-white" style={{ backgroundColor: "${colorPalette.background}" }}>
       <div className="flex min-h-screen">
-        <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white px-4 py-5 lg:flex">
+        <aside className="hidden w-64 flex-col border-r px-4 py-5 lg:flex" style={{ borderColor: "${borderColor}", backgroundColor: "${panelBackgroundStrong}" }}>
           <div>
-            <div className="mt-2 text-2xl font-semibold text-slate-900">${projectName}</div>
+            <div className="mt-2 text-2xl font-semibold text-white">${projectName}</div>
           </div>
           <nav className="mt-8 space-y-2">
             {primaryNav.map((item) => {
               const isActive = item.href === currentPath;
               return (
-                <div key={item.id} className={\`rounded-2xl px-3 py-2.5 text-sm font-medium \${isActive ? "bg-blue-50 text-blue-700" : "text-slate-600"}\`}>
+                <div
+                  key={item.id}
+                  style={isActive ? { backgroundColor: "${activeBackground}", color: "${colorPalette.accent}" } : { color: "${mutedText}" }}
+                  className="rounded-2xl px-3 py-2.5 text-sm font-medium"
+                >
                   {item.label}
                 </div>
               );
             })}
           </nav>
-          <div className="mt-auto rounded-3xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-sm font-semibold text-slate-900">Sarah Chen</div>
-            <div className="text-xs text-slate-500">Team Lead</div>
+          <div className="mt-auto rounded-3xl border p-4" style={{ borderColor: "${borderStrongColor}", backgroundColor: "${panelBackground}" }}>
+            <div className="text-sm font-semibold text-white">Sarah Chen</div>
+            <div className="text-xs" style={{ color: "${subtleText}" }}>Team Lead</div>
           </div>
         </aside>
 
         <div className="flex min-h-screen flex-1 flex-col">
-          <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+          <header className="sticky top-0 z-30 border-b backdrop-blur" style={{ borderColor: "${borderColor}", backgroundColor: "${withHexAlpha(colorPalette.background, "E6")}" }}>
             <div className="flex items-center gap-3 px-4 py-4 lg:px-6">
-              <button className="rounded-2xl border border-slate-200 p-2 text-slate-600 lg:hidden" onClick={() => setOpen(true)}>
+              <button className="rounded-2xl border p-2 lg:hidden" style={{ borderColor: "${borderColor}", color: "${mutedText}" }} onClick={() => setOpen(true)}>
                 <Menu className="h-4 w-4" />
               </button>
               <div className="min-w-0 flex-1">
-                <div className="text-lg font-semibold text-slate-900">{title}</div>
-                {subtitle ? <div className="text-sm text-slate-500">{subtitle}</div> : null}
+                <div className="text-lg font-semibold text-white">{title}</div>
+                {subtitle ? <div className="text-sm" style={{ color: "${subtleText}" }}>{subtitle}</div> : null}
               </div>
-              <div className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 md:flex">
-                <Search className="h-4 w-4 text-slate-400" />
-                <span className="text-sm text-slate-400">Search</span>
+              <div className="hidden items-center gap-2 rounded-2xl border px-3 py-2 md:flex" style={{ borderColor: "${borderColor}", backgroundColor: "${panelBackground}" }}>
+                <Search className="h-4 w-4" style={{ color: "${subtleText}" }} />
+                <span className="text-sm" style={{ color: "${subtleText}" }}>Search</span>
               </div>
-              <button className="rounded-2xl border border-slate-200 p-2 text-slate-600">
+              <button className="rounded-2xl border p-2" style={{ borderColor: "${borderColor}", color: "${mutedText}" }}>
                 <Bell className="h-4 w-4" />
               </button>
             </div>
           </header>
 
           {open ? (
-            <div className="fixed inset-0 z-40 bg-slate-950/40 lg:hidden" onClick={() => setOpen(false)}>
-              <div className="h-full w-72 bg-white px-4 py-5" onClick={(event) => event.stopPropagation()}>
+            <div className="fixed inset-0 z-40 bg-slate-950/60 lg:hidden" onClick={() => setOpen(false)}>
+              <div className="h-full w-72 px-4 py-5" style={{ backgroundColor: "${withHexAlpha(colorPalette.background, "FA")}" }} onClick={(event) => event.stopPropagation()}>
                 <div className="flex items-center justify-between">
-                  <div className="text-lg font-semibold text-slate-900">${projectName}</div>
-                  <button className="rounded-2xl border border-slate-200 p-2 text-slate-600" onClick={() => setOpen(false)}>
+                  <div className="text-lg font-semibold text-white">${projectName}</div>
+                  <button className="rounded-2xl border p-2" style={{ borderColor: "${borderColor}", color: "${mutedText}" }} onClick={() => setOpen(false)}>
                     <X className="h-4 w-4" />
                   </button>
                 </div>
                 <div className="mt-6 space-y-2">
                   {primaryNav.map((item) => (
-                    <div key={item.id} className="rounded-2xl px-3 py-2.5 text-sm text-slate-700">{item.label}</div>
+                    <div key={item.id} className="rounded-2xl px-3 py-2.5 text-sm" style={{ color: "${mutedText}" }}>{item.label}</div>
                   ))}
                 </div>
               </div>
@@ -622,7 +653,9 @@ export { AppShell };
 export function buildGeneratedScaffoldFiles(input: {
   project: Pick<Project, "name">;
   template: TemplateDefinition;
+  colorPalette?: ColorPalette;
 }): readonly StudioFile[] {
+  const colorPalette = input.colorPalette ?? DEFAULT_COLOR_PALETTE;
   const manifest = buildGeneratedManifest(input.template);
 
   return [
@@ -635,7 +668,7 @@ export function buildGeneratedScaffoldFiles(input: {
       source: "platform",
     },
     {
-      content: buildThemeFile(input.template).trim(),
+      content: buildThemeFile(input.template, colorPalette).trim(),
       kind: "config",
       language: "ts",
       locked: false,
@@ -667,7 +700,7 @@ export function buildGeneratedScaffoldFiles(input: {
       source: "platform",
     },
     {
-      content: buildAppShellFile(input.template, input.project.name).trim(),
+      content: buildAppShellFile(input.template, input.project.name, colorPalette).trim(),
       kind: "layout",
       language: "tsx",
       locked: false,
@@ -675,7 +708,7 @@ export function buildGeneratedScaffoldFiles(input: {
       source: "platform",
     },
     {
-      content: buildPrimaryButtonFile(input.template).trim(),
+      content: buildPrimaryButtonFile(input.template, colorPalette).trim(),
       kind: "component",
       language: "tsx",
       locked: false,
@@ -683,7 +716,7 @@ export function buildGeneratedScaffoldFiles(input: {
       source: "platform",
     },
     {
-      content: buildSurfaceCardFile(input.template).trim(),
+      content: buildSurfaceCardFile(input.template, colorPalette).trim(),
       kind: "component",
       language: "tsx",
       locked: false,
@@ -693,39 +726,17 @@ export function buildGeneratedScaffoldFiles(input: {
   ];
 }
 
-function getTemplateAccentHint(template: TemplateDefinition): string {
-  if (template.shell === "website") {
-    return "accent color: orange (#f97316) — use orange for CTAs, highlights, and active states.";
-  }
-  if (template.id === "mobile-app") {
-    return "accent color: blue (#2563eb) — use blue for interactive elements and active states.";
-  }
-  if (template.id === "interactive-tool") {
-    return "accent color: orange (#f97316) — use orange for buttons and active states.";
-  }
-  if (template.id === "ecommerce") {
-    return "accent color: blue (#2563eb) — use blue for buy buttons and product highlights.";
-  }
-  if (template.id === "workspace-task") {
-    return "accent color: blue (#2563eb) — use blue for task status, active nav, and action buttons.";
-  }
-  if (template.id === "saas-dashboard") {
-    return "accent color: blue (#2563eb) — use blue for metrics, charts, and CTAs.";
-  }
-  if (template.id === "blog-cms") {
-    return "accent color: blue (#2563eb) — use blue for links, tags, and active elements.";
-  }
-  if (template.id === "social-app") {
-    return "accent color: blue (#2563eb) — use blue for likes, follows, and interactive UI.";
-  }
-
-  return "accent color: blue (#2563eb) — use blue for interactive elements and active states.";
+function buildPaletteHint(colorPalette: ColorPalette): string {
+  return `selected palette: ${colorPalette.id} (${colorPalette.label}) — primary ${colorPalette.primary}, accent ${colorPalette.accent}, background ${colorPalette.background}; best for ${colorPalette.bestFor}.`;
 }
 
-export function buildScaffoldPromptBlock(template: TemplateDefinition): string {
+export function buildScaffoldPromptBlock(
+  template: TemplateDefinition,
+  colorPalette: ColorPalette = DEFAULT_COLOR_PALETTE,
+): string {
   return [
     "Shared generated scaffold files already exist and MUST be reused:",
-    `- Theme: @/generated/${template.id}/theme (${getTemplateAccentHint(template)})`,
+    `- Theme: @/generated/${template.id}/theme (${buildPaletteHint(colorPalette)})`,
     `- Navigation: @/generated/${template.id}/navigation`,
     `- Data: @/generated/${template.id}/data`,
     `- Route manifest JSON: @/generated/${template.id}/app.manifest.json`,
@@ -737,6 +748,7 @@ export function buildScaffoldPromptBlock(template: TemplateDefinition): string {
     "If you need className composition, import cn from @/lib/utils instead of redefining helper utilities.",
     "Do not recreate sidebar, topbar, footer navigation, mobile drawer, or bottom tab chrome inside a route file.",
     "Use the shared scaffold for theme, navigation, and repeated UI instead of redefining those patterns in every page.",
+    `Use the selected palette throughout the route: primary ${colorPalette.primary}, accent ${colorPalette.accent}, background ${colorPalette.background}.`,
     "Use the accent color specified in the Theme hint above for buttons, active nav items, badges, and highlights — do not hardcode a different accent color.",
   ].join("\n");
 }

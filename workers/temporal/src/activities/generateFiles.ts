@@ -9,10 +9,13 @@ import {
 } from "@beomz-studio/prompt-policies";
 import {
   createEmptyBuilderV3TraceMetadata,
+  getColorPalette,
   normalizeGeneratedPath,
   type BuilderV3TraceMetadata,
+  type ColorPalette,
   type StudioFile,
   type TemplatePage,
+  type TemplateId,
 } from "@beomz-studio/contracts";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import {
@@ -60,6 +63,11 @@ interface ClassifiedGenerationError {
 interface StreamedAnthropicMessageResult {
   text: string;
   streamError?: ClassifiedGenerationError;
+}
+
+interface PaletteSelection {
+  colorPalette: ColorPalette;
+  reason: string;
 }
 
 // ─── Updated stream event types (covers text + tool_use) ─────────────────────
@@ -188,11 +196,197 @@ function buildTemplatePageContext(input: GenerateFilesActivityInput): string {
   );
 }
 
+function buildPalettePromptContext(selection: PaletteSelection): string {
+  return JSON.stringify(
+    {
+      accent: selection.colorPalette.accent,
+      background: selection.colorPalette.background,
+      bestFor: selection.colorPalette.bestFor,
+      label: selection.colorPalette.label,
+      palette: selection.colorPalette.id,
+      primary: selection.colorPalette.primary,
+      reason: selection.reason,
+    },
+    null,
+    2,
+  );
+}
+
+function selectPalette(prompt: string, templateId: TemplateId): PaletteSelection {
+  const normalized = prompt.toLowerCase();
+
+  const keywordRules: Array<{
+    paletteId: ColorPalette["id"];
+    reason: string;
+    keywords: readonly string[];
+  }> = [
+    {
+      paletteId: "crypto-dark",
+      reason: "crypto/web3 context",
+      keywords: ["crypto", "web3", "blockchain", "token", "defi", "wallet", "nft"],
+    },
+    {
+      paletteId: "law-navy",
+      reason: "formal legal/finance context",
+      keywords: ["law", "legal", "attorney", "lawyer", "compliance", "firm"],
+    },
+    {
+      paletteId: "finance-green",
+      reason: "finance or budgeting context",
+      keywords: ["finance", "money", "budget", "expense", "bookkeeping", "invoice", "accounting", "tax"],
+    },
+    {
+      paletteId: "medical-blue",
+      reason: "clinical or medical context",
+      keywords: ["medical", "clinic", "doctor", "hospital", "patient", "therapy", "dental", "clinical"],
+    },
+    {
+      paletteId: "energy-red",
+      reason: "sport or workout context",
+      keywords: ["workout", "gym", "training", "sport", "sports", "athlete", "running", "performance"],
+    },
+    {
+      paletteId: "health-teal",
+      reason: "health and wellness context",
+      keywords: ["health", "fitness", "wellness", "habit", "nutrition", "mindfulness", "yoga"],
+    },
+    {
+      paletteId: "warm-amber",
+      reason: "food and hospitality context",
+      keywords: ["food", "restaurant", "recipe", "cook", "cafe", "coffee", "dining", "bakery", "menu"],
+    },
+    {
+      paletteId: "kids-yellow",
+      reason: "education or kids context",
+      keywords: ["kids", "children", "school", "classroom", "teacher", "toddler", "preschool", "fun learning"],
+    },
+    {
+      paletteId: "midnight-indigo",
+      reason: "study, productivity, or focus context",
+      keywords: ["study", "planner", "focus", "notes", "productivity", "todo", "task", "calendar"],
+    },
+    {
+      paletteId: "retail-coral",
+      reason: "shopping and retail context",
+      keywords: ["retail", "shop", "store", "shopping", "deal", "sale", "checkout"],
+    },
+    {
+      paletteId: "rose-pink",
+      reason: "beauty, fashion, or lifestyle context",
+      keywords: ["beauty", "fashion", "skincare", "cosmetic", "lifestyle", "makeup"],
+    },
+    {
+      paletteId: "ocean-cyan",
+      reason: "travel or water-themed context",
+      keywords: ["travel", "water", "ocean", "beach", "hotel", "flight", "cruise"],
+    },
+    {
+      paletteId: "nature-emerald",
+      reason: "nature and wellness context",
+      keywords: ["nature", "plant", "garden", "eco", "sustainability", "green", "meditation"],
+    },
+    {
+      paletteId: "gaming-neon",
+      reason: "gaming and entertainment context",
+      keywords: ["game", "gaming", "esports", "streaming", "arcade", "entertainment"],
+    },
+    {
+      paletteId: "creative-purple",
+      reason: "creative or design context",
+      keywords: ["creative", "design", "art", "artist", "agency", "portfolio", "brand studio"],
+    },
+    {
+      paletteId: "startup-violet",
+      reason: "startup and modern SaaS context",
+      keywords: ["startup", "founder", "launch", "modern saas", "vc", "pitch"],
+    },
+    {
+      paletteId: "professional-blue",
+      reason: "business or corporate context",
+      keywords: ["business", "saas", "corporate", "crm", "dashboard", "workspace", "b2b", "enterprise"],
+    },
+    {
+      paletteId: "news-charcoal",
+      reason: "content and publishing context",
+      keywords: ["news", "blog", "article", "editorial", "publishing", "magazine", "media"],
+    },
+    {
+      paletteId: "slate-neutral",
+      reason: "minimal and note-taking context",
+      keywords: ["minimal", "notes", "docs", "documentation", "knowledge base", "wiki"],
+    },
+  ];
+
+  for (const rule of keywordRules) {
+    if (rule.keywords.some((keyword) => normalized.includes(keyword))) {
+      return {
+        colorPalette: getColorPalette(rule.paletteId),
+        reason: rule.reason,
+      };
+    }
+  }
+
+  const fallbackByTemplateId: Record<TemplateId, PaletteSelection> = {
+    "blog-cms": {
+      colorPalette: getColorPalette("news-charcoal"),
+      reason: "blog templates default to a content-led editorial palette",
+    },
+    "data-table-app": {
+      colorPalette: getColorPalette("professional-blue"),
+      reason: "data-heavy apps default to a professional business palette",
+    },
+    ecommerce: {
+      colorPalette: getColorPalette("retail-coral"),
+      reason: "ecommerce templates default to a retail-friendly palette",
+    },
+    "interactive-tool": {
+      colorPalette: getColorPalette("warm-orange"),
+      reason: "tools default to the warm-orange utility palette",
+    },
+    "marketing-website": {
+      colorPalette: getColorPalette("warm-orange"),
+      reason: "marketing sites default to the warm-orange launch palette",
+    },
+    "mobile-app": {
+      colorPalette: getColorPalette("midnight-indigo"),
+      reason: "mobile products default to a focused app palette",
+    },
+    "onboarding-flow": {
+      colorPalette: getColorPalette("startup-violet"),
+      reason: "onboarding flows default to the startup-violet product palette",
+    },
+    portfolio: {
+      colorPalette: getColorPalette("creative-purple"),
+      reason: "portfolios default to a creative palette",
+    },
+    "saas-dashboard": {
+      colorPalette: getColorPalette("professional-blue"),
+      reason: "SaaS dashboards default to a professional business palette",
+    },
+    "social-app": {
+      colorPalette: getColorPalette("startup-violet"),
+      reason: "social apps default to a modern product palette",
+    },
+    "workspace-task": {
+      colorPalette: getColorPalette("professional-blue"),
+      reason: "workspace tools default to a professional operations palette",
+    },
+  };
+
+  return fallbackByTemplateId[templateId] ?? {
+    colorPalette: getColorPalette("warm-orange"),
+    reason: "default palette for unmatched prompts",
+  };
+}
+
 /**
  * Prompt for the SINGLE-CALL path: all pages described in one message,
  * asking the model to call `generate_app_files` with every file at once.
  */
-function buildAllPagesUserPrompt(input: GenerateFilesActivityInput): string {
+function buildAllPagesUserPrompt(
+  input: GenerateFilesActivityInput,
+  paletteSelection: PaletteSelection,
+): string {
   const pageDescriptions = input.template.pages.map((page) => {
     const filePath = buildGeneratedPageFilePath(input.template.id, page.id);
     const componentName = buildGeneratedPageComponentName(input.template.id, page.id);
@@ -219,7 +413,9 @@ function buildAllPagesUserPrompt(input: GenerateFilesActivityInput): string {
     `Template: ${input.template.name}`,
     `Template description: ${input.template.description}`,
     `Template prompt hints: ${input.template.promptHints.join(" | ")}`,
-    buildScaffoldPromptBlock(input.template),
+    buildScaffoldPromptBlock(input.template, paletteSelection.colorPalette),
+    "Selected color palette:",
+    buildPalettePromptContext(paletteSelection),
     "Full template page set — generate ALL of these in a single generate_app_files call:",
     buildTemplatePageContext(input),
     "Rules that apply to EVERY generated page file:",
@@ -241,6 +437,7 @@ function buildAllPagesUserPrompt(input: GenerateFilesActivityInput): string {
 function buildUserPrompt(
   input: GenerateFilesActivityInput,
   page: TemplatePage,
+  paletteSelection: PaletteSelection,
 ): string {
   const filePath = buildGeneratedPageFilePath(input.template.id, page.id);
   const componentName = buildGeneratedPageComponentName(input.template.id, page.id);
@@ -252,7 +449,9 @@ function buildUserPrompt(
     `Template: ${input.template.name}`,
     `Template description: ${input.template.description}`,
     `Template prompt hints: ${input.template.promptHints.join(" | ")}`,
-    buildScaffoldPromptBlock(input.template),
+    buildScaffoldPromptBlock(input.template, paletteSelection.colorPalette),
+    "Selected color palette:",
+    buildPalettePromptContext(paletteSelection),
     "Full template page set for consistency across navigation and tone:",
     buildTemplatePageContext(input),
     "Generate exactly one standalone TSX page file for this page:",
@@ -988,6 +1187,7 @@ async function generateInitialFilesSingleCall(
   config: ReturnType<typeof getAnthropicRuntimeConfig>,
   policy: PromptPolicyLike,
   streamSequenceRef: { value: number },
+  paletteSelection: PaletteSelection,
 ): Promise<{
   files: StudioFile[];
   assistantResponseText: string;
@@ -995,7 +1195,7 @@ async function generateInitialFilesSingleCall(
   warnings: string[];
 }> {
   const systemPrompt = buildSystemPrompt(policy, "initial");
-  const userPrompt = buildAllPagesUserPrompt(input);
+  const userPrompt = buildAllPagesUserPrompt(input, paletteSelection);
   const warnings: string[] = [];
 
   const result = await streamAnthropicAllFiles({
@@ -1085,6 +1285,7 @@ async function generateInitialFilesInParallel(
   config: ReturnType<typeof getAnthropicRuntimeConfig>,
   policy: PromptPolicyLike,
   streamSequenceRef: { value: number },
+  paletteSelection: PaletteSelection,
   onlyPageIds?: ReadonlySet<string>,
 ): Promise<{
   files: StudioFile[];
@@ -1104,7 +1305,7 @@ async function generateInitialFilesInParallel(
     pagesToGenerate.map(async (page) => {
       const streamResult = await streamAnthropicMessage({
         system: systemPrompt,
-        userMessage: buildUserPrompt(input, page),
+        userMessage: buildUserPrompt(input, page, paletteSelection),
         onTextDelta: async (delta) => {
           streamSequenceRef.value += 1;
           await appendAssistantDeltaEvent({
@@ -1227,6 +1428,7 @@ export async function generateFiles(
   const assistantResponsesByPage: Array<{ pageId: string; text: string }> = [];
   const warnings: string[] = [];
   const streamSequenceRef = { value: 0 };
+  const paletteSelection = selectPalette(input.plan.normalizedPrompt, input.template.id);
 
   // ─── Iteration path (unchanged) ──────────────────────────────────────────
 
@@ -1319,6 +1521,7 @@ export async function generateFiles(
   // ─── Initial build path ───────────────────────────────────────────────────
 
   const scaffoldFiles = buildGeneratedScaffoldFiles({
+    colorPalette: paletteSelection.colorPalette,
     project: input.project,
     template: input.template,
   });
@@ -1334,6 +1537,7 @@ export async function generateFiles(
       config,
       policy,
       streamSequenceRef,
+      paletteSelection,
     );
     generatedRouteFiles = singleCallResult.files;
     assistantResponseParts.push(singleCallResult.assistantResponseText);
@@ -1358,6 +1562,7 @@ export async function generateFiles(
       config,
       policy,
       streamSequenceRef,
+      paletteSelection,
     );
     generatedRouteFiles = parallelResult.files;
     assistantResponseParts.push(parallelResult.assistantResponseText);

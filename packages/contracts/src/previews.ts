@@ -5,6 +5,13 @@ export type PreviewProvider = "webcontainer" | "local";
 
 export type PreviewAuthPolicy = "public" | "authenticated";
 
+export type PreviewSessionStatus =
+  | "queued"
+  | "starting"
+  | "ready"
+  | "failed"
+  | "expired";
+
 export interface PreviewNavigationItem {
   id: string;
   href: string;

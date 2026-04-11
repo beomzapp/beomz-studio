@@ -5,6 +5,7 @@ export * from "./builder-v3.js";
 export * from "./generated-surface.js";
 export * from "./images.js";
 export * from "./operations.js";
+export * from "./palettes.js";
 export * from "./previews.js";
 export * from "./studio.js";
 export * from "./templates.js";
