@@ -255,6 +255,26 @@ export async function enhancePrompt(prompt: string): Promise<string> {
   return data.enhancedPrompt;
 }
 
+export async function fixFile(args: {
+  buildId: string;
+  filePath: string;
+  errorMessage: string;
+  fileContent: string;
+}): Promise<string> {
+  const url = `${getApiBaseUrl()}/fix`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Fix failed with ${res.status}.`);
+  }
+  const data = await res.json() as { fixedContent: string };
+  return data.fixedContent;
+}
+
 export async function streamBuildEvents(args: {
   buildId: string;
   lastEventId?: string | null;

@@ -177,7 +177,7 @@ export function PreviewPane({
   const tabletViewportHeight = tabletPortrait ? 1024 : 768;
 
   // ── WebContainer (primary preview) ──────────────────────────────────────
-  const { status: wcStatus, previewUrl, progressMessage } = useWebContainerPreview(
+  const { status: wcStatus, previewUrl, progressMessage, isFixing } = useWebContainerPreview(
     files,
     project,
     onFilesWritten,
@@ -277,10 +277,16 @@ export function PreviewPane({
               Customising…
             </span>
           )}
-          {wcStatus === "ready" && !isAiCustomising && (
+          {wcStatus === "ready" && !isAiCustomising && !isFixing && (
             <span className="flex items-center gap-1 text-[10px] font-medium text-[#22c55e]">
               <Zap size={9} />
               Live
+            </span>
+          )}
+          {isFixing && (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-[#f59e0b]">
+              <Zap size={9} className="animate-pulse" />
+              Fixing…
             </span>
           )}
           {(wcStatus === "booting" || wcStatus === "installing" || wcStatus === "starting") && (

@@ -9,6 +9,7 @@ import {
   type WcInstance,
   type WcStatus,
 } from "../lib/webcontainer";
+import { fixFile } from "../lib/api";
 
 export type { WcStatus };
 
@@ -16,6 +17,7 @@ export interface WcPreviewState {
   status: WcStatus;
   previewUrl: string | null;
   progressMessage: string;
+  isFixing: boolean;
 }
 
 // Eagerly kick off the WebContainer boot + npm install as soon as the hook
@@ -30,9 +32,12 @@ export function useWebContainerPreview(
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [progressMessage, setProgressMessage] = useState("Preparing…");
 
+  const [isFixing, setIsFixing] = useState(false);
+
   const instanceRef = useRef<WcInstance | null>(null);
   const viteStartedRef = useRef(false);
   const prevFilesRef = useRef<readonly StudioFile[] | null>(null);
+  const fixAttemptsRef = useRef<Record<string, number>>({});
 
   // Live refs so the boot closure (which has [] deps and captures stale values)
   // can always read the most-recent files/project at any point in time.
@@ -146,6 +151,71 @@ export function useWebContainerPreview(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run exactly once per component mount
 
+  // ── Self-healing: fix Vite parse errors via AI ────────────────────────────
+  const handleViteError = useCallback(
+    async (wc: import("@webcontainer/api").WebContainer, fileName: string, errorMessage: string) => {
+      const MAX_ATTEMPTS = 2;
+      const attempts = fixAttemptsRef.current[fileName] ?? 0;
+      if (attempts >= MAX_ATTEMPTS) {
+        console.warn(`[self-heal] Max fix attempts reached for ${fileName}`);
+        return;
+      }
+      fixAttemptsRef.current[fileName] = attempts + 1;
+
+      // Read the broken file from WebContainer
+      const readPaths = [
+        `apps/web/src/app/generated/${fileName}`,
+        `src/${fileName}`,
+        fileName,
+      ];
+      let fileContent: string | null = null;
+      for (const p of readPaths) {
+        try {
+          fileContent = await wc.fs.readFile(p, "utf-8");
+          break;
+        } catch {
+          continue;
+        }
+      }
+      if (!fileContent) {
+        console.warn(`[self-heal] Could not read ${fileName} from WebContainer`);
+        return;
+      }
+
+      setIsFixing(true);
+      setProgressMessage("Fixing a code issue…");
+
+      try {
+        const fixedContent = await fixFile({
+          buildId: projectRef.current?.id ?? "unknown",
+          filePath: fileName,
+          errorMessage,
+          fileContent,
+        });
+
+        // Write the fixed file back to WebContainer
+        const paths = [
+          `apps/web/src/app/generated/${fileName}`,
+          `src/${fileName}`,
+        ];
+        for (const p of paths) {
+          try {
+            await wc.fs.readFile(p, "utf-8"); // check it exists
+            await wc.fs.writeFile(p, fixedContent);
+            break;
+          } catch {
+            continue;
+          }
+        }
+      } catch (err) {
+        console.error("[self-heal] Fix failed:", err instanceof Error ? err.message : err);
+      } finally {
+        setIsFixing(false);
+      }
+    },
+    [],
+  );
+
   // ── Start Vite + hot-reload when files change ─────────────────────────────
   const startVite = useCallback(
     async (
@@ -167,6 +237,28 @@ export function useWebContainerPreview(
 
         const devProcess = await wc.spawn("npm", ["run", "dev"]);
         instance.devProcess = devProcess;
+
+        // ── Listen to dev server output for Vite parse errors ──────────────
+        devProcess.output.pipeTo(new WritableStream({
+          write: (chunk: string) => {
+            // Detect Vite oxc parse errors: [plugin:vite:oxc] or [PARSE_ERROR]
+            if (chunk.includes("[plugin:vite:oxc]") || chunk.includes("[PARSE_ERROR]")) {
+              // Extract file path and error message from output like:
+              // [plugin:vite:oxc] ... at /path/to/file.tsx:123:45
+              // or: Unexpected token at SomePage.tsx:42:10
+              const fileMatch = chunk.match(/at\s+(?:\/[^\s:]+\/)?(\S+\.tsx?):(\d+)/);
+              const errorLines = chunk.split("\n").filter((l: string) =>
+                l.includes("PARSE_ERROR") || l.includes("Unexpected") || l.includes("Expected") || l.includes("vite:oxc"),
+              ).join(" ").trim();
+
+              if (fileMatch) {
+                const fileName = fileMatch[1].replace(/^.*\//, "");
+                const errorMsg = errorLines || chunk.slice(0, 300);
+                void handleViteError(wc, fileName, errorMsg);
+              }
+            }
+          },
+        })).catch(() => { /* stream closed */ });
 
         wc.on("server-ready", (_port: number, url: string) => {
           setPreviewUrl(url);
@@ -197,5 +289,5 @@ export function useWebContainerPreview(
     void startVite(instance, files, project);
   }, [files, project, project?.id, startVite]);
 
-  return { status, previewUrl, progressMessage };
+  return { status, previewUrl, progressMessage, isFixing };
 }

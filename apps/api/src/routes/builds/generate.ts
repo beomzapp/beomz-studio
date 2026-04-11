@@ -145,6 +145,22 @@ function patchReactGlobals(content: string): string {
   return `import { ${Array.from(allNames).join(", ")} } from "react";\n${cleaned}`;
 }
 
+// ─── Sanitise JSX attributes ─────────────────────────────────────────────────
+// AI sometimes generates backslash-escaped quotes inside double-quoted JSX
+// attributes: placeholder="e.g. MacBook Pro 14\" (HW001)"
+// This is invalid JSX — Vite/oxc chokes on it. Replace \" inside
+// double-quoted attribute values with &quot; so the JSX parser is happy.
+function sanitiseJsxAttributes(content: string): string {
+  return content.replace(
+    /(<\w[^>]*?\s\w[\w-]*=)"((?:[^"\\]|\\.)*)"/g,
+    (_match, prefix: string, value: string) => {
+      if (!value.includes('\\"')) return _match;
+      const cleaned = value.replace(/\\"/g, "&quot;");
+      return `${prefix}"${cleaned}"`;
+    },
+  );
+}
+
 // ─── Flatten relative imports ─────────────────────────────────────────────────
 // After remapPrebuiltPath() all generated files live in the same flat directory.
 // If the AI generates App.tsx with `import X from './components/X'` but we
@@ -231,7 +247,7 @@ function templateFilesToStudioFiles(
       path: targetPath,
       kind: inferFileKind(targetPath),
       language: inferLanguage(targetPath),
-      content: patchReactGlobals(f.content),
+      content: sanitiseJsxAttributes(patchReactGlobals(f.content)),
       source: "platform" as const,
       locked: false,
     });
@@ -1519,7 +1535,7 @@ export async function runBuildInBackground(
           files: sanitiseFiles(
             iterResult.files.map((f) => ({
               path: remapPrebuiltPath(f.path, templateId),
-              content: flattenRelativeImports(patchReactGlobals(f.content)),
+              content: sanitiseJsxAttributes(flattenRelativeImports(patchReactGlobals(f.content))),
             })),
           ),
         };
@@ -1667,7 +1683,7 @@ export async function runBuildInBackground(
             path: remapPrebuiltPath(f.path, templateId),
             // patchReactGlobals: CJS React destructure → ESM import
             // flattenRelativeImports: './components/X' → './X' (all files are flat)
-            content: flattenRelativeImports(patchReactGlobals(f.content)),
+            content: sanitiseJsxAttributes(flattenRelativeImports(patchReactGlobals(f.content))),
           })),
         ),
       };
@@ -1684,7 +1700,7 @@ export async function runBuildInBackground(
         files: sanitiseFiles(
           prebuilt.files.map((f) => ({
             path: remapPrebuiltPath(f.path, templateId),
-            content: patchReactGlobals(f.content),
+            content: sanitiseJsxAttributes(patchReactGlobals(f.content)),
           })),
         ),
         summary: `${prebuilt.manifest.name} — ${prompt}`,
