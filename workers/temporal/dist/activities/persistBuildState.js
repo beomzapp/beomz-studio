@@ -137,9 +137,6 @@ function shouldPersistTelemetry(status) {
 }
 async function persistBuildTelemetryRow(db, generation, metadata) {
     const userId = readString(metadata, "userId");
-    if (!userId) {
-        return;
-    }
     const generations = await db.listGenerationsByProjectId(generation.project_id);
     const currentGenerationIndex = generations.findIndex((row) => row.id === generation.id);
     const iterationCount = currentGenerationIndex > 0
@@ -158,7 +155,7 @@ async function persistBuildTelemetryRow(db, generation, metadata) {
     await db.upsertBuildTelemetry({
         id: generation.id,
         project_id: generation.project_id,
-        user_id: userId,
+        user_id: userId ?? null,
         prompt: readString(metadata, "sourcePrompt") ?? generation.prompt,
         template_used: generation.template_id,
         palette_used: readString(metadata, "paletteUsed"),
@@ -230,7 +227,13 @@ export async function persistBuildStateWithClient(input, { db, logger, wait = as
         warnings: input.generationPatch.warnings,
     });
     if (shouldPersistTelemetry(input.generationPatch.status)) {
-        await persistBuildTelemetryRow(db, updatedGeneration, mergedMetadata);
+        try {
+            await persistBuildTelemetryRow(db, updatedGeneration, mergedMetadata);
+        }
+        catch (e) {
+            // telemetry must never crash a build
+            logger?.warn("Telemetry write failed (non-fatal):", e);
+        }
     }
 }
 export async function persistBuildState(input) {

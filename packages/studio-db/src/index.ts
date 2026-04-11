@@ -104,7 +104,7 @@ export interface PlanSessionRow extends Record<string, unknown> {
 export interface BuildTelemetryRow extends Record<string, unknown> {
   id: string;
   project_id: string;
-  user_id: string;
+  user_id: string | null;
   prompt: string;
   template_used: string;
   palette_used: string | null;
@@ -264,7 +264,7 @@ export interface PlanSessionUpdate extends Record<string, unknown> {
 export interface BuildTelemetryInsert extends Record<string, unknown> {
   id: string;
   project_id: string;
-  user_id: string;
+  user_id: string | null;
   prompt: string;
   template_used: string;
   palette_used?: string | null;
