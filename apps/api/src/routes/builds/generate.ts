@@ -122,15 +122,98 @@ function inferLanguage(path: string): string {
   return map[ext] ?? "typescript";
 }
 
-function templateFilesToStudioFiles(files: readonly TemplateFile[]): StudioFile[] {
-  return files.map((f) => ({
-    path: f.path,
-    kind: inferFileKind(f.path),
-    language: inferLanguage(f.path),
-    content: f.content,
+// ─── React import patcher ─────────────────────────────────────────────────────
+// All prebuilt templates use `const { useState, ... } = React;` (CJS/UMD style)
+// designed for the inline srcDoc preview where React is injected as window.React.
+// Vite inside WebContainer uses strict ESM — patch each destructure to a proper
+// import statement so the component compiles without errors.
+function patchReactGlobals(content: string): string {
+  const allNames = new Set<string>();
+  const cleaned = content.replace(
+    /^const\s*\{([^}]+)\}\s*=\s*React\s*;?\r?\n?/gm,
+    (_match, identifiers: string) => {
+      identifiers.split(",").map((s) => s.trim()).filter(Boolean).forEach((n) => allNames.add(n));
+      return "";
+    },
+  );
+  if (allNames.size === 0) return content;
+  return `import { ${Array.from(allNames).join(", ")} } from "react";\n${cleaned}`;
+}
+
+// ─── Path mapping for prebuilt templates ──────────────────────────────────────
+// The WebContainer preview shell (WORKSPACE_PREVIEW_APP_TSX in webcontainer.ts)
+// globs `apps/web/src/app/generated/**/*.tsx` and reads routes from
+// `apps/web/src/generated/{templateId}/app.manifest.json`.
+//
+// Prebuilt templates store their component at bare `App.tsx`. We remap to the
+// generated path so Vite's glob finds the file and runtime.json routes match.
+function remapPrebuiltPath(originalPath: string, templateId: string): string {
+  // Flatten any directory prefix — keep only the filename.
+  // "App.tsx" → "apps/web/src/app/generated/workspace-task/App.tsx"
+  // "components/Card.tsx" → "apps/web/src/app/generated/workspace-task/Card.tsx"
+  const basename = originalPath.replace(/^.*\//, "");
+  return `apps/web/src/app/generated/${templateId}/${basename}`;
+}
+
+function buildSyntheticManifest(templateId: string, mainFilePath: string): StudioFile {
+  // Must satisfy isGeneratedAppManifest() in contracts/generated-surface.ts.
+  // Written to apps/web/src/generated/{templateId}/app.manifest.json so that
+  // readGeneratedManifestFromFiles() finds it and bypasses buildGeneratedManifest().
+  const manifest = {
+    version: 1 as const,
+    templateId,
+    shell: "none",
+    entryPath: "/",
+    routes: [
+      {
+        id: `${templateId}:app`,
+        path: "/",
+        label: "App",
+        summary: "Main application",
+        auth: "public" as const,
+        inPrimaryNav: false,
+        filePath: mainFilePath,
+      },
+    ],
+  };
+  return {
+    path: `apps/web/src/generated/${templateId}/app.manifest.json`,
+    kind: "asset-manifest" as const,
+    language: "json",
+    content: JSON.stringify(manifest, null, 2),
     source: "platform" as const,
     locked: false,
-  }));
+  };
+}
+
+function templateFilesToStudioFiles(
+  files: readonly TemplateFile[],
+  templateId: string,
+): StudioFile[] {
+  let mainFilePath = `apps/web/src/app/generated/${templateId}/App.tsx`;
+  const result: StudioFile[] = [];
+
+  for (const f of files) {
+    const targetPath = remapPrebuiltPath(f.path, templateId);
+    if (f.path === "App.tsx" || f.path.endsWith("/App.tsx")) {
+      mainFilePath = targetPath;
+    }
+    result.push({
+      path: targetPath,
+      kind: inferFileKind(targetPath),
+      language: inferLanguage(targetPath),
+      content: patchReactGlobals(f.content),
+      source: "platform" as const,
+      locked: false,
+    });
+    console.log("[generate] template file remapped:", f.path, "→", targetPath);
+  }
+
+  // Synthetic manifest so buildRuntimeJson() can find the entry route.
+  result.push(buildSyntheticManifest(templateId, mainFilePath));
+  console.log("[generate] manifest added for templateId:", templateId, "entry:", mainFilePath);
+
+  return result;
 }
 
 function mergeFiles(
@@ -376,7 +459,11 @@ export async function runBuildInBackground(
   // ── Best-matching prebuilt template ──────────────────────────────────────
   const prebuilt = pickBestPrebuilt(templateId, prompt);
 
-  const templateFiles = templateFilesToStudioFiles(prebuilt.files);
+  // Remap prebuilt files to apps/web/src/app/generated/{templateId}/ and add
+  // the synthetic manifest. templateId is the SLM-matched legacy ID (e.g.
+  // "workspace-task") which is also stored in generationRow.template_id and
+  // used as project.templateId in the frontend → must be consistent.
+  const templateFiles = templateFilesToStudioFiles(prebuilt.files, templateId);
   const previewEntryPath = "/";
 
   let paletteId = "professional-blue";
@@ -428,7 +515,17 @@ export async function runBuildInBackground(
 
     try {
       customised = await callAnthropicCustomise(prompt, prebuilt.files, paletteId);
-      customised = { ...customised, files: sanitiseFiles(customised.files) };
+      // Remap paths from the bare `App.tsx` format Claude returns → generated paths,
+      // and patch any `const { } = React` globals Claude may have preserved.
+      customised = {
+        ...customised,
+        files: sanitiseFiles(
+          customised.files.map((f) => ({
+            path: remapPrebuiltPath(f.path, templateId),
+            content: patchReactGlobals(f.content),
+          })),
+        ),
+      };
     } catch (aiError) {
       // Graceful degradation: show pre-built template as-is (spec requirement)
       console.warn("[generate] Anthropic failed, using template as-is.", {
@@ -436,7 +533,12 @@ export async function runBuildInBackground(
         error: aiError instanceof Error ? aiError.message : String(aiError),
       });
       customised = {
-        files: sanitiseFiles(prebuilt.files.map((f) => ({ path: f.path, content: f.content }))),
+        files: sanitiseFiles(
+          prebuilt.files.map((f) => ({
+            path: remapPrebuiltPath(f.path, templateId),
+            content: patchReactGlobals(f.content),
+          })),
+        ),
         summary: `${prebuilt.manifest.name} — ${prompt}`,
       };
       fallbackUsed = true;
