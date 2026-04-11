@@ -17,7 +17,6 @@ import {
   Sparkles,
   ListChecks,
   AlertCircle,
-  Loader2,
   ChevronDown,
   Code2,
   Zap,
@@ -143,30 +142,6 @@ function filterCodeFromText(text: string): string {
 }
 
 // ─────────────────────────────────────────────
-// Building status messages
-// ─────────────────────────────────────────────
-
-const BUILDING_MESSAGES = [
-  "Thinking really hard...",
-  "Planning your components...",
-  "Writing the good stuff...",
-  "Making it beautiful...",
-  "Connecting the pieces...",
-  "Checking the details...",
-  "Almost there...",
-  "Polishing the edges...",
-  "Running through it once more...",
-  "Adding the finishing touches...",
-  "Making sure everything works...",
-  "One sec, this part is tricky...",
-  "Laying the foundations...",
-  "Wiring up the logic...",
-  "Styling things up...",
-  "Just a moment...",
-  "Bringing it all together...",
-  "Nearly ready...",
-];
-
 // ─────────────────────────────────────────────
 // Markdown-lite renderer
 // ─────────────────────────────────────────────
@@ -352,35 +327,7 @@ function BeomzAvatar() {
 // Building status indicator (rotating messages)
 // ─────────────────────────────────────────────
 
-function BuildingStatus() {
-  const [index, setIndex] = useState(0);
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setVisible(false);
-      setTimeout(() => {
-        setIndex((prev) => (prev + 1) % BUILDING_MESSAGES.length);
-        setVisible(true);
-      }, 200);
-    }, 2500);
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <div className="flex items-center gap-2 pl-9">
-      <Loader2 size={12} className="animate-spin text-[#9ca3af]" />
-      <span
-        className={cn(
-          "text-xs text-[#9ca3af] transition-opacity duration-200",
-          visible ? "opacity-100" : "opacity-0",
-        )}
-      >
-        {BUILDING_MESSAGES[index]}
-      </span>
-    </div>
-  );
-}
+// BuildingStatus removed — step messages now flow inline via streamingText
 
 // ─────────────────────────────────────────────
 // Suggestion links
@@ -601,17 +548,19 @@ export function ChatPanel({
               return (
                 <div key={msg.id}>
                   {msg.role === "user" ? (
-                    /* User message — right-aligned dark bubble */
+                    /* User message — right-aligned subtle pill */
                     <div className="flex justify-end">
-                      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#1a1a1a] px-3.5 py-2.5 text-sm leading-relaxed text-white">
+                      <div className="max-w-[80%] rounded-full bg-[#1a1a1a] px-4 py-2 text-sm leading-snug text-white">
                         {msg.content}
                       </div>
                     </div>
                   ) : (
-                    /* AI message — left-aligned with orange avatar, plain text (no card) */
+                    /* AI message — left-aligned, free-flowing text */
                     <div className="flex items-start gap-2.5">
-                      <BeomzAvatar />
-                      <div className="group relative min-w-0 max-w-[85%] pt-0.5">
+                      <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316] mt-0.5">
+                        <span className="text-[9px] font-bold text-white">B</span>
+                      </div>
+                      <div className="group relative min-w-0 flex-1 pt-0">
                         {/* Prose content — hidden during builds (when trace entries exist) */}
                         {displayContent && !hasTrace && <MarkdownText text={displayContent} />}
 
@@ -647,26 +596,24 @@ export function ChatPanel({
               );
             })}
 
-            {/* Streaming AI message — plain text with cursor */}
+            {/* Streaming — inline step text + cursor */}
             {isStreaming && (
-              <>
-                <div className="flex items-start gap-2.5">
-                  <BeomzAvatar />
-                  <div className="min-w-0 max-w-[85%] pt-0.5">
-                    {displayStreamingText ? (
-                      <div className="text-sm leading-relaxed text-[#374151]">
-                        <MarkdownText text={displayStreamingText} />
-                        <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
-                      </div>
-                    ) : (
-                      /* Blinking cursor while waiting for first token */
-                      <span className="inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
-                    )}
-                  </div>
+              <div className="flex items-start gap-2.5">
+                <BeomzAvatar />
+                <div className="min-w-0 max-w-[85%] pt-0.5">
+                  {displayStreamingText ? (
+                    <div className="text-sm leading-relaxed text-[#374151]">
+                      <MarkdownText text={displayStreamingText} />
+                      <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
+                    </div>
+                  ) : (
+                    <span className="flex items-center gap-2 text-sm italic text-[#9ca3af]">
+                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#9ca3af]" />
+                      Thinking…
+                    </span>
+                  )}
                 </div>
-                {/* Rotating build status messages */}
-                <BuildingStatus />
-              </>
+              </div>
             )}
           </div>
         )}
@@ -705,7 +652,7 @@ export function ChatPanel({
             <button
               key={chip}
               onClick={() => handleChipClick(chip)}
-              className="rounded-full border border-[#F97316]/30 bg-[#faf9f6] px-3.5 py-1.5 text-sm text-[#F97316] transition-all hover:border-[#F97316] hover:bg-[#F97316]/5"
+              className="rounded-full border border-[#e5e5e5] bg-white px-3 py-1.5 text-xs text-[#6b7280] transition-all hover:border-[#d1d5db] hover:text-[#374151]"
             >
               {chip}
             </button>

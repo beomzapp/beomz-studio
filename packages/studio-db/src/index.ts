@@ -531,11 +531,16 @@ export class StudioDbClient {
 
   async touchProjectLastOpened(id: string): Promise<void> {
     const now = new Date().toISOString();
-    await this.client
-      .from("projects")
-      .update({ last_opened_at: now })
-      .eq("id", id);
-    // Fire-and-forget — ignore errors; this is non-critical telemetry.
+    // Intentionally ignore errors — non-critical, column may not exist yet
+    // if migration 007 hasn't been applied.
+    try {
+      await this.client
+        .from("projects")
+        .update({ last_opened_at: now })
+        .eq("id", id);
+    } catch {
+      // no-op
+    }
   }
 
   async countGenerationsByProjectIds(
