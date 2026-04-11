@@ -224,7 +224,9 @@ async function callAnthropicCustomise(
 
   const userMessage = `Here are the current template files:\n\n${fileContext}\n\nCustomise this app for: ${prompt}`;
 
-  const message = await client.messages.create({
+  // Use streaming — required by Anthropic for long-running requests (>10 min timeout).
+  // stream.finalMessage() collects all chunks and returns the same Message shape as create().
+  const stream = client.messages.stream({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 32000,
     system: systemPrompt,
@@ -232,6 +234,7 @@ async function callAnthropicCustomise(
     tool_choice: { type: "tool", name: "deliver_customised_files" },
     messages: [{ role: "user", content: userMessage }],
   });
+  const message = await stream.finalMessage();
 
   const toolBlock = message.content.find(
     (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
