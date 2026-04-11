@@ -44,7 +44,25 @@ enhanceRoute.post("/", async (c) => {
       return c.json({ error: "No text response from model." }, 502);
     }
 
-    return c.json({ enhancedPrompt: textBlock.text.trim() });
+    let enhanced = textBlock.text.trim();
+
+    // Hard truncation: keep only complete sentences that fit within 4500 chars.
+    if (enhanced.length > 4500) {
+      const sentences = enhanced.split(". ");
+      const kept: string[] = [];
+      let length = 0;
+      for (const sentence of sentences) {
+        const chunk = kept.length === 0 ? sentence : `. ${sentence}`;
+        if (length + chunk.length > 4500) break;
+        kept.push(sentence);
+        length += chunk.length;
+      }
+      enhanced = kept.join(". ");
+      // Ensure it ends with a period.
+      if (enhanced && !enhanced.endsWith(".")) enhanced += ".";
+    }
+
+    return c.json({ enhancedPrompt: enhanced });
   } catch (err) {
     console.error("[enhance] Anthropic call failed:", err instanceof Error ? err.message : err);
     return c.json({ error: "Enhancement failed — please try again." }, 502);
