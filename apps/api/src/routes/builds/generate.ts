@@ -959,8 +959,20 @@ function buildIterationSystemPrompt(): string {
     "7. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
     "8. Keep all existing functionality that the user did NOT ask to change.",
     "",
-    "DELIVER: Call deliver_customised_files with only the changed files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Changed color theme from blue to red.'",
+    "ADDING NEW PAGES OR COMPONENTS:",
+    "When the user asks to add a new page or feature that requires a new file:",
+    "  a. Create the new file (e.g. AssetDetailPage.tsx) with complete implementation.",
+    "  b. ALWAYS also return an updated App.tsx that imports the new file and adds it to the navigation/routing.",
+    "     App.tsx is a sidebar/tab app — add the new page to the sidebar nav items and the page-rendering switch.",
+    "  c. Use flat import paths: import AssetDetailPage from './AssetDetailPage' (NOT './components/AssetDetailPage').",
+    "  d. The new page file must have a default export.",
+    "  e. Fill it with realistic sample data and working interactions — no placeholder content.",
+    "",
+    "FILE NAMING:",
+    "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
+    "",
+    "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
+    "The summary should briefly describe what changed, e.g. 'Added AssetDetailPage with analytics dashboard and updated App.tsx navigation.'",
   ].join("\n");
 }
 
@@ -1199,11 +1211,27 @@ export async function runBuildInBackground(
       );
 
       let iterResult: CustomiseResult;
+      let iterErrorReason: string | null = null;
       try {
         iterResult = await callModelIterate(prompt, model, existingFiles);
-        console.log("[generate] Iteration model returned files:", iterResult.files.map((f) => f.path));
+        console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
-        // Remap flat filenames → correct generated directory path, flatten imports
+        // Classify returned files as "new" (not in current build) vs "updated" (overwrite existing).
+        // Both get the same transforms; the classification is purely for logging + App.tsx detection.
+        const existingBasenames = new Set(existingFiles.map((f) => f.path.replace(/^.*\//, "")));
+
+        const newFileNames: string[] = [];
+        const updatedFileNames: string[] = [];
+        for (const f of iterResult.files) {
+          const base = f.path.replace(/^.*\//, "");
+          (existingBasenames.has(base) ? updatedFileNames : newFileNames).push(base);
+        }
+
+        console.log("[generate] iteration new files from AI:", newFileNames);
+        console.log("[generate] iteration existing files matched:", updatedFileNames);
+
+        // Remap ALL returned files (new and updated alike) → flat generated directory,
+        // then apply ESM-import + relative-import fixes.
         iterResult = {
           ...iterResult,
           files: sanitiseFiles(
@@ -1213,21 +1241,48 @@ export async function runBuildInBackground(
             })),
           ),
         };
-        console.log("[generate] Iteration remapped files:", iterResult.files.map((f) => f.path));
+
+        // If the AI added new page files but didn't update App.tsx, warn loudly.
+        // The updated iteration system prompt instructs the AI to always include App.tsx,
+        // but as a safety net we detect the gap and log it.
+        const appTsxBasename = "App.tsx";
+        const appTsxReturned = updatedFileNames.includes(appTsxBasename)
+          || newFileNames.includes(appTsxBasename);
+
+        if (newFileNames.length > 0 && !appTsxReturned) {
+          console.warn(
+            "[generate] iteration: AI added new file(s) without updating App.tsx — "
+            + "new pages may not be routable until App.tsx is updated.",
+            { newFileNames },
+          );
+        }
+
+        console.log("[generate] iteration remapped files:", iterResult.files.map((f) => f.path));
       } catch (iterErr) {
-        console.warn("[generate] Iteration AI failed, keeping existing files.", {
-          buildId,
-          error: iterErr instanceof Error ? iterErr.message : String(iterErr),
+        iterErrorReason = iterErr instanceof Error ? iterErr.message : String(iterErr);
+        console.warn("[generate] iteration AI call failed.", {
+          buildId, prompt, model, error: iterErrorReason,
         });
-        // Graceful degradation: return existing files unchanged
+        // Graceful degradation: keep existing files unchanged, surface real reason to user
         iterResult = {
           files: [],
-          summary: `${prompt} — changes could not be applied`,
+          summary: `Could not apply changes — ${iterErrorReason}`,
         };
       }
 
-      // Merge AI-changed files over the existing file set
+      // Merge: new files are added, updated files override existing ones
       const iterFinalFiles = mergeFiles([...existingFiles], iterResult.files);
+
+      const updatedCount = iterResult.files.filter((f) =>
+        existingFiles.some((e) => e.path === f.path),
+      ).length;
+      const addedCount = iterResult.files.length - updatedCount;
+
+      console.log("[generate] iteration merge result:", {
+        updated: updatedCount,
+        added: addedCount,
+        total: iterFinalFiles.length,
+      });
       const iterCompletedAt = ts();
 
       const iterDoneEvent: BuilderV3DoneEvent = {
@@ -1240,7 +1295,7 @@ export async function runBuildInBackground(
         buildId,
         projectId,
         fallbackUsed: iterResult.files.length === 0,
-        fallbackReason: iterResult.files.length === 0 ? "ai_iteration_error" : null,
+        fallbackReason: iterErrorReason ?? null,
       };
 
       await appendEventToDb(db, buildId, iterDoneEvent, {
@@ -1250,7 +1305,13 @@ export async function runBuildInBackground(
         summary: iterResult.summary,
       });
 
-      console.log("[generate] Iteration complete.", { buildId, changedFiles: iterResult.files.length });
+      console.log("[generate] iteration complete.", {
+        buildId,
+        changedFiles: iterResult.files.length,
+        added: addedCount,
+        updated: updatedCount,
+        total: iterFinalFiles.length,
+      });
 
       await db.upsertBuildTelemetry({
         id: buildId,
@@ -1261,8 +1322,8 @@ export async function runBuildInBackground(
         palette_used: "iteration",
         files_generated: iterFinalFiles.length,
         succeeded: iterResult.files.length > 0,
-        fallback_reason: iterResult.files.length === 0 ? "ai_iteration_error" : null,
-        error_log: null,
+        fallback_reason: iterErrorReason,
+        error_log: iterErrorReason ? { message: iterErrorReason } : null,
         generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
         credits_used: 0,
         user_iterated: true,
