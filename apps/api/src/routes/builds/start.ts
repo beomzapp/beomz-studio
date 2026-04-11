@@ -21,6 +21,7 @@ import {
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 import { runBuildInBackground } from "./generate.js";
+import { PLAN_LIMITS, isAdminEmail, needsFreeDailyReset } from "../../lib/credits.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -192,6 +193,37 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     || projectRow?.name
     || buildProjectNameFromPrompt(prompt, selectedTemplateDef.defaultProjectName);
 
+  // ── Credit balance check (synchronous 402 before generation row creation) ──
+  // Admins bypass; free plan lazily resets daily; block if totalAvailable <= 0.
+  const userEmail = orgContext.user.email;
+  if (!isAdminEmail(userEmail)) {
+    const freshOrg = await orgContext.db.getOrgWithBalance(orgContext.org.id);
+    if (freshOrg) {
+      let monthlyCredits = Number(freshOrg.credits ?? 0);
+      const topupCredits  = Number(freshOrg.topup_credits ?? 0);
+
+      // Lazy daily reset for free plan
+      if (freshOrg.plan === "free") {
+        if (needsFreeDailyReset(freshOrg.daily_reset_at)) {
+          const dailyAmount = PLAN_LIMITS.free!.dailyReset ?? 10;
+          await orgContext.db.updateOrg(freshOrg.id, {
+            credits: dailyAmount,
+            daily_reset_at: new Date().toISOString(),
+          }).catch(() => undefined);
+          monthlyCredits = dailyAmount;
+        }
+      }
+
+      const totalAvailable = monthlyCredits + topupCredits;
+      if (totalAvailable <= 0) {
+        return c.json(
+          { error: "Insufficient credits. Please purchase a credit pack or upgrade your plan." },
+          402,
+        );
+      }
+    }
+  }
+
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
   const requestedAt = new Date().toISOString();
@@ -252,7 +284,9 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   runBuildInBackground(
     {
       buildId, projectId,
+      orgId: orgContext.org.id,
       userId: orgContext.user.id,
+      userEmail: orgContext.user.email,
       prompt: effectivePrompt, sourcePrompt,
       templateId: selectedTemplateId,
       model: parsedBody.data.model ?? "claude-haiku-4-5-20251001",

@@ -38,6 +38,9 @@ export interface OrgRow extends Record<string, unknown> {
   name: string;
   plan: string;
   credits: number;
+  topup_credits: number;
+  stripe_customer_id: string | null;
+  daily_reset_at: string | null;
   created_at: string;
 }
 
@@ -115,6 +118,8 @@ export interface BuildTelemetryRow extends Record<string, unknown> {
   error_log: Record<string, unknown> | null;
   generation_time_ms: number | null;
   credits_used: number;
+  output_tokens: number;
+  cost_usd: number | null;
   user_iterated: boolean;
   iteration_count: number;
   model_used: string | null;
@@ -139,6 +144,7 @@ export interface OrgInsert extends Record<string, unknown> {
   name: string;
   plan?: string;
   credits?: number;
+  topup_credits?: number;
   created_at?: string;
 }
 
@@ -147,6 +153,9 @@ export interface OrgUpdate extends Record<string, unknown> {
   name?: string;
   plan?: string;
   credits?: number;
+  topup_credits?: number;
+  stripe_customer_id?: string | null;
+  daily_reset_at?: string | null;
 }
 
 export interface OrgMembershipInsert extends Record<string, unknown> {
@@ -276,6 +285,8 @@ export interface BuildTelemetryInsert extends Record<string, unknown> {
   error_log?: Record<string, unknown> | null;
   generation_time_ms?: number | null;
   credits_used?: number;
+  output_tokens?: number;
+  cost_usd?: number | null;
   user_iterated?: boolean;
   iteration_count?: number;
   model_used?: string | null;
@@ -294,9 +305,33 @@ export interface BuildTelemetryUpdate extends Record<string, unknown> {
   error_log?: Record<string, unknown> | null;
   generation_time_ms?: number | null;
   credits_used?: number;
+  output_tokens?: number;
+  cost_usd?: number | null;
   user_iterated?: boolean;
   iteration_count?: number;
   model_used?: string | null;
+  created_at?: string;
+}
+
+export interface CreditTransactionRow extends Record<string, unknown> {
+  id: string;
+  org_id: string;
+  amount: number;
+  type: string;
+  build_id: string | null;
+  description: string | null;
+  stripe_payment_intent_id: string | null;
+  created_at: string;
+}
+
+export interface CreditTransactionInsert extends Record<string, unknown> {
+  id?: string;
+  org_id: string;
+  amount: number;
+  type: string;
+  build_id?: string | null;
+  description?: string | null;
+  stripe_payment_intent_id?: string | null;
   created_at?: string;
 }
 
@@ -347,6 +382,12 @@ export interface StudioDatabase {
         Row: PlanSessionRow;
         Insert: PlanSessionInsert;
         Update: PlanSessionUpdate;
+        Relationships: [];
+      };
+      credit_transactions: {
+        Row: CreditTransactionRow;
+        Insert: CreditTransactionInsert;
+        Update: Record<string, unknown>;
         Relationships: [];
       };
       users: {
@@ -813,6 +854,128 @@ export class StudioDbClient {
       .single();
 
     return unwrapSingle(response);
+  }
+
+  async getOrgWithBalance(orgId: string): Promise<OrgRow | null> {
+    const response = await this.client
+      .from("orgs")
+      .select("id,owner_id,name,plan,credits,topup_credits,stripe_customer_id,daily_reset_at,created_at")
+      .eq("id", orgId)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async updateOrg(orgId: string, patch: OrgUpdate): Promise<OrgRow | null> {
+    const response = await this.client
+      .from("orgs")
+      .update(patch)
+      .eq("id", orgId)
+      .select("*")
+      .maybeSingle();
+
+    return unwrapMaybeSingle(response);
+  }
+
+  async findOrgByStripeCustomerId(customerId: string): Promise<OrgRow | null> {
+    const response = await this.client
+      .from("orgs")
+      .select("*")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async applyOrgUsageDeduction(
+    orgId: string,
+    amount: number,
+    buildId?: string,
+    description?: string,
+  ): Promise<{ deducted: number; credits: number; topup_credits: number }> {
+    const response = await (this.client as SupabaseClient<any>).rpc(
+      "apply_org_usage_deduction",
+      {
+        p_org_id: orgId,
+        p_amount: amount,
+        p_build_id: buildId ?? null,
+        p_description: description ?? "App generation",
+      },
+    );
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    const row = Array.isArray(response.data) ? response.data[0] : response.data;
+    return {
+      deducted: Number(row.deducted ?? 0),
+      credits: Number(row.credits ?? 0),
+      topup_credits: Number(row.topup_credits ?? 0),
+    };
+  }
+
+  async applyOrgTopupPurchase(
+    orgId: string,
+    amount: number,
+    paymentIntentId: string,
+    description?: string,
+  ): Promise<boolean> {
+    const response = await (this.client as SupabaseClient<any>).rpc(
+      "apply_org_topup_purchase",
+      {
+        p_org_id: orgId,
+        p_amount: amount,
+        p_payment_intent_id: paymentIntentId,
+        p_description: description ?? "Purchased credits",
+      },
+    );
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return Boolean(response.data);
+  }
+
+  async resetOrgMonthlyCredits(orgId: string, creditAmount: number): Promise<void> {
+    const now = new Date().toISOString();
+    await this.updateOrg(orgId, { credits: creditAmount });
+    await this.client
+      .from("credit_transactions")
+      .insert({
+        org_id: orgId,
+        amount: creditAmount,
+        type: "subscription_reset",
+        description: "Monthly credit refresh",
+        created_at: now,
+      });
+  }
+
+  async listCreditTransactions(
+    orgId: string,
+    limit = 50,
+  ): Promise<CreditTransactionRow[]> {
+    const response = await this.client
+      .from("credit_transactions")
+      .select("*")
+      .eq("org_id", orgId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data ?? [];
   }
 }
 

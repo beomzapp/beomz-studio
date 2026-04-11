@@ -39,6 +39,7 @@ import {
 
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
+import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -46,7 +47,9 @@ import { classifyPalette } from "../../lib/slm/client.js";
 export interface BuildGenerateInput {
   buildId: string;
   projectId: string;
+  orgId: string;
   userId: string | null;
+  userEmail: string | null;
   prompt: string;
   sourcePrompt: string;
   templateId: string;
@@ -61,6 +64,7 @@ interface CustomiseResult {
   files: Array<{ path: string; content: string }>;
   summary: string;
   appName?: string;
+  outputTokens: number;
 }
 
 // ─── Anthropic tool definition ────────────────────────────────────────────────
@@ -1120,7 +1124,7 @@ function buildUserMessage(prompt: string): string {
   ].join("\n");
 }
 
-function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?: unknown }, prompt: string): CustomiseResult {
+function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?: unknown }, prompt: string): Omit<CustomiseResult, "outputTokens"> {
   const files = Array.isArray(raw.files)
     ? (raw.files as Array<{ path: string; content: string }>).filter(
         (f) => typeof f.path === "string" && typeof f.content === "string",
@@ -1155,12 +1159,13 @@ async function callAnthropicWithMessages(
       messages: [{ role: "user", content: userMessage }],
     });
     const message = await stream.finalMessage();
+    const outputTokens = message.usage?.output_tokens ?? 0;
     console.log("[generate] Anthropic response:", { model: modelId, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
     const toolBlock = message.content.find(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
     if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
-    return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt);
+    return { ...parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt), outputTokens };
   };
 
   try {
@@ -1214,12 +1219,13 @@ async function callOpenAICompatibleWithMessages(
     tool_choice: { type: "function", function: { name: "deliver_customised_files" } },
   });
 
+  const outputTokens = response.usage?.completion_tokens ?? 0;
   const toolCall = response.choices[0]?.message.tool_calls?.[0];
   if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "deliver_customised_files") {
     throw new Error(`${model} did not call the deliver_customised_files tool.`);
   }
   const raw = JSON.parse(toolCall.function.arguments) as { files?: unknown; summary?: unknown; appName?: unknown };
-  return parseRawToolOutput(raw, prompt);
+  return { ...parseRawToolOutput(raw, prompt), outputTokens };
 }
 
 async function callOpenAICompatibleCustomise(
@@ -1488,7 +1494,7 @@ async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
 ): Promise<void> {
-  const { buildId, projectId, prompt, templateId, model, requestedAt, userId } = input;
+  const { buildId, projectId, orgId, userEmail, prompt, templateId, model, requestedAt, userId } = input;
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
@@ -1619,6 +1625,7 @@ async function _runBuildInBackground(
         iterResult = {
           files: [],
           summary: `Could not apply changes — ${iterErrorReason}`,
+          outputTokens: 0,
         };
       }
 
@@ -1678,10 +1685,40 @@ async function _runBuildInBackground(
         error_log: iterErrorReason ? { message: iterErrorReason } : null,
         generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
         credits_used: 0,
+        output_tokens: 0,
         user_iterated: true,
         iteration_count: 0,
         model_used: model,
       }).catch(() => undefined);
+
+      // Post-deduction for successful iteration (no charge on failure)
+      const iterTokens = iterResult.outputTokens ?? 0;
+      if (iterResult.files.length > 0 && iterTokens > 0 && !isAdminEmail(userEmail)) {
+        const iterCost = calcCreditCost(iterTokens);
+        const iterCostUsd = calcCostUsd(iterCost);
+        try {
+          const deduction = await db.applyOrgUsageDeduction(orgId, iterCost, buildId, "App iteration");
+          await db.upsertBuildTelemetry({
+            id: buildId,
+            project_id: projectId,
+            user_id: userId,
+            prompt: input.sourcePrompt,
+            template_used: templateId,
+            palette_used: "iteration",
+            files_generated: iterFinalFiles.length,
+            succeeded: true,
+            output_tokens: iterTokens,
+            credits_used: deduction.deducted,
+            cost_usd: iterCostUsd,
+            user_iterated: true,
+            iteration_count: 0,
+            model_used: model,
+          }).catch(() => undefined);
+          console.log("[generate] iteration credits deducted:", { deducted: deduction.deducted, tokens: iterTokens, buildId });
+        } catch (deductErr) {
+          console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
+        }
+      }
 
       await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
       return;
@@ -1758,6 +1795,7 @@ async function _runBuildInBackground(
           })),
         ),
         summary: `${prebuilt.manifest.name} — ${prompt}`,
+        outputTokens: 0,
       };
       fallbackUsed = true;
     }
@@ -1793,8 +1831,25 @@ async function _runBuildInBackground(
       fallbackUsed,
     });
 
-    // ── 5. Telemetry (non-fatal) ─────────────────────────────────────────────
+    // ── 5. Telemetry + credit deduction (non-fatal) ───────────────────────────
     const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
+    const outputTokens = customised.outputTokens ?? 0;
+    let creditsUsed = 0;
+    let costUsd: number | null = null;
+
+    // Only deduct when AI actually ran (not fallback) and user is not admin
+    if (!fallbackUsed && outputTokens > 0 && !isAdminEmail(userEmail)) {
+      const creditCost = calcCreditCost(outputTokens);
+      costUsd = calcCostUsd(creditCost);
+      try {
+        const deduction = await db.applyOrgUsageDeduction(orgId, creditCost, buildId, "App generation");
+        creditsUsed = deduction.deducted;
+        console.log("[generate] credits deducted:", { deducted: creditsUsed, tokens: outputTokens, buildId });
+      } catch (deductErr) {
+        console.error("[generate] credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
+      }
+    }
+
     await db.upsertBuildTelemetry({
       id: buildId,
       project_id: projectId,
@@ -1807,7 +1862,9 @@ async function _runBuildInBackground(
       fallback_reason: fallbackUsed ? "anthropic_error" : null,
       error_log: null,
       generation_time_ms: generationMs > 0 ? generationMs : null,
-      credits_used: 0,
+      credits_used: creditsUsed,
+      output_tokens: outputTokens,
+      cost_usd: costUsd,
       user_iterated: input.isIteration,
       iteration_count: 0,
       model_used: model,

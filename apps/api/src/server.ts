@@ -23,6 +23,11 @@ import enhanceRoute from "./routes/enhance/index.js";
 import fixRoute from "./routes/fix/index.js";
 import projectsRoute from "./routes/projects/index.js";
 import avatarRoute from "./routes/avatar/index.js";
+import creditsRoute from "./routes/credits/index.js";
+import checkoutRoute from "./routes/payments/checkout.js";
+import confirmTopupRoute from "./routes/payments/confirm-topup.js";
+import portalRoute from "./routes/payments/portal.js";
+import webhookRoute from "./routes/payments/webhook.js";
 const app = new Hono();
 
 app.use(
@@ -59,6 +64,12 @@ app.route("/enhance", enhanceRoute);
 app.route("/fix", fixRoute);
 app.route("/projects", projectsRoute);
 app.route("/avatar", avatarRoute);
+// BEO-261: Credits & Payments
+app.route("/credits", creditsRoute);
+app.route("/payments/checkout", checkoutRoute);
+app.route("/payments/confirm-topup", confirmTopupRoute);
+app.route("/payments/portal", portalRoute);
+app.route("/payments/webhook", webhookRoute);
 
 serve(
   {

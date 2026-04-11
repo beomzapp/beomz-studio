@@ -5,6 +5,7 @@ import {
   type OrgRow,
 } from "@beomz-studio/studio-db";
 
+import { PLAN_LIMITS } from "../lib/credits.js";
 import type { VerifiedPlatformJwt } from "./verifyPlatformJwt.js";
 
 function buildDefaultOrgName(email: string | undefined, platformUserId: string) {
@@ -57,6 +58,7 @@ export const loadOrgContext: MiddlewareHandler = async (c, next) => {
     org = await db.createOrg({
       name: buildDefaultOrgName(jwt.email, jwt.sub),
       owner_id: user.id,
+      credits: PLAN_LIMITS.free!.credits,
     });
 
     membership = await db.createOrgMembership({

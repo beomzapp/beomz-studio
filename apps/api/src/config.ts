@@ -15,6 +15,23 @@ const envSchema = z.object({
   STUDIO_SUPABASE_URL: z.string().url(),
   STUDIO_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   PORT: z.number().int().positive(),
+  // Stripe — all optional so the API boots without payments configured
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // Subscription price IDs
+  STRIPE_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_STARTER_YEARLY_PRICE_ID: z.string().optional(),
+  STRIPE_PRO_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_PRO_YEARLY_PRICE_ID: z.string().optional(),
+  STRIPE_BUSINESS_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_BUSINESS_YEARLY_PRICE_ID: z.string().optional(),
+  // Credit pack price IDs
+  STRIPE_PACK_50_PRICE_ID: z.string().optional(),
+  STRIPE_PACK_100_PRICE_ID: z.string().optional(),
+  STRIPE_PACK_300_PRICE_ID: z.string().optional(),
+  // Redirect URLs for Stripe Checkout
+  STRIPE_SUCCESS_URL: z.string().url().optional(),
+  STRIPE_CANCEL_URL: z.string().url().optional(),
 });
 
 export type ApiConfig = z.infer<typeof envSchema>;
