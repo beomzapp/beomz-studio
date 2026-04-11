@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { config as dotenvConfig } from "dotenv";
 
 function shouldStartEmbeddedTemporalWorker(): boolean {
   if (process.env.BEOMZ_ENABLE_EMBEDDED_TEMPORAL_WORKER === "true") {
@@ -41,6 +43,13 @@ function wireShutdownSignals(): void {
 }
 
 async function main(): Promise<void> {
+  // Load .env with an explicit path before the dynamic import of server.js.
+  // All static imports in bootstrap (node built-ins + dotenv) are leaves with
+  // no dependency on config.ts, so they evaluate first. The dotenvConfig() call
+  // here runs before `await import("./server.js")`, meaning config.ts sees the
+  // correct env values when it evaluates — regardless of pm2's saved env state.
+  const _bootstrapDir = dirname(fileURLToPath(import.meta.url));
+  dotenvConfig({ path: join(_bootstrapDir, "../.env"), override: true });
   if (shouldStartEmbeddedTemporalWorker()) {
     const workerEntry = fileURLToPath(
       new URL("../../../workers/temporal/dist/worker.js", import.meta.url),

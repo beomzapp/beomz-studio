@@ -1,10 +1,4 @@
-// Load .env from apps/api/.env using the module's own path, not process.cwd().
-// This prevents the key from going missing when pm2 runs from the monorepo root.
-import { config as dotenvConfig } from "dotenv";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-const _serverDir = dirname(fileURLToPath(import.meta.url));
-dotenvConfig({ path: join(_serverDir, "../.env"), override: true });
+import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
