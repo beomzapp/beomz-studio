@@ -48,6 +48,7 @@ export interface Project {
   previewEntryPath: string;
   createdAt: string;
   updatedAt: string;
+  lastOpenedAt: string | null;
 }
 
 export interface StudioFile {

@@ -234,6 +234,7 @@ export function mapProjectRowToProject(row: ProjectRow): Project {
     createdAt: row.created_at,
     icon: row.icon ?? null,
     id: row.id,
+    lastOpenedAt: row.last_opened_at ?? null,
     name: row.name,
     orgId: row.org_id,
     previewEntryPath: template.previewEntryPath,

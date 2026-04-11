@@ -57,6 +57,7 @@ export interface ProjectRow extends Record<string, unknown> {
   icon: string | null;
   created_at: string;
   updated_at: string;
+  last_opened_at: string | null;
 }
 
 export interface GenerationRow extends Record<string, unknown> {
@@ -180,6 +181,7 @@ export interface ProjectUpdate extends Record<string, unknown> {
   icon?: string | null;
   created_at?: string;
   updated_at?: string;
+  last_opened_at?: string | null;
 }
 
 export interface GenerationInsert extends Record<string, unknown> {
@@ -510,6 +512,52 @@ export class StudioDbClient {
     }
 
     return response.data;
+  }
+
+  async findProjectsByOrgId(orgId: string): Promise<ProjectRow[]> {
+    const response = await this.client
+      .from("projects")
+      .select("*")
+      .eq("org_id", orgId)
+      .order("last_opened_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data ?? [];
+  }
+
+  async touchProjectLastOpened(id: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.client
+      .from("projects")
+      .update({ last_opened_at: now })
+      .eq("id", id);
+    // Fire-and-forget — ignore errors; this is non-critical telemetry.
+  }
+
+  async countGenerationsByProjectIds(
+    projectIds: string[],
+  ): Promise<Record<string, number>> {
+    if (projectIds.length === 0) return {};
+
+    const response = await this.client
+      .from("generations")
+      .select("project_id")
+      .in("project_id", projectIds);
+
+    if (response.error) {
+      // Non-fatal — return empty counts
+      return {};
+    }
+
+    const counts: Record<string, number> = {};
+    for (const row of response.data ?? []) {
+      counts[row.project_id] = (counts[row.project_id] ?? 0) + 1;
+    }
+    return counts;
   }
 
   async updateProject(id: string, patch: ProjectUpdate): Promise<ProjectRow | null> {

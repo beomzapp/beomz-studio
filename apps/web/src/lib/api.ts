@@ -240,6 +240,14 @@ export async function getLatestBuildIdForProject(projectId: string): Promise<str
   return response?.build?.id ?? null;
 }
 
+export async function listProjects(): Promise<Array<Project & { generationCount: number }>> {
+  const data = await requestJson<{ projects: Array<Project & { generationCount: number }> }>(
+    "/projects",
+    { method: "GET" },
+  );
+  return data.projects;
+}
+
 export async function enhancePrompt(prompt: string): Promise<string> {
   const url = `${getApiBaseUrl()}/enhance`;
   const res = await fetch(url, {

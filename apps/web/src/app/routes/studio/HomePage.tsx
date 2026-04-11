@@ -1,5 +1,5 @@
 /**
- * HomePage — V1 projects dashboard ported to V2.
+ * HomePage — V2 projects dashboard.
  * Shows project grid, stats cards, empty state.
  * Light mode — uses StudioLayout sidebar (dark) as wrapper.
  */
@@ -29,16 +29,12 @@ import {
   Wrench,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import type { Project } from "@beomz-studio/contracts";
 import { cn } from "../../../lib/cn";
-import { supabase } from "../../../lib/supabase";
+import { listProjects } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
 
-interface ProjectCard {
-  id: string;
-  name: string;
-  icon: string | null;
-  status: "draft" | "published" | "building";
-  updatedAt: string;
+interface ProjectCard extends Project {
   generationCount: number;
 }
 
@@ -76,7 +72,8 @@ function projectGradient(id: string): string {
   return hues[hash % hues.length];
 }
 
-function timeAgo(iso: string): string {
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return "never opened";
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
@@ -94,30 +91,14 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
-  // Fetch projects
+  // Fetch projects via the authenticated API (avoids needing Supabase RLS)
   useEffect(() => {
     void (async () => {
       try {
-        const { data } = await supabase
-          .from("projects")
-          .select("id, name, status, updated_at, icon")
-          .order("updated_at", { ascending: false })
-          .limit(20);
-
-        if (data) {
-          setProjects(
-            data.map((p) => ({
-              id: p.id,
-              name: p.name ?? "Untitled",
-              icon: (p.icon as string | null) ?? null,
-              status: (p.status ?? "draft") as ProjectCard["status"],
-              updatedAt: p.updated_at,
-              generationCount: 0,
-            })),
-          );
-        }
+        const apiProjects = await listProjects();
+        setProjects(apiProjects.map((p) => ({ ...p })));
       } catch {
-        // Supabase query may fail if table doesn't exist yet
+        // API may fail if user is not yet authenticated or session is loading
       } finally {
         setLoading(false);
       }
@@ -140,7 +121,7 @@ export function HomePage() {
 
       {/* Stats cards */}
       <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {([
+      {([
           { label: "Apps", value: projects.length, icon: FolderOpen, color: "text-[#F97316]" },
           { label: "Published", value: projects.filter((p) => p.status === "published").length, icon: Globe, color: "text-emerald-500" },
           { label: "Total Builds", value: projects.reduce((a, p) => a + p.generationCount, 0), icon: Zap, color: "text-blue-500" },
@@ -223,7 +204,7 @@ export function HomePage() {
                   projectGradient(project.id),
                 )}
               >
-                <ProjectIconBadge name={project.icon} className="text-white/80" />
+                <ProjectIconBadge name={project.icon ?? null} className="text-white/80" />
                 {/* Status badge */}
                 <span
                   className={cn(
@@ -279,7 +260,7 @@ export function HomePage() {
                   <span className="flex items-center gap-1">
                     <Zap size={10} /> {project.generationCount} builds
                   </span>
-                  <span className="ml-auto">{timeAgo(project.updatedAt)}</span>
+                  <span className="ml-auto">{timeAgo(project.lastOpenedAt ?? project.updatedAt)}</span>
                 </div>
               </div>
             </div>

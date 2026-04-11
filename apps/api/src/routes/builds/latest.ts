@@ -36,6 +36,9 @@ buildsLatestRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json({ build: null, project: mapProjectRowToProject(projectRow), result: null, trace: null });
   }
 
+  // Fire-and-forget: stamp last_opened_at so the dashboard shows "recently opened"
+  void orgContext.db.touchProjectLastOpened(projectId);
+
   const trace = readBuildTraceMetadata(generationRow);
 
   return c.json({
