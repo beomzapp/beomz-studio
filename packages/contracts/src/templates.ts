@@ -57,3 +57,24 @@ export interface TemplateDefinition {
   promptHints: readonly string[];
   pages: readonly TemplatePage[];
 }
+
+// ── Pre-built template types ────────────────────────────────────────
+
+export interface TemplateFile {
+  path: string;
+  content: string;
+}
+
+export interface TemplateManifest {
+  id: string;
+  name: string;
+  description: string;
+  shell: TemplateShell;
+  accentColor: string;
+  tags: readonly string[];
+}
+
+export interface PrebuiltTemplate {
+  manifest: TemplateManifest;
+  files: readonly TemplateFile[];
+}
