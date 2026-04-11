@@ -173,7 +173,7 @@ export function TopBar({
               setNameInput(projectName);
               setTimeout(() => nameInputRef.current?.select(), 0);
             }}
-            className="flex items-center gap-1.5 max-w-[220px] truncate text-sm font-semibold transition-colors hover:text-[#6b7280]"
+            className="flex items-center gap-1.5 max-w-[220px] truncate text-sm font-semibold text-[#1a1a1a] transition-colors hover:text-[#6b7280]"
           >
             {projectIcon && (
               <span className="flex-none text-[#F97316]">

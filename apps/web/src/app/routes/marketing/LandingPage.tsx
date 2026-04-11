@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useNavigate, Link } from "@tanstack/react-router";
 import {
   ListChecks,
@@ -22,10 +22,17 @@ import {
   type ModelId,
 } from "../../../components/builder/ChatPanel";
 
-const SUGGESTIONS = [
-  "a SaaS dashboard",
-  "a marketing website",
-  "a task manager",
+const SUGGESTION_POOL = [
+  "a SaaS dashboard", "a marketing website", "a task manager",
+  "a CRM system", "an e-commerce store", "a project tracker",
+  "a budget planner", "a social media scheduler", "an analytics dashboard",
+  "a booking system", "a recipe app", "a fitness tracker",
+  "an invoice generator", "a kanban board", "a habit tracker",
+  "a portfolio site", "a support ticket system", "a team directory",
+  "a content calendar", "a quiz app", "a weather dashboard",
+  "an expense tracker", "a notes app", "a countdown timer",
+  "a job board", "a meal planner", "a reading list",
+  "a crypto tracker", "a travel planner", "a study planner",
 ];
 
 const CHAR_TIERS = [
@@ -70,6 +77,16 @@ export function LandingPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingPromptRef = useRef<string | null>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  // Pick 3 random suggestions from the pool on each page mount
+  const SUGGESTIONS = useMemo(() => {
+    const pool = [...SUGGESTION_POOL];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+    }
+    return pool.slice(0, 3);
+  }, []);
   const { session } = useAuth();
   const rafRef = useRef<number>(0);
   const currentSizeRef = useRef(72);

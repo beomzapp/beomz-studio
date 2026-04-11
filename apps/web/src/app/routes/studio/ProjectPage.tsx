@@ -242,6 +242,7 @@ export function ProjectPage() {
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
       setIsAiCustomising(true);
+      setStreamingText("Writing code...");
       console.log("[SSE preview_ready] fetching build status for", buildId);
       void getBuildStatus(event.buildId)
         .then((status) => {
@@ -301,6 +302,19 @@ export function ProjectPage() {
             if (status.trace.previewReady || status.build.status === "completed") {
               setPreviewGenerationId(bid);
             }
+            // Completion card: summary + file list
+            const summary = event.message || status.build.summary || "Build complete.";
+            const filePaths = (status.result?.files ?? []).map((f) => f.path);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `done-${bid}`,
+                role: "assistant" as const,
+                content: summary,
+                timestamp: new Date().toISOString(),
+                changedFiles: filePaths,
+              },
+            ]);
           })
           .catch((err) => {
             console.error("[SSE done] getBuildStatus failed — preview will not update", err);
@@ -375,7 +389,7 @@ export function ProjectPage() {
       abortRef.current = controller;
       resetHealth();
       setIsStreaming(true);
-      setStreamingText("Connecting live build stream...");
+      setStreamingText("Selecting template...");
       setPreviewGenerationId(null);
       setLastEventId(null);
       activeAssistantMessageIdRef.current = null;

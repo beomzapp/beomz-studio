@@ -335,21 +335,13 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
     historyRef.current = newHistory;
 
     if (planReady) {
-      // Plan is ready — user wants to modify it
-      setTyping(true);
-      setTimeout(() => {
-        setTyping(false);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `ai-${Date.now()}`,
-            role: "ai",
-            content: "Sure — what would you like to change?",
-          },
-        ]);
-        scrollToBottom();
-        inputRef.current?.focus();
-      }, 600);
+      // Plan is ready — treat any typed message as a direct edit request.
+      // Skip the "Sure — what would you like to change?" gate and run
+      // analysis immediately with the user's message as the modification.
+      setPlanReady(false);
+      const newCount = questionCount + 1;
+      setQuestionCount(newCount);
+      void runAnalysis(newHistory, newCount);
     } else {
       const newCount = questionCount + 1;
       setQuestionCount(newCount);
@@ -363,6 +355,7 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
     questionCount,
     runAnalysis,
     scrollToBottom,
+    setPlanReady,
   ]);
 
   const handleBuildIt = useCallback(() => {

@@ -16,6 +16,7 @@ interface GlobalNavProps {
 export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
   const { session } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -83,12 +84,13 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
           onClick={() => setDropdownOpen((v) => !v)}
           className="flex items-center gap-2"
         >
-          {avatarUrl ? (
+          {avatarUrl && !avatarError ? (
             <img
               src={avatarUrl}
               alt="Avatar"
               className="h-8 w-8 rounded-full object-cover"
               referrerPolicy="no-referrer"
+              onError={() => setAvatarError(true)}
             />
           ) : (
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
