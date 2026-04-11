@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
+import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 const NAV_ITEMS = [
   { to: "/studio/home", label: "Projects", icon: FolderOpen, locked: false },
@@ -37,29 +38,29 @@ export function StudioLayout() {
   }
 
   return (
-    <div className="flex h-screen bg-bg">
+    <div className="flex h-screen bg-[#faf9f6]">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar — light cream theme */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-bg-sidebar transition-transform lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-[#e5e5e5] bg-white transition-transform lg:static lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-14 items-center justify-between border-b border-border px-4">
-          <Link to="/" className="text-lg font-bold text-white">
-            beomz<span className="text-orange">.ai</span>
+        <div className="flex h-14 items-center justify-between border-b border-[#e5e5e5] px-4">
+          <Link to="/" className="flex items-center gap-2">
+            <BeomzLogo className="h-6 w-auto text-[#F97316]" />
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="text-white/40 hover:text-white lg:hidden"
+            className="text-[#9ca3af] hover:text-[#1a1a1a] lg:hidden"
           >
             <X size={20} />
           </button>
@@ -74,16 +75,16 @@ export function StudioLayout() {
                 to={item.to}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   active
-                    ? "bg-white/10 text-white"
-                    : "text-white/50 hover:bg-white/5 hover:text-white/80"
+                    ? "bg-[#F97316]/10 text-[#F97316]"
+                    : "text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
                 )}
               >
                 <item.icon size={18} />
                 {item.label}
                 {item.locked && (
-                  <Lock size={12} className="ml-auto text-white/20" />
+                  <Lock size={12} className="ml-auto text-[#d1d5db]" />
                 )}
               </Link>
             );
@@ -94,24 +95,22 @@ export function StudioLayout() {
       {/* Main */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Mobile header */}
-        <header className="flex h-14 items-center justify-between border-b border-border px-4 lg:hidden">
+        <header className="flex h-14 items-center justify-between border-b border-[#e5e5e5] bg-white px-4 lg:hidden">
           <div className="flex items-center">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="text-white/60 hover:text-white"
+              className="text-[#6b7280] hover:text-[#1a1a1a]"
             >
               <Menu size={20} />
             </button>
-            <span className="ml-3 text-sm font-semibold text-white">
-              beomz<span className="text-orange">.ai</span> Studio
-            </span>
+            <BeomzLogo className="ml-3 h-5 w-auto text-[#F97316]" />
           </div>
-          <GlobalNav variant="light" />
+          <GlobalNav />
         </header>
 
         {/* Desktop header — credits + avatar */}
-        <header className="hidden h-14 items-center justify-end border-b border-border px-4 lg:flex">
-          <GlobalNav variant="light" />
+        <header className="hidden h-14 items-center justify-end border-b border-[#e5e5e5] bg-white px-4 lg:flex">
+          <GlobalNav />
         </header>
 
         <main className="flex-1 overflow-y-auto">
