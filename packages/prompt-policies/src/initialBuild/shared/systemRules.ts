@@ -19,4 +19,11 @@ export const sharedInitialBuildSystemRules = [
   "Route files should contain route-specific content only. Shared navigation, shell layout, responsive frame logic, and repeated UI primitives belong in the scaffold files, not duplicated inside each page.",
   "If you touch AppShell or a shared UI module, preserve its default export so route files can import it safely.",
   "Favor editing theme, navigation, AppShell, or shared UI modules for global changes instead of rewriting every route file.",
+  // ── WebContainer COEP restrictions ──────────────────────────────────────────
+  // WebContainer requires SharedArrayBuffer which forces Cross-Origin-Embedder-Policy: require-corp.
+  // Any external resource without CORP/COEP headers (Google Fonts, CDN scripts, external images)
+  // is blocked with ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep.
+  "NEVER add Google Fonts. No @import url('https://fonts.googleapis.com/...') and no <link href='https://fonts.googleapis.com/...'> or fonts.gstatic.com URLs. Use system-ui, -apple-system, sans-serif or Tailwind's built-in font-sans / font-mono classes.",
+  "NEVER load any resource from an external https:// URL. No CDN scripts (unpkg.com, jsdelivr.net, cdnjs), no external images, no <link>/<script>/<style> tags referencing https:// origins.",
+  "NEVER use url('https://...') in any CSS property for backgrounds, fonts, or any resource. Use solid Tailwind colour classes or inline SVG for decorative images.",
 ] as const;

@@ -219,6 +219,18 @@ async function callAnthropicCustomise(
     "- Do NOT import drag-and-drop libraries.",
     "- Do NOT import react-icons or @heroicons — use lucide-react only.",
     `- Accent colour hint from palette: ${paletteId} — honour it where natural.`,
+    "",
+    "CRITICAL — WebContainer COEP restrictions (violating these breaks the preview):",
+    "- NEVER add Google Fonts or any external font. No @import url('https://fonts.googleapis.com/...')",
+    "  and no <link href='https://fonts.googleapis.com/...'> or any fonts.gstatic.com URL.",
+    "  Use only system fonts: font-family: system-ui, -apple-system, sans-serif",
+    "  or Tailwind's default font stack (font-sans, font-mono).",
+    "- NEVER load any resource from an external URL: no CDN scripts, no unpkg.com,",
+    "  no jsdelivr.net, no cdnjs.cloudflare.com, no external images via https://.",
+    "- NEVER add <link>, <script>, or <style> tags that reference external https:// URLs.",
+    "- NEVER use url('https://...') in CSS for backgrounds, fonts, or any resource.",
+    "  If an image is needed, use a solid Tailwind colour div or an inline SVG instead.",
+    "",
     "- Call deliver_customised_files exactly once with the changed files and a one-sentence summary.",
   ].join("\n");
 
@@ -254,7 +266,48 @@ async function callAnthropicCustomise(
   return { files, summary };
 }
 
-// Maps old 11-template IDs → best prebuilt category tags for semantic fallback
+// ─── Post-generation COEP sanitiser ─────────────────────────────────────────
+// Belt-and-suspenders: even if Claude ignores the system prompt rule, strip
+// any external resource references before files reach WebContainer.
+// WebContainer enforces COEP require-corp; resources without CORP headers
+// (Google Fonts, CDN scripts, external images) trigger
+// ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep.
+
+function sanitiseExternalUrls(content: string, path: string): string {
+  let out = content;
+
+  // 1. CSS @import url('https://fonts.googleapis.com/…') — entire line
+  out = out.replace(/@import\s+url\(['"]https?:\/\/[^'"]+['"]\)\s*;?\s*/gi, "");
+  out = out.replace(/@import\s+['"]https?:\/\/[^'"]+['"]\s*;?\s*/gi, "");
+
+  // 2. url('https://…') inside CSS properties (backgrounds, fonts, etc.)
+  //    Replace with none / transparent so the rule still applies but renders blank.
+  out = out.replace(/url\(['"]https?:\/\/[^'"]*['"]\)/gi, "none");
+
+  // 3. JSX <link href="https://fonts.googleapis.com/…" … /> or similar
+  //    Strip the whole element; these break COEP and are usually font imports.
+  out = out.replace(/<link[^>]+href=['"]https?:\/\/[^'"]*['"][^>]*\/?>/gi, "");
+
+  // 4. JSX/HTML <script src="https://…"> … </script>  (CDN scripts)
+  out = out.replace(/<script[^>]+src=['"]https?:\/\/[^'"]*['"][^>]*>[\s\S]*?<\/script>/gi, "");
+  out = out.replace(/<script[^>]+src=['"]https?:\/\/[^'"]*['"][^>]*\/>/gi, "");
+
+  // 5. Inline style / className strings referencing external font-family from Google
+  //    e.g.  fontFamily: "'Roboto', sans-serif"  after a Google Fonts import was stripped.
+  //    Leave font-family values intact — just remove the external import; the browser
+  //    will fall through to sans-serif naturally.
+
+  if (out !== content) {
+    console.warn("[generate] sanitiseExternalUrls: stripped external URL(s) from", path);
+  }
+  return out;
+}
+
+function sanitiseFiles(
+  files: Array<{ path: string; content: string }>,
+): Array<{ path: string; content: string }> {
+  return files.map((f) => ({ ...f, content: sanitiseExternalUrls(f.content, f.path) }));
+}
 const LEGACY_TEMPLATE_TAGS: Record<string, readonly string[]> = {
   "marketing-website": ["landing", "website", "launch"],
   "saas-dashboard": ["dashboard", "analytics", "saas"],
@@ -375,6 +428,7 @@ export async function runBuildInBackground(
 
     try {
       customised = await callAnthropicCustomise(prompt, prebuilt.files, paletteId);
+      customised = { ...customised, files: sanitiseFiles(customised.files) };
     } catch (aiError) {
       // Graceful degradation: show pre-built template as-is (spec requirement)
       console.warn("[generate] Anthropic failed, using template as-is.", {
@@ -382,7 +436,7 @@ export async function runBuildInBackground(
         error: aiError instanceof Error ? aiError.message : String(aiError),
       });
       customised = {
-        files: prebuilt.files.map((f) => ({ path: f.path, content: f.content })),
+        files: sanitiseFiles(prebuilt.files.map((f) => ({ path: f.path, content: f.content }))),
         summary: `${prebuilt.manifest.name} — ${prompt}`,
       };
       fallbackUsed = true;
