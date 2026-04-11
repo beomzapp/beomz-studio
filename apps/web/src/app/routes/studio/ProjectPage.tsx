@@ -19,6 +19,8 @@ import {
   IntegrationsPanel,
   type ChatMessage,
   type ActiveView,
+  type ModelId,
+  DEFAULT_MODEL,
 } from "../../../components/builder";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
@@ -82,6 +84,7 @@ export function ProjectPage() {
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [isAiCustomising, setIsAiCustomising] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<ModelId>(DEFAULT_MODEL);
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
@@ -338,6 +341,7 @@ export function ProjectPage() {
       await startAndStreamBuild({
         body: {
           existingFiles: buildResult?.files?.length ? buildResult.files : undefined,
+          model: selectedModel,
           prompt: text,
           projectId: projectId ?? undefined,
           projectName: projectName !== "Untitled project" ? projectName : undefined,
@@ -798,6 +802,8 @@ export function ProjectPage() {
               width={chatPanelWidth}
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
             />
           </div>
         </div>

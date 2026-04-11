@@ -49,6 +49,7 @@ export interface BuildGenerateInput {
   prompt: string;
   sourcePrompt: string;
   templateId: string;
+  model: string;
   requestedAt: string;
   operationId: string;
   isIteration: boolean;
@@ -283,16 +284,10 @@ async function appendEventToDb(
   });
 }
 
-// ─── Anthropic app generation call ───────────────────────────────────────────
+// ─── Shared prompt builders ───────────────────────────────────────────────────
 
-async function callAnthropicCustomise(
-  prompt: string,
-  _templateFiles: readonly TemplateFile[], // reserved — not sent to model; template used for scaffold_ready only
-  paletteId: string,
-): Promise<CustomiseResult> {
-  const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
-
-  const systemPrompt = [
+function buildSystemPrompt(paletteId: string): string {
+  return [
     "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
     "",
@@ -367,8 +362,10 @@ async function callAnthropicCustomise(
     "  files: App.tsx (always) + one file per major page for multi-page apps",
     "  summary: one sentence — 'A light-theme asset management system with sidebar navigation covering Assets, Work Orders, Team, and Calendar.'",
   ].join("\n");
+}
 
-  const userMessage = [
+function buildUserMessage(prompt: string): string {
+  return [
     `Build this app: ${prompt}`,
     "",
     "Stack available (already configured — no setup needed):",
@@ -378,33 +375,111 @@ async function callAnthropicCustomise(
     "  No router installed — use React useState to show different pages/views",
     "  Entry point is App.tsx with a default export",
   ].join("\n");
+}
 
-  const stream = client.messages.stream({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 32000,
-    system: systemPrompt,
-    tools: [DELIVER_FILES_TOOL],
-    tool_choice: { type: "tool", name: "deliver_customised_files" },
-    messages: [{ role: "user", content: userMessage }],
-  });
-  const message = await stream.finalMessage();
-
-  const toolBlock = message.content.find(
-    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
-  );
-  if (!toolBlock) {
-    throw new Error("Anthropic did not call the deliver_customised_files tool.");
-  }
-
-  const raw = toolBlock.input as { files?: unknown; summary?: unknown };
+function parseRawToolOutput(raw: { files?: unknown; summary?: unknown }, prompt: string): CustomiseResult {
   const files = Array.isArray(raw.files)
     ? (raw.files as Array<{ path: string; content: string }>).filter(
         (f) => typeof f.path === "string" && typeof f.content === "string",
       )
     : [];
   const summary = typeof raw.summary === "string" ? raw.summary : `${prompt} app`;
-
   return { files, summary };
+}
+
+// ─── Anthropic provider ───────────────────────────────────────────────────────
+
+async function callAnthropicCustomise(
+  prompt: string,
+  model: string,
+  paletteId: string,
+): Promise<CustomiseResult> {
+  const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+  const stream = client.messages.stream({
+    model,
+    max_tokens: 32000,
+    system: buildSystemPrompt(paletteId),
+    tools: [DELIVER_FILES_TOOL],
+    tool_choice: { type: "tool", name: "deliver_customised_files" },
+    messages: [{ role: "user", content: buildUserMessage(prompt) }],
+  });
+  const message = await stream.finalMessage();
+  const toolBlock = message.content.find(
+    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+  );
+  if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
+  return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown }, prompt);
+}
+
+// ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
+
+async function callOpenAICompatibleCustomise(
+  prompt: string,
+  model: string,
+  apiKey: string,
+  paletteId: string,
+  baseURL?: string,
+): Promise<CustomiseResult> {
+  const { default: OpenAI } = await import("openai");
+  const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+
+  const response = await client.chat.completions.create({
+    model,
+    max_tokens: model.startsWith("gemini-") ? 8192 : 16384,
+    messages: [
+      { role: "system", content: buildSystemPrompt(paletteId) },
+      { role: "user", content: buildUserMessage(prompt) },
+    ],
+    tools: [{
+      type: "function",
+      function: {
+        name: "deliver_customised_files",
+        description: DELIVER_FILES_TOOL.description,
+        parameters: DELIVER_FILES_TOOL.input_schema as Record<string, unknown>,
+      },
+    }],
+    tool_choice: { type: "function", function: { name: "deliver_customised_files" } },
+  });
+
+  const toolCall = response.choices[0]?.message.tool_calls?.[0];
+  if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "deliver_customised_files") {
+    throw new Error(`${model} did not call the deliver_customised_files tool.`);
+  }
+  const raw = JSON.parse(toolCall.function.arguments) as { files?: unknown; summary?: unknown };
+  return parseRawToolOutput(raw, prompt);
+}
+
+// ─── Model dispatch ───────────────────────────────────────────────────────────
+
+async function callModelCustomise(
+  prompt: string,
+  model: string,
+  paletteId: string,
+): Promise<CustomiseResult> {
+  console.log("[generate] calling model:", model);
+
+  if (model.startsWith("claude-")) {
+    return callAnthropicCustomise(prompt, model, paletteId);
+  }
+
+  if (model.startsWith("gpt-")) {
+    const apiKey = apiConfig.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
+    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId);
+  }
+
+  if (model.startsWith("gemini-")) {
+    const apiKey = apiConfig.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not configured on server.");
+    return callOpenAICompatibleCustomise(
+      prompt, model, apiKey, paletteId,
+      "https://generativelanguage.googleapis.com/v1beta/openai/",
+    );
+  }
+
+  // Unknown model — fall back to haiku
+  console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
+  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId);
 }
 
 // ─── Post-generation COEP sanitiser ─────────────────────────────────────────
@@ -499,7 +574,7 @@ export async function runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
 ): Promise<void> {
-  const { buildId, projectId, prompt, templateId, requestedAt, userId } = input;
+  const { buildId, projectId, prompt, templateId, model, requestedAt, userId } = input;
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
@@ -573,8 +648,8 @@ export async function runBuildInBackground(
     let fallbackUsed = false;
 
     try {
-      customised = await callAnthropicCustomise(prompt, prebuilt.files, paletteId);
-      console.log("[generate] Anthropic returned files:", customised.files.map((f) => f.path));
+      customised = await callModelCustomise(prompt, model, paletteId);
+      console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
       // we flatten into the generated directory. Patch any residual CJS React globals.
       customised = {
@@ -653,7 +728,7 @@ export async function runBuildInBackground(
       credits_used: 0,
       user_iterated: input.isIteration,
       iteration_count: 0,
-      model_used: "claude-haiku-4-5-20251001",
+      model_used: model,
     }).catch(() => undefined);
 
     await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);

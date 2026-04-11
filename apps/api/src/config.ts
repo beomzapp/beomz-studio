@@ -4,6 +4,8 @@ const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  OPENAI_API_KEY: z.string().min(1).optional(),
   PLATFORM_JWKS_URL: z
     .string()
     .url()

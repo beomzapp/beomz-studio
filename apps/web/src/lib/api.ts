@@ -177,6 +177,7 @@ async function requestJson<TResponse>(
 
 export function startBuild(body: {
   existingFiles?: readonly StudioFile[];
+  model?: string;
   prompt: string;
   projectId?: string;
   projectName?: string;

@@ -255,6 +255,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       userId: orgContext.user.id,
       prompt: effectivePrompt, sourcePrompt,
       templateId: selectedTemplateId,
+      model: parsedBody.data.model ?? "claude-haiku-4-5-20251001",
       requestedAt, operationId,
       isIteration, existingFiles,
     },

@@ -37,6 +37,17 @@ export interface ChatMessage {
   phase?: { current: number; total: number; summary: string };
 }
 
+export const AVAILABLE_MODELS = [
+  { id: "claude-haiku-4-5-20251001", label: "Haiku",  badge: "Fast",   provider: "anthropic" },
+  { id: "claude-sonnet-4-5-20251001", label: "Sonnet", badge: "Better", provider: "anthropic" },
+  { id: "gpt-4o",                     label: "GPT-4o", badge: "OpenAI", provider: "openai"    },
+  { id: "gemini-2.0-flash",           label: "Gemini", badge: "Google", provider: "google"    },
+] as const;
+
+export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
+
+export const DEFAULT_MODEL: ModelId = "claude-haiku-4-5-20251001";
+
 interface ChatPanelProps {
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -48,6 +59,8 @@ interface ChatPanelProps {
   width?: number;
   suggestionChips?: string[];
   onDismissChips?: () => void;
+  selectedModel?: ModelId;
+  onModelChange?: (model: ModelId) => void;
 }
 
 // ─────────────────────────────────────────────
@@ -456,10 +469,13 @@ export function ChatPanel({
   width = 380,
   suggestionChips,
   onDismissChips,
+  selectedModel = DEFAULT_MODEL,
+  onModelChange,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
   const [chipsDismissed, setChipsDismissed] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -738,6 +754,35 @@ export function ChatPanel({
               >
                 <ListChecks size={15} />
               </button>
+
+              {/* Model selector pill */}
+              <div className="relative ml-0.5">
+                <button
+                  onClick={() => setModelMenuOpen((v) => !v)}
+                  className="flex items-center gap-1 rounded-md border border-[#e5e5e5] px-2 py-1 text-[11px] font-medium text-[#6b7280] transition-colors hover:border-[#d1d5db] hover:text-[#374151]"
+                  title="Select model"
+                >
+                  {AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.label ?? "Haiku"}
+                  <ChevronDown size={9} />
+                </button>
+                {modelMenuOpen && (
+                  <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[160px] overflow-hidden rounded-xl border border-[#e5e5e5] bg-white shadow-lg">
+                    {AVAILABLE_MODELS.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => { onModelChange?.(m.id); setModelMenuOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[#faf9f6]"
+                      >
+                        <span className="flex-1 text-[13px] font-medium text-[#1a1a1a]">{m.label}</span>
+                        <span className="text-[10px] text-[#9ca3af]">{m.badge}</span>
+                        {selectedModel === m.id && (
+                          <Check size={10} className="shrink-0 text-[#F97316]" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {isStreaming ? (

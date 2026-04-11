@@ -54,10 +54,12 @@ export interface StartBuildRequest extends BuildPlanContext {
   projectId?: string;
   projectName?: string;
   existingFiles?: readonly StudioFile[];
+  model?: string;
 }
 
 export const startBuildRequestSchema = z.object({
   existingFiles: z.array(studioFileSchema).optional(),
+  model: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(8).max(4000),
   projectId: z.string().trim().uuid().optional(),
   projectName: z.string().trim().min(1).max(120).optional(),
