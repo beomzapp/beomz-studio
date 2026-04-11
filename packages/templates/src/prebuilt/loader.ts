@@ -134,6 +134,24 @@ import { manifest as plantCareTrackerManifest } from "../plant-care-tracker/mani
 import { files as plantCareTrackerFiles } from "../plant-care-tracker/files.js";
 import { manifest as movieWatchlistManifest } from "../movie-watchlist/manifest.js";
 import { files as movieWatchlistFiles } from "../movie-watchlist/files.js";
+import { manifest as expenseReportManifest } from "../expense-report/manifest.js";
+import { files as expenseReportFiles } from "../expense-report/files.js";
+import { manifest as contentCalendarManifest } from "../content-calendar/manifest.js";
+import { files as contentCalendarFiles } from "../content-calendar/files.js";
+import { manifest as bugTrackerManifest } from "../bug-tracker/manifest.js";
+import { files as bugTrackerFiles } from "../bug-tracker/files.js";
+import { manifest as socialMediaSchedulerManifest } from "../social-media-scheduler/manifest.js";
+import { files as socialMediaSchedulerFiles } from "../social-media-scheduler/files.js";
+import { manifest as portfolioTrackerManifest } from "../portfolio-tracker/manifest.js";
+import { files as portfolioTrackerFiles } from "../portfolio-tracker/files.js";
+import { manifest as contactBookManifest } from "../contact-book/manifest.js";
+import { files as contactBookFiles } from "../contact-book/files.js";
+import { manifest as dailyStandupManifest } from "../daily-standup/manifest.js";
+import { files as dailyStandupFiles } from "../daily-standup/files.js";
+import { manifest as quizBuilderManifest } from "../quiz-builder/manifest.js";
+import { files as quizBuilderFiles } from "../quiz-builder/files.js";
+import { manifest as unitConverterProManifest } from "../unit-converter-pro/manifest.js";
+import { files as unitConverterProFiles } from "../unit-converter-pro/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -203,6 +221,15 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: interviewPrepManifest, files: interviewPrepFiles },
   { manifest: plantCareTrackerManifest, files: plantCareTrackerFiles },
   { manifest: movieWatchlistManifest, files: movieWatchlistFiles },
+  { manifest: expenseReportManifest, files: expenseReportFiles },
+  { manifest: contentCalendarManifest, files: contentCalendarFiles },
+  { manifest: bugTrackerManifest, files: bugTrackerFiles },
+  { manifest: socialMediaSchedulerManifest, files: socialMediaSchedulerFiles },
+  { manifest: portfolioTrackerManifest, files: portfolioTrackerFiles },
+  { manifest: contactBookManifest, files: contactBookFiles },
+  { manifest: dailyStandupManifest, files: dailyStandupFiles },
+  { manifest: quizBuilderManifest, files: quizBuilderFiles },
+  { manifest: unitConverterProManifest, files: unitConverterProFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
