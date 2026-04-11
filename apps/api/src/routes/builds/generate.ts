@@ -469,7 +469,8 @@ export async function runBuildInBackground(
   let paletteId = "professional-blue";
   try {
     const p = await classifyPalette(prompt);
-    if (p.confidence > 0) paletteId = p.palette;
+    paletteId = p.palette;
+    console.log("[generate] palette selected:", paletteId, { confidence: p.confidence });
   } catch {
     // non-fatal
   }

@@ -3,6 +3,7 @@ import type { Project, StudioFile } from "@beomz-studio/contracts";
 import {
   Monitor,
   Smartphone,
+  Sparkles,
   Tablet,
   RefreshCw,
   Zap,
@@ -144,6 +145,7 @@ function TabletFrame({
 interface PreviewPaneProps {
   files?: readonly StudioFile[] | null;
   generationId?: string | null;
+  isAiCustomising?: boolean;
   previewEntryPath?: string | null;
   project?: Pick<Project, "id" | "name" | "templateId"> | null;
   refreshToken?: number;
@@ -153,6 +155,7 @@ interface PreviewPaneProps {
 export function PreviewPane({
   files,
   generationId,
+  isAiCustomising = false,
   previewEntryPath,
   project,
   refreshToken = 0,
@@ -265,7 +268,13 @@ export function PreviewPane({
         </div>
         <div className="flex flex-1 items-center gap-2 rounded-md border border-[#e5e5e5] bg-white px-3 py-1">
           <span className="flex-1 text-xs text-[#9ca3af]">{urlBarText}</span>
-          {wcStatus === "ready" && (
+          {wcStatus === "ready" && isAiCustomising && (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-[#a855f7]">
+              <Sparkles size={9} className="animate-pulse" />
+              Customising…
+            </span>
+          )}
+          {wcStatus === "ready" && !isAiCustomising && (
             <span className="flex items-center gap-1 text-[10px] font-medium text-[#22c55e]">
               <Zap size={9} />
               Live

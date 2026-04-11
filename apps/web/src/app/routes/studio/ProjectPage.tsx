@@ -81,6 +81,7 @@ export function ProjectPage() {
   const [buildResult, setBuildResult] = useState<BuildStatusResponse["result"] | null>(null);
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
+  const [isAiCustomising, setIsAiCustomising] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
@@ -223,6 +224,7 @@ export function ProjectPage() {
 
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
+      setIsAiCustomising(true);
       console.log("[SSE preview_ready] fetching build status for", buildId);
       void getBuildStatus(event.buildId)
         .then((status) => {
@@ -243,6 +245,7 @@ export function ProjectPage() {
     if (event.type === "done" || event.type === "error") {
       setIsStreaming(false);
       setStreamingText("");
+      setIsAiCustomising(false);
     }
 
     if (event.type === "done") {
@@ -726,6 +729,7 @@ export function ProjectPage() {
           <PreviewPane
             files={buildResult?.files}
             generationId={previewGenerationId}
+            isAiCustomising={isAiCustomising}
             previewEntryPath={buildResult?.previewEntryPath ?? null}
             project={projectId && build?.templateId
               ? { id: projectId, name: projectName, templateId: build.templateId as TemplateId }
