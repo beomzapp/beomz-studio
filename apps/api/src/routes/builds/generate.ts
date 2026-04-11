@@ -34,6 +34,7 @@ import type { StudioDbClient } from "@beomz-studio/studio-db";
 import {
   getPrebuiltTemplate,
   listPrebuiltTemplates,
+  searchPrebuiltTemplatesByTags,
 } from "@beomz-studio/templates";
 
 import { apiConfig } from "../../config.js";
@@ -250,7 +251,47 @@ async function callAnthropicCustomise(
   return { files, summary };
 }
 
-// ─── Main background runner ───────────────────────────────────────────────────
+// Maps old 11-template IDs → best prebuilt category tags for semantic fallback
+const LEGACY_TEMPLATE_TAGS: Record<string, readonly string[]> = {
+  "marketing-website": ["landing", "website", "launch"],
+  "saas-dashboard": ["dashboard", "analytics", "saas"],
+  "workspace-task": ["kanban", "task", "todo"],
+  "mobile-app": ["tracker", "habit", "personal"],
+  "social-app": ["social", "community", "feed"],
+  "ecommerce": ["shop", "product", "retail"],
+  "portfolio": ["portfolio", "creative", "showcase"],
+  "blog-cms": ["blog", "content", "reading"],
+  "onboarding-flow": ["onboarding", "wizard", "survey"],
+  "data-table-app": ["expense", "budget", "invoice"],
+  "interactive-tool": ["calculator", "timer", "converter"],
+};
+
+function pickBestPrebuilt(
+  templateId: string,
+  prompt: string,
+) {
+  // Direct hit first (prebuilt template IDs)
+  const direct = getPrebuiltTemplate(templateId);
+  if (direct) return direct;
+
+  // Keyword search on prompt tokens
+  const promptTokens = prompt
+    .toLowerCase()
+    .match(/[a-z0-9]+/g)
+    ?.filter((t) => t.length >= 4) ?? [];
+  const byPrompt = searchPrebuiltTemplatesByTags(promptTokens.slice(0, 6));
+  if (byPrompt.length > 0) return byPrompt[0]!;
+
+  // Semantic mapping from legacy template category
+  const fallbackTags = LEGACY_TEMPLATE_TAGS[templateId];
+  if (fallbackTags) {
+    const byCat = searchPrebuiltTemplatesByTags([...fallbackTags]);
+    if (byCat.length > 0) return byCat[0]!;
+  }
+
+  // Last resort: first in registry
+  return listPrebuiltTemplates()[0]!;
+}
 
 /**
  * Fire-and-forget background build.  Called after start.ts returns 202.
@@ -277,12 +318,7 @@ export async function runBuildInBackground(
   });
 
   // ── Best-matching prebuilt template ──────────────────────────────────────
-  let prebuilt = getPrebuiltTemplate(templateId);
-  if (!prebuilt) {
-    // templateId may be one of the 11 old TemplateIds; pick semantically best prebuilt
-    const all = listPrebuiltTemplates();
-    prebuilt = all[0]; // fallback: first in registry (basic-calculator is a safe neutral)
-  }
+  const prebuilt = pickBestPrebuilt(templateId, prompt);
 
   const templateFiles = templateFilesToStudioFiles(prebuilt.files);
   const previewEntryPath = "/";
