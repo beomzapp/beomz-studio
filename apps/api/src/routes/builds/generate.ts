@@ -145,6 +145,27 @@ function patchReactGlobals(content: string): string {
   return `import { ${Array.from(allNames).join(", ")} } from "react";\n${cleaned}`;
 }
 
+// ─── Flatten relative imports ─────────────────────────────────────────────────
+// After remapPrebuiltPath() all generated files live in the same flat directory.
+// If the AI generates App.tsx with `import X from './components/X'` but we
+// flatten components/X.tsx → X.tsx, the import breaks and Vite returns
+// index.html (text/html) instead of the module → MIME error.
+//
+// This function rewrites any relative import that has directory components
+// to a flat `./basename` form:
+//   './components/AssetsPage'  → './AssetsPage'
+//   '../pages/WorkOrders'      → './WorkOrders'
+//   './styles.css'             → unchanged (already flat)
+function flattenRelativeImports(content: string): string {
+  return content.replace(
+    /(['"])(\.\.?\/(?:[^/'"]*\/)+[^/'"]+)(['"])/g,
+    (_match, open, importPath, close) => {
+      const basename = importPath.replace(/^.*\//, "");
+      return `${open}./${basename}${close}`;
+    },
+  );
+}
+
 // ─── Path mapping for prebuilt templates ──────────────────────────────────────
 // The WebContainer preview shell (WORKSPACE_PREVIEW_APP_TSX in webcontainer.ts)
 // globs `apps/web/src/app/generated/**/*.tsx` and reads routes from
@@ -389,19 +410,20 @@ function parseRawToolOutput(raw: { files?: unknown; summary?: unknown }, prompt:
 
 // ─── Anthropic provider ───────────────────────────────────────────────────────
 
-async function callAnthropicCustomise(
-  prompt: string,
+async function callAnthropicWithMessages(
   model: string,
-  paletteId: string,
+  systemPrompt: string,
+  userMessage: string,
+  prompt: string,
 ): Promise<CustomiseResult> {
   const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
   const stream = client.messages.stream({
     model,
     max_tokens: 32000,
-    system: buildSystemPrompt(paletteId),
+    system: systemPrompt,
     tools: [DELIVER_FILES_TOOL],
     tool_choice: { type: "tool", name: "deliver_customised_files" },
-    messages: [{ role: "user", content: buildUserMessage(prompt) }],
+    messages: [{ role: "user", content: userMessage }],
   });
   const message = await stream.finalMessage();
   const toolBlock = message.content.find(
@@ -411,13 +433,22 @@ async function callAnthropicCustomise(
   return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown }, prompt);
 }
 
-// ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
-
-async function callOpenAICompatibleCustomise(
+async function callAnthropicCustomise(
   prompt: string,
   model: string,
-  apiKey: string,
   paletteId: string,
+): Promise<CustomiseResult> {
+  return callAnthropicWithMessages(model, buildSystemPrompt(paletteId), buildUserMessage(prompt), prompt);
+}
+
+// ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
+
+async function callOpenAICompatibleWithMessages(
+  model: string,
+  apiKey: string,
+  systemPrompt: string,
+  userMessage: string,
+  prompt: string,
   baseURL?: string,
 ): Promise<CustomiseResult> {
   const { default: OpenAI } = await import("openai");
@@ -427,8 +458,8 @@ async function callOpenAICompatibleCustomise(
     model,
     max_tokens: model.startsWith("gemini-") ? 8192 : 16384,
     messages: [
-      { role: "system", content: buildSystemPrompt(paletteId) },
-      { role: "user", content: buildUserMessage(prompt) },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
     ],
     tools: [{
       type: "function",
@@ -449,7 +480,17 @@ async function callOpenAICompatibleCustomise(
   return parseRawToolOutput(raw, prompt);
 }
 
-// ─── Model dispatch ───────────────────────────────────────────────────────────
+async function callOpenAICompatibleCustomise(
+  prompt: string,
+  model: string,
+  apiKey: string,
+  paletteId: string,
+  baseURL?: string,
+): Promise<CustomiseResult> {
+  return callOpenAICompatibleWithMessages(model, apiKey, buildSystemPrompt(paletteId), buildUserMessage(prompt), prompt, baseURL);
+}
+
+// ─── Model dispatch (initial build) ──────────────────────────────────────────
 
 async function callModelCustomise(
   prompt: string,
@@ -480,6 +521,95 @@ async function callModelCustomise(
   // Unknown model — fall back to haiku
   console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
   return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId);
+}
+
+// ─── Iteration prompts ────────────────────────────────────────────────────────
+
+function buildIterationSystemPrompt(): string {
+  return [
+    "You are modifying an existing React application. Apply ONLY the specific change the user requests.",
+    "",
+    "RULES:",
+    "1. Return ONLY files that actually need to change. Do NOT return unchanged files.",
+    "2. Preserve all existing structure, components, navigation, and logic unless the change requires touching them.",
+    "3. For color/theme changes: update Tailwind color classes (e.g. bg-blue-500 → bg-red-500) and hex/CSS color values.",
+    "4. For feature additions: add the minimal code in the relevant file(s) only.",
+    "5. For text/copy changes: update only the text content, nothing else.",
+    "6. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
+    "7. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
+    "8. Keep all existing functionality that the user did NOT ask to change.",
+    "",
+    "DELIVER: Call deliver_customised_files with only the changed files and their complete updated content.",
+    "The summary should briefly describe what changed, e.g. 'Changed color theme from blue to red.'",
+  ].join("\n");
+}
+
+function buildIterationUserMessage(
+  prompt: string,
+  existingFiles: readonly StudioFile[],
+): string {
+  // Include only source TSX/TS files as context; skip platform manifests/JSON.
+  const MAX_CONTEXT_CHARS = 40_000;
+  const sourceFiles = existingFiles.filter(
+    (f) => /\.(tsx|ts)$/.test(f.path) && f.source !== "platform",
+  );
+
+  let contextChars = 0;
+  const contextParts: string[] = [];
+  for (const f of sourceFiles) {
+    const piece = `// FILE: ${f.path}\n${f.content}`;
+    if (contextChars + piece.length > MAX_CONTEXT_CHARS) break;
+    contextParts.push(piece);
+    contextChars += piece.length;
+  }
+
+  return [
+    "CURRENT APP FILES:",
+    "",
+    contextParts.join("\n\n---\n\n"),
+    "",
+    "---",
+    "",
+    `CHANGE REQUESTED: ${prompt}`,
+    "",
+    "Return only the files that need to change with their complete new content.",
+  ].join("\n");
+}
+
+// ─── Model dispatch (iteration) ───────────────────────────────────────────────
+
+async function callModelIterate(
+  prompt: string,
+  model: string,
+  existingFiles: readonly StudioFile[],
+): Promise<CustomiseResult> {
+  console.log("[generate] iterating with model:", model);
+
+  const systemPrompt = buildIterationSystemPrompt();
+  const userMessage = buildIterationUserMessage(prompt, existingFiles);
+
+  if (model.startsWith("claude-")) {
+    return callAnthropicWithMessages(model, systemPrompt, userMessage, prompt);
+  }
+
+  if (model.startsWith("gpt-")) {
+    const apiKey = apiConfig.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
+    return callOpenAICompatibleWithMessages(model, apiKey, systemPrompt, userMessage, prompt);
+  }
+
+  if (model.startsWith("gemini-")) {
+    const apiKey = apiConfig.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not configured on server.");
+    return callOpenAICompatibleWithMessages(
+      model, apiKey, systemPrompt, userMessage, prompt,
+      "https://generativelanguage.googleapis.com/v1beta/openai/",
+    );
+  }
+
+  // Unknown model — fall back to haiku
+  console.warn("[generate] Unknown model for iteration, falling back to claude-haiku-4-5-20251001:", model);
+  return callAnthropicWithMessages("claude-haiku-4-5-20251001", systemPrompt, userMessage, prompt);
 }
 
 // ─── Post-generation COEP sanitiser ─────────────────────────────────────────
@@ -609,6 +739,121 @@ export async function runBuildInBackground(
   }
 
   try {
+    // ── ITERATION PATH ─────────────────────────────────────────────────────────
+    // For iteration (user modifying an existing project), skip template loading.
+    // Pass current files as context; AI returns only changed files.
+    if (input.isIteration && input.existingFiles.length > 0) {
+      const existingFiles = input.existingFiles;
+
+      await appendEventToDb(
+        db, buildId,
+        statusEvent("ai_iterating", "Applying changes…", "customising"),
+        { status: "running" },
+      );
+
+      // scaffold_ready with existing files so preview shows current app state
+      // while AI applies the change in the background.
+      const iterScaffoldEvent: BuilderV3PreviewReadyEvent = {
+        type: "preview_ready",
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        code: "scaffold_ready",
+        message: "Loading existing app…",
+        buildId,
+        projectId,
+        previewEntryPath: "/",
+        fallbackUsed: false,
+      };
+      await appendEventToDb(db, buildId, iterScaffoldEvent, {
+        files: [...existingFiles],
+        preview_entry_path: "/",
+        template_id: templateId as TemplateId,
+      });
+
+      console.log("[generate] iteration scaffold_ready emitted.", { buildId, existingFilesCount: existingFiles.length });
+
+      await appendEventToDb(
+        db, buildId,
+        statusEvent("ai_customising", "Applying your changes with AI…", "customising"),
+      );
+
+      let iterResult: CustomiseResult;
+      try {
+        iterResult = await callModelIterate(prompt, model, existingFiles);
+        console.log("[generate] Iteration model returned files:", iterResult.files.map((f) => f.path));
+
+        // Remap flat filenames → correct generated directory path, flatten imports
+        iterResult = {
+          ...iterResult,
+          files: sanitiseFiles(
+            iterResult.files.map((f) => ({
+              path: remapPrebuiltPath(f.path, templateId),
+              content: flattenRelativeImports(patchReactGlobals(f.content)),
+            })),
+          ),
+        };
+        console.log("[generate] Iteration remapped files:", iterResult.files.map((f) => f.path));
+      } catch (iterErr) {
+        console.warn("[generate] Iteration AI failed, keeping existing files.", {
+          buildId,
+          error: iterErr instanceof Error ? iterErr.message : String(iterErr),
+        });
+        // Graceful degradation: return existing files unchanged
+        iterResult = {
+          files: [],
+          summary: `${prompt} — changes could not be applied`,
+        };
+      }
+
+      // Merge AI-changed files over the existing file set
+      const iterFinalFiles = mergeFiles([...existingFiles], iterResult.files);
+      const iterCompletedAt = ts();
+
+      const iterDoneEvent: BuilderV3DoneEvent = {
+        type: "done",
+        id: nextId(),
+        timestamp: iterCompletedAt,
+        operation: op,
+        code: "build_completed",
+        message: iterResult.summary,
+        buildId,
+        projectId,
+        fallbackUsed: iterResult.files.length === 0,
+        fallbackReason: iterResult.files.length === 0 ? "ai_iteration_error" : null,
+      };
+
+      await appendEventToDb(db, buildId, iterDoneEvent, {
+        completed_at: iterCompletedAt,
+        files: iterFinalFiles,
+        status: "completed",
+        summary: iterResult.summary,
+      });
+
+      console.log("[generate] Iteration complete.", { buildId, changedFiles: iterResult.files.length });
+
+      await db.upsertBuildTelemetry({
+        id: buildId,
+        project_id: projectId,
+        user_id: userId,
+        prompt: input.sourcePrompt,
+        template_used: templateId,
+        palette_used: "iteration",
+        files_generated: iterFinalFiles.length,
+        succeeded: iterResult.files.length > 0,
+        fallback_reason: iterResult.files.length === 0 ? "ai_iteration_error" : null,
+        error_log: null,
+        generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
+        credits_used: 0,
+        user_iterated: true,
+        iteration_count: 0,
+        model_used: model,
+      }).catch(() => undefined);
+
+      await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
+      return;
+    }
+
     // ── 1. Status: loading ──────────────────────────────────────────────────
     await appendEventToDb(
       db, buildId,
@@ -657,7 +902,9 @@ export async function runBuildInBackground(
         files: sanitiseFiles(
           customised.files.map((f) => ({
             path: remapPrebuiltPath(f.path, templateId),
-            content: patchReactGlobals(f.content),
+            // patchReactGlobals: CJS React destructure → ESM import
+            // flattenRelativeImports: './components/X' → './X' (all files are flat)
+            content: flattenRelativeImports(patchReactGlobals(f.content)),
           })),
         ),
       };
