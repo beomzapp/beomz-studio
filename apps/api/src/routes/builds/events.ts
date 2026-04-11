@@ -202,12 +202,24 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     };
 
     while (!c.req.raw.signal.aborted && streamOpen) {
-      const currentGenerationRow = await orgContext.db.findGenerationById(buildId);
-      if (!currentGenerationRow) {
-        break;
+      let currentGenerationRow: Awaited<ReturnType<typeof orgContext.db.findGenerationById>>;
+      let currentProjectRow: Awaited<ReturnType<typeof orgContext.db.findProjectById>>;
+
+      try {
+        currentGenerationRow = await orgContext.db.findGenerationById(buildId);
+        if (!currentGenerationRow) {
+          break;
+        }
+        currentProjectRow = await orgContext.db.findProjectById(currentGenerationRow.project_id);
+      } catch {
+        // Supabase transient error — skip this poll tick and try again.
+        const shouldContinue = await waitForNextPoll();
+        if (!shouldContinue) {
+          return;
+        }
+        continue;
       }
 
-      const currentProjectRow = await orgContext.db.findProjectById(currentGenerationRow.project_id);
       if (!currentProjectRow || currentProjectRow.org_id !== orgContext.org.id) {
         break;
       }
