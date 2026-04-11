@@ -98,6 +98,22 @@ import { manifest as timeTrackerManifest } from "../time-tracker/manifest.js";
 import { files as timeTrackerFiles } from "../time-tracker/files.js";
 import { manifest as linkInBioManifest } from "../link-in-bio/manifest.js";
 import { files as linkInBioFiles } from "../link-in-bio/files.js";
+import { manifest as pomodoroProManifest } from "../pomodoro-pro/manifest.js";
+import { files as pomodoroProFiles } from "../pomodoro-pro/files.js";
+import { manifest as netWorthTrackerManifest } from "../net-worth-tracker/manifest.js";
+import { files as netWorthTrackerFiles } from "../net-worth-tracker/files.js";
+import { manifest as dailyJournalManifest } from "../daily-journal/manifest.js";
+import { files as dailyJournalFiles } from "../daily-journal/files.js";
+import { manifest as languageFlashcardsManifest } from "../language-flashcards/manifest.js";
+import { files as languageFlashcardsFiles } from "../language-flashcards/files.js";
+import { manifest as projectRoadmapManifest } from "../project-roadmap/manifest.js";
+import { files as projectRoadmapFiles } from "../project-roadmap/files.js";
+import { manifest as clientTrackerManifest } from "../client-tracker/manifest.js";
+import { files as clientTrackerFiles } from "../client-tracker/files.js";
+import { manifest as wineCellarManifest } from "../wine-cellar/manifest.js";
+import { files as wineCellarFiles } from "../wine-cellar/files.js";
+import { manifest as bookNotesManifest } from "../book-notes/manifest.js";
+import { files as bookNotesFiles } from "../book-notes/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -149,6 +165,14 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: groceryListManifest, files: groceryListFiles },
   { manifest: timeTrackerManifest, files: timeTrackerFiles },
   { manifest: linkInBioManifest, files: linkInBioFiles },
+  { manifest: pomodoroProManifest, files: pomodoroProFiles },
+  { manifest: netWorthTrackerManifest, files: netWorthTrackerFiles },
+  { manifest: dailyJournalManifest, files: dailyJournalFiles },
+  { manifest: languageFlashcardsManifest, files: languageFlashcardsFiles },
+  { manifest: projectRoadmapManifest, files: projectRoadmapFiles },
+  { manifest: clientTrackerManifest, files: clientTrackerFiles },
+  { manifest: wineCellarManifest, files: wineCellarFiles },
+  { manifest: bookNotesManifest, files: bookNotesFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
