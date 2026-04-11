@@ -39,7 +39,7 @@ export interface ChatMessage {
 
 export const AVAILABLE_MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku",  badge: "Fast",   provider: "anthropic" },
-  { id: "claude-sonnet-4-5-20251001", label: "Sonnet", badge: "Better", provider: "anthropic" },
+  { id: "claude-sonnet-4-6",         label: "Sonnet", badge: "Better", provider: "anthropic" },
   { id: "gpt-4o",                     label: "GPT-4o", badge: "OpenAI", provider: "openai"    },
   { id: "gemini-2.0-flash",           label: "Gemini", badge: "Google", provider: "google"    },
 ] as const;

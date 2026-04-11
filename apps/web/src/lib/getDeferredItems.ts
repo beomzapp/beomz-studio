@@ -11,7 +11,7 @@ export async function getDeferredItems(prompt: string): Promise<string[]> {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-4-6",
         max_tokens: 150,
         system: `You are a software architect. Given an app idea, identify the top 3 features that would be deferred to Phase 2 (not in the MVP). Return ONLY a valid JSON array of 3 short feature names. Example: ["User authentication", "Admin dashboard", "Email notifications"]`,
         messages: [{ role: "user", content: prompt }],

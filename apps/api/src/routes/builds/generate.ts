@@ -1080,29 +1080,43 @@ function parseRawToolOutput(raw: { files?: unknown; summary?: unknown }, prompt:
 
 // ─── Anthropic provider ───────────────────────────────────────────────────────
 
+const ANTHROPIC_HAIKU_FALLBACK = "claude-haiku-4-5-20251001";
+
 async function callAnthropicWithMessages(
   model: string,
   systemPrompt: string,
   userMessage: string,
   prompt: string,
 ): Promise<CustomiseResult> {
-  console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
-  const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
-  const stream = client.messages.stream({
-    model,
-    max_tokens: 32000,
-    system: systemPrompt,
-    tools: [DELIVER_FILES_TOOL],
-    tool_choice: { type: "tool", name: "deliver_customised_files" },
-    messages: [{ role: "user", content: userMessage }],
-  });
-  const message = await stream.finalMessage();
-  console.log("[generate] Anthropic response:", { model, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
-  const toolBlock = message.content.find(
-    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
-  );
-  if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
-  return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown }, prompt);
+  const executeCall = async (modelId: string): Promise<CustomiseResult> => {
+    console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
+    const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+    const stream = client.messages.stream({
+      model: modelId,
+      max_tokens: 32000,
+      system: systemPrompt,
+      tools: [DELIVER_FILES_TOOL],
+      tool_choice: { type: "tool", name: "deliver_customised_files" },
+      messages: [{ role: "user", content: userMessage }],
+    });
+    const message = await stream.finalMessage();
+    console.log("[generate] Anthropic response:", { model: modelId, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
+    const toolBlock = message.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+    );
+    if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
+    return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown }, prompt);
+  };
+
+  try {
+    return await executeCall(model);
+  } catch (err) {
+    if (err instanceof Anthropic.APIError && err.status === 404 && model !== ANTHROPIC_HAIKU_FALLBACK) {
+      console.error(`[model] ${model} not found, falling back to haiku`);
+      return await executeCall(ANTHROPIC_HAIKU_FALLBACK);
+    }
+    throw err;
+  }
 }
 
 async function callAnthropicCustomise(
