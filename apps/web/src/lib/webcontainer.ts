@@ -8,7 +8,7 @@ import {
   normalizeGeneratedPath,
   readGeneratedManifestFromFiles,
 } from "@beomz-studio/contracts";
-import { getTemplateDefinition } from "@beomz-studio/templates";
+import { getTemplateDefinitionSafe } from "@beomz-studio/templates";
 
 // ─── Workspace scaffold (mirrors workers/preview-e2b/src/templates/vite-react/workspace) ───
 
@@ -122,13 +122,13 @@ const WORKSPACE_PREVIEW_APP_TSX = `import { useMemo, type ComponentType } from "
 
 import runtime from "../.beomz/runtime.json";
 
-type RouteModule = {
-  default: ComponentType;
-};
+type AnyGeneratedModule = { default?: ComponentType; [key: string]: unknown };
 
-const generatedModules = import.meta.glob("../app/generated/**/*.tsx", {
+// Include .ts so theme.ts (and other utility modules) are in Vite's module graph
+// and can be resolved via relative imports from .tsx components.
+const generatedModules = import.meta.glob("../app/generated/**/*.{ts,tsx}", {
   eager: true,
-}) as Record<string, RouteModule>;
+}) as Record<string, AnyGeneratedModule>;
 
 function resolveModuleKey(filePath: string): string {
   return \`../\${filePath.replace(/^apps\\/web\\/src\\//, "")}\`;
@@ -209,7 +209,7 @@ function buildRuntimeJson(
   files: readonly Pick<StudioFile, "path" | "content">[],
   project: Pick<Project, "id" | "name" | "templateId">,
 ): string {
-  const template = getTemplateDefinition(project.templateId);
+  const template = getTemplateDefinitionSafe(project.templateId);
   const manifest =
     readGeneratedManifestFromFiles(project.templateId, files) ??
     buildGeneratedManifest(template);

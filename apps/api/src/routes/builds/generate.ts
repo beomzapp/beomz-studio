@@ -1086,6 +1086,7 @@ async function callAnthropicWithMessages(
   userMessage: string,
   prompt: string,
 ): Promise<CustomiseResult> {
+  console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
   const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
   const stream = client.messages.stream({
     model,
@@ -1096,6 +1097,7 @@ async function callAnthropicWithMessages(
     messages: [{ role: "user", content: userMessage }],
   });
   const message = await stream.finalMessage();
+  console.log("[generate] Anthropic response:", { model, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
   const toolBlock = message.content.find(
     (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
   );
@@ -1658,9 +1660,11 @@ export async function runBuildInBackground(
       console.log("[generate] Remapped files:", customised.files.map((f) => f.path));
     } catch (aiError) {
       // Graceful degradation: show pre-built template as-is (spec requirement)
-      console.warn("[generate] Anthropic failed, using template as-is.", {
+      console.error("[generate] AI call failed — using scaffold fallback.", {
         buildId,
+        model,
         error: aiError instanceof Error ? aiError.message : String(aiError),
+        stack: aiError instanceof Error ? aiError.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
       });
       customised = {
         files: sanitiseFiles(
