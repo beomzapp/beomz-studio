@@ -114,6 +114,26 @@ import { manifest as wineCellarManifest } from "../wine-cellar/manifest.js";
 import { files as wineCellarFiles } from "../wine-cellar/files.js";
 import { manifest as bookNotesManifest } from "../book-notes/manifest.js";
 import { files as bookNotesFiles } from "../book-notes/files.js";
+import { manifest as meditationTimerManifest } from "../meditation-timer/manifest.js";
+import { files as meditationTimerFiles } from "../meditation-timer/files.js";
+import { manifest as habitJournalManifest } from "../habit-journal/manifest.js";
+import { files as habitJournalFiles } from "../habit-journal/files.js";
+import { manifest as workoutPlannerManifest } from "../workout-planner/manifest.js";
+import { files as workoutPlannerFiles } from "../workout-planner/files.js";
+import { manifest as recipeCostCalculatorManifest } from "../recipe-cost-calculator/manifest.js";
+import { files as recipeCostCalculatorFiles } from "../recipe-cost-calculator/files.js";
+import { manifest as debtPayoffTrackerManifest } from "../debt-payoff-tracker/manifest.js";
+import { files as debtPayoffTrackerFiles } from "../debt-payoff-tracker/files.js";
+import { manifest as savingsGoalTrackerManifest } from "../savings-goal-tracker/manifest.js";
+import { files as savingsGoalTrackerFiles } from "../savings-goal-tracker/files.js";
+import { manifest as meetingNotesManifest } from "../meeting-notes/manifest.js";
+import { files as meetingNotesFiles } from "../meeting-notes/files.js";
+import { manifest as interviewPrepManifest } from "../interview-prep/manifest.js";
+import { files as interviewPrepFiles } from "../interview-prep/files.js";
+import { manifest as plantCareTrackerManifest } from "../plant-care-tracker/manifest.js";
+import { files as plantCareTrackerFiles } from "../plant-care-tracker/files.js";
+import { manifest as movieWatchlistManifest } from "../movie-watchlist/manifest.js";
+import { files as movieWatchlistFiles } from "../movie-watchlist/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -173,6 +193,16 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: clientTrackerManifest, files: clientTrackerFiles },
   { manifest: wineCellarManifest, files: wineCellarFiles },
   { manifest: bookNotesManifest, files: bookNotesFiles },
+  { manifest: meditationTimerManifest, files: meditationTimerFiles },
+  { manifest: habitJournalManifest, files: habitJournalFiles },
+  { manifest: workoutPlannerManifest, files: workoutPlannerFiles },
+  { manifest: recipeCostCalculatorManifest, files: recipeCostCalculatorFiles },
+  { manifest: debtPayoffTrackerManifest, files: debtPayoffTrackerFiles },
+  { manifest: savingsGoalTrackerManifest, files: savingsGoalTrackerFiles },
+  { manifest: meetingNotesManifest, files: meetingNotesFiles },
+  { manifest: interviewPrepManifest, files: interviewPrepFiles },
+  { manifest: plantCareTrackerManifest, files: plantCareTrackerFiles },
+  { manifest: movieWatchlistManifest, files: movieWatchlistFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
