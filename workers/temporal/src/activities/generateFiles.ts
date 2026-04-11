@@ -106,11 +106,11 @@ type AnthropicStreamEvent =
 // ─── Multi-file structured generation via tool_use ────────────────────────────
 
 /**
- * Higher token ceiling for single-call multi-file generation.
- * claude-sonnet-4-5 supports 8 192 output tokens natively; we clamp
- * at 8 192 to stay within the model's hard limit without a beta header.
+ * Token ceiling for single-call multi-file generation.
+ * 32 000 tokens gives Claude enough room to emit all pages without
+ * truncating mid-file and producing unclosed JSX tags.
  */
-const MULTI_FILE_MAX_TOKENS = 8192;
+const MULTI_FILE_MAX_TOKENS = 32000;
 
 /**
  * Tool that forces Anthropic to return ALL page files in one structured call.
