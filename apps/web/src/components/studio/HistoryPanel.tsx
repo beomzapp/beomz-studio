@@ -3,7 +3,7 @@
  * Shows generation history with restore + fork actions.
  * Light/cream theme (V1 builder aesthetic).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, RotateCcw, GitBranch, FileCode, Loader2 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
@@ -68,7 +68,14 @@ export function HistoryPanel({
     void refresh();
   }, [refresh]);
 
-  // Realtime subscription for new generations
+  // Keep a stable ref to refresh so the realtime callback always calls
+  // the latest version without re-subscribing on every refresh change.
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  // Realtime subscription for new generations — depends only on projectId
+  // so the channel is created once per project and all postgres_changes
+  // listeners are registered before .subscribe() is called.
   useEffect(() => {
     if (!projectId) return;
 
@@ -82,14 +89,14 @@ export function HistoryPanel({
           schema: "public",
           table: "generations",
         },
-        () => void refresh(),
+        () => void refreshRef.current(),
       )
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [projectId, refresh]);
+  }, [projectId]);
 
   const handleRestore = useCallback(
     async (checkpoint: Checkpoint) => {
