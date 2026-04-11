@@ -60,6 +60,7 @@ export interface BuildGenerateInput {
 interface CustomiseResult {
   files: Array<{ path: string; content: string }>;
   summary: string;
+  appName?: string;
 }
 
 // ─── Anthropic tool definition ────────────────────────────────────────────────
@@ -92,6 +93,10 @@ const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
       summary: {
         type: "string",
         description: "One sentence describing what this app does.",
+      },
+      appName: {
+        type: "string",
+        description: "The brand name of the app you built, e.g. 'Spendr', 'AssetHub', 'TrackMate'. Short, memorable, no spaces.",
       },
     },
     required: ["files", "summary"],
@@ -949,6 +954,33 @@ const PALETTE_THEME_TOKENS: Record<string, ThemeTokens> = {
     success: "#10b981",        warning: "#ea580c",         error: "#ef4444",    info: "#3b82f6",
     borderRadius: "8px",       borderRadiusLg: "12px",
   },
+  "coral-sunset": {
+    primary: "#f77f50",        primaryHover: "#e56b3a",
+    background: "#fff8f5",     surface: "#ffffff",
+    sidebar: "#fff1ea",        border: "#fddccc",
+    textPrimary: "#1c1917",    textSecondary: "#57534e",   textMuted: "#a8a29e",
+    accent: "#fb923c",         accentHover: "#f97316",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#06b6d4",
+    borderRadius: "12px",      borderRadiusLg: "20px",
+  },
+  "ocean-teal": {
+    primary: "#0891b2",        primaryHover: "#0e7490",
+    background: "#f0fdfa",     surface: "#ffffff",
+    sidebar: "#e0f7fa",        border: "#b2ebf2",
+    textPrimary: "#111827",    textSecondary: "#374151",   textMuted: "#9ca3af",
+    accent: "#0d9488",         accentHover: "#0f766e",
+    success: "#10b981",        warning: "#f59e0b",         error: "#ef4444",    info: "#0891b2",
+    borderRadius: "8px",       borderRadiusLg: "12px",
+  },
+  "forest-green": {
+    primary: "#166534",        primaryHover: "#14532d",
+    background: "#f0fdf4",     surface: "#ffffff",
+    sidebar: "#dcfce7",        border: "#bbf7d0",
+    textPrimary: "#111827",    textSecondary: "#374151",   textMuted: "#9ca3af",
+    accent: "#22c55e",         accentHover: "#16a34a",
+    success: "#15803d",        warning: "#f59e0b",         error: "#ef4444",    info: "#0284c7",
+    borderRadius: "8px",       borderRadiusLg: "16px",
+  },
 };
 
 function buildThemeTs(paletteId: string): string {
@@ -1085,14 +1117,17 @@ function buildUserMessage(prompt: string): string {
   ].join("\n");
 }
 
-function parseRawToolOutput(raw: { files?: unknown; summary?: unknown }, prompt: string): CustomiseResult {
+function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?: unknown }, prompt: string): CustomiseResult {
   const files = Array.isArray(raw.files)
     ? (raw.files as Array<{ path: string; content: string }>).filter(
         (f) => typeof f.path === "string" && typeof f.content === "string",
       )
     : [];
   const summary = typeof raw.summary === "string" ? raw.summary : `${prompt} app`;
-  return { files, summary };
+  const appName = typeof raw.appName === "string" && raw.appName.trim().length > 0
+    ? raw.appName.trim()
+    : undefined;
+  return { files, summary, appName };
 }
 
 // ─── Anthropic provider ───────────────────────────────────────────────────────
@@ -1122,7 +1157,7 @@ async function callAnthropicWithMessages(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
     if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
-    return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown }, prompt);
+    return parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt);
   };
 
   try {
@@ -1180,7 +1215,7 @@ async function callOpenAICompatibleWithMessages(
   if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "deliver_customised_files") {
     throw new Error(`${model} did not call the deliver_customised_files tool.`);
   }
-  const raw = JSON.parse(toolCall.function.arguments) as { files?: unknown; summary?: unknown };
+  const raw = JSON.parse(toolCall.function.arguments) as { files?: unknown; summary?: unknown; appName?: unknown };
   return parseRawToolOutput(raw, prompt);
 }
 
@@ -1776,6 +1811,12 @@ async function _runBuildInBackground(
     }).catch(() => undefined);
 
     await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
+
+    // BEO-265: rename project to the AI-generated brand name (initial build only)
+    if (customised.appName) {
+      console.log("[generate] renaming project to AI brand name:", customised.appName);
+      await db.updateProject(projectId, { name: customised.appName }).catch(() => undefined);
+    }
   } catch (fatalError) {
     // ── Error path ───────────────────────────────────────────────────────────
     const errorMessage = fatalError instanceof Error ? fatalError.message : "Build failed.";

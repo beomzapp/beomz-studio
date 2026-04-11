@@ -120,37 +120,51 @@ const SLM_TIMEOUT_MS = 4_000;
 // ─── Palette keyword fallback ──────────────────────────────────────────────
 
 const PALETTE_KEYWORD_MAP: Array<{ paletteId: string; keywords: readonly string[] }> = [
+  // BEO-266: finance/money prompts ALWAYS get professional-blue — listed before finance-green
+  // so ties break in professional-blue's favour; generic finance keywords removed from finance-green.
+  { paletteId: "professional-blue",keywords: ["business", "corporate", "crm", "workspace", "b2b", "enterprise", "report", "admin", "hr", "operations", "management", "office", "team", "employee", "company", "sales pipeline", "lead", "client", "account", "finance", "money", "budget", "expense", "invoice", "billing", "accounting"] },
   { paletteId: "crypto-dark",      keywords: ["crypto", "web3", "blockchain", "token", "defi", "wallet", "nft", "coin", "bitcoin", "ethereum", "dex", "swap", "mint", "dao"] },
   { paletteId: "law-navy",         keywords: ["law", "legal", "attorney", "lawyer", "compliance", "firm", "contract", "court", "justice", "regulation", "litigation"] },
-  { paletteId: "finance-green",    keywords: ["finance", "money", "budget", "expense", "bookkeeping", "invoice", "accounting", "tax", "payment", "transaction", "salary", "income", "spending", "cost", "billing", "payroll", "bank", "wealth", "investment", "savings", "loan", "mortgage", "debt"] },
+  // finance-green kept for eco/sustainable-finance niche; generic finance terms moved to professional-blue
+  { paletteId: "finance-green",    keywords: ["bookkeeping", "tax", "payment", "transaction", "salary", "income", "spending", "cost", "payroll", "bank", "wealth", "investment", "savings", "loan", "mortgage", "debt"] },
   { paletteId: "medical-blue",     keywords: ["medical", "clinic", "doctor", "hospital", "patient", "therapy", "dental", "clinical", "health record", "appointment", "prescription", "diagnosis", "nurse", "pharmacy", "telemedicine"] },
-  { paletteId: "energy-red",       keywords: ["workout", "gym", "training", "sport", "sports", "athlete", "running", "performance", "exercise", "cardio", "strength", "crossfit", "marathon", "football", "soccer", "basketball", "tennis", "cycling", "rep", "lift", "weight lifting"] },
-  { paletteId: "health-teal",      keywords: ["health", "fitness", "wellness", "habit", "nutrition", "mindfulness", "yoga", "sleep", "water intake", "calorie", "meditation", "mental health", "stress", "mood", "bmi", "steps", "hydration"] },
-  { paletteId: "warm-amber",       keywords: ["food", "restaurant", "recipe", "cook", "cafe", "coffee", "dining", "bakery", "menu", "meal", "kitchen", "ingredient", "cuisine", "dish", "eating", "snack", "catering", "delivery", "brunch", "dessert", "cocktail"] },
+  { paletteId: "energy-red",       keywords: ["gym", "training", "sport", "sports", "athlete", "running", "performance", "exercise", "cardio", "strength", "crossfit", "marathon", "football", "soccer", "basketball", "tennis", "cycling", "rep", "lift", "weight lifting"] },
+  // BEO-266: fitness/health/workout/food/recipe/meal/nutrition → warm-orange
+  { paletteId: "warm-orange",      keywords: ["fitness", "health", "workout", "food", "recipe", "meal", "nutrition", "restaurant", "cook", "cafe", "coffee", "dining", "bakery", "menu", "kitchen", "ingredient", "cuisine", "dish", "eating", "snack", "catering", "delivery", "brunch", "dessert", "cocktail", "social", "community", "network", "connect", "chat", "messaging", "forum", "feed", "friend", "follow", "profile", "meetup"] },
+  { paletteId: "health-teal",      keywords: ["wellness", "habit", "mindfulness", "yoga", "sleep", "water intake", "calorie", "meditation", "mental health", "stress", "mood", "bmi", "steps", "hydration"] },
+  { paletteId: "warm-amber",       keywords: ["amber", "spice", "harvest", "autumn", "artisan", "craft", "market"] },
   { paletteId: "kids-yellow",      keywords: ["kids", "children", "school", "classroom", "teacher", "toddler", "preschool", "student", "education", "learn", "quiz", "flashcard", "spelling", "math", "science", "homework", "tutor", "grade", "pupil"] },
-  { paletteId: "midnight-indigo",  keywords: ["study", "planner", "focus", "notes", "productivity", "todo", "task", "calendar", "reminder", "schedule", "agenda", "deadline", "project", "kanban", "board", "organize", "backlog", "sprint", "tracker", "track", "checklist", "goal", "habit tracker", "time management", "pomodoro"] },
+  // BEO-266: code/developer/api/database/terminal/software → midnight-indigo
+  { paletteId: "midnight-indigo",  keywords: ["code", "developer", "api", "database", "terminal", "software", "study", "planner", "focus", "notes", "productivity", "todo", "task", "reminder", "agenda", "deadline", "project", "kanban", "board", "organize", "backlog", "sprint", "tracker", "track", "checklist", "goal", "habit tracker", "time management", "pomodoro"] },
   { paletteId: "retail-coral",     keywords: ["retail", "shop", "store", "shopping", "deal", "sale", "checkout", "cart", "product", "catalog", "inventory", "price", "order", "ecommerce", "discount", "marketplace", "listing"] },
-  { paletteId: "rose-pink",        keywords: ["beauty", "fashion", "skincare", "cosmetic", "lifestyle", "makeup", "wedding", "event", "dating", "love", "gift", "style", "clothing", "jewellery", "jewelry", "bridal", "maternity", "women"] },
-  { paletteId: "ocean-cyan",       keywords: ["travel", "water", "ocean", "beach", "hotel", "flight", "cruise", "trip", "vacation", "booking", "explore", "adventure", "destination", "tourism", "airbnb", "hostel", "road trip", "backpack"] },
-  { paletteId: "nature-emerald",   keywords: ["nature", "plant", "garden", "eco", "sustainability", "green", "environment", "organic", "tree", "farm", "wildlife", "carbon", "recycle", "solar", "renewable"] },
-  { paletteId: "gaming-neon",      keywords: ["game", "gaming", "esports", "streaming", "arcade", "entertainment", "puzzle", "quiz", "trivia", "leaderboard", "score", "level", "player", "rpg", "fps", "strategy", "board game", "card game"] },
-  { paletteId: "creative-purple",  keywords: ["creative", "design", "art", "artist", "agency", "portfolio", "freelance", "brand", "logo", "visual", "photo", "photography", "music", "content", "illustration", "animation", "video", "editor"] },
+  // BEO-266: social/creative/design/art/photo → rose-pink
+  { paletteId: "rose-pink",        keywords: ["social", "creative", "design", "art", "photo", "photography", "beauty", "fashion", "skincare", "cosmetic", "lifestyle", "makeup", "wedding", "dating", "love", "gift", "style", "clothing", "jewellery", "jewelry", "bridal", "maternity", "women", "illustration", "animation"] },
+  // BEO-266: travel/booking/events/calendar/schedule → coral-sunset (new palette)
+  { paletteId: "coral-sunset",     keywords: ["travel", "booking", "events", "calendar", "schedule", "hotel", "flight", "cruise", "trip", "vacation", "explore", "adventure", "destination", "tourism", "airbnb", "hostel", "road trip", "backpack", "beach"] },
+  { paletteId: "ocean-cyan",       keywords: ["water", "ocean", "surf", "sailing", "dive", "aqua", "marine"] },
+  // BEO-266: medical/wellness/analytics/dashboard → ocean-teal (new palette)
+  { paletteId: "ocean-teal",       keywords: ["analytics", "dashboard", "metrics", "reporting", "insights", "data", "monitoring", "chart", "graph", "kpi", "telemetry"] },
+  { paletteId: "nature-emerald",   keywords: ["sustainability", "environment", "organic", "tree", "farm", "wildlife", "carbon", "recycle", "solar", "renewable"] },
+  // BEO-266: nature/garden/plant/habit/eco → forest-green (new palette)
+  { paletteId: "forest-green",     keywords: ["nature", "garden", "plant", "eco", "green", "forest", "outdoor", "hiking", "camping", "landscape", "botanical", "herbal", "seed", "compost"] },
+  { paletteId: "gaming-neon",      keywords: ["game", "gaming", "esports", "streaming", "arcade", "entertainment", "puzzle", "trivia", "leaderboard", "score", "level", "player", "rpg", "fps", "strategy", "board game", "card game"] },
+  { paletteId: "creative-purple",  keywords: ["creative agency", "brand studio", "artist portfolio", "design agency", "visual identity", "logo design", "motion design", "video editor", "content creator", "music", "podcast studio"] },
   { paletteId: "startup-violet",   keywords: ["startup", "founder", "launch", "saas", "vc", "pitch", "mvp", "landing page", "waitlist", "early access", "product hunt", "investor", "accelerator", "b2c"] },
-  { paletteId: "professional-blue",keywords: ["business", "corporate", "crm", "dashboard", "workspace", "b2b", "enterprise", "analytics", "report", "admin", "hr", "operations", "management", "office", "team", "employee", "company", "sales pipeline", "lead", "client", "account"] },
   { paletteId: "news-charcoal",    keywords: ["news", "blog", "article", "editorial", "publishing", "magazine", "media", "journalist", "newsletter", "digest", "press", "reporting", "podcast"] },
   { paletteId: "slate-neutral",    keywords: ["minimal", "notes", "docs", "documentation", "knowledge base", "wiki", "simple", "clean", "note", "write", "journal", "diary", "log", "memo", "reference"] },
-  { paletteId: "warm-orange",      keywords: ["social", "community", "network", "connect", "chat", "messaging", "forum", "feed", "friend", "follow", "profile", "user", "people", "event", "meetup"] },
 ];
 
-// Curated rotation for when no keyword matches (ensures visual variety)
+// Curated rotation for when no keyword matches (ensures visual variety).
+// Purples (startup-violet, creative-purple, midnight-indigo) are interleaved
+// so consecutive builds never look the same shade of purple.
 const FALLBACK_PALETTE_ROTATION = [
   "professional-blue",
-  "startup-violet",
-  "creative-purple",
-  "midnight-indigo",
   "warm-orange",
+  "startup-violet",
   "ocean-cyan",
+  "creative-purple",
   "nature-emerald",
+  "midnight-indigo",
   "gaming-neon",
   "slate-neutral",
 ];
