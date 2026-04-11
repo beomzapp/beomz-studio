@@ -311,19 +311,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 // ─────────────────────────────────────────────
-// Orange B Avatar
-// ─────────────────────────────────────────────
-
-function BeomzAvatar() {
-  return (
-    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
-      B
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Building status indicator (rotating messages)
+// Building status (removed — inline bouncing dots now)
 // ─────────────────────────────────────────────
 
 // BuildingStatus removed — step messages now flow inline via streamingText
@@ -532,9 +520,11 @@ export function ChatPanel({
 
         {hasMessages && (
           <div className="space-y-4">
-            {messages.map((msg) => {
+            {messages.map((msg, msgIdx) => {
               const displayContent = getDisplayContent(msg);
               const hasTrace = (msg.traceEntries?.length ?? 0) > 0;
+              const prevMsg = msgIdx > 0 ? messages[msgIdx - 1] : null;
+              const showAvatar = msg.role === "assistant" && prevMsg?.role !== "assistant";
 
               const hasVisibleContent =
                 (displayContent.length > 0 && !hasTrace) ||
@@ -547,18 +537,22 @@ export function ChatPanel({
               return (
                 <div key={msg.id}>
                   {msg.role === "user" ? (
-                    /* User message — right-aligned subtle pill */
-                    <div className="flex justify-end">
-                      <div className="max-w-[80%] rounded-full bg-[#1a1a1a] px-4 py-2 text-sm leading-snug text-white">
+                    /* User message — right-aligned compact bubble, V1 style */
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="max-w-[70%] rounded-2xl rounded-tr-md bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm">
                         {msg.content}
                       </div>
                     </div>
                   ) : (
-                    /* AI message — left-aligned, free-flowing text */
-                    <div className="flex items-start gap-2.5">
-                      <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316] mt-0.5">
-                        <span className="text-[9px] font-bold text-white">B</span>
-                      </div>
+                    /* AI message — free-flowing text, avatar only on first in group */
+                    <div className="flex items-start gap-2">
+                      {showAvatar ? (
+                        <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-purple-600 mt-0.5">
+                          <span className="text-[9px] font-bold text-white leading-none">B</span>
+                        </div>
+                      ) : (
+                        <div className="w-5 flex-shrink-0" />
+                      )}
                       <div className="group relative min-w-0 flex-1 pt-0">
                         {/* Prose content — hidden during builds (when trace entries exist) */}
                         {displayContent && !hasTrace && <MarkdownText text={displayContent} />}
@@ -595,21 +589,27 @@ export function ChatPanel({
               );
             })}
 
-            {/* Streaming — inline step text + cursor */}
+            {/* Streaming — V1-style bouncing dots + step text */}
             {isStreaming && (
-              <div className="flex items-start gap-2.5">
-                <BeomzAvatar />
-                <div className="min-w-0 max-w-[85%] pt-0.5">
+              <div className="flex items-start gap-2 px-1">
+                <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-purple-600 mt-0.5">
+                  <span className="text-[9px] font-bold text-white leading-none">B</span>
+                </div>
+                <div className="min-w-0 flex-1 pt-0.5">
                   {displayStreamingText ? (
                     <div className="text-sm leading-relaxed text-[#374151]">
                       <MarkdownText text={displayStreamingText} />
                       <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
                     </div>
                   ) : (
-                    <span className="flex items-center gap-2 text-sm italic text-[#9ca3af]">
-                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#9ca3af]" />
-                      Thinking…
-                    </span>
+                    <div className="flex items-center gap-1.5 py-1">
+                      <div className="flex gap-1">
+                        {[0, 1, 2].map((i) => (
+                          <span key={i} className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                        ))}
+                      </div>
+                      <span className="text-xs text-[#9ca3af] ml-1">Thinking…</span>
+                    </div>
                   )}
                 </div>
               </div>
