@@ -502,6 +502,35 @@ function readBuilderTraceMetadata(metadata) {
         fallbackUsed: candidate.fallbackUsed === true,
     };
 }
+function buildSerializableError(error) {
+    if (error instanceof Error) {
+        return {
+            message: error.message,
+            name: error.name,
+            stack: error.stack ?? null,
+        };
+    }
+    if (isRecord(error)) {
+        return error;
+    }
+    return {
+        message: toErrorMessage(error),
+    };
+}
+async function persistGenerationMetadata(input) {
+    const db = createStudioDbClient();
+    const currentGeneration = await db.findGenerationById(input.buildId);
+    if (!currentGeneration) {
+        throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
+    }
+    const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
+    await db.updateGeneration(input.buildId, {
+        metadata: {
+            ...currentMetadata,
+            ...input.metadataPatch,
+        },
+    });
+}
 async function appendAssistantDeltaEvent(input) {
     const db = createStudioDbClient();
     const currentGeneration = await db.findGenerationById(input.buildId);
@@ -531,15 +560,9 @@ async function appendAssistantDeltaEvent(input) {
     });
 }
 async function persistAssistantResponseMetadata(input) {
-    const db = createStudioDbClient();
-    const currentGeneration = await db.findGenerationById(input.buildId);
-    if (!currentGeneration) {
-        throw new Error(`Build ${input.buildId} does not exist in the studio database.`);
-    }
-    const currentMetadata = isRecord(currentGeneration.metadata) ? currentGeneration.metadata : {};
-    await db.updateGeneration(input.buildId, {
-        metadata: {
-            ...currentMetadata,
+    await persistGenerationMetadata({
+        buildId: input.buildId,
+        metadataPatch: {
             assistantResponseText: input.assistantResponseText,
             assistantResponsesByPage: input.assistantResponsesByPage,
         },
@@ -1050,131 +1073,206 @@ export async function generateFiles(input) {
     const warnings = [];
     const streamSequenceRef = { value: 0 };
     const paletteSelection = selectPalette(input.plan.normalizedPrompt, input.template.id);
-    // ─── Iteration path (unchanged) ──────────────────────────────────────────
-    if (isIteration) {
-        if (!config.ANTHROPIC_API_KEY) {
-            throw new Error("ANTHROPIC_API_KEY is not configured.");
-        }
-        const model = new AnthropicStreamingModel({
-            apiKey: config.ANTHROPIC_API_KEY,
-            baseUrl: config.ANTHROPIC_BASE_URL,
-            maxTokens: config.ANTHROPIC_MAX_TOKENS,
-            model: config.ANTHROPIC_MODEL,
-            timeoutMs: 180_000,
+    const startedAt = Date.now();
+    const startedAtIso = new Date(startedAt).toISOString();
+    const persistGenerateFilesOutcome = async (inputPatch) => {
+        const completedAt = new Date().toISOString();
+        const durationMs = Date.now() - startedAt;
+        await persistGenerationMetadata({
+            buildId: input.buildId,
+            metadataPatch: {
+                filesGenerated: inputPatch.filesGenerated,
+                generateFilesCompletedAt: completedAt,
+                generateFilesDurationMs: durationMs,
+                generateFilesError: inputPatch.error === undefined ? null : buildSerializableError(inputPatch.error),
+                generateFilesStartedAt: startedAtIso,
+                generateFilesSucceeded: inputPatch.succeeded,
+                modelUsed: config.ANTHROPIC_MODEL,
+                paletteReason: paletteSelection.reason,
+                paletteUsed: paletteSelection.colorPalette.id,
+            },
         });
-        const engine = new GenerationEngine({
-            actor: input.actor,
-            generationId: input.buildId,
-            initialFiles: input.existingFiles.map((file) => ({
-                content: file.content,
-                path: normalizeGeneratedPath(file.path),
-            })),
-            maxTurns: 30,
-            model,
-            operation: projectIterationOperation,
-            persistence: false,
-            prompt: buildIterationUserPrompt(input),
-            promptPolicy: getIterationPromptPolicy(input.template.id),
+        if (inputPatch.succeeded) {
+            console.log("Build generation completed.", {
+                buildId: input.buildId,
+                durationMs,
+                filesGenerated: inputPatch.filesGenerated,
+                modelUsed: config.ANTHROPIC_MODEL,
+                paletteUsed: paletteSelection.colorPalette.id,
+                templateId: input.template.id,
+            });
+            return;
+        }
+        console.error("Build generation failed.", {
+            buildId: input.buildId,
+            durationMs,
+            error: toErrorMessage(inputPatch.error),
+            modelUsed: config.ANTHROPIC_MODEL,
+            paletteUsed: paletteSelection.colorPalette.id,
+            templateId: input.template.id,
+        });
+    };
+    console.log("Build generation started.", {
+        buildId: input.buildId,
+        isIteration,
+        modelUsed: config.ANTHROPIC_MODEL,
+        paletteUsed: paletteSelection.colorPalette.id,
+        templateId: input.template.id,
+    });
+    await persistGenerationMetadata({
+        buildId: input.buildId,
+        metadataPatch: {
+            generateFilesStartedAt: startedAtIso,
+            modelUsed: config.ANTHROPIC_MODEL,
+            paletteReason: paletteSelection.reason,
+            paletteUsed: paletteSelection.colorPalette.id,
+        },
+    });
+    try {
+        // ─── Iteration path (unchanged) ────────────────────────────────────────
+        if (isIteration) {
+            if (!config.ANTHROPIC_API_KEY) {
+                throw new Error("ANTHROPIC_API_KEY is not configured.");
+            }
+            const model = new AnthropicStreamingModel({
+                apiKey: config.ANTHROPIC_API_KEY,
+                baseUrl: config.ANTHROPIC_BASE_URL,
+                maxTokens: config.ANTHROPIC_MAX_TOKENS,
+                model: config.ANTHROPIC_MODEL,
+                timeoutMs: 180_000,
+            });
+            const engine = new GenerationEngine({
+                actor: input.actor,
+                generationId: input.buildId,
+                initialFiles: input.existingFiles.map((file) => ({
+                    content: file.content,
+                    path: normalizeGeneratedPath(file.path),
+                })),
+                maxTurns: 30,
+                model,
+                operation: projectIterationOperation,
+                persistence: false,
+                prompt: buildIterationUserPrompt(input),
+                promptPolicy: getIterationPromptPolicy(input.template.id),
+                project: input.project,
+                template: input.template,
+            });
+            const turnTexts = [];
+            let resultSummary = "";
+            let finalFiles = input.existingFiles;
+            for await (const event of engine.run()) {
+                if (event.type === "text_delta" && event.text.length > 0) {
+                    assistantResponseParts.push(event.text);
+                    turnTexts.push(event.text);
+                    streamSequenceRef.value += 1;
+                    await appendAssistantDeltaEvent({
+                        buildId: input.buildId,
+                        delta: event.text,
+                        eventId: `assistant-iteration-${streamSequenceRef.value}`,
+                    });
+                }
+                if (event.type === "llm_turn_completed") {
+                    assistantResponsesByPage.push({
+                        pageId: `iteration-turn-${event.turn}`,
+                        text: turnTexts.join(""),
+                    });
+                    turnTexts.length = 0;
+                }
+                if (event.type === "generation_completed") {
+                    finalFiles = event.result.files;
+                    resultSummary = event.result.summary;
+                }
+            }
+            await persistAssistantResponseMetadata({
+                buildId: input.buildId,
+                assistantResponseText: assistantResponseParts.join(""),
+                assistantResponsesByPage,
+            });
+            const changedPaths = getMaterialChangedPaths(input.existingFiles, finalFiles);
+            const changedFiles = finalFiles.filter((file) => changedPaths.includes(normalizeGeneratedPath(file.path)));
+            assertGeneratedFileGuardrails(changedFiles);
+            const draft = {
+                assistantResponseText: assistantResponseParts.join(""),
+                assistantResponsesByPage,
+                changedPaths,
+                files: finalFiles,
+                previewEntryPath: input.template.previewEntryPath,
+                source: "ai",
+                summary: resultSummary.trim()
+                    || (changedPaths.length > 0
+                        ? `Updated ${changedPaths.length} file${changedPaths.length === 1 ? "" : "s"} in ${input.project.name}.`
+                        : `No file changes were needed for ${input.project.name}.`),
+                warnings,
+            };
+            await persistGenerateFilesOutcome({
+                filesGenerated: draft.files.length,
+                succeeded: true,
+            });
+            return draft;
+        }
+        // ─── Initial build path ─────────────────────────────────────────────────
+        const scaffoldFiles = buildGeneratedScaffoldFiles({
+            colorPalette: paletteSelection.colorPalette,
             project: input.project,
             template: input.template,
         });
-        const turnTexts = [];
-        let resultSummary = "";
-        let finalFiles = input.existingFiles;
-        for await (const event of engine.run()) {
-            if (event.type === "text_delta" && event.text.length > 0) {
-                assistantResponseParts.push(event.text);
-                turnTexts.push(event.text);
-                streamSequenceRef.value += 1;
-                await appendAssistantDeltaEvent({
-                    buildId: input.buildId,
-                    delta: event.text,
-                    eventId: `assistant-iteration-${streamSequenceRef.value}`,
-                });
-            }
-            if (event.type === "llm_turn_completed") {
-                assistantResponsesByPage.push({
-                    pageId: `iteration-turn-${event.turn}`,
-                    text: turnTexts.join(""),
-                });
-                turnTexts.length = 0;
-            }
-            if (event.type === "generation_completed") {
-                finalFiles = event.result.files;
-                resultSummary = event.result.summary;
-            }
+        let generatedRouteFiles = [];
+        // Strategy 1: single structured call via tool_use.
+        // If it succeeds, we get all pages in one coherent response.
+        let singleCallError = null;
+        try {
+            const singleCallResult = await generateInitialFilesSingleCall(input, config, policy, streamSequenceRef, paletteSelection);
+            generatedRouteFiles = singleCallResult.files;
+            assistantResponseParts.push(singleCallResult.assistantResponseText);
+            assistantResponsesByPage.push(...singleCallResult.assistantResponsesByPage);
+            warnings.push(...singleCallResult.warnings);
         }
+        catch (error) {
+            singleCallError = error;
+            console.warn("Single-call generation failed; falling back to parallel per-page calls.", {
+                error: toErrorMessage(error),
+                templateId: input.template.id,
+                pageCount: input.template.pages.length,
+            });
+        }
+        // Strategy 2: parallel per-page calls (fallback when single call fails).
+        // All pages run concurrently — a timeout on page A cannot block page B.
+        if (singleCallError !== null) {
+            warnings.push(`Single-call generation failed (${toErrorMessage(singleCallError)}); used parallel generation.`);
+            const parallelResult = await generateInitialFilesInParallel(input, config, policy, streamSequenceRef, paletteSelection);
+            generatedRouteFiles = parallelResult.files;
+            assistantResponseParts.push(parallelResult.assistantResponseText);
+            assistantResponsesByPage.push(...parallelResult.assistantResponsesByPage);
+            warnings.push(...parallelResult.warnings);
+        }
+        const allFiles = [...scaffoldFiles, ...generatedRouteFiles];
+        assertGeneratedFileGuardrails(allFiles);
         await persistAssistantResponseMetadata({
             buildId: input.buildId,
             assistantResponseText: assistantResponseParts.join(""),
             assistantResponsesByPage,
         });
-        const changedPaths = getMaterialChangedPaths(input.existingFiles, finalFiles);
-        const changedFiles = finalFiles.filter((file) => changedPaths.includes(normalizeGeneratedPath(file.path)));
-        assertGeneratedFileGuardrails(changedFiles);
-        return {
+        const draft = {
             assistantResponseText: assistantResponseParts.join(""),
             assistantResponsesByPage,
-            changedPaths,
-            files: finalFiles,
+            files: allFiles,
             previewEntryPath: input.template.previewEntryPath,
             source: "ai",
-            summary: resultSummary.trim()
-                || (changedPaths.length > 0
-                    ? `Updated ${changedPaths.length} file${changedPaths.length === 1 ? "" : "s"} in ${input.project.name}.`
-                    : `No file changes were needed for ${input.project.name}.`),
+            summary: `Generated ${allFiles.length} scaffold and route files for ${input.template.name}.`,
             warnings,
         };
-    }
-    // ─── Initial build path ───────────────────────────────────────────────────
-    const scaffoldFiles = buildGeneratedScaffoldFiles({
-        colorPalette: paletteSelection.colorPalette,
-        project: input.project,
-        template: input.template,
-    });
-    let generatedRouteFiles = [];
-    // Strategy 1: single structured call via tool_use.
-    // If it succeeds, we get all pages in one coherent response.
-    let singleCallError = null;
-    try {
-        const singleCallResult = await generateInitialFilesSingleCall(input, config, policy, streamSequenceRef, paletteSelection);
-        generatedRouteFiles = singleCallResult.files;
-        assistantResponseParts.push(singleCallResult.assistantResponseText);
-        assistantResponsesByPage.push(...singleCallResult.assistantResponsesByPage);
-        warnings.push(...singleCallResult.warnings);
+        await persistGenerateFilesOutcome({
+            filesGenerated: draft.files.length,
+            succeeded: true,
+        });
+        return draft;
     }
     catch (error) {
-        singleCallError = error;
-        console.warn("Single-call generation failed; falling back to parallel per-page calls.", {
-            error: toErrorMessage(error),
-            templateId: input.template.id,
-            pageCount: input.template.pages.length,
+        await persistGenerateFilesOutcome({
+            error,
+            filesGenerated: 0,
+            succeeded: false,
         });
+        throw error;
     }
-    // Strategy 2: parallel per-page calls (fallback when single call fails).
-    // All pages run concurrently — a timeout on page A cannot block page B.
-    if (singleCallError !== null) {
-        warnings.push(`Single-call generation failed (${toErrorMessage(singleCallError)}); used parallel generation.`);
-        const parallelResult = await generateInitialFilesInParallel(input, config, policy, streamSequenceRef, paletteSelection);
-        generatedRouteFiles = parallelResult.files;
-        assistantResponseParts.push(parallelResult.assistantResponseText);
-        assistantResponsesByPage.push(...parallelResult.assistantResponsesByPage);
-        warnings.push(...parallelResult.warnings);
-    }
-    const allFiles = [...scaffoldFiles, ...generatedRouteFiles];
-    assertGeneratedFileGuardrails(allFiles);
-    await persistAssistantResponseMetadata({
-        buildId: input.buildId,
-        assistantResponseText: assistantResponseParts.join(""),
-        assistantResponsesByPage,
-    });
-    return {
-        assistantResponseText: assistantResponseParts.join(""),
-        assistantResponsesByPage,
-        files: allFiles,
-        previewEntryPath: input.template.previewEntryPath,
-        source: "ai",
-        summary: `Generated ${allFiles.length} scaffold and route files for ${input.template.name}.`,
-        warnings,
-    };
 }

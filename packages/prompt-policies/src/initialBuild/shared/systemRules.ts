@@ -8,6 +8,7 @@ export const sharedInitialBuildSystemRules = [
   "Keep output deterministic, concise, and production-presentable rather than experimental.",
   "ALWAYS import icons from lucide-react. Never use SVG placeholders, grey circles, emoji, or inline SVGs as icons unless the user explicitly requested a custom icon or image.",
   "Never import from react-icons, @heroicons, or any other icon library besides lucide-react.",
+  "For kanban boards and drag-and-drop UI, NEVER import drag-and-drop libraries (@hello-pangea/dnd, @dnd-kit/core, @dnd-kit/sortable, react-beautiful-dnd, or similar). These packages are not available in the sandbox. Instead use button-based move controls (← → arrow buttons) or simple onClick handlers to move items between columns.",
   "EVERY input, textarea, and select must include a realistic placeholder attribute. Never leave a form field blank and never use placeholder='...'.",
   "Maintain readable contrast at all times. Never place white or light text on white or light backgrounds. Never place dark text on dark backgrounds. Inputs on light surfaces must use dark text such as text-gray-900, and text on colored buttons must be white or clearly contrasting.",
   "Seed lists, tables, feeds, and cards with 3 to 5 rows of realistic example data using real-looking names, dates, prices, counts, statuses, and labels. Never use Lorem ipsum, Sample text, Item 1, or other generic filler.",

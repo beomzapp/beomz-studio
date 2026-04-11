@@ -4,6 +4,7 @@ import {
   createEmptyBuilderV3TraceMetadata,
   type BuilderV3TraceMetadata,
 } from "@beomz-studio/contracts";
+import { projectIterationOperation } from "@beomz-studio/operations";
 import {
   createStudioDbClient,
   type ProjectUpdate,
@@ -16,7 +17,11 @@ const TEMPLATE_SCHEMA_CACHE_RETRY_DELAY_MS = 750;
 
 type PersistBuildStateDb = Pick<
   StudioDbClient,
-  "findGenerationById" | "updateGeneration" | "updateProject"
+  | "findGenerationById"
+  | "listGenerationsByProjectId"
+  | "updateGeneration"
+  | "updateProject"
+  | "upsertBuildTelemetry"
 >;
 
 interface PersistBuildStateDependencies {
@@ -27,6 +32,16 @@ interface PersistBuildStateDependencies {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readNumber(metadata: Record<string, unknown>, key: string): number | null {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function isTemplateSchemaCacheError(error: unknown): boolean {
@@ -145,6 +160,108 @@ function readBuilderTraceMetadata(metadata: Record<string, unknown>): BuilderV3T
   };
 }
 
+function buildTelemetryFallbackReason(
+  generation: Awaited<ReturnType<PersistBuildStateDb["updateGeneration"]>>,
+  metadata: Record<string, unknown>,
+): string | null {
+  const telemetryFallbackReason = readString(metadata, "telemetryFallbackReason");
+  if (telemetryFallbackReason) {
+    return telemetryFallbackReason;
+  }
+
+  const fallbackTriggerReason = readString(metadata, "fallbackTriggerReason");
+  const fallbackReason = readString(metadata, "fallbackReason");
+
+  if (fallbackTriggerReason && fallbackReason) {
+    return `${fallbackTriggerReason}: ${fallbackReason}`;
+  }
+
+  if (fallbackReason) {
+    return fallbackReason;
+  }
+
+  if (generation.status === "failed" && generation.error) {
+    return `build_failed: ${generation.error}`;
+  }
+
+  return null;
+}
+
+function buildTelemetryErrorLog(
+  generation: Awaited<ReturnType<PersistBuildStateDb["updateGeneration"]>>,
+  metadata: Record<string, unknown>,
+  fallbackReason: string | null,
+): Record<string, unknown> | null {
+  const generateFilesError = metadata.generateFilesError;
+  const hasGenerateFilesError = isRecord(generateFilesError);
+
+  if (!generation.error && !fallbackReason && !hasGenerateFilesError) {
+    return null;
+  }
+
+  return {
+    fallbackReason,
+    fallbackTriggerReason: readString(metadata, "fallbackTriggerReason"),
+    generateFilesError: hasGenerateFilesError ? generateFilesError : null,
+    generationError: generation.error,
+    resultSource: readString(metadata, "resultSource"),
+    status: generation.status,
+  };
+}
+
+function shouldPersistTelemetry(status: string | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+async function persistBuildTelemetryRow(
+  db: PersistBuildStateDb,
+  generation: Awaited<ReturnType<PersistBuildStateDb["updateGeneration"]>>,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const userId = readString(metadata, "userId");
+  if (!userId) {
+    return;
+  }
+
+  const generations = await db.listGenerationsByProjectId(generation.project_id);
+  const currentGenerationIndex = generations.findIndex((row) => row.id === generation.id);
+  const iterationCount = currentGenerationIndex > 0
+    ? currentGenerationIndex
+    : Math.max(0, generations.length - 1);
+  const fallbackReason = buildTelemetryFallbackReason(generation, metadata);
+  const generationTimeMs = (() => {
+    const startedAtMs = Date.parse(generation.started_at);
+    const completedAtMs = Date.parse(
+      generation.completed_at ?? new Date().toISOString(),
+    );
+
+    if (Number.isNaN(startedAtMs) || Number.isNaN(completedAtMs)) {
+      return readNumber(metadata, "generateFilesDurationMs");
+    }
+
+    return Math.max(0, completedAtMs - startedAtMs);
+  })();
+  const resultSource = readString(metadata, "resultSource");
+
+  await db.upsertBuildTelemetry({
+    id: generation.id,
+    project_id: generation.project_id,
+    user_id: userId,
+    prompt: readString(metadata, "sourcePrompt") ?? generation.prompt,
+    template_used: generation.template_id,
+    palette_used: readString(metadata, "paletteUsed"),
+    files_generated: generation.files.length,
+    succeeded: generation.status === "completed" && resultSource !== "fallback" && resultSource !== "error",
+    fallback_reason: fallbackReason,
+    error_log: buildTelemetryErrorLog(generation, metadata, fallbackReason),
+    generation_time_ms: generationTimeMs,
+    credits_used: readNumber(metadata, "creditsUsed") ?? 0,
+    user_iterated: generation.operation_id === projectIterationOperation.id,
+    iteration_count: iterationCount,
+    model_used: readString(metadata, "modelUsed"),
+  });
+}
+
 export async function persistBuildStateWithClient(
   input: PersistBuildStateActivityInput,
   {
@@ -213,7 +330,7 @@ export async function persistBuildStateWithClient(
     } satisfies BuilderV3TraceMetadata;
   }
 
-  await db.updateGeneration(input.buildId, {
+  const updatedGeneration = await db.updateGeneration(input.buildId, {
     completed_at:
       input.generationPatch.completedAt
       ?? ((input.generationPatch.status === "completed" || input.generationPatch.status === "failed")
@@ -229,6 +346,10 @@ export async function persistBuildStateWithClient(
     template_id: input.generationPatch.templateId,
     warnings: input.generationPatch.warnings,
   });
+
+  if (shouldPersistTelemetry(input.generationPatch.status)) {
+    await persistBuildTelemetryRow(db, updatedGeneration, mergedMetadata);
+  }
 }
 
 export async function persistBuildState(

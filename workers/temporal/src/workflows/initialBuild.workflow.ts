@@ -60,6 +60,7 @@ async function runBuildWorkflow(
   const operationId = isIteration ? projectIterationOperation.id : initialBuildOperation.id;
   let eventSequence = 1;
   let fallbackReason: string | null = null;
+  let fallbackTriggerReason: string | null = null;
   let fallbackUsed = false;
   let selectedTemplateId = input.provisionalTemplateId;
   let selectedTemplateReason = "Template not yet selected.";
@@ -307,10 +308,19 @@ async function runBuildWorkflow(
         throw error;
       }
 
+      const generationFailureReason = toErrorMessage(error);
       source = "platform";
       fallbackUsed = true;
-      fallbackReason = toErrorMessage(error);
-      generationWarnings = [`Model generation failed: ${toErrorMessage(error)}`];
+      fallbackReason = generationFailureReason;
+      fallbackTriggerReason = "generate_files_failed";
+      generationWarnings = [`Model generation failed: ${generationFailureReason}`];
+
+      console.warn("Falling back to deterministic scaffold after model generation failed.", {
+        buildId: input.buildId,
+        reason: generationFailureReason,
+        templateId: selection.template.id,
+        trigger: fallbackTriggerReason,
+      });
 
       await persistBuildState({
         buildId: input.buildId,
@@ -324,7 +334,7 @@ async function runBuildWorkflow(
                 code: "generate_files_failed",
                 message: "Model generation failed, switching to the fallback scaffold.",
                 payload: {
-                  reason: toErrorMessage(error),
+                  reason: generationFailureReason,
                 },
                 status: "error",
               },
@@ -341,7 +351,7 @@ async function runBuildWorkflow(
                 code: "fallback_scaffold_started",
                 message: "Creating the deterministic fallback scaffold.",
                 payload: {
-                  reason: toErrorMessage(error),
+                  reason: generationFailureReason,
                 },
               },
             ],
@@ -351,9 +361,11 @@ async function runBuildWorkflow(
             },
           ),
           metadata: {
-            fallbackReason: toErrorMessage(error),
+            fallbackReason: generationFailureReason,
+            fallbackTriggerReason,
             phase: "fallback",
             resultSource: "fallback",
+            telemetryFallbackReason: `${fallbackTriggerReason}: ${generationFailureReason}`,
           },
           summary: "Model generation failed, switching to the fallback scaffold.",
         },
@@ -476,10 +488,20 @@ async function runBuildWorkflow(
       source = "platform";
       fallbackUsed = true;
       fallbackReason = validation.errors.map((error) => error.message).join("; ");
+      fallbackTriggerReason = "validate_build_failed";
       generationWarnings = [
         ...generationWarnings,
         ...validation.errors.map((error) => error.message),
       ];
+
+      console.warn("Falling back to deterministic scaffold after validation failed.", {
+        buildId: input.buildId,
+        errors: validation.errors,
+        reason: fallbackReason,
+        source,
+        templateId: selection.template.id,
+        trigger: fallbackTriggerReason,
+      });
 
       await persistBuildState({
         buildId: input.buildId,
@@ -521,8 +543,10 @@ async function runBuildWorkflow(
           ),
           metadata: {
             fallbackReason,
+            fallbackTriggerReason,
             phase: "fallback",
             resultSource: "fallback",
+            telemetryFallbackReason: `${fallbackTriggerReason}: ${fallbackReason}`,
           },
           summary: "Validation failed, generating a fallback scaffold instead.",
         },
@@ -705,8 +729,13 @@ async function runBuildWorkflow(
           assistantResponseText: draft.assistantResponseText,
           assistantResponsesByPage: draft.assistantResponsesByPage,
           fallbackReason,
+          fallbackTriggerReason,
           phase: source === "platform" ? "fallback-completed" : "completed",
           resultSource: source === "platform" ? "fallback" : "ai",
+          telemetryFallbackReason:
+            source === "platform" && fallbackReason && fallbackTriggerReason
+              ? `${fallbackTriggerReason}: ${fallbackReason}`
+              : null,
           templateReason: selectedTemplateReason,
           templateScores: selectedTemplateScores,
           validationWarnings: validation.warnings,
@@ -752,9 +781,14 @@ async function runBuildWorkflow(
         error: toErrorMessage(error),
         metadata: {
           fallbackReason,
+          fallbackTriggerReason,
           phase: "failed",
           resultSource: "error",
           selectedTemplateId,
+          telemetryFallbackReason:
+            fallbackReason && fallbackTriggerReason
+              ? `${fallbackTriggerReason}: ${fallbackReason}`
+              : null,
         },
         status: "failed",
       },

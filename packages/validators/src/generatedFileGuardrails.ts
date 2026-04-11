@@ -17,6 +17,11 @@ const approvedGeneratedImports = new Set<string>(APPROVED_GENERATED_IMPORTS);
 const bannedImportPatterns = [
   /^react-icons(?:\/|$)/,
   /^@heroicons(?:\/|$)/,
+  // Drag-and-drop libraries — not available in the sandbox.
+  // Implement drag-and-drop using CSS pointer events and useState instead.
+  /^@hello-pangea\/dnd(?:\/|$)/,
+  /^@dnd-kit\/(?:core|sortable|utilities|modifiers|accessibility)(?:\/|$)/,
+  /^react-beautiful-dnd(?:\/|$)/,
 ] as const;
 
 function isBareModuleSpecifier(specifier: string): boolean {

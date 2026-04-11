@@ -1,6 +1,6 @@
 import { type StudioDbClient } from "@beomz-studio/studio-db";
 import type { PersistBuildStateActivityInput } from "../shared/types.js";
-type PersistBuildStateDb = Pick<StudioDbClient, "findGenerationById" | "updateGeneration" | "updateProject">;
+type PersistBuildStateDb = Pick<StudioDbClient, "findGenerationById" | "listGenerationsByProjectId" | "updateGeneration" | "updateProject" | "upsertBuildTelemetry">;
 interface PersistBuildStateDependencies {
     db: PersistBuildStateDb;
     logger?: Pick<Console, "warn">;
