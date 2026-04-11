@@ -80,6 +80,24 @@ import { manifest as subscriptionTrackerManifest } from "../subscription-tracker
 import { files as subscriptionTrackerFiles } from "../subscription-tracker/files.js";
 import { manifest as waterIntakeManifest } from "../water-intake/manifest.js";
 import { files as waterIntakeFiles } from "../water-intake/files.js";
+import { manifest as financeDashboardManifest } from "../finance-dashboard/manifest.js";
+import { files as financeDashboardFiles } from "../finance-dashboard/files.js";
+import { manifest as habitStreakTrackerManifest } from "../habit-streak-tracker/manifest.js";
+import { files as habitStreakTrackerFiles } from "../habit-streak-tracker/files.js";
+import { manifest as invoiceBuilderManifest } from "../invoice-builder/manifest.js";
+import { files as invoiceBuilderFiles } from "../invoice-builder/files.js";
+import { manifest as flashcardQuizManifest } from "../flashcard-quiz/manifest.js";
+import { files as flashcardQuizFiles } from "../flashcard-quiz/files.js";
+import { manifest as resumeBuilderManifest } from "../resume-builder/manifest.js";
+import { files as resumeBuilderFiles } from "../resume-builder/files.js";
+import { manifest as eventPlannerManifest } from "../event-planner/manifest.js";
+import { files as eventPlannerFiles } from "../event-planner/files.js";
+import { manifest as groceryListManifest } from "../grocery-list/manifest.js";
+import { files as groceryListFiles } from "../grocery-list/files.js";
+import { manifest as timeTrackerManifest } from "../time-tracker/manifest.js";
+import { files as timeTrackerFiles } from "../time-tracker/files.js";
+import { manifest as linkInBioManifest } from "../link-in-bio/manifest.js";
+import { files as linkInBioFiles } from "../link-in-bio/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -122,6 +140,15 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: petCareTrackerManifest, files: petCareTrackerFiles },
   { manifest: subscriptionTrackerManifest, files: subscriptionTrackerFiles },
   { manifest: waterIntakeManifest, files: waterIntakeFiles },
+  { manifest: financeDashboardManifest, files: financeDashboardFiles },
+  { manifest: habitStreakTrackerManifest, files: habitStreakTrackerFiles },
+  { manifest: invoiceBuilderManifest, files: invoiceBuilderFiles },
+  { manifest: flashcardQuizManifest, files: flashcardQuizFiles },
+  { manifest: resumeBuilderManifest, files: resumeBuilderFiles },
+  { manifest: eventPlannerManifest, files: eventPlannerFiles },
+  { manifest: groceryListManifest, files: groceryListFiles },
+  { manifest: timeTrackerManifest, files: timeTrackerFiles },
+  { manifest: linkInBioManifest, files: linkInBioFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
