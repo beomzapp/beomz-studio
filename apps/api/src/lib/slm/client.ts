@@ -10,6 +10,66 @@
 import type { InitialBuildPlan, TemplateId, TemplateSelectionResult } from "@beomz-studio/contracts";
 import { listTemplateDefinitions, listPrebuiltTemplates } from "@beomz-studio/templates";
 
+// ─── Design system → base template pre-detection ─────────────────────────────
+// When a prompt explicitly names a design system, skip semantic matching and
+// return the corresponding base scaffold template directly.  This runs BEFORE
+// the SLM call so the scaffold already looks like the requested design system.
+
+const DS_TEMPLATE_MAP: Array<{ id: string; templateId: string; name: string; patterns: RegExp }> = [
+  {
+    id: "material",
+    templateId: "material-base",
+    name: "Material Design 3",
+    patterns: /material\s*design|material\s*ui|\bmd3\b|material\s*you|\bgoogle\s*material\b/i,
+  },
+  {
+    id: "apple-hig",
+    templateId: "apple-hig-base",
+    name: "Apple Human Interface Guidelines",
+    patterns: /\bapple\s*hig\b|\bios\s*style\b|\bmacos\s*style\b|\bcupertino\b|\bapple\s*design\b/i,
+  },
+  {
+    id: "linear",
+    templateId: "linear-base",
+    name: "Linear",
+    patterns: /\blinear\s*style\b|\blinear\s*design\b|\blinear\s*app\b|\blike\s*linear\b/i,
+  },
+  {
+    id: "asana",
+    templateId: "asana-base",
+    name: "Asana",
+    patterns: /\basana\s*style\b|\basana\s*design\b|\blike\s*asana\b/i,
+  },
+  {
+    id: "stripe",
+    templateId: "stripe-base",
+    name: "Stripe",
+    patterns: /\bstripe\s*style\b|\bstripe\s*design\b|\bstripe\s*dashboard\b|\blike\s*stripe\b/i,
+  },
+  {
+    id: "notion",
+    templateId: "saas-dashboard-template", // closest available match — no notion-base yet
+    name: "Notion",
+    patterns: /\bnotion\s*style\b|\bnotion\s*design\b|\blike\s*notion\b/i,
+  },
+  {
+    id: "vercel",
+    templateId: "saas-dashboard-template", // closest available match — no vercel-base yet
+    name: "Vercel",
+    patterns: /\bvercel\s*style\b|\bvercel\s*design\b|\blike\s*vercel\b/i,
+  },
+];
+
+function detectDesignSystemTemplate(prompt: string): { templateId: string; name: string } | null {
+  for (const entry of DS_TEMPLATE_MAP) {
+    if (entry.patterns.test(prompt)) {
+      console.log("[slm] design system detected:", entry.id, "→ scaffold:", entry.templateId);
+      return { templateId: entry.templateId, name: entry.name };
+    }
+  }
+  return null;
+}
+
 // ─── Inlined keyword template selector (was in @beomz-studio/temporal-worker) ─
 
 const TEMPLATE_SIGNALS: Record<TemplateId, readonly string[]> = {
@@ -169,6 +229,31 @@ export async function matchTemplate(input: {
   const augmentedPrompt = input.plan
     ? `${input.prompt} ${input.plan.intentSummary} ${input.plan.keywords.join(" ")}`
     : input.prompt;
+
+  // ── Design system pre-check ────────────────────────────────────────────────
+  // If the prompt explicitly names a design system (Material Design, Apple HIG,
+  // Linear, etc.) select the corresponding base scaffold template directly,
+  // bypassing both the SLM and keyword scoring.
+  const ds = detectDesignSystemTemplate(augmentedPrompt);
+  if (ds) {
+    const prebuiltMatch = prebuilt.find((t) => t.manifest.id === ds.templateId);
+    if (prebuiltMatch) {
+      return {
+        template: {
+          id: ds.templateId as TemplateId,
+          name: prebuiltMatch.manifest.name,
+          description: prebuiltMatch.manifest.description,
+          shell: prebuiltMatch.manifest.shell,
+          defaultProjectName: ds.name,
+          previewEntryPath: "/",
+          promptHints: [],
+          pages: [],
+        },
+        reason: `Design system detected (${ds.name}) → scaffold: ${ds.templateId}`,
+        scores: {} as Record<TemplateId, number>,
+      };
+    }
+  }
 
   try {
     const allTemplates = [

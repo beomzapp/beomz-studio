@@ -200,6 +200,16 @@ import { manifest as landingPageSaasManifest } from "../landing-page-saas/manife
 import { files as landingPageSaasFiles } from "../landing-page-saas/files.js";
 import { manifest as socialDashboardManifest } from "../social-dashboard/manifest.js";
 import { files as socialDashboardFiles } from "../social-dashboard/files.js";
+import { manifest as materialBaseManifest } from "../material-base/manifest.js";
+import { files as materialBaseFiles } from "../material-base/files.js";
+import { manifest as appleHigBaseManifest } from "../apple-hig-base/manifest.js";
+import { files as appleHigBaseFiles } from "../apple-hig-base/files.js";
+import { manifest as linearBaseManifest } from "../linear-base/manifest.js";
+import { files as linearBaseFiles } from "../linear-base/files.js";
+import { manifest as asanaBaseManifest } from "../asana-base/manifest.js";
+import { files as asanaBaseFiles } from "../asana-base/files.js";
+import { manifest as stripeBaseManifest } from "../stripe-base/manifest.js";
+import { files as stripeBaseFiles } from "../stripe-base/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -302,6 +312,11 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: kanbanProManifest, files: kanbanProFiles },
   { manifest: landingPageSaasManifest, files: landingPageSaasFiles },
   { manifest: socialDashboardManifest, files: socialDashboardFiles },
+  { manifest: materialBaseManifest, files: materialBaseFiles },
+  { manifest: appleHigBaseManifest, files: appleHigBaseFiles },
+  { manifest: linearBaseManifest, files: linearBaseFiles },
+  { manifest: asanaBaseManifest, files: asanaBaseFiles },
+  { manifest: stripeBaseManifest, files: stripeBaseFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(

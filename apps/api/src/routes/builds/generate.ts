@@ -305,11 +305,422 @@ async function appendEventToDb(
   });
 }
 
+// ─── Design system detection + spec injection ─────────────────────────────────
+
+const DESIGN_SYSTEM_PATTERNS: Array<{ id: string; patterns: RegExp }> = [
+  {
+    id: "material",
+    patterns: /material\s*design|material\s*ui|\bmd3\b|material\s*you|\bgoogle\s*material\b/i,
+  },
+  {
+    id: "apple-hig",
+    patterns: /\bapple\s*hig\b|\bios\s*style\b|\bmacos\s*style\b|\bcupertino\b|\bapple\s*design\b/i,
+  },
+  {
+    id: "linear",
+    patterns: /\blinear\s*style\b|\blinear\s*design\b|\blinear\s*app\b|\blike\s*linear\b/i,
+  },
+  {
+    id: "asana",
+    patterns: /\basana\s*style\b|\basana\s*design\b|\blike\s*asana\b/i,
+  },
+  {
+    id: "stripe",
+    patterns: /\bstripe\s*style\b|\bstripe\s*design\b|\bstripe\s*dashboard\b|\blike\s*stripe\b/i,
+  },
+  {
+    id: "notion",
+    patterns: /\bnotion\s*style\b|\bnotion\s*design\b|\blike\s*notion\b/i,
+  },
+  {
+    id: "vercel",
+    patterns: /\bvercel\s*style\b|\bvercel\s*design\b|\blike\s*vercel\b/i,
+  },
+];
+
+function detectDesignSystem(prompt: string): string | null {
+  for (const { id, patterns } of DESIGN_SYSTEM_PATTERNS) {
+    if (patterns.test(prompt)) {
+      console.log("[generate] design system detected:", id);
+      return id;
+    }
+  }
+  return null;
+}
+
+const DESIGN_SYSTEM_SPECS: Record<string, string> = {
+  "material": `
+══ DESIGN SYSTEM: MATERIAL DESIGN 3 (Google) ══
+Follow MD3 spec precisely. These override any other visual guidance.
+
+TOKENS:
+  Background:     #FFFBFE   Surface:        #FFFBFE   Surface variant: #E7E0EC
+  On-background:  #1C1B1F   On-surface:     #1C1B1F   Outline:        #79747E
+  Primary:        #6750A4   On-primary:     #FFFFFF   Primary container: #E8DEF8
+  Secondary:      #625B71   Secondary ctr:  #E8DEF8   On-secondary-ctr: #1D192B
+  Error:          #B3261E   Error container: #F9DEDC
+
+TYPOGRAPHY (Roboto font stack: 'Roboto', system-ui, sans-serif):
+  Display Large:   57px / 64px  weight 400
+  Headline Large:  32px / 40px  weight 400
+  Title Large:     22px / 28px  weight 400
+  Title Medium:    16px / 24px  weight 500
+  Body Large:      16px / 24px  weight 400
+  Body Medium:     14px / 20px  weight 400
+  Label Large:     14px / 20px  weight 500 (button text)
+
+COMPONENTS:
+  Navigation Drawer: 240–280px wide, full-height, bg #FFFBFE, border-r 1px #E7E0EC
+    Nav items: pill shape (border-radius: 9999px), height 56px, padding 0 24px
+    Active: bg #E8DEF8, text #21005D  Inactive: text #49454F
+    Leading icon: 24×24, active color #6750A4
+  
+  Buttons:
+    Filled: bg #6750A4, text #FFFFFF, radius 9999px, height 40px, px 24px — primary actions
+    Outlined: border 1px #6750A4, text #6750A4, radius 9999px — secondary actions
+    Text: text #6750A4, no border/bg — tertiary actions
+    FAB: radius 16px, bg #6750A4, size 56px, shadow elevation 3
+  
+  Cards:
+    Elevated: bg #FFFBFE, shadow 0 1px 2px rgba(0,0,0,0.08) 0 2px 8px rgba(0,0,0,0.05), radius 12px, padding 16px
+    Filled: bg #E8DEF8, radius 12px, no shadow
+  
+  Top App Bar: height 64px, bg #FFFBFE, title 22px/weight 400
+  Lists: 56px row height (48px compact), leading icon 24px, divider 1px #E7E0EC
+
+SPACING: 4px grid. Use 4/8/12/16/24/32/48px increments.
+`,
+
+  "apple-hig": `
+══ DESIGN SYSTEM: APPLE HUMAN INTERFACE GUIDELINES ══
+Follow Apple HIG precisely. These override any other visual guidance.
+
+TOKENS (Light mode):
+  Background:       #F2F2F7   (system grouped background)
+  Secondary bg:     #FFFFFF   (secondary system background)
+  Tertiary bg:      #F2F2F7
+  Label primary:    #000000   Label secondary: rgba(60,60,67,0.6)
+  Label tertiary:   rgba(60,60,67,0.3)
+  Separator:        rgba(60,60,67,0.29)  Fill:  rgba(120,120,128,0.2)
+  System Blue:      #007AFF   System Green: #34C759  System Red:  #FF3B30
+  System Orange:    #FF9500   System Purple: #AF52DE  System Teal: #5AC8FA
+
+TYPOGRAPHY (-apple-system, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif):
+  Large Title:   34px / 41px  weight 700
+  Title 1:       28px / 34px  weight 700
+  Title 2:       22px / 28px  weight 700
+  Title 3:       20px / 25px  weight 600
+  Headline:      17px / 22px  weight 600
+  Body:          17px / 22px  weight 400
+  Callout:       16px / 21px  weight 400
+  Subhead:       15px / 20px  weight 400
+  Footnote:      13px / 18px  weight 400
+  Caption:       12px / 16px  weight 400
+
+COMPONENTS:
+  Sidebar (macOS/iPadOS):
+    Width: 220–260px, bg #F2F2F7, border-r 1px rgba(60,60,67,0.29)
+    Nav items: px 12px py 8px, rounded-lg (8px), height 32px
+    Active: bg #007AFF text #FFFFFF  Hover: bg rgba(0,0,0,0.06)
+    Section header: text 11px uppercase tracking-wide color rgba(60,60,67,0.6) px 12px mb 4px
+  
+  List rows (UIKit table-view style):
+    Full width, height 44px (min), px 16px, bg #FFFFFF
+    Divider: inset 16px, 1px solid #E5E5EA
+    Trailing chevron: ChevronRight 14px color #C7C7CC (always on tappable rows)
+    Leading avatar/icon: 32–40px rounded-full
+  
+  Toolbar: height 52px, bg rgba(242,242,247,0.8) blur(12px), border-b 1px rgba(60,60,67,0.29)
+  
+  Buttons:
+    Primary: bg #007AFF text white, rounded-lg 10px, height 44px, px 16px, font-weight 600
+    Secondary: border 1px #007AFF text #007AFF, rounded-lg
+    Destructive: bg #FF3B30
+  
+  Cards: bg #FFFFFF, rounded-2xl (16px), no shadow (use bg contrast instead)
+  Modal sheet: rounded-tl/tr 16px, bg #FFFFFF
+
+SPACING: 4/8/12/16/20/24/32/44px. 44pt minimum tap target.
+`,
+
+  "linear": `
+══ DESIGN SYSTEM: LINEAR APP ══
+Follow Linear's design language precisely. These override any other visual guidance.
+
+TOKENS:
+  Background:       #FFFFFF   Surface:    #FAFAFA   Sidebar bg: #F7F7F7
+  Border:           #E5E5E5   Divider:    #F3F4F6   
+  Text primary:     #1A1A1A   Text secondary: #4B5563  Text tertiary: #9CA3AF
+  Accent/primary:   #5E6AD2   (Linear indigo)
+  Accent hover:     #4F5BBD
+  Selection bg:     #EBEBEB   Selected text: #1A1A1A
+  Priority urgent:  #E11D48   Priority high: #F97316
+  Priority medium:  #EAB308   Priority low: #6B7280
+
+TYPOGRAPHY (Inter, system-ui, sans-serif — base 13px):
+  Base:    13px / 20px  weight 400  (this is the default for all body text)
+  Medium:  13px / 20px  weight 500
+  Label:   11px / 16px  weight 500 uppercase tracking-wide
+  Large:   15px / 22px  weight 500 (headings only)
+  Mono:    font-family: 'JetBrains Mono', 'Fira Code', monospace  12px (IDs, timestamps)
+
+COMPONENTS:
+  Sidebar:
+    Width: 220px exactly, bg #F7F7F7, border-r 1px #E5E5E5
+    Workspace header: px 12px py 8px, 5px rounded icon 20×20
+    Section header: 11px uppercase tracking-wide color #9CA3AF, px 12px py 4px
+    Nav item: px 12px py 6px rounded-lg, height ~28px, gap-2, icon 14px
+    Active: bg #EBEBEB text #1A1A1A  Hover: bg #F0F0F0 text #1A1A1A
+    Unread count: 11px text-right color #9CA3AF
+  
+  Issue list (the core component):
+    Toolbar: height 40px, border-b 1px #E5E5E5, px 16px
+    Column header row: height 32px, bg #FAFAFA, border-b #E5E5E5, 11px uppercase #9CA3AF, sticky
+    Issue row: height 36px, border-b 1px #F3F4F6, px 16px, hover bg #F9F9F9
+      Priority dot: 8px circle, color = priority color
+      ID: font-mono 12px text-tertiary, w-16
+      Title: 13px text-primary, flex-1
+      Status badge: 12px text-secondary
+      Assignee avatar: 24×24 rounded-full, bg #E5E7EB text 10px
+  
+  Buttons:
+    Primary: bg #5E6AD2 text white, rounded-lg 6px, text 12px font-medium, px 10px py 6px
+    Secondary: border 1px #E5E5E5 text #4B5563, rounded-lg 6px, text 12px
+    Icon: 28×28, rounded-md, hover bg #EBEBEB, icon 14px
+  
+  Status pills: rounded-full px 8px py 2px, text 11px font-medium — inline status labels
+
+SPACING: 4/8/12/16/24px. Tight density: most vertical rhythms are 28–36px.
+DENSITY: Everything is compact. Reduce padding everywhere vs typical UI.
+`,
+
+  "asana": `
+══ DESIGN SYSTEM: ASANA ══
+Follow Asana's visual language precisely. These override any other visual guidance.
+
+TOKENS:
+  Background:       #FFFFFF   Sidebar bg: #F6F8F9    Surface border: #E2E8F0
+  Text primary:     #1A202C   Text secondary: #4A5568  Text tertiary: #718096
+  Divider:          #EDF2F7   Fill light: #F6F8F9
+  Coral/primary:    #F06A6A   Coral dark: #D95B5B     Coral bg: #FFF0F0
+  Blue secondary:   #4573D2   Green success: #1DA462   Yellow warn: #F2C94C
+  Gray action:      #6B7280
+
+TYPOGRAPHY (Inter, system-ui, sans-serif — base 14px):
+  H1:      24px / 32px  weight 700
+  H2:      20px / 28px  weight 600
+  H3:      16px / 24px  weight 600
+  Body:    14px / 20px  weight 400
+  Small:   12px / 16px  weight 400
+  Label:   12px / 16px  weight 500
+
+COMPONENTS:
+  Sidebar:
+    Width: 240px, bg #F6F8F9, border-r 1px #E2E8F0, py 12px
+    Brand header: 28px avatar rounded-full bg coral, font-semibold 14px, px 16px pb 8px
+    Nav item: px 16px py 8px, rounded-lg 8px, gap-2, icon 16px, text 14px font-medium
+    Active: bg #EAEEF5 text #1A202C  Hover: bg #EDF2F7
+    Section label: 11px uppercase tracking-wide color #718096, px 16px py 8px
+    Project dot: 10×10 rounded-full, each project has a distinct color
+  
+  Task list (core component):
+    Column headers: text 11px font-semibold uppercase tracking-wide #718096, border-b 1px #EDF2F7
+    Task row: min-height 40px, border-b 1px #EDF2F7, grid layout 12 cols, hover bg #FAFAFA
+    Checkbox: 16px circle (Circle icon when undone, CheckCircle2 when done)
+    Done task: text-decoration line-through, color #A0AEC0
+    Assignee avatar: 24×24 rounded-full bg #E2E8F0, initials 10px font-medium
+    Priority badge: rounded-full px 8px py 2px, text 11px font-medium, bg = color+'18' (10% opacity)
+    Due date: 14px text-secondary
+  
+  Buttons:
+    Primary: bg #F06A6A text white, rounded-lg 8px, height 36px, px 16px, font-medium 14px
+    Secondary: border 1px #E2E8F0 text #4A5568, rounded-lg 8px
+    Ghost: text-only #718096, hover text #1A202C
+  
+  Summary cards: bg #FFFFFF rounded-2xl, no heavy shadow (use border), p 16px
+  Modals/panels: rounded-2xl, shadow-lg, border border-#E2E8F0
+
+SPACING: 4/8/12/16/20/24/32/40px. Standard density — not too tight, not spacious.
+INTERACTIONS: Checkbox toggles are the primary interaction. Clicking a row should open a detail view.
+`,
+
+  "stripe": `
+══ DESIGN SYSTEM: STRIPE DASHBOARD ══
+Follow Stripe's dashboard design language precisely. These override any other visual guidance.
+
+TOKENS:
+  Sidebar bg:       #1A1F36   (dark navy)
+  Sidebar text:     #C1C9D2   Sidebar active text: #FFFFFF
+  Sidebar hover:    rgba(255,255,255,0.08)  Sidebar active: rgba(255,255,255,0.1)
+  Sidebar border:   rgba(255,255,255,0.08)
+  Content bg:       #F6F9FC
+  Card bg:          #FFFFFF   Card border: #E3E8EF   Card shadow: 0 1px 3px rgba(18,18,29,0.08)
+  Text primary:     #1A1F36   Text secondary: #697386  Text tertiary: #9EA3AE
+  Accent/primary:   #635BFF   (Stripe purple)
+  Accent hover:     #4F48E2
+  Success:          #09825D   Success bg: #ECFDF5     Success text: #065F46
+  Danger:           #C0392B   Danger bg:  #FEF2F2     Danger text: #991B1B
+  Warning:          #B45309   Warning bg: #FFF7ED     Warning text: #9A3412
+  Processing:       #B45309   Processing bg: #FFF7ED
+  Table header:     #F9FAFC   Table divider: #E3E8EF
+
+TYPOGRAPHY (Inter, system-ui, sans-serif):
+  Page title:    20px / 28px  weight 600  color #1A1F36
+  Section head:  14px / 20px  weight 600  color #1A1F36
+  Body:          14px / 20px  weight 400  color #1A1F36
+  Label/meta:    12px / 16px  weight 400  color #697386
+  Table header:  11px / 16px  weight 500 uppercase tracking-wide color #697386
+  Mono:          font-family: 'SF Mono', 'Fira Code', monospace  12px — for IDs, amounts
+
+COMPONENTS:
+  Sidebar (DARK NAVY):
+    Width: 224px, bg #1A1F36, full height
+    Logo area: px 16px py 16px, brand mark + workspace name
+    Nav item: px 12px py 10px mx 8px rounded-lg, icon 15px, text 13px font-medium, gap-2
+    Active: bg rgba(255,255,255,0.1) text #FFFFFF  Inactive: text #8792A2
+    Bottom profile: border-t rgba(255,255,255,0.08), avatar 28px rounded-full bg #635BFF
+  
+  Top bar: height 56px, bg #FFFFFF, border-b 1px #E3E8EF, px 24px
+    Search: rounded-lg border #E3E8EF bg #F6F9FC, show ⌘K shortcut
+  
+  Metric cards:
+    bg #FFFFFF, border 1px #E3E8EF, rounded-lg 8px, p 16px
+    Label: 14px text-secondary  Value: 20px font-semibold text-primary
+    Delta: 12px with ArrowUpRight/ArrowDownRight icon, color = green (up) or red (down)
+  
+  Data table:
+    Container: bg #FFFFFF border 1px #E3E8EF rounded-lg overflow-hidden
+    Table header row: bg #F9FAFC border-b #E3E8EF, 11px uppercase tracking-wide #697386, px 20px py 12px
+    Data row: px 20px py 14px border-b #F3F4F6, hover bg #F9FAFC
+    ID column: font-mono 12px text-tertiary
+    Amount: 14px font-medium text-primary
+    Status badge: rounded-full px 8px py 4px text 12px font-medium capitalize
+  
+  Buttons:
+    Primary: bg #635BFF text white, rounded-md 6px, px 14px h 36px, font-medium 14px
+    Secondary: border 1px #E3E8EF text #1A1F36 bg white, rounded-md 6px
+    Danger: bg #C0392B text white
+
+SPACING: 4/8/12/16/20/24/32/48px. Content area uses 24px horizontal padding.
+LAYOUT: Always dark sidebar (224px) + light content area. Data tables are the core component.
+`,
+
+  "notion": `
+══ DESIGN SYSTEM: NOTION ══
+Follow Notion's clean, minimal design language. These override any other visual guidance.
+
+TOKENS:
+  Background:       #FFFFFF   Sidebar bg: #F7F6F3
+  Hover bg:         #EFEFEF   Active bg:  #E9E9E7
+  Border:           #E9E9E7
+  Text primary:     #37352F   Text secondary: #787774  Text placeholder: rgba(55,53,47,0.5)
+  Accent:           #2EAADC   (Notion blue)  Accent bg: #E8F5FA
+  Red:              #E03E3E   Yellow: #DFAB01  Green: #0F7B6C
+
+TYPOGRAPHY (Inter, -apple-system, system-ui, sans-serif):
+  Title/H1:  40px / 50px  weight 700  color #37352F
+  H2:        30px / 38px  weight 700
+  H3:        24px / 30px  weight 600
+  Body:      16px / 24px  weight 400  (Notion uses 16px as base)
+  Small:     14px / 20px  weight 400
+  Caption:   12px / 16px  weight 400
+
+COMPONENTS:
+  Sidebar: 240px, bg #F7F6F3, no hard border (subtle shadow or bg diff only)
+    Page items: px 12px py 4px rounded-md, icon/emoji 16px, text 14px
+    Hover: bg #EFEFEF  Active: bg #E9E9E7 text #37352F
+    Section: 11px uppercase tracking-wide #787774, px 12px py 6px mb 2px
+  
+  Content area: max-width 900px centered, px 96px (wide page: 64px), pt 96px
+    Block editor feel: each section is a "block" with top/bottom margin
+  
+  Tables/databases:
+    Property header: 12px font-medium uppercase tracking-wide #787774
+    Row: 44px min-height, border-b 1px #E9E9E7, px 8px
+    Hover: bg #F7F6F3
+    Cell: 14px text-primary
+    Status pills: rounded-full px 8px py 2px, 12px font-medium
+  
+  Buttons: 
+    Primary: bg #37352F text white, rounded-md 4px, px 12px h 32px text 14px font-medium
+    Secondary: bg #EFEFEF text #37352F, rounded-md 4px
+    Ghost: text-only, hover bg #EFEFEF
+  
+  Callout/info blocks: bg #F1F1EF, rounded-md, p 16px, left border none
+
+SPACING: 4/8/12/16/24/32/48/64/96px. Generous whitespace, editorial feel.
+FEEL: Wikipedia/document + database. Blocks, properties, views. Calm and minimal.
+`,
+
+  "vercel": `
+══ DESIGN SYSTEM: VERCEL DASHBOARD ══
+Follow Vercel's sleek, developer-focused dark design language. These override any other visual guidance.
+
+TOKENS (dark mode — Vercel defaults to dark):
+  Background:       #000000   Surface:    #111111   Elevated: #1A1A1A
+  Border:           #333333   Subtle:     #222222
+  Text primary:     #EDEDED   Text secondary: #888888  Text tertiary: #666666
+  Accent/primary:   #FFFFFF   (white primary actions on dark)
+  Blue:             #0070F3   Blue light: #3291FF     Blue dark: #0761D1
+  Success:          #50E3C2   Error:      #FF0080     Warning: #F5A623
+  Code bg:          #0D1117   Code text:  #79C0FF
+
+TYPOGRAPHY ('Geist', Inter, system-ui, sans-serif):
+  H1:      32px / 40px  weight 700  color #EDEDED
+  H2:      24px / 32px  weight 600  color #EDEDED
+  H3:      18px / 26px  weight 600  color #EDEDED
+  Body:    14px / 22px  weight 400  color #EDEDED
+  Small:   12px / 18px  weight 400  color #888888
+  Mono:    'Geist Mono', 'JetBrains Mono', monospace  13px — for paths, IDs, code
+
+COMPONENTS:
+  Main nav (top bar):
+    bg #000000, border-b 1px #333333, height 56px, px 24px
+    Logo: left-aligned, white Vercel triangle/wordmark
+    Nav links: 14px #888888, hover #EDEDED, px 12px
+    Right: avatar, CTA button
+  
+  Sidebar (project nav):
+    Width: 240px, bg #000000, border-r 1px #333333, py 8px
+    Nav item: px 12px py 8px rounded-lg, text 14px, gap-2, icon 16px
+    Active: bg #1A1A1A text #EDEDED  Inactive: text #888888 hover bg #111111
+  
+  Deployment cards:
+    bg #111111, border 1px #333333, rounded-lg 8px, p 16px
+    Domain name: 14px font-medium #EDEDED
+    Status badge: rounded-full px 8px py 3px text 12px
+      Success: bg #0D2818 text #50E3C2   Failed: bg #1F0A1A text #FF0080  Building: bg #1A1200 text #F5A623
+  
+  Data table (dark):
+    Container: bg #111111 border 1px #333333 rounded-lg
+    Header: bg #0A0A0A border-b #333333, 11px uppercase #666666 tracking-wide, px 20px py 12px
+    Row: px 20px py 14px border-b #222222 hover bg #1A1A1A
+    Cell: 14px #888888  Key cell: 14px #EDEDED font-medium
+  
+  Buttons:
+    Primary: bg #FFFFFF text #000000, rounded-md 6px, px 14px h 36px font-medium — high contrast
+    Secondary: bg transparent border 1px #333333 text #EDEDED, rounded-md 6px
+    Destructive: bg #FF0080 text white
+  
+  Code blocks: bg #0D1117, border 1px #30363D, rounded-lg, p 16px, mono 13px
+
+SPACING: 4/8/12/16/24/32/48px. Developer-first: data-dense, minimal decoration.
+FEEL: Dark, sleek, professional. Commands attention. GitHub/VS Code aesthetic.
+`,
+};
+
+function getDesignSystemSpec(designSystemId: string): string {
+  return DESIGN_SYSTEM_SPECS[designSystemId] ?? "";
+}
+
 // ─── Shared prompt builders ───────────────────────────────────────────────────
 
-function buildSystemPrompt(paletteId: string): string {
+function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string {
+  const designBlock = designSystemSpec
+    ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
+    : "";
   return [
-    "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
+    designBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
     "",
     "══ STEP 1: ANALYSE THE PROMPT ══",
@@ -437,8 +848,9 @@ async function callAnthropicCustomise(
   prompt: string,
   model: string,
   paletteId: string,
+  designSystemSpec?: string,
 ): Promise<CustomiseResult> {
-  return callAnthropicWithMessages(model, buildSystemPrompt(paletteId), buildUserMessage(prompt), prompt);
+  return callAnthropicWithMessages(model, buildSystemPrompt(paletteId, designSystemSpec), buildUserMessage(prompt), prompt);
 }
 
 // ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
@@ -486,8 +898,9 @@ async function callOpenAICompatibleCustomise(
   apiKey: string,
   paletteId: string,
   baseURL?: string,
+  designSystemSpec?: string,
 ): Promise<CustomiseResult> {
-  return callOpenAICompatibleWithMessages(model, apiKey, buildSystemPrompt(paletteId), buildUserMessage(prompt), prompt, baseURL);
+  return callOpenAICompatibleWithMessages(model, apiKey, buildSystemPrompt(paletteId, designSystemSpec), buildUserMessage(prompt), prompt, baseURL);
 }
 
 // ─── Model dispatch (initial build) ──────────────────────────────────────────
@@ -499,14 +912,20 @@ async function callModelCustomise(
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
+  const designSystemId = detectDesignSystem(prompt);
+  const designSystemSpec = designSystemId ? getDesignSystemSpec(designSystemId) : undefined;
+  if (designSystemId) {
+    console.log("[generate] design system spec injected:", designSystemId);
+  }
+
   if (model.startsWith("claude-")) {
-    return callAnthropicCustomise(prompt, model, paletteId);
+    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec);
   }
 
   if (model.startsWith("gpt-")) {
     const apiKey = apiConfig.OPENAI_API_KEY;
     if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
-    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId);
+    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId, undefined, designSystemSpec);
   }
 
   if (model.startsWith("gemini-")) {
@@ -515,12 +934,13 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
+      designSystemSpec,
     );
   }
 
   // Unknown model — fall back to haiku
   console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
-  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId);
+  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec);
 }
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
