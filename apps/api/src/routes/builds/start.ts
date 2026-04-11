@@ -3,22 +3,11 @@ import { randomUUID } from "node:crypto";
 import { initialBuildOperation, projectIterationOperation } from "@beomz-studio/operations";
 import type {
   BuilderV3TraceMetadata,
-  InitialBuildWorkflowInput,
   OrgPlan,
   PlanStep,
   TemplateId,
 } from "@beomz-studio/contracts";
-import {
-  INITIAL_BUILD_WORKFLOW_TYPE,
-  PROJECT_ITERATION_WORKFLOW_TYPE,
-  buildInitialBuildWorkflowId,
-  buildProjectIterationWorkflowId,
-  buildProjectNameFromPrompt,
-  getInitialBuildTaskQueue,
-  getTemporalClient,
-  selectInitialBuildTemplate,
-} from "@beomz-studio/temporal-worker";
-import { getTemplateDefinition } from "@beomz-studio/templates";
+import { getTemplateDefinitionSafe } from "@beomz-studio/templates";
 import { Hono } from "hono";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
@@ -31,8 +20,34 @@ import {
   startBuildRequestSchema,
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
+import { runBuildInBackground } from "./generate.js";
 
-const TEMPLATE_ICONS: Record<TemplateId, string> = {
+// ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
+
+const PROMPT_STOP_WORDS = new Set([
+  "a", "an", "and", "app", "build", "create", "for", "from",
+  "in", "make", "of", "the", "to", "with",
+]);
+
+function buildProjectNameFromPrompt(prompt: string, fallbackName: string): string {
+  const tokens = prompt
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((t) => t.replace(/[^a-zA-Z0-9-]/g, ""))
+    .filter((t) => t.length > 2 && !PROMPT_STOP_WORDS.has(t.toLowerCase()))
+    .slice(0, 3);
+
+  if (tokens.length === 0) return fallbackName;
+
+  return tokens
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const TEMPLATE_ICONS: Record<string, string> = {
   "marketing-website": "Globe",
   "saas-dashboard": "BarChart2",
   "workspace-task": "CheckSquare",
@@ -46,7 +61,7 @@ const TEMPLATE_ICONS: Record<TemplateId, string> = {
   "interactive-tool": "Wrench",
 };
 
-function getProjectIcon(templateId: TemplateId): string {
+function getProjectIcon(templateId: string): string {
   return TEMPLATE_ICONS[templateId] ?? "Sparkles";
 }
 
@@ -59,45 +74,31 @@ function buildPlanContextPrompt(
   summary: string | undefined,
   steps: readonly PlanStep[] | undefined,
 ): string {
-  if (!summary || !steps || steps.length === 0) {
-    return prompt;
-  }
+  if (!summary || !steps || steps.length === 0) return prompt;
 
   const stepsBlock = steps
-    .map((step, index) => `${index + 1}. ${step.title} — ${step.description}`)
+    .map((step, i) => `${i + 1}. ${step.title} — ${step.description}`)
     .join("\n");
 
-  return `${prompt}
-
-Approved build plan:
-Summary: ${summary}
-Steps:
-${stepsBlock}`;
+  return `${prompt}\n\nApproved build plan:\nSummary: ${summary}\nSteps:\n${stepsBlock}`;
 }
 
 function derivePlanKeywords(steps: readonly PlanStep[] | undefined): string[] | undefined {
-  if (!steps || steps.length === 0) {
-    return undefined;
-  }
+  if (!steps || steps.length === 0) return undefined;
 
   return steps
-    .flatMap((step) => step.title.split(/[^a-zA-Z0-9]+/))
-    .map((keyword) => keyword.trim().toLowerCase())
-    .filter((keyword) => keyword.length >= 3)
-    .filter((keyword, index, items) => items.indexOf(keyword) === index)
+    .flatMap((s) => s.title.split(/[^a-zA-Z0-9]+/))
+    .map((kw) => kw.trim().toLowerCase())
+    .filter((kw) => kw.length >= 3)
+    .filter((kw, idx, arr) => arr.indexOf(kw) === idx)
     .slice(0, 12);
 }
 
 function toOrgPlan(plan: string): OrgPlan {
-  switch (plan) {
-    case "free":
-    case "starter":
-    case "pro":
-    case "business":
-      return plan;
-    default:
-      return "free";
+  if (plan === "free" || plan === "starter" || plan === "pro" || plan === "business") {
+    return plan;
   }
+  return "free";
 }
 
 function createInitialBuilderTrace(
@@ -109,7 +110,7 @@ function createInitialBuilderTrace(
       {
         code: "build_queued",
         id: "1",
-        message: "Build queued. Waiting for the worker to start.",
+        message: "Build queued.",
         operation,
         timestamp: requestedAt,
         type: "status",
@@ -123,6 +124,8 @@ function createInitialBuilderTrace(
   };
 }
 
+// ─── Route ────────────────────────────────────────────────────────────────────
+
 const buildsStartRoute = new Hono();
 
 buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
@@ -131,13 +134,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const parsedBody = startBuildRequestSchema.safeParse(requestBody);
 
   if (!parsedBody.success) {
-    return c.json(
-      {
-        details: parsedBody.error.flatten(),
-        error: "Invalid build request body.",
-      },
-      400,
-    );
+    return c.json({ details: parsedBody.error.flatten(), error: "Invalid build request body." }, 400);
   }
 
   const prompt = parsedBody.data.prompt.trim();
@@ -152,27 +149,21 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     if (!planSession || planSession.user_id !== orgContext.user.id) {
       return c.json({ error: "Approved plan session not found." }, 404);
     }
-
     if (planSession.phase !== "approved") {
       return c.json({ error: "Plan session is not approved yet." }, 409);
     }
-
     planSummary = planSession.summary ?? planSummary;
     planSteps = planSession.steps ?? planSteps;
   }
 
   const effectivePrompt = buildPlanContextPrompt(prompt, planSummary, planSteps);
+
   let projectRow = requestedProjectId
     ? await orgContext.db.findProjectById(requestedProjectId)
     : null;
 
-  if (requestedProjectId && !projectRow) {
-    return c.json({ error: "Project not found." }, 404);
-  }
-
-  if (projectRow && projectRow.org_id !== orgContext.org.id) {
-    return c.json({ error: "Project not found." }, 404);
-  }
+  if (requestedProjectId && !projectRow) return c.json({ error: "Project not found." }, 404);
+  if (projectRow && projectRow.org_id !== orgContext.org.id) return c.json({ error: "Project not found." }, 404);
 
   let existingFiles = parsedBody.data.existingFiles ? [...parsedBody.data.existingFiles] : [];
   if (projectRow && existingFiles.length === 0) {
@@ -181,25 +172,30 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   const isIteration = Boolean(projectRow && existingFiles.length > 0);
-  const selection = isIteration && projectRow
-    ? {
-        reason: `Reusing the current ${projectRow.template} template for this project iteration.`,
-        scores: { [projectRow.template]: 1 },
-        template: getTemplateDefinition(projectRow.template),
-      }
-    : await slmMatchTemplate({ prompt: effectivePrompt });
+
+  // ── Template selection (fast; generate.ts picks the best prebuilt later) ───
+  let selectedTemplateId: string;
+  if (isIteration && projectRow) {
+    selectedTemplateId = projectRow.template;
+  } else {
+    try {
+      const slm = await slmMatchTemplate({ prompt: effectivePrompt });
+      selectedTemplateId = slm.template.id;
+    } catch {
+      selectedTemplateId = "interactive-tool"; // safe fallback
+    }
+  }
+
+  const selectedTemplateDef = getTemplateDefinitionSafe(selectedTemplateId);
   const projectName =
     (isIteration ? projectRow?.name : parsedBody.data.projectName?.trim())
-    || (projectRow?.name)
-    || buildProjectNameFromPrompt(prompt, selection.template.defaultProjectName);
+    || projectRow?.name
+    || buildProjectNameFromPrompt(prompt, selectedTemplateDef.defaultProjectName);
+
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
   const requestedAt = new Date().toISOString();
   const operation = isIteration ? "iteration" : "initial_build";
-  const workflowId = isIteration
-    ? buildProjectIterationWorkflowId(buildId)
-    : buildInitialBuildWorkflowId(buildId);
-  const workflowType = isIteration ? PROJECT_ITERATION_WORKFLOW_TYPE : INITIAL_BUILD_WORKFLOW_TYPE;
   const operationId = isIteration ? projectIterationOperation.id : initialBuildOperation.id;
   const initialBuilderTrace = createInitialBuilderTrace(requestedAt, operation);
 
@@ -212,162 +208,64 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     planSteps: planSteps ? [...planSteps] : undefined,
     planSummary,
     resultSource: undefined,
-    selectedTemplateId: selection.template.id,
+    selectedTemplateId,
     sourcePrompt,
-    templateUsed: selection.template.id,
-    templateReason: selection.reason,
-    templateScores: selection.scores,
+    templateUsed: selectedTemplateId,
     userId: orgContext.user.id,
-    workflowId,
   } satisfies Record<string, unknown>;
 
-  console.log("Build queued from API.", {
-    buildId,
-    operation,
-    prompt: sourcePrompt,
-    projectId,
-    templateId: selection.template.id,
-    userId: orgContext.user.id,
+  console.log("[BEO-210] Build queued.", {
+    buildId, operation, prompt: sourcePrompt, projectId,
+    templateId: selectedTemplateId, userId: orgContext.user.id,
   });
 
   if (projectRow) {
     projectRow = await orgContext.db.updateProject(projectId, {
-      name: projectName,
-      status: "queued",
-      template: selection.template.id,
+      name: projectName, status: "queued", template: selectedTemplateId as TemplateId,
     });
   } else {
     projectRow = await orgContext.db.createProject({
-      id: projectId,
-      name: projectName,
-      org_id: orgContext.org.id,
-      status: "queued",
-      template: selection.template.id,
+      id: projectId, name: projectName,
+      org_id: orgContext.org.id, status: "queued", template: selectedTemplateId as TemplateId,
     });
   }
 
-  if (!projectRow) {
-    return c.json({ error: "Project not found." }, 404);
-  }
+  if (!projectRow) return c.json({ error: "Project not found." }, 404);
 
-  // Best-effort: set icon after create/update (column may not exist yet pending migration).
-  const iconValue = getProjectIcon(selection.template.id);
+  const iconValue = getProjectIcon(selectedTemplateId);
   await orgContext.db.updateProject(projectId, { icon: iconValue }).catch(() => undefined);
-  if (projectRow && !projectRow.icon) {
-    projectRow = { ...projectRow, icon: iconValue };
-  }
+  if (!projectRow.icon) projectRow = { ...projectRow, icon: iconValue };
 
   const generationRow = await orgContext.db.createGeneration({
-    completed_at: null,
-    error: null,
-    files: [],
-    id: buildId,
-    metadata: initialMetadata,
-    operation_id: operationId,
-    output_paths: [],
-    preview_entry_path: selection.template.previewEntryPath,
-    project_id: projectId,
-    prompt: effectivePrompt,
-    started_at: requestedAt,
+    completed_at: null, error: null, files: [],
+    id: buildId, metadata: initialMetadata, operation_id: operationId,
+    output_paths: [], preview_entry_path: "/",
+    project_id: projectId, prompt: effectivePrompt, started_at: requestedAt,
     status: "queued",
-    summary: planSummary
-      ? isIteration
-        ? `Queued requested changes for ${projectName} from the approved plan.`
-        : `Queued ${selection.template.name} initial build from approved plan.`
-      : isIteration
-        ? `Queued requested changes for ${projectName}.`
-        : `Queued ${selection.template.name} initial build.`,
-    template_id: selection.template.id,
-    warnings: [],
+    summary: isIteration
+      ? `Queued requested changes for ${projectName}.`
+      : `Queued initial build for ${projectName}.`,
+    template_id: selectedTemplateId as TemplateId, warnings: [],
   });
 
-  try {
-    const temporalClient = await getTemporalClient();
-
-    const workflowInput: InitialBuildWorkflowInput = {
-      actor: {
-        org: {
-          id: orgContext.org.id,
-          name: orgContext.org.name,
-          plan: toOrgPlan(orgContext.org.plan),
-        },
-        user: {
-          email: orgContext.user.email,
-          id: orgContext.user.id,
-          platformUserId: orgContext.user.platform_user_id,
-        },
-      },
-      buildId,
-      existingFiles,
-      projectId,
-      projectName,
-      prompt: effectivePrompt,
-      provisionalTemplateId: selection.template.id,
-      requestedAt,
-    };
-
-    await temporalClient.workflow.start(workflowType, {
-      args: [workflowInput],
-      taskQueue: getInitialBuildTaskQueue(),
-      workflowId,
+  // ── Fire-and-forget background build (BEO-210 — no Temporal) ──────────────
+  runBuildInBackground(
+    {
+      buildId, projectId,
+      userId: orgContext.user.id,
+      prompt: effectivePrompt, sourcePrompt,
+      templateId: selectedTemplateId,
+      requestedAt, operationId,
+      isIteration, existingFiles,
+    },
+    orgContext.db,
+  ).catch((err: unknown) => {
+    console.error("[BEO-210] Unhandled error in runBuildInBackground.", {
+      buildId, error: err instanceof Error ? err.message : String(err),
     });
-  } catch (error) {
-    const errorMessage = toErrorMessage(error);
-    const failureReason = errorMessage.includes("timeout")
-      ? "GENERATION_TIMEOUT" as const
-      : "ANTHROPIC_ERROR" as const;
-    const completedAt = new Date().toISOString();
+  });
 
-    await orgContext.db.updateGeneration(buildId, {
-      completed_at: completedAt,
-      error: errorMessage,
-      metadata: {
-        ...initialMetadata,
-        fallbackReason: `workflow_start_failed: ${errorMessage}`,
-        fallbackTriggerReason: "workflow_start_failed",
-        failureReason,
-        phase: "failed",
-        resultSource: "error",
-        startError: errorMessage,
-        telemetryFallbackReason: `workflow_start_failed: ${errorMessage}`,
-      },
-      status: "failed",
-    });
-    await orgContext.db.updateProject(projectId, {
-      status: "draft",
-    });
-    await orgContext.db.upsertBuildTelemetry({
-      id: buildId,
-      project_id: projectId,
-      user_id: orgContext.user.id,
-      prompt: sourcePrompt,
-      template_used: selection.template.id,
-      palette_used: null,
-      files_generated: 0,
-      succeeded: false,
-      fallback_reason: `workflow_start_failed: ${errorMessage}`,
-      error_log: {
-        error: errorMessage,
-        failureReason,
-        phase: "failed",
-      },
-      generation_time_ms: Math.max(0, Date.parse(completedAt) - Date.parse(requestedAt)),
-      credits_used: 0,
-      user_iterated: isIteration,
-      iteration_count: isIteration ? 1 : 0,
-      model_used: null,
-    }).catch(() => undefined);
-
-    return c.json(
-      {
-        error: "Failed to start build workflow.",
-        failureReason,
-        details: errorMessage,
-      },
-      500,
-    );
-  }
-
+  // Return 202 immediately — client subscribes to /builds/:id/events
   const metadata = readBuildMetadata(generationRow.metadata);
   const trace = readBuildTraceMetadata(generationRow);
 
@@ -384,11 +282,11 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         status: generationRow.status,
         summary: generationRow.summary,
         templateId: generationRow.template_id,
-        workflowId: metadata.workflowId ?? workflowId,
+        workflowId: null,
       },
       project: mapProjectRowToProject(projectRow),
       result: null,
-      template: selection.template,
+      template: selectedTemplateDef,
       trace,
     },
     202,

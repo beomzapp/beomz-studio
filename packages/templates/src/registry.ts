@@ -511,6 +511,16 @@ export function getTemplateDefinition(templateId: TemplateId): TemplateDefinitio
   return templateRegistryById[templateId];
 }
 
+/**
+ * Like getTemplateDefinition but accepts any string (e.g. prebuilt template IDs
+ * such as "budget-planner"). Falls back to the "interactive-tool" definition so
+ * callers always get a valid previewEntryPath and shell.
+ */
+export function getTemplateDefinitionSafe(templateId: string): TemplateDefinition {
+  return (templateRegistryById as Record<string, TemplateDefinition>)[templateId]
+    ?? interactiveToolTemplate;
+}
+
 export function listTemplateDefinitions(): readonly TemplateDefinition[] {
   return TEMPLATE_REGISTRY;
 }

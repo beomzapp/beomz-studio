@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-import { isBuilderV3TerminalEvent, type TemplateId } from "@beomz-studio/contracts";
-import { getTemplateDefinition } from "@beomz-studio/templates";
+import { isBuilderV3TerminalEvent } from "@beomz-studio/contracts";
+import { getTemplateDefinitionSafe } from "@beomz-studio/templates";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
@@ -78,7 +78,7 @@ function buildTerminalSafetyEvent(
     operation: "initial_build" as const,
     payload: {
       previewEntryPath:
-        row.preview_entry_path ?? getTemplateDefinition(row.template_id as TemplateId).previewEntryPath,
+        row.preview_entry_path ?? getTemplateDefinitionSafe(row.template_id).previewEntryPath,
       source: metadata.resultSource ?? "ai",
     },
     projectId: row.project_id,

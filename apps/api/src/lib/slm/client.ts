@@ -9,7 +9,50 @@
 
 import type { InitialBuildPlan, TemplateId, TemplateSelectionResult } from "@beomz-studio/contracts";
 import { listTemplateDefinitions, listPrebuiltTemplates } from "@beomz-studio/templates";
-import { selectInitialBuildTemplate } from "@beomz-studio/temporal-worker";
+
+// ─── Inlined keyword template selector (was in @beomz-studio/temporal-worker) ─
+
+const TEMPLATE_SIGNALS: Record<TemplateId, readonly string[]> = {
+  "marketing-website": ["company site","contact","cta","hero","landing page","landing","launch","marketing","pricing","product page","public","saas homepage","waitlist","website"],
+  "saas-dashboard": ["account manager","account","admin","analytics","crm","customer","deal","deals","lead","leads","metrics","pipeline","overview","saas","sales","settings"],
+  "workspace-task": ["backlog","budget","board","collaboration","dashboard","kanban","manager","planner","project","sprint","task","team","todo","tracker","workflow","workspace"],
+  "mobile-app": ["calories","diary","fitness","habit","journal","meditation","mobile","personal","streak","tracker"],
+  "social-app": ["comment","community","dating","feed","follow","forum","like","message","post","social"],
+  ecommerce: ["cart","catalog","checkout","commerce","marketplace","product","retail","shop","store"],
+  portfolio: ["agency","case study","creative","freelancer","personal brand","portfolio","resume","showcase","studio"],
+  "blog-cms": ["article","author","blog","content","documentation","editorial","magazine","news","post"],
+  "onboarding-flow": ["form flow","multi-step","onboarding","quiz","sign up","stepper","survey","wizard"],
+  "data-table-app": ["back office","data table","employee","filter","fleet","inventory","lead management","logistics","operations console","operations","pagination","pipeline report","record management","reporting","sales ops","sortable"],
+  "interactive-tool": ["calculator","clock","converter","counter","game","generator","puzzle","stopwatch","timer","tool","utility","widget"],
+};
+
+function countKwMatches(haystack: string, phrases: readonly string[]): number {
+  return phrases.reduce((score, phrase) => haystack.includes(phrase) ? score + (phrase.includes(" ") ? 4 : 2) : score, 0);
+}
+
+function selectInitialBuildTemplate(input: { prompt: string; plan?: InitialBuildPlan }): TemplateSelectionResult {
+  const templates = listTemplateDefinitions();
+  const promptLower = input.prompt.toLowerCase();
+  const planHaystack = input.plan ? `${input.plan.intentSummary.toLowerCase()} ${input.plan.keywords.join(" ")}` : "";
+
+  const scored = templates
+    .map((t) => ({
+      template: t,
+      score: countKwMatches(promptLower, TEMPLATE_SIGNALS[t.id]) + countKwMatches(planHaystack, TEMPLATE_SIGNALS[t.id]) + (t.id === "workspace-task" ? 1 : 0),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const selected = scored[0] ?? { template: templates[0]!, score: 0 };
+  const scores = scored.reduce<Record<TemplateId, number>>((acc, e) => { acc[e.template.id] = e.score; return acc; }, {} as Record<TemplateId, number>);
+
+  return {
+    template: selected.template,
+    reason: selected.score > 0
+      ? `Selected ${selected.template.name} based on prompt keywords.`
+      : `Defaulted to ${selected.template.name}.`,
+    scores,
+  };
+}
 
 const SLM_BASE_URL = (process.env.SLM_BASE_URL ?? "http://127.0.0.1:8001").replace(/\/$/, "");
 const SLM_TIMEOUT_MS = 4_000;

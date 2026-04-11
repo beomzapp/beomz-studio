@@ -8,7 +8,7 @@ import type {
 } from "@beomz-studio/contracts";
 import { createEmptyBuilderV3TraceMetadata } from "@beomz-studio/contracts";
 import type { GenerationRow, ProjectRow } from "@beomz-studio/studio-db";
-import { getTemplateDefinition } from "@beomz-studio/templates";
+import { getTemplateDefinition, getTemplateDefinitionSafe } from "@beomz-studio/templates";
 import { z } from "zod";
 
 import { buildPlanContextSchema } from "../plan/shared.js";
@@ -127,7 +127,7 @@ function synthesizeBuilderTrace(
   row: GenerationRow,
   metadata: BuildRouteMetadata,
 ): BuilderV3TraceMetadata {
-  const template = getTemplateDefinition(row.template_id);
+  const template = getTemplateDefinitionSafe(row.template_id);
   const operation = row.operation_id === "projectIteration" ? "iteration" : "initial_build";
   const fallbackReason = metadata.fallbackReason ?? null;
   const fallbackUsed = metadata.resultSource === "fallback";
@@ -226,7 +226,7 @@ export function readBuildTraceMetadata(row: GenerationRow): BuilderV3TraceMetada
 }
 
 export function mapProjectRowToProject(row: ProjectRow): Project {
-  const template = getTemplateDefinition(row.template);
+  const template = getTemplateDefinitionSafe(row.template);
 
   return {
     createdAt: row.created_at,
@@ -257,7 +257,7 @@ export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput 
       summary: row.summary ?? undefined,
     },
     previewEntryPath:
-      row.preview_entry_path ?? getTemplateDefinition(row.template_id).previewEntryPath,
+      row.preview_entry_path ?? getTemplateDefinitionSafe(row.template_id).previewEntryPath,
     warnings: row.warnings,
   };
 }

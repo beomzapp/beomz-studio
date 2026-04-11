@@ -1,0 +1,429 @@
+/**
+ * BEO-210: Template-first streaming build handler.
+ *
+ * Pattern (from Claude Code QueryEngine): AsyncGenerator yields events →
+ * caller persists each event to DB → SSE polling loop in events.ts picks
+ * them up and delivers to the frontend in real time.
+ *
+ * Flow:
+ *   1. Load prebuilt template → emit scaffold_ready (preview_ready)
+ *      Frontend mounts template in WebContainer immediately (~1-2s).
+ *   2. Call Anthropic once: "customise this template for: {prompt}"
+ *      Uses tool_use so the response is structured JSON, not markdown.
+ *   3. Merge customised files → emit done
+ *      HMR in WebContainer picks up the delta automatically.
+ *   4. Fallback: if Anthropic fails the template is shown as-is (still a
+ *      working app, not a blank scaffold).
+ */
+
+import { randomUUID } from "node:crypto";
+
+import Anthropic from "@anthropic-ai/sdk";
+import type {
+  BuilderV3DoneEvent,
+  BuilderV3ErrorEvent,
+  BuilderV3PreviewReadyEvent,
+  BuilderV3StatusEvent,
+  BuilderV3TraceMetadata,
+  StudioFile,
+  TemplateFile,
+  TemplateId,
+} from "@beomz-studio/contracts";
+import { createEmptyBuilderV3TraceMetadata } from "@beomz-studio/contracts";
+import type { StudioDbClient } from "@beomz-studio/studio-db";
+import {
+  getPrebuiltTemplate,
+  listPrebuiltTemplates,
+} from "@beomz-studio/templates";
+
+import { apiConfig } from "../../config.js";
+import { classifyPalette } from "../../lib/slm/client.js";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface BuildGenerateInput {
+  buildId: string;
+  projectId: string;
+  userId: string | null;
+  prompt: string;
+  sourcePrompt: string;
+  templateId: string;
+  requestedAt: string;
+  operationId: string;
+  isIteration: boolean;
+  existingFiles: readonly StudioFile[];
+}
+
+interface CustomiseResult {
+  files: Array<{ path: string; content: string }>;
+  summary: string;
+}
+
+// ─── Anthropic tool definition ────────────────────────────────────────────────
+
+const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
+  name: "deliver_customised_files",
+  description:
+    "Return the complete set of customised app files. "
+    + "Only include files that differ from the template. "
+    + "The summary must be one clear sentence describing the finished app.",
+  input_schema: {
+    type: "object",
+    properties: {
+      files: {
+        type: "array",
+        description: "Files to create or overwrite. Omit unchanged files.",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "File path, e.g. src/App.tsx" },
+            content: { type: "string", description: "Complete file content" },
+          },
+          required: ["path", "content"],
+        },
+      },
+      summary: {
+        type: "string",
+        description: "One sentence describing what this app does.",
+      },
+    },
+    required: ["files", "summary"],
+  },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function ts(): string {
+  return new Date().toISOString();
+}
+
+function inferFileKind(path: string): StudioFile["kind"] {
+  if (/\/(routes|pages|screens|views)\//.test(path) || /App\.(tsx|jsx)$/.test(path)) return "route";
+  if (/\/components\//.test(path)) return "component";
+  if (/\/(styles?|css)\/|\.css$/.test(path)) return "style";
+  if (/\/(config|settings)\/|\.config\.(ts|js)$/.test(path)) return "config";
+  if (/\/(data|fixtures)\//.test(path)) return "data";
+  if (/\.(json|md)$/.test(path)) return "content";
+  return "component";
+}
+
+function inferLanguage(path: string): string {
+  const ext = path.split(".").pop() ?? "";
+  const map: Record<string, string> = {
+    tsx: "tsx",
+    ts: "typescript",
+    jsx: "jsx",
+    js: "javascript",
+    css: "css",
+    json: "json",
+    md: "markdown",
+  };
+  return map[ext] ?? "typescript";
+}
+
+function templateFilesToStudioFiles(files: readonly TemplateFile[]): StudioFile[] {
+  return files.map((f) => ({
+    path: f.path,
+    kind: inferFileKind(f.path),
+    language: inferLanguage(f.path),
+    content: f.content,
+    source: "platform" as const,
+    locked: false,
+  }));
+}
+
+function mergeFiles(
+  base: StudioFile[],
+  overrides: Array<{ path: string; content: string }>,
+): StudioFile[] {
+  const byPath = new Map<string, StudioFile>(base.map((f) => [f.path, f]));
+  for (const o of overrides) {
+    byPath.set(o.path, {
+      path: o.path,
+      kind: inferFileKind(o.path),
+      language: inferLanguage(o.path),
+      content: o.content,
+      source: "ai" as const,
+      locked: false,
+    });
+  }
+  return Array.from(byPath.values());
+}
+
+function readTrace(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
+  const t = metadata.builderTrace;
+  if (typeof t === "object" && t !== null && !Array.isArray(t)) {
+    const raw = t as Record<string, unknown>;
+    return {
+      events: Array.isArray(raw.events) ? (raw.events as BuilderV3TraceMetadata["events"]) : [],
+      lastEventId: typeof raw.lastEventId === "string" ? raw.lastEventId : null,
+      previewReady: raw.previewReady === true,
+      fallbackUsed: raw.fallbackUsed === true,
+      fallbackReason: typeof raw.fallbackReason === "string" ? raw.fallbackReason : null,
+    };
+  }
+  return createEmptyBuilderV3TraceMetadata();
+}
+
+async function appendEventToDb(
+  db: StudioDbClient,
+  buildId: string,
+  event: BuilderV3StatusEvent | BuilderV3PreviewReadyEvent | BuilderV3DoneEvent | BuilderV3ErrorEvent,
+  extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
+): Promise<void> {
+  const row = await db.findGenerationById(buildId);
+  if (!row) return;
+
+  const meta = typeof row.metadata === "object" && row.metadata !== null
+    ? (row.metadata as Record<string, unknown>)
+    : {};
+
+  const trace = readTrace(meta);
+  const newTrace: BuilderV3TraceMetadata = {
+    ...trace,
+    events: [...trace.events, event],
+    lastEventId: event.id,
+    previewReady: trace.previewReady || event.type === "preview_ready",
+  };
+
+  await db.updateGeneration(buildId, {
+    metadata: { ...meta, builderTrace: newTrace },
+    ...extraPatch,
+  });
+}
+
+// ─── Anthropic customisation call ────────────────────────────────────────────
+
+async function callAnthropicCustomise(
+  prompt: string,
+  templateFiles: readonly TemplateFile[],
+  paletteId: string,
+): Promise<CustomiseResult> {
+  const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+
+  const fileContext = templateFiles
+    .slice(0, 40) // guard against token overflow
+    .map((f) => `<file path="${f.path}">\n${f.content}\n</file>`)
+    .join("\n\n");
+
+  const systemPrompt = [
+    "You are customising a pre-built React application template.",
+    "The user wants an app tailored to their request.",
+    "",
+    "Rules:",
+    "- Return ONLY files that need to change. Unchanged files are inherited automatically.",
+    "- Keep all imports intact. Never add new npm dependencies.",
+    "- Customise: text content, labels, demo data, colour values, placeholder values.",
+    "- Do NOT change routing structure or top-level component names.",
+    "- Do NOT import drag-and-drop libraries.",
+    "- Do NOT import react-icons or @heroicons — use lucide-react only.",
+    `- Accent colour hint from palette: ${paletteId} — honour it where natural.`,
+    "- Call deliver_customised_files exactly once with the changed files and a one-sentence summary.",
+  ].join("\n");
+
+  const userMessage = `Here are the current template files:\n\n${fileContext}\n\nCustomise this app for: ${prompt}`;
+
+  const message = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 32000,
+    system: systemPrompt,
+    tools: [DELIVER_FILES_TOOL],
+    tool_choice: { type: "tool", name: "deliver_customised_files" },
+    messages: [{ role: "user", content: userMessage }],
+  });
+
+  const toolBlock = message.content.find(
+    (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+  );
+  if (!toolBlock) {
+    throw new Error("Anthropic did not call the deliver_customised_files tool.");
+  }
+
+  const raw = toolBlock.input as { files?: unknown; summary?: unknown };
+  const files = Array.isArray(raw.files)
+    ? (raw.files as Array<{ path: string; content: string }>).filter(
+        (f) => typeof f.path === "string" && typeof f.content === "string",
+      )
+    : [];
+  const summary = typeof raw.summary === "string" ? raw.summary : `${prompt} app`;
+
+  return { files, summary };
+}
+
+// ─── Main background runner ───────────────────────────────────────────────────
+
+/**
+ * Fire-and-forget background build.  Called after start.ts returns 202.
+ * Writes events directly to the generation row's builderTrace so the
+ * existing events.ts SSE polling loop delivers them to the frontend.
+ */
+export async function runBuildInBackground(
+  input: BuildGenerateInput,
+  db: StudioDbClient,
+): Promise<void> {
+  const { buildId, projectId, prompt, templateId, requestedAt, userId } = input;
+  const op = input.isIteration ? "iteration" : ("initial_build" as const);
+  let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
+  const nextId = () => String(eventSeq++);
+
+  const statusEvent = (code: string, message: string, phase: string): BuilderV3StatusEvent => ({
+    type: "status",
+    id: nextId(),
+    timestamp: ts(),
+    operation: op,
+    code,
+    phase,
+    message,
+  });
+
+  // ── Best-matching prebuilt template ──────────────────────────────────────
+  let prebuilt = getPrebuiltTemplate(templateId);
+  if (!prebuilt) {
+    // templateId may be one of the 11 old TemplateIds; pick semantically best prebuilt
+    const all = listPrebuiltTemplates();
+    prebuilt = all[0]; // fallback: first in registry (basic-calculator is a safe neutral)
+  }
+
+  const templateFiles = templateFilesToStudioFiles(prebuilt.files);
+  const previewEntryPath = "/";
+
+  let paletteId = "professional-blue";
+  try {
+    const p = await classifyPalette(prompt);
+    if (p.confidence > 0) paletteId = p.palette;
+  } catch {
+    // non-fatal
+  }
+
+  try {
+    // ── 1. Status: loading ──────────────────────────────────────────────────
+    await appendEventToDb(
+      db, buildId,
+      statusEvent("template_loading", "Loading template…", "loading"),
+      { status: "running" },
+    );
+
+    // ── 2. scaffold_ready → mount template in WebContainer immediately ──────
+    const scaffoldEventId = nextId();
+    const scaffoldEvent: BuilderV3PreviewReadyEvent = {
+      type: "preview_ready",
+      id: scaffoldEventId,
+      timestamp: ts(),
+      operation: op,
+      code: "scaffold_ready",
+      message: "Template ready. Customising for your prompt…",
+      buildId,
+      projectId,
+      previewEntryPath,
+      fallbackUsed: false,
+    };
+    await appendEventToDb(db, buildId, scaffoldEvent, {
+      files: templateFiles,
+      preview_entry_path: previewEntryPath,
+      template_id: templateId as TemplateId,
+    });
+
+    console.log("[generate] scaffold_ready emitted.", { buildId, templateId: prebuilt.manifest.id });
+
+    // ── 3. Anthropic customisation ──────────────────────────────────────────
+    await appendEventToDb(
+      db, buildId,
+      statusEvent("ai_customising", "Customising with AI…", "customising"),
+    );
+
+    let customised: CustomiseResult;
+    let fallbackUsed = false;
+
+    try {
+      customised = await callAnthropicCustomise(prompt, prebuilt.files, paletteId);
+    } catch (aiError) {
+      // Graceful degradation: show pre-built template as-is (spec requirement)
+      console.warn("[generate] Anthropic failed, using template as-is.", {
+        buildId,
+        error: aiError instanceof Error ? aiError.message : String(aiError),
+      });
+      customised = {
+        files: prebuilt.files.map((f) => ({ path: f.path, content: f.content })),
+        summary: `${prebuilt.manifest.name} — ${prompt}`,
+      };
+      fallbackUsed = true;
+    }
+
+    const finalFiles = mergeFiles(templateFiles, customised.files);
+    const completedAt = ts();
+
+    // ── 4. done ─────────────────────────────────────────────────────────────
+    const doneEventId = nextId();
+    const doneEvent: BuilderV3DoneEvent = {
+      type: "done",
+      id: doneEventId,
+      timestamp: completedAt,
+      operation: op,
+      code: "build_completed",
+      message: customised.summary,
+      buildId,
+      projectId,
+      fallbackUsed,
+      fallbackReason: fallbackUsed ? "anthropic_error" : null,
+    };
+
+    await appendEventToDb(db, buildId, doneEvent, {
+      completed_at: completedAt,
+      files: finalFiles,
+      status: "completed",
+      summary: customised.summary,
+    });
+
+    console.log("[generate] Build complete.", {
+      buildId,
+      filesCount: finalFiles.length,
+      fallbackUsed,
+    });
+
+    // ── 5. Telemetry (non-fatal) ─────────────────────────────────────────────
+    const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
+    await db.upsertBuildTelemetry({
+      id: buildId,
+      project_id: projectId,
+      user_id: userId,
+      prompt: input.sourcePrompt,
+      template_used: prebuilt.manifest.id,
+      palette_used: paletteId,
+      files_generated: finalFiles.length,
+      succeeded: !fallbackUsed,
+      fallback_reason: fallbackUsed ? "anthropic_error" : null,
+      error_log: null,
+      generation_time_ms: generationMs > 0 ? generationMs : null,
+      credits_used: 0,
+      user_iterated: input.isIteration,
+      iteration_count: 0,
+      model_used: "claude-haiku-4-5-20251001",
+    }).catch(() => undefined);
+
+    await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
+  } catch (fatalError) {
+    // ── Error path ───────────────────────────────────────────────────────────
+    const errorMessage = fatalError instanceof Error ? fatalError.message : "Build failed.";
+    console.error("[generate] Fatal build error.", { buildId, error: errorMessage });
+
+    const errorEventId = nextId();
+    const errorEvent: BuilderV3ErrorEvent = {
+      type: "error",
+      id: errorEventId,
+      timestamp: ts(),
+      operation: op,
+      code: "build_failed",
+      message: errorMessage,
+      buildId,
+      projectId,
+    };
+
+    await appendEventToDb(db, buildId, errorEvent, {
+      completed_at: ts(),
+      error: errorMessage,
+      status: "failed",
+    }).catch(() => undefined);
+
+    await db.updateProject(projectId, { status: "draft" }).catch(() => undefined);
+  }
+}
