@@ -24,6 +24,7 @@ export interface WcPreviewState {
 export function useWebContainerPreview(
   files: readonly StudioFile[] | null | undefined,
   project: Pick<Project, "id" | "name" | "templateId"> | null | undefined,
+  onFilesWritten?: () => void,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -39,6 +40,11 @@ export function useWebContainerPreview(
   const projectRef = useRef(project);
   filesRef.current = files;
   projectRef.current = project;
+
+  // Keep the latest onFilesWritten callback in a ref so startVite (which has
+  // stable [] deps) can always call the current version without re-creating.
+  const onFilesWrittenRef = useRef(onFilesWritten);
+  onFilesWrittenRef.current = onFilesWritten;
 
   // ── Eager boot + npm install ──────────────────────────────────────────────
   useEffect(() => {
@@ -166,9 +172,12 @@ export function useWebContainerPreview(
           setPreviewUrl(url);
           setStatus("ready");
         });
+      } else {
+        // Subsequent file write: Vite is already running; wc.mount has landed
+        // the new files and HMR will pick them up. Signal the caller so it can
+        // reveal the preview after a short HMR propagation window.
+        onFilesWrittenRef.current?.();
       }
-      // Subsequent calls: Vite is already running; the file writes above
-      // trigger HMR automatically. No further action needed.
     },
     [],
   );

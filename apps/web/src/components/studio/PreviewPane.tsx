@@ -150,6 +150,7 @@ interface PreviewPaneProps {
   project?: Pick<Project, "id" | "name" | "templateId"> | null;
   refreshToken?: number;
   publishedSlug?: string | null;
+  onFilesWritten?: () => void;
 }
 
 export function PreviewPane({
@@ -159,7 +160,8 @@ export function PreviewPane({
   previewEntryPath,
   project,
   refreshToken = 0,
-  publishedSlug
+  publishedSlug,
+  onFilesWritten,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
 
@@ -178,6 +180,7 @@ export function PreviewPane({
   const { status: wcStatus, previewUrl, progressMessage } = useWebContainerPreview(
     files,
     project,
+    onFilesWritten,
   );
 
   // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──

@@ -85,6 +85,9 @@ export function ProjectPage() {
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [isAiCustomising, setIsAiCustomising] = useState(false);
+  // Safety ref: if onFilesWritten never fires (e.g. WC unsupported / fallback build),
+  // force-clear isAiCustomising after 8s so the overlay doesn't get stuck.
+  const aiCustomisingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelId>(() => {
     try {
       const stored = localStorage.getItem("beomz-model");
@@ -259,7 +262,23 @@ export function ProjectPage() {
     if (event.type === "done" || event.type === "error") {
       setIsStreaming(false);
       setStreamingText("");
-      setIsAiCustomising(false);
+      if (event.type === "error") {
+        // On error, reveal immediately — no new files will arrive.
+        if (aiCustomisingTimeoutRef.current) {
+          clearTimeout(aiCustomisingTimeoutRef.current);
+          aiCustomisingTimeoutRef.current = null;
+        }
+        setIsAiCustomising(false);
+      } else {
+        // On done: keep the overlay up until WebContainer writes the new files
+        // and Vite HMR propagates (handled by handleFilesWrittenToWC below).
+        // Safety: force-clear after 8s in case WC is unavailable or files don't change.
+        if (aiCustomisingTimeoutRef.current) clearTimeout(aiCustomisingTimeoutRef.current);
+        aiCustomisingTimeoutRef.current = setTimeout(() => {
+          aiCustomisingTimeoutRef.current = null;
+          setIsAiCustomising(false);
+        }, 8000);
+      }
     }
 
     if (event.type === "done") {
@@ -304,6 +323,19 @@ export function ProjectPage() {
       console.error("[SSE error event]", event.message);
     }
   }, [appendTranscriptEntry, projectName, upsertAssistantMessage]);
+
+  // Called by PreviewPane/useWebContainerPreview after new files have been
+  // written to the WebContainer sandbox. We wait a short window for Vite HMR
+  // to propagate before revealing the iframe so the user never sees the
+  // scaffold template flash through.
+  const handleFilesWrittenToWC = useCallback(() => {
+    if (aiCustomisingTimeoutRef.current) {
+      clearTimeout(aiCustomisingTimeoutRef.current);
+      aiCustomisingTimeoutRef.current = null;
+    }
+    // 400ms covers Vite HMR detection + React fast-refresh render.
+    setTimeout(() => setIsAiCustomising(false), 400);
+  }, []);
 
   const handleBuildStatus = useCallback((status: BuildStatusResponse) => {
     setBuild(status.build);
@@ -755,6 +787,7 @@ export function ProjectPage() {
               ? { id: projectId, name: projectName, templateId: build.templateId as TemplateId }
               : null}
             refreshToken={previewRefreshKey}
+            onFilesWritten={handleFilesWrittenToWC}
           />
         );
       case "code":
