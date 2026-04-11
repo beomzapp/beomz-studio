@@ -60,6 +60,26 @@ import { manifest as jobBoardManifest } from "../job-board/manifest.js";
 import { files as jobBoardFiles } from "../job-board/files.js";
 import { manifest as productCatalogManifest } from "../product-catalog/manifest.js";
 import { files as productCatalogFiles } from "../product-catalog/files.js";
+import { manifest as bookingSystemManifest } from "../booking-system/manifest.js";
+import { files as bookingSystemFiles } from "../booking-system/files.js";
+import { manifest as mealPlannerManifest } from "../meal-planner/manifest.js";
+import { files as mealPlannerFiles } from "../meal-planner/files.js";
+import { manifest as goalTrackerManifest } from "../goal-tracker/manifest.js";
+import { files as goalTrackerFiles } from "../goal-tracker/files.js";
+import { manifest as personalCrmManifest } from "../personal-crm/manifest.js";
+import { files as personalCrmFiles } from "../personal-crm/files.js";
+import { manifest as studyPlannerManifest } from "../study-planner/manifest.js";
+import { files as studyPlannerFiles } from "../study-planner/files.js";
+import { manifest as moodJournalManifest } from "../mood-journal/manifest.js";
+import { files as moodJournalFiles } from "../mood-journal/files.js";
+import { manifest as travelPlannerManifest } from "../travel-planner/manifest.js";
+import { files as travelPlannerFiles } from "../travel-planner/files.js";
+import { manifest as petCareTrackerManifest } from "../pet-care-tracker/manifest.js";
+import { files as petCareTrackerFiles } from "../pet-care-tracker/files.js";
+import { manifest as subscriptionTrackerManifest } from "../subscription-tracker/manifest.js";
+import { files as subscriptionTrackerFiles } from "../subscription-tracker/files.js";
+import { manifest as waterIntakeManifest } from "../water-intake/manifest.js";
+import { files as waterIntakeFiles } from "../water-intake/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -92,6 +112,16 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: readingListManifest, files: readingListFiles },
   { manifest: jobBoardManifest, files: jobBoardFiles },
   { manifest: productCatalogManifest, files: productCatalogFiles },
+  { manifest: bookingSystemManifest, files: bookingSystemFiles },
+  { manifest: mealPlannerManifest, files: mealPlannerFiles },
+  { manifest: goalTrackerManifest, files: goalTrackerFiles },
+  { manifest: personalCrmManifest, files: personalCrmFiles },
+  { manifest: studyPlannerManifest, files: studyPlannerFiles },
+  { manifest: moodJournalManifest, files: moodJournalFiles },
+  { manifest: travelPlannerManifest, files: travelPlannerFiles },
+  { manifest: petCareTrackerManifest, files: petCareTrackerFiles },
+  { manifest: subscriptionTrackerManifest, files: subscriptionTrackerFiles },
+  { manifest: waterIntakeManifest, files: waterIntakeFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
