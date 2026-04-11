@@ -20,6 +20,26 @@ import { manifest as saasDashboardTemplateManifest } from "../saas-dashboard-tem
 import { files as saasDashboardTemplateFiles } from "../saas-dashboard-template/files.js";
 import { manifest as triviaGameManifest } from "../trivia-game/manifest.js";
 import { files as triviaGameFiles } from "../trivia-game/files.js";
+import { manifest as pomodoroTimerManifest } from "../pomodoro-timer/manifest.js";
+import { files as pomodoroTimerFiles } from "../pomodoro-timer/files.js";
+import { manifest as habitTrackerManifest } from "../habit-tracker/manifest.js";
+import { files as habitTrackerFiles } from "../habit-tracker/files.js";
+import { manifest as expenseTrackerManifest } from "../expense-tracker/manifest.js";
+import { files as expenseTrackerFiles } from "../expense-tracker/files.js";
+import { manifest as invoiceGeneratorManifest } from "../invoice-generator/manifest.js";
+import { files as invoiceGeneratorFiles } from "../invoice-generator/files.js";
+import { manifest as recipeManagerManifest } from "../recipe-manager/manifest.js";
+import { files as recipeManagerFiles } from "../recipe-manager/files.js";
+import { manifest as memoryGameManifest } from "../memory-game/manifest.js";
+import { files as memoryGameFiles } from "../memory-game/files.js";
+import { manifest as wordScrambleManifest } from "../word-scramble/manifest.js";
+import { files as wordScrambleFiles } from "../word-scramble/files.js";
+import { manifest as colorPickerManifest } from "../color-picker/manifest.js";
+import { files as colorPickerFiles } from "../color-picker/files.js";
+import { manifest as diceRollerManifest } from "../dice-roller/manifest.js";
+import { files as diceRollerFiles } from "../dice-roller/files.js";
+import { manifest as randomGeneratorManifest } from "../random-generator/manifest.js";
+import { files as randomGeneratorFiles } from "../random-generator/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -32,6 +52,16 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: flashcardAppManifest, files: flashcardAppFiles },
   { manifest: saasDashboardTemplateManifest, files: saasDashboardTemplateFiles },
   { manifest: triviaGameManifest, files: triviaGameFiles },
+  { manifest: pomodoroTimerManifest, files: pomodoroTimerFiles },
+  { manifest: habitTrackerManifest, files: habitTrackerFiles },
+  { manifest: expenseTrackerManifest, files: expenseTrackerFiles },
+  { manifest: invoiceGeneratorManifest, files: invoiceGeneratorFiles },
+  { manifest: recipeManagerManifest, files: recipeManagerFiles },
+  { manifest: memoryGameManifest, files: memoryGameFiles },
+  { manifest: wordScrambleManifest, files: wordScrambleFiles },
+  { manifest: colorPickerManifest, files: colorPickerFiles },
+  { manifest: diceRollerManifest, files: diceRollerFiles },
+  { manifest: randomGeneratorManifest, files: randomGeneratorFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
