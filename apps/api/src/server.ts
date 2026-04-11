@@ -1,7 +1,9 @@
+import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
 
+import { activeBuilds } from "./lib/activeBuilds.js";
 import { apiConfig } from "./config.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
@@ -65,3 +67,28 @@ serve(
     console.log(`Beomz Studio API listening on http://localhost:${info.port}`);
   },
 );
+
+// ── Graceful shutdown (BEO-255) ──────────────────────────────────────────────
+// PM2 sends SIGTERM (or SIGINT) when restarting. If any Sonnet build is still
+// running we wait up to 60s before exiting so the build can complete and write
+// its result to Supabase rather than dying mid-generation.
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (activeBuilds.size > 0) {
+    console.log(`[shutdown] ${signal} received — ${activeBuilds.size} active build(s) in flight. Waiting up to 60s...`);
+    const deadline = Date.now() + 60_000;
+    while (activeBuilds.size > 0 && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+    }
+    if (activeBuilds.size > 0) {
+      console.warn(`[shutdown] Deadline reached — forcing exit with ${activeBuilds.size} build(s) still running.`);
+    } else {
+      console.log("[shutdown] All builds drained. Exiting cleanly.");
+    }
+  } else {
+    console.log(`[shutdown] ${signal} received — no active builds. Exiting immediately.`);
+  }
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => { void gracefulShutdown("SIGTERM"); });
+process.on("SIGINT", () => { void gracefulShutdown("SIGINT"); });

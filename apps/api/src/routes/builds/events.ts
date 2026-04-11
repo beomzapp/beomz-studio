@@ -156,6 +156,19 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     let completedPollsWithoutTerminal = 0;
     let lastStreamWriteAt = Date.now();
 
+    // Independent keepalive: send an SSE comment every 20s to prevent
+    // nginx from closing the connection during long Sonnet builds.
+    const pingInterval = setInterval(async () => {
+      if (!streamOpen || c.req.raw.signal.aborted) return;
+      try {
+        await sse.write(": ping\n\n");
+      } catch {
+        streamOpen = false;
+      }
+    }, 20_000);
+
+    const clearPingInterval = () => clearInterval(pingInterval);
+
     const writeEvent = async (event: { data: string; event: string; id: string }) => {
       if (!streamOpen || c.req.raw.signal.aborted) {
         return false;
@@ -215,6 +228,7 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         // Supabase transient error — skip this poll tick and try again.
         const shouldContinue = await waitForNextPoll();
         if (!shouldContinue) {
+          clearPingInterval();
           return;
         }
         continue;
@@ -234,11 +248,13 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
           id: event.id,
         });
         if (!didWrite) {
+          clearPingInterval();
           return;
         }
         lastSentEventId = event.id;
 
         if (isBuilderV3TerminalEvent(event)) {
+          clearPingInterval();
           return;
         }
       }
@@ -255,6 +271,7 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         || currentGenerationRow.status === "cancelled"
       ) {
         if (terminalEventAlreadySeen) {
+          clearPingInterval();
           return;
         }
 
@@ -262,6 +279,7 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         if (completedPollsWithoutTerminal <= TERMINAL_EVENT_RETRY_LIMIT) {
           const shouldContinue = await waitForNextPoll();
           if (!shouldContinue) {
+            clearPingInterval();
             return;
           }
           continue;
@@ -288,17 +306,21 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
           id: safetyEvent.id,
         });
         if (!didWrite) {
+          clearPingInterval();
           return;
         }
+        clearPingInterval();
         return;
       }
 
       completedPollsWithoutTerminal = 0;
       const shouldContinue = await waitForNextPoll();
       if (!shouldContinue) {
+        clearPingInterval();
         return;
       }
     }
+    clearPingInterval();
   });
 });
 

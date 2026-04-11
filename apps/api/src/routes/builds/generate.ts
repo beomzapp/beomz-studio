@@ -38,6 +38,7 @@ import {
 } from "@beomz-studio/templates";
 
 import { apiConfig } from "../../config.js";
+import { activeBuilds } from "../../lib/activeBuilds.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1431,6 +1432,21 @@ function pickBestPrebuilt(
  * existing events.ts SSE polling loop delivers them to the frontend.
  */
 export async function runBuildInBackground(
+  input: BuildGenerateInput,
+  db: StudioDbClient,
+): Promise<void> {
+  const { buildId, projectId, prompt, templateId, model, requestedAt, userId } = input;
+
+  activeBuilds.add(buildId);
+
+  try {
+    await _runBuildInBackground(input, db);
+  } finally {
+    activeBuilds.delete(buildId);
+  }
+}
+
+async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
 ): Promise<void> {
