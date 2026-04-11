@@ -65,20 +65,24 @@ interface CustomiseResult {
 const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
   name: "deliver_customised_files",
   description:
-    "Return the complete set of customised app files. "
-    + "Only include files that differ from the template. "
-    + "The summary must be one clear sentence describing the finished app.",
+    "Deliver all generated app files. "
+    + "App.tsx is always required. "
+    + "For multi-page apps (sidebar nav, multiple sections) also include one file per major page — "
+    + "e.g. AssetsPage.tsx, WorkOrdersPage.tsx, TeamPage.tsx. "
+    + "The summary must be one sentence describing the finished app.",
   input_schema: {
     type: "object",
     properties: {
       files: {
         type: "array",
-        description: "Files to create or overwrite. Omit unchanged files.",
+        description:
+          "All generated files. App.tsx (default export required) is always first. "
+          + "Multi-page apps: App.tsx + one file per major page/section.",
         items: {
           type: "object",
           properties: {
-            path: { type: "string", description: "File path, e.g. src/App.tsx" },
-            content: { type: "string", description: "Complete file content" },
+            path: { type: "string", description: "Filename only, e.g. App.tsx or AssetsPage.tsx" },
+            content: { type: "string", description: "Complete file content, no placeholders" },
           },
           required: ["path", "content"],
         },
@@ -145,12 +149,15 @@ function patchReactGlobals(content: string): string {
 // globs `apps/web/src/app/generated/**/*.tsx` and reads routes from
 // `apps/web/src/generated/{templateId}/app.manifest.json`.
 //
-// Prebuilt templates store their component at bare `App.tsx`. We remap to the
-// generated path so Vite's glob finds the file and runtime.json routes match.
+// Claude returns bare filenames (App.tsx, AssetsPage.tsx) or sometimes with
+// directory prefixes (src/App.tsx, components/AssetsPage.tsx). Strip all
+// directory prefixes and place files flat in the generated directory so the
+// glob always finds them.
 function remapPrebuiltPath(originalPath: string, templateId: string): string {
-  // Flatten any directory prefix — keep only the filename.
-  // "App.tsx" → "apps/web/src/app/generated/workspace-task/App.tsx"
-  // "components/Card.tsx" → "apps/web/src/app/generated/workspace-task/Card.tsx"
+  // Strip any leading path components — keep only the filename.
+  // "App.tsx"                    → "apps/web/src/app/generated/workspace-task/App.tsx"
+  // "src/App.tsx"                → "apps/web/src/app/generated/workspace-task/App.tsx"
+  // "components/AssetsPage.tsx"  → "apps/web/src/app/generated/workspace-task/AssetsPage.tsx"
   const basename = originalPath.replace(/^.*\//, "");
   return `apps/web/src/app/generated/${templateId}/${basename}`;
 }
@@ -276,51 +283,102 @@ async function appendEventToDb(
   });
 }
 
-// ─── Anthropic customisation call ────────────────────────────────────────────
+// ─── Anthropic app generation call ───────────────────────────────────────────
 
 async function callAnthropicCustomise(
   prompt: string,
-  templateFiles: readonly TemplateFile[],
+  _templateFiles: readonly TemplateFile[], // reserved — not sent to model; template used for scaffold_ready only
   paletteId: string,
 ): Promise<CustomiseResult> {
   const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
 
-  const fileContext = templateFiles
-    .slice(0, 40) // guard against token overflow
-    .map((f) => `<file path="${f.path}">\n${f.content}\n</file>`)
-    .join("\n\n");
-
   const systemPrompt = [
-    "You are customising a pre-built React application template.",
-    "The user wants an app tailored to their request.",
+    "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
+    "Design the architecture from scratch based on what the app actually needs.",
     "",
-    "Rules:",
-    "- Return ONLY files that need to change. Unchanged files are inherited automatically.",
-    "- Keep all imports intact. Never add new npm dependencies.",
-    "- Customise: text content, labels, demo data, colour values, placeholder values.",
-    "- Do NOT change routing structure or top-level component names.",
-    "- Do NOT import drag-and-drop libraries.",
-    "- Do NOT import react-icons or @heroicons — use lucide-react only.",
-    `- Accent colour hint from palette: ${paletteId} — honour it where natural.`,
+    "══ STEP 1: ANALYSE THE PROMPT ══",
+    "Identify these four things before writing any code:",
     "",
-    "CRITICAL — WebContainer COEP restrictions (violating these breaks the preview):",
-    "- NEVER add Google Fonts or any external font. No @import url('https://fonts.googleapis.com/...')",
-    "  and no <link href='https://fonts.googleapis.com/...'> or any fonts.gstatic.com URL.",
-    "  Use only system fonts: font-family: system-ui, -apple-system, sans-serif",
-    "  or Tailwind's default font stack (font-sans, font-mono).",
-    "- NEVER load any resource from an external URL: no CDN scripts, no unpkg.com,",
-    "  no jsdelivr.net, no cdnjs.cloudflare.com, no external images via https://.",
-    "- NEVER add <link>, <script>, or <style> tags that reference external https:// URLs.",
-    "- NEVER use url('https://...') in CSS for backgrounds, fonts, or any resource.",
-    "  If an image is needed, use a solid Tailwind colour div or an inline SVG instead.",
+    "1. NAVIGATION PATTERN — pick exactly one:",
+    "   sidebar  → multi-section apps: dashboards, management tools, admin panels, CRMs, trackers with 3+ independent sections",
+    "   top-nav  → marketing sites, landing pages, portfolios, simple single-topic SaaS",
+    "   tabs     → 2-4 tightly related views, mobile-style apps, single-feature apps with sub-views",
+    "   none     → single-page tools: calculators, timers, converters, games, quizzes, generators",
     "",
-    "- Call deliver_customised_files exactly once with the changed files and a one-sentence summary.",
+    "2. THEME:",
+    "   light → productivity apps, data/admin tools, business software, management systems, dashboards",
+    "   dark  → creative tools, entertainment, gaming, developer tools, crypto, music apps",
+    `   Palette accent: ${paletteId} — use this accent color for buttons, active states, badges, highlights`,
+    "",
+    "3. PAGES/SECTIONS — list every distinct section the app needs.",
+    "   Asset management system → Assets, Work Orders, Team, Calendar",
+    "   CRM → Contacts, Deals, Pipeline, Reports",
+    "   Calculator → (no pages, single-page tool)",
+    "",
+    "4. DATA ENTITIES — for each page, what data does it show?",
+    "   Assets → { id, name, category, status, location, assignedTo, lastService }",
+    "   Each entity needs 4-5 realistic sample records.",
+    "",
+    "══ STEP 2: BUILD THE APP ══",
+    "Write complete, working, production-presentable code.",
+    "",
+    "SIDEBAR APPS (sidebar navigation pattern):",
+    "  App.tsx — root component containing:",
+    "    • Sidebar with nav items (lucide-react icons + label), active state highlighting",
+    "    • Main content area that renders the active page based on useState",
+    "    • Light theme: bg-white sidebar with border-r, bg-gray-50 main area",
+    "  PageName.tsx — one file per major section (e.g. AssetsPage.tsx, WorkOrdersPage.tsx)",
+    "    • Full page content: heading, toolbar (search/filter/add button), data table or card grid",
+    "    • Realistic sample data in the file as a typed const array",
+    "    • Action buttons do something (useState toggles, modals, status changes)",
+    "",
+    "TOP-NAV APPS:",
+    "  App.tsx — root with sticky topbar + page state + sections",
+    "  PageName.tsx per major section if there are 3+, otherwise inline in App.tsx",
+    "",
+    "TABS APPS:",
+    "  App.tsx — tab bar + tab panels, all inline or split by tab if complex",
+    "",
+    "SINGLE-PAGE TOOLS (no nav):",
+    "  App.tsx only — focused, clean, full functionality",
+    "",
+    "Code quality rules:",
+    "  • All imports at top: import { useState, useEffect, useCallback, useMemo } from 'react'",
+    "  • Icons: import { Home, Settings, Users } from 'lucide-react'  (ONLY lucide-react — no other icon lib)",
+    "  • Tailwind CSS for ALL styling — avoid inline style objects",
+    "  • TypeScript interfaces for every data entity",
+    "  • Each file has a default export",
+    "  • Imports between files: import AssetsPage from './AssetsPage'  (flat directory, no subdirs)",
+    "  • NO new npm dependencies — only React, Tailwind, lucide-react are available",
+    "  • NO placeholder comments like '// TODO' or '// Add content here'",
+    "  • Seed every list/table with 4-5 realistic sample records",
+    "  • Buttons and interactions must do something (useState, not empty onClick)",
+    "  • Use correct contrast: dark text on light backgrounds, white text on colored buttons",
+    "",
+    "══ STEP 3: COEP RULES — violations break the preview, no exceptions ══",
+    "  • NO Google Fonts — no @import url('https://fonts.googleapis.com/...')",
+    "  • NO external CDN — no unpkg.com, jsdelivr, cdnjs, or any https:// URL in code",
+    "  • Fonts: use className='font-sans' (Tailwind) — system fonts only",
+    "  • Images/avatars: colored div with initials or lucide-react icon — no <img src='https://...'>",
+    "  • NO <link>, <script>, or <style> tags referencing external URLs",
+    "",
+    "══ STEP 4: DELIVER ══",
+    "Call deliver_customised_files with:",
+    "  files: App.tsx (always) + one file per major page for multi-page apps",
+    "  summary: one sentence — 'A light-theme asset management system with sidebar navigation covering Assets, Work Orders, Team, and Calendar.'",
   ].join("\n");
 
-  const userMessage = `Here are the current template files:\n\n${fileContext}\n\nCustomise this app for: ${prompt}`;
+  const userMessage = [
+    `Build this app: ${prompt}`,
+    "",
+    "Stack available (already configured — no setup needed):",
+    "  React 18 + TypeScript",
+    "  Tailwind CSS v4",
+    "  lucide-react icons",
+    "  No router installed — use React useState to show different pages/views",
+    "  Entry point is App.tsx with a default export",
+  ].join("\n");
 
-  // Use streaming — required by Anthropic for long-running requests (>10 min timeout).
-  // stream.finalMessage() collects all chunks and returns the same Message shape as create().
   const stream = client.messages.stream({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 32000,
@@ -516,8 +574,9 @@ export async function runBuildInBackground(
 
     try {
       customised = await callAnthropicCustomise(prompt, prebuilt.files, paletteId);
-      // Remap paths from the bare `App.tsx` format Claude returns → generated paths,
-      // and patch any `const { } = React` globals Claude may have preserved.
+      console.log("[generate] Anthropic returned files:", customised.files.map((f) => f.path));
+      // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
+      // we flatten into the generated directory. Patch any residual CJS React globals.
       customised = {
         ...customised,
         files: sanitiseFiles(
@@ -527,6 +586,7 @@ export async function runBuildInBackground(
           })),
         ),
       };
+      console.log("[generate] Remapped files:", customised.files.map((f) => f.path));
     } catch (aiError) {
       // Graceful degradation: show pre-built template as-is (spec requirement)
       console.warn("[generate] Anthropic failed, using template as-is.", {
