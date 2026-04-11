@@ -172,6 +172,26 @@ import { manifest as onboardingFlowManifest } from "../onboarding-flow/manifest.
 import { files as onboardingFlowFiles } from "../onboarding-flow/files.js";
 import { manifest as reportsDashboardManifest } from "../reports-dashboard/manifest.js";
 import { files as reportsDashboardFiles } from "../reports-dashboard/files.js";
+import { manifest as musicPlayerManifest } from "../music-player/manifest.js";
+import { files as musicPlayerFiles } from "../music-player/files.js";
+import { manifest as photoGalleryManifest } from "../photo-gallery/manifest.js";
+import { files as photoGalleryFiles } from "../photo-gallery/files.js";
+import { manifest as codeSnippetManagerManifest } from "../code-snippet-manager/manifest.js";
+import { files as codeSnippetManagerFiles } from "../code-snippet-manager/files.js";
+import { manifest as apiTesterManifest } from "../api-tester/manifest.js";
+import { files as apiTesterFiles } from "../api-tester/files.js";
+import { manifest as databaseViewerManifest } from "../database-viewer/manifest.js";
+import { files as databaseViewerFiles } from "../database-viewer/files.js";
+import { manifest as changelogManifest } from "../changelog/manifest.js";
+import { files as changelogFiles } from "../changelog/files.js";
+import { manifest as roadmapPublicManifest } from "../roadmap-public/manifest.js";
+import { files as roadmapPublicFiles } from "../roadmap-public/files.js";
+import { manifest as featureVotingManifest } from "../feature-voting/manifest.js";
+import { files as featureVotingFiles } from "../feature-voting/files.js";
+import { manifest as statusPageManifest } from "../status-page/manifest.js";
+import { files as statusPageFiles } from "../status-page/files.js";
+import { manifest as feedbackBoardManifest } from "../feedback-board/manifest.js";
+import { files as feedbackBoardFiles } from "../feedback-board/files.js";
 
 export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: basicCalculatorManifest, files: basicCalculatorFiles },
@@ -260,6 +280,16 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: salesPipelineManifest, files: salesPipelineFiles },
   { manifest: onboardingFlowManifest, files: onboardingFlowFiles },
   { manifest: reportsDashboardManifest, files: reportsDashboardFiles },
+  { manifest: musicPlayerManifest, files: musicPlayerFiles },
+  { manifest: photoGalleryManifest, files: photoGalleryFiles },
+  { manifest: codeSnippetManagerManifest, files: codeSnippetManagerFiles },
+  { manifest: apiTesterManifest, files: apiTesterFiles },
+  { manifest: databaseViewerManifest, files: databaseViewerFiles },
+  { manifest: changelogManifest, files: changelogFiles },
+  { manifest: roadmapPublicManifest, files: roadmapPublicFiles },
+  { manifest: featureVotingManifest, files: featureVotingFiles },
+  { manifest: statusPageManifest, files: statusPageFiles },
+  { manifest: feedbackBoardManifest, files: feedbackBoardFiles },
 ];
 
 export const prebuiltById = new Map<string, PrebuiltTemplate>(
