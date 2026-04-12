@@ -239,16 +239,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     }
   }
 
-  // ── Free plan: model locked to Haiku ────────────────────────────────────────
-  const requestedModel = parsedBody.data.model ?? "claude-haiku-4-5-20251001";
-  let effectiveModel = requestedModel;
-  if (!isAdminEmail(orgContext.user.email)) {
-    const org = await orgContext.db.getOrgWithBalance(orgContext.org.id);
-    if (org?.plan === "free" && !requestedModel.includes("haiku")) {
-      effectiveModel = "claude-haiku-4-5-20251001";
-      console.log("[start] free plan — model downgraded from", requestedModel, "to haiku");
-    }
-  }
+  const effectiveModel = parsedBody.data.model ?? "claude-haiku-4-5-20251001";
 
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
