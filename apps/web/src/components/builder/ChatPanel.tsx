@@ -21,7 +21,6 @@ import {
   Code2,
   Zap,
   RefreshCw,
-  Crown,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -38,16 +37,6 @@ export interface ChatMessage {
   phase?: { current: number; total: number; summary: string };
 }
 
-export const AVAILABLE_MODELS = [
-  { id: "claude-haiku-4-5-20251001", label: "Haiku",  badge: "Fast",   provider: "anthropic" },
-  { id: "claude-sonnet-4-6",         label: "Sonnet", badge: "Better", provider: "anthropic" },
-  { id: "gpt-4o",                     label: "GPT-4o", badge: "OpenAI", provider: "openai"    },
-  { id: "gemini-2.0-flash",           label: "Gemini", badge: "Google", provider: "google"    },
-] as const;
-
-export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
-
-export const DEFAULT_MODEL: ModelId = "claude-haiku-4-5-20251001";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -61,10 +50,6 @@ interface ChatPanelProps {
   width?: number;
   suggestionChips?: string[];
   onDismissChips?: () => void;
-  selectedModel?: ModelId;
-  onModelChange?: (model: ModelId) => void;
-  /** User's plan — free users are locked to Haiku only */
-  plan?: string;
   /** Current credits balance — 0 disables send */
   creditsBalance?: number;
 }
@@ -411,18 +396,12 @@ export function ChatPanel({
   width = 380,
   suggestionChips,
   onDismissChips,
-  selectedModel = DEFAULT_MODEL,
-  onModelChange,
-  plan,
   creditsBalance,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
-  const [lockedModelTooltip, setLockedModelTooltip] = useState<string | null>(null);
-  const isFreePlan = (plan ?? "free").toLowerCase() === "free";
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
   const [chipsDismissed, setChipsDismissed] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -737,59 +716,6 @@ export function ChatPanel({
               >
                 <ListChecks size={15} />
               </button>
-
-              {/* Model selector pill */}
-              <div className="relative ml-0.5">
-                <button
-                  onClick={() => setModelMenuOpen((v) => !v)}
-                  className="flex items-center gap-1 rounded-md border border-[#e5e5e5] px-2 py-1 text-[11px] font-medium text-[#6b7280] transition-colors hover:border-[#d1d5db] hover:text-[#374151]"
-                  title="Select model"
-                >
-                  {AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.label ?? "Haiku"}
-                  <ChevronDown size={9} />
-                </button>
-                {modelMenuOpen && (
-                  <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[180px] overflow-hidden rounded-xl border border-[#e5e5e5] bg-white shadow-lg">
-                    {AVAILABLE_MODELS.map((m) => {
-                      const isHaiku = m.id === "claude-haiku-4-5-20251001";
-                      const isLocked = isFreePlan && !isHaiku;
-                      return (
-                      <button
-                        key={m.id}
-                        onClick={() => {
-                          if (isLocked) {
-                            setLockedModelTooltip(m.id);
-                            setTimeout(() => setLockedModelTooltip(null), 2000);
-                            return;
-                          }
-                          onModelChange?.(m.id); setModelMenuOpen(false);
-                        }}
-                        className={cn(
-                          "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
-                          isLocked ? "opacity-60 hover:bg-[#faf9f6]" : "hover:bg-[#faf9f6]",
-                        )}
-                      >
-                        <span className={cn("flex-1 text-[13px] font-medium", isLocked ? "text-[#9ca3af]" : "text-[#1a1a1a]")}>{m.label}</span>
-                        {isLocked ? (
-                          <span className="flex items-center gap-1">
-                            <Crown size={10} className="text-[#F97316]" />
-                            <span className="text-[10px] font-semibold text-[#F97316]">Pro</span>
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-[#9ca3af]">{m.badge}</span>
-                        )}
-                        {!isLocked && selectedModel === m.id && (
-                          <Check size={10} className="shrink-0 text-[#F97316]" />
-                        )}
-                        {isLocked && lockedModelTooltip === m.id && (
-                          <span className="text-[9px] text-[#F97316]">Upgrade</span>
-                        )}
-                      </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
             </div>
 
             {isStreaming ? (

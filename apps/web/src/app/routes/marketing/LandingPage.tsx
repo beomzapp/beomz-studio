@@ -6,8 +6,6 @@ import {
   Loader2,
   Paperclip,
   X,
-  ChevronDown,
-  Check,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
@@ -16,11 +14,6 @@ import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { AuthModal } from "../../../components/auth/AuthModal";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 import { enhancePrompt } from "../../../lib/api";
-import {
-  AVAILABLE_MODELS,
-  DEFAULT_MODEL,
-  type ModelId,
-} from "../../../components/builder/ChatPanel";
 
 const SUGGESTION_POOL = [
   "a SaaS dashboard", "a marketing website", "a task manager",
@@ -64,19 +57,10 @@ export function LandingPage() {
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelId>(() => {
-    try {
-      const stored = localStorage.getItem("beomz-model");
-      if (stored && AVAILABLE_MODELS.some((m) => m.id === stored)) return stored as ModelId;
-    } catch {}
-    return DEFAULT_MODEL;
-  });
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
 
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingPromptRef = useRef<string | null>(null);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
 
   // Pick 3 random suggestions from the pool on each page mount
   const SUGGESTIONS = useMemo(() => {
@@ -254,24 +238,6 @@ export function LandingPage() {
     [],
   );
 
-  const handleModelChange = useCallback((model: ModelId) => {
-    setSelectedModel(model);
-    try { localStorage.setItem("beomz-model", model); } catch {}
-    setModelMenuOpen(false);
-  }, []);
-
-  // Close model menu on outside click
-  useEffect(() => {
-    if (!modelMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
-        setModelMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [modelMenuOpen]);
-
   useEffect(() => {
     editableRef.current?.focus();
   }, []);
@@ -412,33 +378,6 @@ export function LandingPage() {
               )}
               Enhance
             </button>
-
-            {/* Model selector */}
-            <div ref={modelMenuRef} className="relative">
-              <button
-                onMouseDown={(e) => { e.preventDefault(); setModelMenuOpen((v) => !v); }}
-                title="Select AI model"
-                className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
-              >
-                {AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.label ?? "Haiku"}
-                <ChevronDown size={10} />
-              </button>
-              {modelMenuOpen && (
-                <div className="absolute bottom-full left-0 z-50 mb-2 min-w-[160px] overflow-hidden rounded-xl border border-border bg-[#111] shadow-xl">
-                  {AVAILABLE_MODELS.map((m) => (
-                    <button
-                      key={m.id}
-                      onMouseDown={(e) => { e.preventDefault(); handleModelChange(m.id); }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/5"
-                    >
-                      <span className="flex-1 text-sm font-medium text-white/80">{m.label}</span>
-                      <span className="text-[10px] text-white/30">{m.badge}</span>
-                      {selectedModel === m.id && <Check size={10} className="shrink-0 text-orange" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {/* File upload */}
             <button

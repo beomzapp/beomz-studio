@@ -50,11 +50,8 @@ import {
   DatabasePanel,
   IntegrationsPanel,
   PublishModal,
-  AVAILABLE_MODELS,
   type ChatMessage,
   type ActiveView,
-  type ModelId,
-  DEFAULT_MODEL,
 } from "../../../components/builder";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
@@ -126,17 +123,6 @@ export function ProjectPage() {
   // Safety ref: if onFilesWritten never fires (e.g. WC unsupported / fallback build),
   // force-clear isAiCustomising after 8s so the overlay doesn't get stuck.
   const aiCustomisingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [selectedModel, setSelectedModel] = useState<ModelId>(() => {
-    try {
-      const stored = localStorage.getItem("beomz-model");
-      if (stored && AVAILABLE_MODELS.some((m) => m.id === stored)) {
-        return stored as ModelId;
-      }
-    } catch {
-      // localStorage not available (e.g. private browsing with storage blocked)
-    }
-    return DEFAULT_MODEL;
-  });
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
@@ -592,7 +578,7 @@ export function ProjectPage() {
       await startAndStreamBuild({
         body: {
           existingFiles: buildResult?.files?.length ? buildResult.files : undefined,
-          model: selectedModel,
+        model: "claude-sonnet-4-6",
           prompt: text,
           projectId: projectId ?? undefined,
           projectName: effectiveName !== "Untitled project" ? effectiveName : undefined,
@@ -694,11 +680,6 @@ export function ProjectPage() {
     setStreamingText("");
     setTransport("idle");
   }, [setTransport]);
-
-  const handleModelChange = useCallback((model: ModelId) => {
-    setSelectedModel(model);
-    try { localStorage.setItem("beomz-model", model); } catch {}
-  }, []);
 
   const handleRefreshPreview = useCallback(() => {
     setPreviewRefreshKey((c) => c + 1);
@@ -1118,9 +1099,6 @@ export function ProjectPage() {
               width={chatPanelWidth}
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
-              selectedModel={selectedModel}
-              onModelChange={handleModelChange}
-              plan={credits?.plan}
               creditsBalance={credits?.balance}
             />
           </div>
