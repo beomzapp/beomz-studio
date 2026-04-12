@@ -224,6 +224,32 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     }
   }
 
+  // ── Free plan: max 3 projects ─────────────────────────────────────────────
+  // Only enforced on initial builds (not iterations on existing projects).
+  if (!isIteration && !isAdminEmail(orgContext.user.email)) {
+    const org = await orgContext.db.getOrgWithBalance(orgContext.org.id);
+    if (org?.plan === "free") {
+      const existingProjects = await orgContext.db.findProjectsByOrgId(org.id);
+      if (existingProjects.length >= 3) {
+        return c.json(
+          { error: "Free plan is limited to 3 projects. Upgrade to create more.", reason: "plan_limit" },
+          403,
+        );
+      }
+    }
+  }
+
+  // ── Free plan: model locked to Haiku ────────────────────────────────────────
+  const requestedModel = parsedBody.data.model ?? "claude-haiku-4-5-20251001";
+  let effectiveModel = requestedModel;
+  if (!isAdminEmail(orgContext.user.email)) {
+    const org = await orgContext.db.getOrgWithBalance(orgContext.org.id);
+    if (org?.plan === "free" && !requestedModel.includes("haiku")) {
+      effectiveModel = "claude-haiku-4-5-20251001";
+      console.log("[start] free plan — model downgraded from", requestedModel, "to haiku");
+    }
+  }
+
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
   const requestedAt = new Date().toISOString();
@@ -289,7 +315,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       userEmail: orgContext.user.email,
       prompt: effectivePrompt, sourcePrompt,
       templateId: selectedTemplateId,
-      model: parsedBody.data.model ?? "claude-haiku-4-5-20251001",
+      model: effectiveModel,
       requestedAt, operationId,
       isIteration, existingFiles,
     },

@@ -40,6 +40,7 @@ export interface OrgRow extends Record<string, unknown> {
   credits: number;
   topup_credits: number;
   stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
   daily_reset_at: string | null;
   created_at: string;
 }
@@ -155,6 +156,7 @@ export interface OrgUpdate extends Record<string, unknown> {
   credits?: number;
   topup_credits?: number;
   stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
   daily_reset_at?: string | null;
 }
 
@@ -859,7 +861,7 @@ export class StudioDbClient {
   async getOrgWithBalance(orgId: string): Promise<OrgRow | null> {
     const response = await this.client
       .from("orgs")
-      .select("id,owner_id,name,plan,credits,topup_credits,stripe_customer_id,daily_reset_at,created_at")
+      .select("id,owner_id,name,plan,credits,topup_credits,stripe_customer_id,stripe_subscription_id,daily_reset_at,created_at")
       .eq("id", orgId)
       .maybeSingle();
 

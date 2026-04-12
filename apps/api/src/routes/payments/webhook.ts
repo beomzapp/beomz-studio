@@ -116,7 +116,7 @@ webhookRoute.post("/", async (c) => {
         const plan = priceId ? (PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? "starter") : "starter";
         const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.starter!;
 
-        await db.updateOrg(orgId, { plan });
+        await db.updateOrg(orgId, { plan, stripe_subscription_id: sub.id });
         await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
         console.log("[webhook] subscription.created: org upgraded to", plan, { orgId });
         break;
@@ -131,10 +131,10 @@ webhookRoute.post("/", async (c) => {
 
         const priceId = sub.items.data[0]?.price.id;
         const plan = priceId ? (PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan) : undefined;
-        if (plan) {
-          await db.updateOrg(orgId, { plan });
-          console.log("[webhook] subscription.updated: org plan updated to", plan, { orgId });
-        }
+        const patch: Parameters<typeof db.updateOrg>[1] = { stripe_subscription_id: sub.id };
+        if (plan) patch.plan = plan;
+        await db.updateOrg(orgId, patch);
+        if (plan) console.log("[webhook] subscription.updated: org plan updated to", plan, { orgId });
         break;
       }
 
@@ -145,7 +145,7 @@ webhookRoute.post("/", async (c) => {
           ?? await resolveOrgByCustomer(db, stripe, sub.customer as string);
         if (!orgId) { console.warn("[webhook] subscription.deleted: no org_id", { subId: sub.id }); break; }
 
-        await db.updateOrg(orgId, { plan: "free" });
+        await db.updateOrg(orgId, { plan: "free", stripe_subscription_id: null });
         await db.resetOrgMonthlyCredits(orgId, PLAN_LIMITS.free!.credits);
         console.log("[webhook] subscription.deleted: org downgraded to free", { orgId });
         break;
