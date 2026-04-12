@@ -331,7 +331,10 @@ export async function enableDatabase(projectId: string): Promise<void> {
 }
 
 export interface WireDatabaseResponse {
-  ok: boolean;
+  wired: boolean;
+  migrationsApplied: number;
+  files: Array<{ path: string; content: string }>;
+  migrationErrors?: string[];
   dbCredentials?: {
     supabaseUrl: string;
     supabaseAnonKey: string;

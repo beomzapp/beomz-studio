@@ -235,6 +235,14 @@ Call the wire_database tool with the patched files and required SQL migrations.`
     const raw = toolBlock.input as { files?: unknown; migrations?: unknown };
     patchedFiles = (Array.isArray(raw.files) ? raw.files : []) as Array<{ path: string; content: string }>;
     migrationSql = (Array.isArray(raw.migrations) ? raw.migrations : []) as string[];
+
+    console.log("[wire] patched files count:", patchedFiles.length);
+    console.log("[wire] patched file paths:", patchedFiles.map((f) => f.path));
+    console.log("[wire] files containing createClient:", patchedFiles.filter((f) => f.content.includes("createClient")).map((f) => f.path));
+    console.log("[wire] files still containing hardcoded arrays:", patchedFiles.filter((f) => /const\s+\w*(?:INITIAL|MOCK|SEED|DATA|ITEMS|TODOS|TASKS)\w*\s*[=:]\s*\[/.test(f.content)).map((f) => f.path));
+    if (migrationSql.length > 0) {
+      console.log("[wire] migration SQL statements:", migrationSql);
+    }
   } catch (err) {
     console.error("[wire] Anthropic error:", err instanceof Error ? err.message : err);
     return c.json(
