@@ -59,6 +59,7 @@ import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
   getBuildStatus,
   getLatestBuildForProject,
+  getProjectDbState,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -166,9 +167,33 @@ export function ProjectPage() {
 
   const [showShareModal, setShowShareModal] = useState(false);
 
+  // Database state (driven by GET /api/projects/:id)
+  const [dbEnabled, setDbEnabled] = useState(false);
+  const [dbProvider, setDbProvider] = useState<string | null>(null);
+  const [dbWired, setDbWired] = useState(false);
+
+  const fetchDbState = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const state = await getProjectDbState(projectId);
+      setDbEnabled(state.database_enabled);
+      setDbProvider(state.db_provider);
+      setDbWired(state.db_wired);
+    } catch {
+      // DB state may not be available yet — keep defaults
+    }
+  }, [projectId]);
+
   useEffect(() => {
     setProjectId(id === "new" ? null : id);
   }, [id]);
+
+  // Fetch DB state when project is loaded
+  useEffect(() => {
+    if (projectId && id !== "new") {
+      void fetchDbState();
+    }
+  }, [projectId, id, fetchDbState]);
 
   // ── Chat message persistence via localStorage ────────────────────────────
   // Restore messages when projectId is set (page load / navigation)
@@ -959,7 +984,17 @@ export function ProjectPage() {
       case "code":
         return renderCodePanel();
       case "database":
-        return <DatabasePanel className="flex-1" />;
+        return (
+          <DatabasePanel
+            className="flex-1"
+            projectId={projectId}
+            databaseEnabled={dbEnabled}
+            dbProvider={dbProvider}
+            dbWired={dbWired}
+            plan={credits?.plan ?? "free"}
+            onDbStateChange={fetchDbState}
+          />
+        );
       case "integrations":
         return <IntegrationsPanel className="flex-1" />;
       default:

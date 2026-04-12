@@ -284,6 +284,93 @@ export async function enhancePrompt(prompt: string): Promise<string> {
   return data.enhancedPrompt;
 }
 
+// ── Database API ────────────────────────────────────────────
+
+export interface DbColumn {
+  name: string;
+  type: string;
+}
+
+export interface DbTable {
+  name: string;
+  columns: DbColumn[];
+}
+
+export interface DbSchemaResponse {
+  tables: DbTable[];
+}
+
+export interface DbRowsResponse {
+  rows: Record<string, unknown>[];
+}
+
+export interface ProjectDbState {
+  database_enabled: boolean;
+  db_provider: string | null;
+  db_wired: boolean;
+}
+
+export async function getProjectDbState(projectId: string): Promise<ProjectDbState> {
+  const project = await requestJson<Record<string, unknown>>(`/projects/${projectId}`, {
+    method: "GET",
+  });
+  return {
+    database_enabled: Boolean(project.database_enabled),
+    db_provider: (project.db_provider as string) ?? null,
+    db_wired: Boolean(project.db_wired),
+  };
+}
+
+export async function enableDatabase(projectId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/enable`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function wireDatabase(projectId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/wire`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function connectDatabase(
+  projectId: string,
+  body: { url: string; anonKey: string },
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/connect`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getDbSchema(projectId: string): Promise<DbSchemaResponse> {
+  return requestJson<DbSchemaResponse>(`/projects/${projectId}/db/schema`, {
+    method: "GET",
+  });
+}
+
+export async function getDbRows(
+  projectId: string,
+  table: string,
+): Promise<DbRowsResponse> {
+  return requestJson<DbRowsResponse>(
+    `/projects/${projectId}/db/rows?table=${encodeURIComponent(table)}`,
+    { method: "GET" },
+  );
+}
+
+export async function runDbMigration(
+  projectId: string,
+  sql: string,
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/migrate`, {
+    method: "POST",
+    body: JSON.stringify({ sql }),
+  });
+}
+
 export async function fixFile(args: {
   buildId: string;
   filePath: string;
