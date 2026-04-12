@@ -70,6 +70,10 @@ export interface ProjectRow extends Record<string, unknown> {
   db_config: Record<string, unknown> | null;
   db_wired: boolean;
   thumbnail_url: string | null;
+  // BEO-262: Publish
+  published: boolean;
+  published_slug: string | null;
+  published_at: string | null;
 }
 
 export interface GenerationRow extends Record<string, unknown> {
@@ -209,6 +213,10 @@ export interface ProjectUpdate extends Record<string, unknown> {
   db_config?: Record<string, unknown> | null;
   db_wired?: boolean;
   thumbnail_url?: string | null;
+  // BEO-262: Publish
+  published?: boolean;
+  published_slug?: string | null;
+  published_at?: string | null;
 }
 
 export interface GenerationInsert extends Record<string, unknown> {
@@ -673,6 +681,21 @@ export class StudioDbClient {
       .single();
 
     return unwrapSingle(response);
+  }
+
+  async findProjectByPublishedSlug(slug: string): Promise<ProjectRow | null> {
+    const response = await this.client
+      .from("projects")
+      .select("*")
+      .eq("published_slug", slug)
+      .eq("published", true)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
   }
 
   async findGenerationById(id: string): Promise<GenerationRow | null> {

@@ -29,18 +29,30 @@ import confirmTopupRoute from "./routes/payments/confirm-topup.js";
 import portalRoute from "./routes/payments/portal.js";
 import webhookRoute from "./routes/payments/webhook.js";
 import dbRouter from "./routes/db/index.js";
+import {
+  checkSlugRoute,
+  exportRoute,
+  publicSlugRoute,
+  publishRoute,
+} from "./routes/projects/publish.js";
 const app = new Hono();
 
 app.use(
   "*",
   cors({
-    origin: [
-      "https://beomz.ai",
-      "https://www.beomz.ai",
-      "http://localhost:5173",
-      "http://localhost:5188",
-      "http://localhost:3000",
-    ],
+    origin: (origin) => {
+      if (!origin) return origin;
+      // Allow all *.beomz.ai subdomains (published apps)
+      if (origin.endsWith(".beomz.ai")) return origin;
+      const allowed = [
+        "https://beomz.ai",
+        "https://www.beomz.ai",
+        "http://localhost:5173",
+        "http://localhost:5188",
+        "http://localhost:3000",
+      ];
+      return allowed.includes(origin) ? origin : null;
+    },
     credentials: true,
   }),
 );
@@ -73,6 +85,11 @@ app.route("/payments/portal", portalRoute);
 app.route("/payments/webhook", webhookRoute);
 // BEO-130: Built-in DB + BYO Supabase
 app.route("/projects/:id/db", dbRouter);
+// BEO-262: Publish
+app.route("/projects/:id/publish", publishRoute);
+app.route("/projects/:id/export", exportRoute);
+app.route("/projects/check-slug", checkSlugRoute);
+app.route("/p", publicSlugRoute);
 
 serve(
   {
