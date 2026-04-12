@@ -12,7 +12,22 @@ import {
   type DbEnv,
 } from "../../../lib/webcontainer";
 
-type PageState = "loading" | "not-found" | "unsupported" | "booting" | "installing" | "ready" | "error";
+type PageState = "loading" | "not-found" | "unsupported" | "booting" | "installing" | "starting" | "ready" | "error";
+
+const BADGE = (
+  <a
+    href="https://beomz.ai"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="fixed bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-[#6b7280] shadow-sm backdrop-blur-sm transition-colors hover:text-[#1a1a1a]"
+  >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-[#F97316]">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+    Built with Beomz
+  </a>
+);
 
 export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
   // Subdomain detection: my-app.beomz.ai → slug = "my-app"
@@ -22,11 +37,26 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
     hostname !== "beomz.ai" &&
     hostname !== "www.beomz.ai";
   const slug = isSubdomain ? hostname.replace(".beomz.ai", "") : routerSlug;
+
   const [state, setState] = useState<PageState>("loading");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("App");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [slowLoad, setSlowLoad] = useState(false);
   const bootedRef = useRef(false);
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // After 10s of loading, show "almost there" message
+  useEffect(() => {
+    if (state === "ready" || state === "not-found" || state === "error" || state === "unsupported") {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+      return;
+    }
+    slowTimerRef.current = setTimeout(() => setSlowLoad(true), 10000);
+    return () => {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+    };
+  }, [state]);
 
   useEffect(() => {
     if (!slug) {
@@ -125,6 +155,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
       if (cancelled) return;
 
       // 6. Start dev server
+      setState("starting");
       const devProcess = await wc.spawn("npm", ["run", "dev"]);
 
       // Listen for server-ready URL
@@ -135,11 +166,9 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
         }
       });
 
-      // Also read stderr for errors
       devProcess.output.pipeTo(
         new WritableStream({
           write(chunk) {
-            // Log for debugging
             console.log("[PublicApp]", chunk);
           },
         }),
@@ -151,20 +180,55 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
     };
   }, [slug]);
 
-  // Loading states
-  if (state === "loading" || state === "booting" || state === "installing") {
+  // Status message for loading screen
+  const statusMessage = (() => {
+    switch (state) {
+      case "loading": return "Loading app...";
+      case "booting": return "Starting runtime...";
+      case "installing": return "Installing dependencies...";
+      case "starting": return "Starting app server...";
+      default: return "Loading...";
+    }
+  })();
+
+  // Loading states — show branded loading screen
+  if (state !== "ready" && state !== "not-found" && state !== "unsupported" && state !== "error") {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center bg-[#faf9f6]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
-          <p className="text-sm text-[#6b7280]">
-            {state === "loading"
-              ? "Loading app..."
-              : state === "booting"
-                ? "Starting runtime..."
-                : "Installing dependencies..."}
-          </p>
+        <div className="flex flex-col items-center gap-5">
+          {/* Beomz logo */}
+          <div className="flex items-center gap-2">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" className="text-[#F97316]">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+              <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="text-lg font-semibold text-[#1a1a1a]" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+              Beomz
+            </span>
+          </div>
+
+          {/* App name */}
+          <p className="text-base font-medium text-[#1a1a1a]">{projectName}</p>
+
+          {/* Spinner */}
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-[#F97316]" />
+            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_0.2s_infinite] rounded-full bg-[#F97316]" />
+            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_0.4s_infinite] rounded-full bg-[#F97316]" />
+          </div>
+
+          {/* Status text */}
+          <p className="text-sm text-[#6b7280]">{statusMessage}</p>
+
+          {/* Slow load hint */}
+          {slowLoad && (
+            <p className="max-w-xs text-center text-xs text-[#9ca3af]">
+              Almost there — this may take a moment on first load
+            </p>
+          )}
         </div>
+
+        {BADGE}
       </div>
     );
   }
@@ -184,6 +248,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
             Go to Beomz
           </a>
         </div>
+        {BADGE}
       </div>
     );
   }
@@ -198,6 +263,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
             Please try Chrome, Edge, or Firefox.
           </p>
         </div>
+        {BADGE}
       </div>
     );
   }
@@ -215,11 +281,12 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
             Retry
           </button>
         </div>
+        {BADGE}
       </div>
     );
   }
 
-  // Ready — full viewport iframe
+  // Ready — full viewport iframe, always visible
   return (
     <div className="relative h-screen w-screen">
       {previewUrl && (
@@ -230,20 +297,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
         />
       )}
-
-      {/* "Built with Beomz" badge */}
-      <a
-        href="https://beomz.ai"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="fixed bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-[#6b7280] shadow-sm backdrop-blur-sm transition-colors hover:text-[#1a1a1a]"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-[#F97316]">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-          <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        Built with Beomz
-      </a>
+      {BADGE}
     </div>
   );
 }
