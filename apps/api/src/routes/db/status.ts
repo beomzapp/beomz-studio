@@ -30,11 +30,19 @@ statusDbRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       enabled: false,
       provider: null,
       wired: false,
-      schema: null,
-      env: null,
     });
   }
 
+  // Never return credentials for unwired projects.
+  if (!project.db_wired) {
+    return c.json({
+      enabled: true,
+      provider: project.db_provider,
+      wired: false,
+    });
+  }
+
+  // Project is wired — build credentials block.
   let env: {
     url: string;
     anonKey: string;
@@ -42,11 +50,18 @@ statusDbRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     nonce: string;
   } | null = null;
 
+  let supabaseUrl: string | null = null;
+  let anonKey: string | null = null;
+  let schemaName: string | null = null;
+
   if (project.db_provider === "beomz" && project.db_schema && project.db_nonce) {
     if (isUserDataConfigured()) {
+      supabaseUrl = getUserDataPublicUrl();
+      anonKey = getUserDataAnonKey();
+      schemaName = project.db_schema;
       env = {
-        url: getUserDataPublicUrl(),
-        anonKey: getUserDataAnonKey(),
+        url: supabaseUrl,
+        anonKey,
         dbSchema: project.db_schema,
         nonce: project.db_nonce,
       };
@@ -54,6 +69,9 @@ statusDbRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   } else if (project.db_provider === "supabase" && project.db_config) {
     const cfg = project.db_config as Record<string, unknown>;
     if (typeof cfg.url === "string" && typeof cfg.anonKey === "string") {
+      supabaseUrl = cfg.url;
+      anonKey = cfg.anonKey;
+      schemaName = "public";
       env = {
         url: cfg.url,
         anonKey: cfg.anonKey,
@@ -66,7 +84,10 @@ statusDbRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   return c.json({
     enabled: true,
     provider: project.db_provider,
-    wired: project.db_wired,
+    wired: true,
+    supabaseUrl,
+    anonKey,
+    schemaName,
     schema: project.db_schema,
     env,
   });
