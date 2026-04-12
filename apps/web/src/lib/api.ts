@@ -311,13 +311,15 @@ export interface ProjectDbState {
 }
 
 export async function getProjectDbState(projectId: string): Promise<ProjectDbState> {
-  const project = await requestJson<Record<string, unknown>>(`/projects/${projectId}`, {
-    method: "GET",
-  });
+  const status = await requestJson<{
+    enabled: boolean;
+    provider: string | null;
+    wired: boolean;
+  }>(`/projects/${projectId}/db/status`, { method: "GET" });
   return {
-    database_enabled: Boolean(project.database_enabled),
-    db_provider: (project.db_provider as string) ?? null,
-    db_wired: Boolean(project.db_wired),
+    database_enabled: Boolean(status.enabled),
+    db_provider: status.provider ?? null,
+    db_wired: Boolean(status.wired),
   };
 }
 
