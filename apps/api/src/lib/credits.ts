@@ -13,30 +13,40 @@ export interface PlanLimit {
   credits: number;          // monthly credit allowance
   dailyReset?: number;      // free tier: daily reset amount (replaces monthlies)
   maxTopup: boolean;        // whether paid topup packs are available
+  price: number;            // USD/month
+  label: string;
 }
 
 export const PLAN_LIMITS: Record<string, PlanLimit> = {
   free: {
-    credits: 30,            // 30 credits/month, reset daily (lazy reset)
-    dailyReset: 10,         // 10 credits each day on demand (V1: 5 free/day, we use 10)
+    credits: 30,            // 30 credits, reset daily (lazy reset) — V1 exact
+    dailyReset: 30,         // each reset gives back the full 30
     maxTopup: false,
+    price: 0,
+    label: "Free",
   },
   starter: {
-    credits: 100,           // 100 credits/month
+    credits: 1000,          // 1000 credits/month — V1 exact
     maxTopup: true,
+    price: 25,
+    label: "Starter",
   },
   pro: {
-    credits: 300,           // 300 credits/month
+    credits: 2000,          // 2000 credits/month — V1 exact
     maxTopup: true,
+    price: 49,
+    label: "Pro",
   },
   business: {
-    credits: 1000,          // 1000 credits/month
+    credits: 5000,          // 5000 credits/month — V1 exact
     maxTopup: true,
+    price: 119,
+    label: "Business",
   },
 };
 
 // ─── Credit packs (one-time purchases) ───────────────────────────────────────
-// V1 pricing: $9/$19/$49 for 50/100/300 credits
+// V1 pricing: Boost Pack $9/200cr, Power Pack $19/500cr, Mega Pack $39/1200cr
 
 export interface CreditPack {
   id: string;
@@ -46,9 +56,9 @@ export interface CreditPack {
 }
 
 export const CREDIT_PACKS: CreditPack[] = [
-  { id: "pack_50",  credits: 50,  priceUsd: 9,  label: "50 Credits"  },
-  { id: "pack_100", credits: 100, priceUsd: 19, label: "100 Credits" },
-  { id: "pack_300", credits: 300, priceUsd: 49, label: "300 Credits" },
+  { id: "credits_200",  credits: 200,  priceUsd: 9,  label: "Boost Pack (200 Credits)"  },
+  { id: "credits_500",  credits: 500,  priceUsd: 19, label: "Power Pack (500 Credits)"  },
+  { id: "credits_1200", credits: 1200, priceUsd: 39, label: "Mega Pack (1200 Credits)"  },
 ];
 
 // ─── Cost formula ─────────────────────────────────────────────────────────────

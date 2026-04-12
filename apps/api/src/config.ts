@@ -25,10 +25,10 @@ const envSchema = z.object({
   STRIPE_PRO_YEARLY_PRICE_ID: z.string().optional(),
   STRIPE_BUSINESS_MONTHLY_PRICE_ID: z.string().optional(),
   STRIPE_BUSINESS_YEARLY_PRICE_ID: z.string().optional(),
-  // Credit pack price IDs
-  STRIPE_PACK_50_PRICE_ID: z.string().optional(),
-  STRIPE_PACK_100_PRICE_ID: z.string().optional(),
-  STRIPE_PACK_300_PRICE_ID: z.string().optional(),
+  // Credit pack price IDs (V1: credits_200/500/1200)
+  STRIPE_CREDITS_200_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_500_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_1200_PRICE_ID: z.string().optional(),
   // Redirect URLs for Stripe Checkout
   STRIPE_SUCCESS_URL: z.string().url().optional(),
   STRIPE_CANCEL_URL: z.string().url().optional(),

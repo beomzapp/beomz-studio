@@ -13,10 +13,9 @@ function getPlanPriceId(plan: string, interval: "monthly" | "yearly"): string | 
   return apiConfig[key] as string | undefined;
 }
 
-// Maps pack ID → Stripe price ID from env
+// Maps pack ID → Stripe price ID from env (V1 pack IDs: credits_200/500/1200)
 function getPackPriceId(packId: string): string | undefined {
-  const suffix = packId.replace("pack_", "");
-  const key = `STRIPE_PACK_${suffix}_PRICE_ID` as keyof typeof apiConfig;
+  const key = `STRIPE_${packId.toUpperCase()}_PRICE_ID` as keyof typeof apiConfig;
   return apiConfig[key] as string | undefined;
 }
 
