@@ -82,7 +82,7 @@ export function PublicAppPage({ slug }: { slug: string }) {
       const studioFiles: StudioFile[] = data.files.map((f) => ({
         path: f.path,
         content: f.content,
-        kind: "generated" as const,
+        kind: "component" as const,
         language: f.path.endsWith(".css") ? "css" : "typescript",
         source: "ai" as const,
         locked: false,
