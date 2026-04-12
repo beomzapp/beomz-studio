@@ -177,6 +177,75 @@ body {
 a { color: inherit; }
 `;
 
+// ─── BEO-130: Pre-built DB helper ────────────────────────────────────────────
+// Injected into every WebContainer as apps/web/src/lib/beomz-db.ts
+// AI prompt instructs: "Use beomz-db.ts helpers — do NOT import @supabase/supabase-js"
+
+const BEOMZ_DB_HELPER_TS = `// Pre-built database helper — do NOT modify
+// Import: import { dbRead, dbInsert, dbUpdate, dbDelete } from "@/lib/beomz-db"
+const DB_URL = import.meta.env.VITE_BEOMZ_DB_URL as string | undefined;
+const ANON_KEY = import.meta.env.VITE_BEOMZ_ANON_KEY as string | undefined;
+const DB_SCHEMA = import.meta.env.VITE_BEOMZ_DB_SCHEMA as string | undefined;
+const DB_NONCE = import.meta.env.VITE_BEOMZ_DB_NONCE as string | undefined;
+
+async function callBeomzDb(
+  op: string,
+  table: string,
+  data?: Record<string, unknown>,
+): Promise<unknown> {
+  if (!DB_URL || !ANON_KEY || !DB_SCHEMA) {
+    throw new Error(
+      "Database not configured. Enable the built-in database in project settings.",
+    );
+  }
+  const body: Record<string, unknown> = {
+    p_schema: DB_SCHEMA,
+    p_table: table,
+    p_op: op,
+    p_data: data ?? null,
+  };
+  if (DB_NONCE) body.p_nonce = DB_NONCE;
+
+  const res = await fetch(\`\${DB_URL.replace(/\\/$/, "")}/rest/v1/rpc/beomz_db\`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: ANON_KEY,
+      Authorization: \`Bearer \${ANON_KEY}\`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(\`DB error (\${res.status}): \${err}\`);
+  }
+  return res.json();
+}
+
+export async function dbRead<T = Record<string, unknown>>(table: string): Promise<T[]> {
+  return callBeomzDb("select", table) as Promise<T[]>;
+}
+
+export async function dbInsert<T = Record<string, unknown>>(
+  table: string,
+  data: Record<string, unknown>,
+): Promise<T> {
+  return callBeomzDb("insert", table, data) as Promise<T>;
+}
+
+export async function dbUpdate<T = Record<string, unknown>>(
+  table: string,
+  data: Record<string, unknown> & { id: string },
+): Promise<T> {
+  return callBeomzDb("update", table, data) as Promise<T>;
+}
+
+export async function dbDelete(table: string, id: string): Promise<void> {
+  await callBeomzDb("delete", table, { id });
+}
+`;
+
 // ─── FileSystemTree helper ────────────────────────────────────────────────────
 
 function pathsToFileTree(
@@ -234,9 +303,17 @@ function buildRuntimeJson(
 
 // ─── Public: build the full FileSystemTree for a preview ─────────────────────
 
+export interface DbEnv {
+  url: string;
+  anonKey: string;
+  dbSchema: string;
+  nonce: string;
+}
+
 export function buildPreviewFileTree(
   files: readonly StudioFile[],
   project: Pick<Project, "id" | "name" | "templateId">,
+  dbEnv?: DbEnv | null,
 ): FileSystemTree {
   const flatFiles: Array<{ path: string; contents: string }> = [
     { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
@@ -250,11 +327,26 @@ export function buildPreviewFileTree(
       path: "apps/web/src/.beomz/runtime.json",
       contents: buildRuntimeJson(files, project),
     },
+    // BEO-130: always include the pre-built DB helper
+    { path: "apps/web/src/lib/beomz-db.ts", contents: BEOMZ_DB_HELPER_TS },
     ...files.map((file) => ({
       path: normalizeGeneratedPath(file.path),
       contents: file.content,
     })),
   ];
+
+  // BEO-130: inject DB credentials as .env.local at runtime (NOT embedded in source)
+  if (dbEnv?.url && dbEnv.anonKey && dbEnv.dbSchema) {
+    const envLines = [
+      `VITE_BEOMZ_DB_URL=${dbEnv.url}`,
+      `VITE_BEOMZ_ANON_KEY=${dbEnv.anonKey}`,
+      `VITE_BEOMZ_DB_SCHEMA=${dbEnv.dbSchema}`,
+      dbEnv.nonce ? `VITE_BEOMZ_DB_NONCE=${dbEnv.nonce}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    flatFiles.push({ path: ".env.local", contents: envLines });
+  }
 
   return pathsToFileTree(flatFiles);
 }

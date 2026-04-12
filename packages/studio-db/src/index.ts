@@ -62,6 +62,13 @@ export interface ProjectRow extends Record<string, unknown> {
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
+  // BEO-130: built-in DB + BYO Supabase
+  database_enabled: boolean;
+  db_schema: string | null;
+  db_nonce: string | null;
+  db_provider: string | null;
+  db_config: Record<string, unknown> | null;
+  db_wired: boolean;
 }
 
 export interface GenerationRow extends Record<string, unknown> {
@@ -193,6 +200,13 @@ export interface ProjectUpdate extends Record<string, unknown> {
   created_at?: string;
   updated_at?: string;
   last_opened_at?: string | null;
+  // BEO-130: built-in DB + BYO Supabase
+  database_enabled?: boolean;
+  db_schema?: string | null;
+  db_nonce?: string | null;
+  db_provider?: string | null;
+  db_config?: Record<string, unknown> | null;
+  db_wired?: boolean;
 }
 
 export interface GenerationInsert extends Record<string, unknown> {
@@ -584,6 +598,20 @@ export class StudioDbClient {
     } catch {
       // no-op
     }
+  }
+
+  async countDbEnabledProjectsByOrgId(orgId: string): Promise<number> {
+    const response = await this.client
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
+      .eq("database_enabled", true);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.count ?? 0;
   }
 
   async countGenerationsByProjectIds(

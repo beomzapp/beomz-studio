@@ -6,6 +6,7 @@ import {
   buildPreviewFileTree,
   getOrBootWebContainer,
   isWebContainerSupported,
+  type DbEnv,
   type WcInstance,
   type WcStatus,
 } from "../lib/webcontainer";
@@ -27,6 +28,7 @@ export function useWebContainerPreview(
   files: readonly StudioFile[] | null | undefined,
   project: Pick<Project, "id" | "name" | "templateId"> | null | undefined,
   onFilesWritten?: () => void,
+  dbEnv?: DbEnv | null,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -50,6 +52,10 @@ export function useWebContainerPreview(
   // stable [] deps) can always call the current version without re-creating.
   const onFilesWrittenRef = useRef(onFilesWritten);
   onFilesWrittenRef.current = onFilesWritten;
+
+  // Keep the latest dbEnv in a ref so startVite can always use the current value.
+  const dbEnvRef = useRef(dbEnv);
+  dbEnvRef.current = dbEnv;
 
   // ── Eager boot + npm install ──────────────────────────────────────────────
   useEffect(() => {
@@ -225,8 +231,8 @@ export function useWebContainerPreview(
     ) => {
       const { wc } = instance;
 
-      // Mount the full file tree (scaffold + generated files + runtime.json).
-      const tree = buildPreviewFileTree(currentFiles, currentProject);
+      // Mount the full file tree (scaffold + generated files + runtime.json + DB env).
+      const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
       await wc.mount(tree);
 
       if (!viteStartedRef.current) {

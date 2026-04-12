@@ -32,6 +32,12 @@ const envSchema = z.object({
   // Redirect URLs for Stripe Checkout
   STRIPE_SUCCESS_URL: z.string().url().optional(),
   STRIPE_CANCEL_URL: z.string().url().optional(),
+  // BEO-130: built-in DB (beomz-user-data project snmocsydvcvqerlommek)
+  USER_DATA_SUPABASE_URL: z.string().url().optional(),
+  USER_DATA_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  USER_DATA_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+  // Supabase Management API personal access token — for schema provisioning
+  SUPABASE_MANAGEMENT_API_KEY: z.string().min(1).optional(),
 });
 
 export type ApiConfig = z.infer<typeof envSchema>;

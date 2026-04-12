@@ -28,6 +28,7 @@ import checkoutRoute from "./routes/payments/checkout.js";
 import confirmTopupRoute from "./routes/payments/confirm-topup.js";
 import portalRoute from "./routes/payments/portal.js";
 import webhookRoute from "./routes/payments/webhook.js";
+import dbRouter from "./routes/db/index.js";
 const app = new Hono();
 
 app.use(
@@ -70,6 +71,8 @@ app.route("/payments/checkout", checkoutRoute);
 app.route("/payments/confirm-topup", confirmTopupRoute);
 app.route("/payments/portal", portalRoute);
 app.route("/payments/webhook", webhookRoute);
+// BEO-130: Built-in DB + BYO Supabase
+app.route("/projects/:id/db", dbRouter);
 
 serve(
   {

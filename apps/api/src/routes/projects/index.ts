@@ -27,6 +27,10 @@ projectsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const projects = rows.map((row) => ({
     ...mapProjectRowToProject(row),
     generationCount: genCounts[row.id] ?? 0,
+    // BEO-130: DB status for the frontend (no credentials, no nonce)
+    database_enabled: Boolean(row.database_enabled),
+    db_provider: row.db_provider ?? null,
+    db_wired: Boolean(row.db_wired),
   }));
 
   const plan = orgContext.org.plan ?? "free";
