@@ -31,6 +31,8 @@ projectsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     database_enabled: Boolean(row.database_enabled),
     db_provider: row.db_provider ?? null,
     db_wired: Boolean(row.db_wired),
+    // BEO-300: thumbnail for project cards
+    thumbnail_url: row.thumbnail_url ?? null,
   }));
 
   const plan = orgContext.org.plan ?? "free";
