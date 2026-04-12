@@ -240,7 +240,7 @@ export async function createBeomzDbFunction(): Promise<void> {
 }
 
 /** Insert a new entry into beomz_schema_registry on beomz-user-data. */
-export async function insertSchemaRegistry(schemaName: string, nonce: string): Promise<void> {
+export async function insertSchemaRegistry(schemaName: string, nonce: string, projectId: string): Promise<void> {
   const url = process.env.USER_DATA_SUPABASE_URL;
   const key = process.env.USER_DATA_SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
@@ -254,7 +254,7 @@ export async function insertSchemaRegistry(schemaName: string, nonce: string): P
       Authorization: `Bearer ${key}`,
       Prefer: "return=minimal",
     },
-    body: JSON.stringify({ schema_name: schemaName, nonce }),
+    body: JSON.stringify({ schema_name: schemaName, nonce, project_id: projectId }),
   });
   if (!res.ok) {
     const body = await res.text();

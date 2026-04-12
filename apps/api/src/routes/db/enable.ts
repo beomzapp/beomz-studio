@@ -76,7 +76,7 @@ enableDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     await createBeomzDbFunction();
 
     // 3. Register nonce in beomz_schema_registry (before exposing to PostgREST)
-    await insertSchemaRegistry(schema, nonce);
+    await insertSchemaRegistry(schema, nonce, projectId);
 
     // 4. Expose schema to PostgREST with retry loop (fixes V1 PGRST106 race)
     await exposeSchemaInPostgREST(schema);
