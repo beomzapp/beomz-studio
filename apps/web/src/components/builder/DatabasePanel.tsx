@@ -34,6 +34,7 @@ import {
   runDbMigration,
   type DbTable,
 } from "../../lib/api";
+import { getOrBootWebContainer, isWebContainerSupported } from "../../lib/webcontainer";
 
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 
@@ -114,7 +115,32 @@ export function DatabasePanel({
     setWiringDb(true);
     setError(null);
     try {
-      await wireDatabase(projectId);
+      const result = await wireDatabase(projectId);
+
+      // Inject Supabase credentials into WebContainer so the app can connect
+      if (result.dbCredentials && isWebContainerSupported()) {
+        try {
+          const { supabaseUrl, supabaseAnonKey, schemaName } = result.dbCredentials;
+          const envContent = [
+            `VITE_SUPABASE_URL=${supabaseUrl}`,
+            `VITE_SUPABASE_ANON_KEY=${supabaseAnonKey}`,
+            `VITE_DB_SCHEMA=${schemaName}`,
+            "",
+          ].join("\n");
+          const { wc } = await getOrBootWebContainer();
+          await wc.fs.writeFile(".env.local", envContent);
+          // Touch vite.config to force Vite to restart and pick up new env
+          try {
+            const cfg = await wc.fs.readFile("vite.config.ts", "utf-8");
+            await wc.fs.writeFile("vite.config.ts", cfg);
+          } catch {
+            // vite.config may not exist yet — env will load on next Vite start
+          }
+        } catch (wcErr) {
+          console.warn("[DatabasePanel] Failed to inject DB env into WebContainer:", wcErr);
+        }
+      }
+
       onDbStateChange();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to wire database.");

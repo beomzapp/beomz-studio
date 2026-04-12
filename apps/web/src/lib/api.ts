@@ -330,8 +330,17 @@ export async function enableDatabase(projectId: string): Promise<void> {
   });
 }
 
-export async function wireDatabase(projectId: string): Promise<void> {
-  await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/wire`, {
+export interface WireDatabaseResponse {
+  ok: boolean;
+  dbCredentials?: {
+    supabaseUrl: string;
+    supabaseAnonKey: string;
+    schemaName: string;
+  };
+}
+
+export async function wireDatabase(projectId: string): Promise<WireDatabaseResponse> {
+  return requestJson<WireDatabaseResponse>(`/projects/${projectId}/db/wire`, {
     method: "POST",
     body: JSON.stringify({}),
   });
