@@ -20,6 +20,7 @@
 import { Hono } from "hono";
 
 import Anthropic from "@anthropic-ai/sdk";
+import type { StudioFile } from "@beomz-studio/contracts";
 
 import { apiConfig } from "../../config.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
@@ -275,6 +276,23 @@ Call the wire_database tool with the patched files and required SQL migrations.`
   const wired = migrationErrors.length === 0 || migrationsApplied > 0;
   if (wired) {
     await db.updateProject(projectId, { db_wired: true });
+
+    // Persist wired files back to the generation row so the next page load
+    // serves the Supabase-powered files instead of the original mock-data build.
+    const originalFilesArr = files as Array<Record<string, unknown>>;
+    const patchedByPath = new Map(patchedFiles.map((f) => [f.path, f.content]));
+    const mergedFiles = originalFilesArr.map((f) =>
+      patchedByPath.has(f.path as string)
+        ? { ...f, content: patchedByPath.get(f.path as string) }
+        : f,
+    );
+    try {
+      await db.updateGeneration(latestGen.id, { files: mergedFiles as unknown as readonly StudioFile[] });
+      console.log("[wire] Persisted wired files to generation", latestGen.id, "— patched:", patchedFiles.length, "of", mergedFiles.length, "total");
+    } catch (persistErr) {
+      // Non-fatal — db_wired is already set; files will update on next wire
+      console.error("[wire] Failed to persist wired files (non-fatal):", persistErr instanceof Error ? persistErr.message : persistErr);
+    }
   }
 
   // Notify PostgREST to reload schema cache

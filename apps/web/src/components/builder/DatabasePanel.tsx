@@ -33,8 +33,6 @@ import {
   runDbMigration,
   type DbTable,
 } from "../../lib/api";
-import { getOrBootWebContainer, isWebContainerSupported } from "../../lib/webcontainer";
-
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 
 interface DatabasePanelProps {
@@ -114,55 +112,11 @@ export function DatabasePanel({
     setWiringDb(true);
     setError(null);
     try {
-      const result = await wireDatabase(projectId);
-
-      console.log("[DatabasePanel] wire response — files:", result.files?.length ?? 0, "wired:", result.wired);
-
-      // Write patched files into WebContainer so the preview reflects the wired code
-      if (result.files && result.files.length > 0 && isWebContainerSupported()) {
-        try {
-          const { wc } = await getOrBootWebContainer();
-          let written = 0;
-          for (const file of result.files) {
-            try {
-              await wc.fs.writeFile(file.path, file.content);
-              written++;
-            } catch (fileErr) {
-              console.warn("[DatabasePanel] Failed to write wired file:", file.path, fileErr);
-            }
-          }
-          console.log("[DatabasePanel] Wrote", written, "/", result.files.length, "wired files to WebContainer");
-        } catch (wcErr) {
-          console.warn("[DatabasePanel] WebContainer not available for file write:", wcErr);
-        }
-      }
-
-      // Inject Supabase credentials into WebContainer so the app can connect
-      if (result.dbCredentials && isWebContainerSupported()) {
-        try {
-          const { supabaseUrl, supabaseAnonKey, schemaName } = result.dbCredentials;
-          const envContent = [
-            `VITE_SUPABASE_URL=${supabaseUrl}`,
-            `VITE_SUPABASE_ANON_KEY=${supabaseAnonKey}`,
-            `VITE_DB_SCHEMA=${schemaName}`,
-            "",
-          ].join("\n");
-          const { wc } = await getOrBootWebContainer();
-          await wc.fs.writeFile(".env.local", envContent);
-          console.log("[DatabasePanel] Injected DB env into WebContainer (.env.local)");
-          // Touch vite.config to force Vite to restart and pick up new env
-          try {
-            const cfg = await wc.fs.readFile("vite.config.ts", "utf-8");
-            await wc.fs.writeFile("vite.config.ts", cfg);
-          } catch {
-            // vite.config may not exist yet — env will load on next Vite start
-          }
-        } catch (wcErr) {
-          console.warn("[DatabasePanel] Failed to inject DB env into WebContainer:", wcErr);
-        }
-      }
-
+      await wireDatabase(projectId);
+      // Patched files are now persisted to the generation row in the DB.
+      // A page reload will mount the correct Supabase-powered files from DB.
       onDbStateChange();
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to wire database.");
     } finally {
