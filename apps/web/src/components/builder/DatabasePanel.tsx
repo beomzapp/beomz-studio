@@ -9,7 +9,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Database,
-  Check,
   Loader2,
   AlertCircle,
   Plus,
@@ -409,13 +408,13 @@ export function DatabasePanel({
     return (
       <div className={cn("flex h-full flex-col items-center justify-center", className)}>
         <div className="mx-auto w-full max-w-md space-y-6 px-6 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50">
-            <Check size={28} className="text-emerald-600" />
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50">
+            <Database size={28} className="text-amber-600" />
           </div>
           <div>
             <div className="mb-2 flex items-center justify-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              <span className="text-sm font-semibold text-emerald-700">Database — Connected</span>
+              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              <span className="text-sm font-semibold text-amber-700">Database — Provisioned</span>
             </div>
             <p className="text-sm text-[#9ca3af]">
               {dbProvider === "supabase"
