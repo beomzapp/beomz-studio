@@ -1,7 +1,7 @@
 /**
  * POST /api/projects/:id/db/wire
  *
- * Wires the generated app to its live database using Gemini 2.5 Flash.
+ * Wires the generated app to its live database using claude-sonnet-4-6.
  * Constrained to only patch data-layer files — never touches theme, layout,
  * nav, or component structure.
  *
@@ -9,8 +9,8 @@
  *  1. Auth + project ownership check
  *  2. Load latest generation files from DB
  *  3. Load live DB schema (tables + columns) from beomz-user-data
- *  4. Call Gemini 2.5 Flash with constrained prompt
- *  5. Parse patched files + migration SQL from response
+ *  4. Call claude-sonnet-4-6 via Anthropic SDK (tool_use for structured output)
+ *  5. Parse patched files + migration SQL from tool response
  *  6. Execute migration SQL on beomz-user-data
  *  7. Update db_wired = true (only on success)
  *  8. Return { files: [...patched], migrationsApplied }
@@ -19,6 +19,9 @@
  */
 import { Hono } from "hono";
 
+import Anthropic from "@anthropic-ai/sdk";
+
+import { apiConfig } from "../../config.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import { isAdminEmail } from "../../lib/credits.js";
@@ -32,17 +35,42 @@ import {
 
 const wireDbRoute = new Hono();
 
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+const WIRE_MODEL = "claude-sonnet-4-6";
+
+const WIRE_DB_TOOL: Anthropic.Messages.Tool = {
+  name: "wire_database",
+  description:
+    "Return all patched app files and any required SQL migration statements to wire the React app to its live database.",
+  input_schema: {
+    type: "object",
+    properties: {
+      files: {
+        type: "array",
+        description:
+          "The patched source files that replace mock/static data with real DB calls via beomz-db helpers.",
+        items: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Full file path as it appeared in the input, e.g. apps/web/src/app/generated/workspace-task/SomePage.tsx" },
+            content: { type: "string", description: "Complete updated file content" },
+          },
+          required: ["path", "content"],
+        },
+      },
+      migrations: {
+        type: "array",
+        description:
+          "SQL statements to create or alter tables as needed. Each statement must be a single SQL DDL string (no semicolons in the middle). Empty array if no migrations are needed.",
+        items: { type: "string" },
+      },
+    },
+    required: ["files", "migrations"],
+  },
+};
 
 wireDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   if (!isUserDataConfigured()) {
     return c.json({ error: "Database service not configured" }, 503);
-  }
-
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) {
-    return c.json({ error: "Gemini API key not configured" }, 503);
   }
 
   const projectId = c.req.param("id") as string;
@@ -81,7 +109,7 @@ wireDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       ? tables
           .map(
             (t) =>
-              `Table: ${t.table_name}\n  Columns: ${t.columns.map((c) => `${c.name} (${c.type})`).join(", ")}`,
+              `Table: ${t.table_name}\n  Columns: ${t.columns.map((col) => `${col.name} (${col.type})`).join(", ")}`,
           )
           .join("\n")
       : "No tables yet. The AI should generate CREATE TABLE migrations.";
@@ -107,62 +135,48 @@ CREATE TABLE IF NOT EXISTS "${dbSchema}"."table_name" (
   ...columns
 );
 
-OUTPUT FORMAT (strict JSON, no markdown):
-{
-  "files": [
-    { "path": "apps/web/src/app/generated/SomePage.tsx", "content": "..." }
-  ],
-  "migrations": [
-    "CREATE TABLE IF NOT EXISTS ...",
-    "CREATE INDEX IF NOT EXISTS ..."
-  ]
-}
-
-Return ONLY the JSON object. No explanation. No markdown.`;
+Call the wire_database tool with the patched files and required SQL migrations.`;
 
   const userMessage = `Here are the app's current source files:\n\n${filesSummary}\n\nWire this app to use its live database. Replace all mock/static data with real DB calls.`;
 
-  let geminiResponse: string;
+  let patchedFiles: Array<{ path: string; content: string }>;
+  let migrationSql: string[];
+
   try {
-    const res = await fetch(`${GEMINI_URL}?key=${geminiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: userMessage }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 65536,
-          responseMimeType: "application/json",
-        },
-      }),
+    const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+    const stream = client.messages.stream({
+      model: WIRE_MODEL,
+      max_tokens: 32000,
+      system: systemPrompt,
+      tools: [WIRE_DB_TOOL],
+      tool_choice: { type: "tool", name: "wire_database" },
+      messages: [{ role: "user", content: userMessage }],
     });
-    if (!res.ok) {
-      const errBody = await res.text();
-      return c.json({ error: `Gemini error (${res.status}): ${errBody}` }, 502);
+    const message = await stream.finalMessage();
+    console.log("[wire] Anthropic response:", {
+      model: WIRE_MODEL,
+      stop_reason: message.stop_reason,
+      content_blocks: message.content.length,
+      usage: message.usage,
+    });
+
+    const toolBlock = message.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
+    );
+    if (!toolBlock) {
+      return c.json({ error: "AI did not return structured wiring output" }, 500);
     }
-    const data = (await res.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
-    };
-    geminiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+    const raw = toolBlock.input as { files?: unknown; migrations?: unknown };
+    patchedFiles = (Array.isArray(raw.files) ? raw.files : []) as Array<{ path: string; content: string }>;
+    migrationSql = (Array.isArray(raw.migrations) ? raw.migrations : []) as string[];
   } catch (err) {
+    console.error("[wire] Anthropic error:", err instanceof Error ? err.message : err);
     return c.json(
-      { error: err instanceof Error ? err.message : "Gemini request failed" },
+      { error: err instanceof Error ? err.message : "AI wiring request failed" },
       502,
     );
   }
-
-  let parsed: { files?: unknown[]; migrations?: unknown[] };
-  try {
-    parsed = JSON.parse(geminiResponse) as { files?: unknown[]; migrations?: unknown[] };
-  } catch {
-    return c.json({ error: "Failed to parse Gemini response as JSON" }, 500);
-  }
-
-  const patchedFiles = (parsed.files ?? []) as Array<{ path: string; content: string }>;
-  const migrationSql = (parsed.migrations ?? []) as string[];
 
   // Execute migrations (managed path — apply SQL allowlist)
   const migrationErrors: string[] = [];
