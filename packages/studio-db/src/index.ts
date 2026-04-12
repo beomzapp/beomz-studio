@@ -652,6 +652,17 @@ export class StudioDbClient {
     return unwrapMaybeSingle(response);
   }
 
+  async deleteProject(id: string): Promise<void> {
+    const response = await this.client
+      .from("projects")
+      .delete()
+      .eq("id", id);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+  }
+
   async createGeneration(
     input: GenerationInsert,
   ): Promise<GenerationRow> {

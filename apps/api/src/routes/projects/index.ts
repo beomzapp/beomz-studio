@@ -49,4 +49,37 @@ projectsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   });
 });
 
+projectsRoute.delete("/:id", verifyPlatformJwt, loadOrgContext, async (c) => {
+  const orgContext = c.get("orgContext") as OrgContext;
+  const projectId = c.req.param("id");
+
+  const project = await orgContext.db.findProjectById(projectId);
+  if (!project || project.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  await orgContext.db.deleteProject(projectId);
+
+  return c.json({ ok: true });
+});
+
+projectsRoute.patch("/:id", verifyPlatformJwt, loadOrgContext, async (c) => {
+  const orgContext = c.get("orgContext") as OrgContext;
+  const projectId = c.req.param("id");
+
+  const project = await orgContext.db.findProjectById(projectId);
+  if (!project || project.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const body = await c.req.json<{ name?: string }>();
+  if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
+    return c.json({ error: "Name is required" }, 400);
+  }
+
+  await orgContext.db.updateProject(projectId, { name: body.name.trim() });
+
+  return c.json({ ok: true });
+});
+
 export default projectsRoute;
