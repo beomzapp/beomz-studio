@@ -1326,6 +1326,7 @@ function buildIterationSystemPrompt(schemaSummary?: string): string {
         "  - CREATE TABLE IF NOT EXISTS \"schema\".\"table_name\" (id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY, ...);",
         "NEVER include DROP TABLE, DROP COLUMN, or ALTER COLUMN TYPE.",
         "If no schema changes are needed, return an empty migrations array.",
+        "IMPORTANT: Always import from the npm package '@supabase/supabase-js' (with @ prefix). Never use relative imports like './supabase-js'.",
       ].join("\n")
     : "";
   return [
