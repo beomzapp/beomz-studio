@@ -14,7 +14,14 @@ import {
 
 type PageState = "loading" | "not-found" | "unsupported" | "booting" | "installing" | "ready" | "error";
 
-export function PublicAppPage({ slug }: { slug: string }) {
+export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
+  // Subdomain detection: my-app.beomz.ai → slug = "my-app"
+  const hostname = window.location.hostname;
+  const isSubdomain =
+    hostname.endsWith(".beomz.ai") &&
+    hostname !== "beomz.ai" &&
+    hostname !== "www.beomz.ai";
+  const slug = isSubdomain ? hostname.replace(".beomz.ai", "") : routerSlug;
   const [state, setState] = useState<PageState>("loading");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("App");

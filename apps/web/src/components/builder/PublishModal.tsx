@@ -132,8 +132,7 @@ export function PublishModal({
   }, [projectId, onUnpublished]);
 
   const handleCopy = useCallback(() => {
-    const url = `https://beomz.ai/p/${slug}`;
-    void navigator.clipboard.writeText(url);
+    void navigator.clipboard.writeText(publicUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [slug]);
@@ -147,7 +146,7 @@ export function PublishModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const publicUrl = `https://beomz.ai/p/${slug}`;
+  const publicUrl = `https://${slug}.beomz.ai`;
   const isSlugValid = slug.length >= 2 && slugAvailable !== false;
 
   return (
@@ -181,7 +180,6 @@ export function PublishModal({
               URL slug
             </label>
             <div className="flex items-center rounded-lg border border-[#e5e5e5] bg-[#faf9f6] px-3 py-2.5 focus-within:border-[#F97316] focus-within:ring-1 focus-within:ring-[#F97316]/20">
-              <span className="mr-1 text-sm text-[#9ca3af]">beomz.ai/p/</span>
               <input
                 ref={inputRef}
                 value={slug}
@@ -190,6 +188,7 @@ export function PublishModal({
                 className="min-w-0 flex-1 bg-transparent text-sm font-medium text-[#1a1a1a] outline-none placeholder:text-[#d1d5db]"
                 placeholder="my-app"
               />
+              <span className="ml-1 text-sm text-[#9ca3af]">.beomz.ai</span>
               {checking && <Loader size={14} className="animate-spin text-[#9ca3af]" />}
               {!checking && slugAvailable === true && (
                 <Check size={14} className="text-emerald-500" />
