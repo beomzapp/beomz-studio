@@ -308,6 +308,9 @@ export interface ProjectDbState {
   database_enabled: boolean;
   db_provider: string | null;
   db_wired: boolean;
+  supabaseUrl?: string;
+  anonKey?: string;
+  schemaName?: string;
 }
 
 export async function getProjectDbState(projectId: string): Promise<ProjectDbState> {
@@ -315,11 +318,15 @@ export async function getProjectDbState(projectId: string): Promise<ProjectDbSta
     enabled: boolean;
     provider: string | null;
     wired: boolean;
+    env?: { url: string; anonKey: string; dbSchema: string } | null;
   }>(`/projects/${projectId}/db/status`, { method: "GET" });
   return {
     database_enabled: Boolean(status.enabled),
     db_provider: status.provider ?? null,
     db_wired: Boolean(status.wired),
+    supabaseUrl: status.env?.url,
+    anonKey: status.env?.anonKey,
+    schemaName: status.env?.dbSchema,
   };
 }
 

@@ -63,6 +63,7 @@ import {
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
+import { getOrBootWebContainer, isWebContainerSupported } from "../../../lib/webcontainer";
 import { consumeProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useBuilderEngineStream } from "../../../hooks/useBuilderEngineStream";
 import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
@@ -179,6 +180,22 @@ export function ProjectPage() {
       setDbEnabled(state.database_enabled);
       setDbProvider(state.db_provider);
       setDbWired(state.db_wired);
+
+      // Inject DB credentials into WebContainer when wired
+      if (state.db_wired && state.supabaseUrl && state.anonKey && isWebContainerSupported()) {
+        try {
+          const envContent = [
+            `VITE_SUPABASE_URL=${state.supabaseUrl}`,
+            `VITE_SUPABASE_ANON_KEY=${state.anonKey}`,
+            `VITE_DB_SCHEMA=${state.schemaName ?? "public"}`,
+            "",
+          ].join("\n");
+          const { wc } = await getOrBootWebContainer();
+          await wc.fs.writeFile(".env.local", envContent);
+        } catch (wcErr) {
+          console.warn("[ProjectPage] Failed to inject DB env into WebContainer:", wcErr);
+        }
+      }
     } catch {
       // DB state may not be available yet — keep defaults
     }
