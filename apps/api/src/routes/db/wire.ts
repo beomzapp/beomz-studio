@@ -13,7 +13,7 @@
  *  5. Parse patched files + migration SQL from tool response
  *  6. Execute migration SQL on beomz-user-data
  *  7. Update db_wired = true (only on success)
- *  8. Return { files: [...patched], migrationsApplied }
+ *  8. Return { files: [...patched], migrationsApplied, dbCredentials }
  *
  * Only sets db_wired=true after verified migration success (fixes V1 race F).
  */
@@ -47,7 +47,7 @@ const WIRE_DB_TOOL: Anthropic.Messages.Tool = {
       files: {
         type: "array",
         description:
-          "The patched source files that replace mock/static data with real DB calls via beomz-db helpers.",
+          "The patched source files that replace mock/static data with real Supabase queries using import.meta.env.VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, and VITE_DB_SCHEMA.",
         items: {
           type: "object",
           properties: {
@@ -117,14 +117,64 @@ wireDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const dbSchema = project.db_schema;
   const isAdmin = isAdminEmail(user.email);
 
-  const systemPrompt = `You are a database wiring specialist. Your ONLY job is to modify the data layer of a React app to use the project's built-in database via beomz-db helpers.
+  const systemPrompt = `You are a database wiring specialist. Your ONLY job is to modify the data layer of a React app to connect it to its live Supabase database.
 
 IMPORTANT CONSTRAINTS:
 - ONLY modify files that contain data fetching, data mutation, or mock/static data
 - NEVER touch theme.ts, layout files, navigation, or UI structure
-- NEVER import @supabase/supabase-js or create any Supabase client
-- ALWAYS use the pre-existing helpers from "@/lib/beomz-db": dbRead, dbInsert, dbUpdate, dbDelete
 - Generated code must be TypeScript React (.tsx) compatible
+
+SUPABASE CLIENT — always initialize like this at the top of every data file:
+\`\`\`ts
+import { createClient } from '@supabase/supabase-js'
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+)
+\`\`\`
+
+SCHEMA SCOPING — every query MUST scope to the project schema:
+\`\`\`ts
+// READ
+const { data, error } = await supabase
+  .schema(import.meta.env.VITE_DB_SCHEMA)
+  .from('table_name')
+  .select()
+
+// INSERT
+const { data, error } = await supabase
+  .schema(import.meta.env.VITE_DB_SCHEMA)
+  .from('table_name')
+  .insert({ ... })
+  .select()
+  .single()
+
+// UPDATE
+const { error } = await supabase
+  .schema(import.meta.env.VITE_DB_SCHEMA)
+  .from('table_name')
+  .update({ ... })
+  .eq('id', id)
+
+// DELETE
+const { error } = await supabase
+  .schema(import.meta.env.VITE_DB_SCHEMA)
+  .from('table_name')
+  .delete()
+  .eq('id', id)
+\`\`\`
+
+DATA PERSISTENCE RULES:
+- Every CREATE, READ, UPDATE, DELETE must go through Supabase — never use useState as the source of truth for persisted data
+- useState is ONLY for UI loading/error states (isLoading, error message) and optimistic local state
+- Always handle errors: if (error) { console.error(error); return; }
+- Fetch data on mount with useEffect + a load function
+- After mutations, re-fetch or update local state to reflect the change
+
+DO NOT:
+- Hardcode the Supabase URL, anon key, or schema name anywhere
+- Use \`process.env\` — use \`import.meta.env\` (this is a Vite app)
+- Create a shared supabase.ts singleton file — initialize inline in each data file
 
 The app's live database schema is:
 ${schemaSummary}
@@ -216,6 +266,11 @@ Call the wire_database tool with the patched files and required SQL migrations.`
     migrationsApplied,
     migrationErrors: migrationErrors.length > 0 ? migrationErrors : undefined,
     wired,
+    dbCredentials: {
+      supabaseUrl: process.env.USER_DATA_SUPABASE_URL,
+      supabaseAnonKey: process.env.USER_DATA_SUPABASE_ANON_KEY,
+      schemaName: project.db_schema,
+    },
   });
 });
 
