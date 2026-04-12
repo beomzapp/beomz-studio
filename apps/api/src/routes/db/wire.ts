@@ -117,77 +117,92 @@ wireDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const dbSchema = project.db_schema;
   const isAdmin = isAdminEmail(user.email);
 
-  const systemPrompt = `You are a database wiring specialist. Your ONLY job is to modify the data layer of a React app to connect it to its live Supabase database.
+  const systemPrompt = `You are a database wiring specialist. Your task: take the React app files below and rewrite every data file so all reads and writes go through Supabase. Follow the EXACT code templates below — do not invent an alternative pattern.
 
-IMPORTANT CONSTRAINTS:
-- ONLY modify files that contain data fetching, data mutation, or mock/static data
-- NEVER touch theme.ts, layout files, navigation, or UI structure
+════════════════════════════════════════════
+STEP 1 — REMOVE ALL MOCK DATA (mandatory)
+════════════════════════════════════════════
+- DELETE every hardcoded array: const INITIAL_TODOS = [...], const todos = [...], const ITEMS = [...], etc.
+- DELETE every seed object / fixture / sample record
+- useState must NEVER hold the initial dataset — arrays must always start empty: useState<Item[]>([])
+- Fetching from Supabase on mount replaces the hardcoded array
+
+════════════════════════════════════════════
+STEP 2 — COPY THIS EXACT SUPABASE SETUP
+════════════════════════════════════════════
+Add these three lines at the top of EVERY file that reads or writes data:
+
+import { createClient } from '@supabase/supabase-js'
+const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
+const db = supabase.schema(import.meta.env.VITE_DB_SCHEMA)
+
+Rules:
+- NEVER hardcode the URL, key, or schema name
+- NEVER use process.env — this is a Vite app, use import.meta.env
+- NEVER create a shared supabase.ts file — initialize inline in each file that needs it
+
+════════════════════════════════════════════
+STEP 3 — COPY THESE EXACT CRUD PATTERNS
+════════════════════════════════════════════
+Replace every mock read/write with the matching pattern below.
+Adapt 'items'/'Item'/'table_name' to match the actual data entity.
+
+LOADING (on mount):
+  const [items, setItems] = useState<Item[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    db.from('table_name').select('*').then(({ data, error }) => {
+      if (error) { console.error(error); return }
+      setItems(data || [])
+      setLoading(false)
+    })
+  }, [])
+
+CREATING:
+  const addItem = async (item: Omit<Item, 'id'>) => {
+    const { data, error } = await db.from('table_name').insert(item).select().single()
+    if (error) { console.error(error); return }
+    setItems(prev => [...prev, data])
+  }
+
+UPDATING:
+  const updateItem = async (id: string, changes: Partial<Item>) => {
+    const { error } = await db.from('table_name').update(changes).eq('id', id)
+    if (error) { console.error(error); return }
+    setItems(prev => prev.map(i => i.id === id ? { ...i, ...changes } : i))
+  }
+
+DELETING:
+  const deleteItem = async (id: string) => {
+    const { error } = await db.from('table_name').delete().eq('id', id)
+    if (error) { console.error(error); return }
+    setItems(prev => prev.filter(i => i.id !== id))
+  }
+
+════════════════════════════════════════════
+ADDITIONAL RULES
+════════════════════════════════════════════
+- ONLY modify files that contain data fetching, mutations, or mock/static data
+- NEVER touch theme.ts, layout files, navigation, or UI component structure
+- useState is ONLY for: loading boolean, error message, and local UI state (modals, form inputs)
+- Every async function that calls Supabase must be async/await and check for error
 - Generated code must be TypeScript React (.tsx) compatible
 
-SUPABASE CLIENT — always initialize like this at the top of every data file:
-\`\`\`ts
-import { createClient } from '@supabase/supabase-js'
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-)
-\`\`\`
-
-SCHEMA SCOPING — every query MUST scope to the project schema:
-\`\`\`ts
-// READ
-const { data, error } = await supabase
-  .schema(import.meta.env.VITE_DB_SCHEMA)
-  .from('table_name')
-  .select()
-
-// INSERT
-const { data, error } = await supabase
-  .schema(import.meta.env.VITE_DB_SCHEMA)
-  .from('table_name')
-  .insert({ ... })
-  .select()
-  .single()
-
-// UPDATE
-const { error } = await supabase
-  .schema(import.meta.env.VITE_DB_SCHEMA)
-  .from('table_name')
-  .update({ ... })
-  .eq('id', id)
-
-// DELETE
-const { error } = await supabase
-  .schema(import.meta.env.VITE_DB_SCHEMA)
-  .from('table_name')
-  .delete()
-  .eq('id', id)
-\`\`\`
-
-DATA PERSISTENCE RULES:
-- Every CREATE, READ, UPDATE, DELETE must go through Supabase — never use useState as the source of truth for persisted data
-- useState is ONLY for UI loading/error states (isLoading, error message) and optimistic local state
-- Always handle errors: if (error) { console.error(error); return; }
-- Fetch data on mount with useEffect + a load function
-- After mutations, re-fetch or update local state to reflect the change
-
-DO NOT:
-- Hardcode the Supabase URL, anon key, or schema name anywhere
-- Use \`process.env\` — use \`import.meta.env\` (this is a Vite app)
-- Create a shared supabase.ts singleton file — initialize inline in each data file
-
-The app's live database schema is:
+════════════════════════════════════════════
+LIVE DATABASE SCHEMA
+════════════════════════════════════════════
 ${schemaSummary}
 
-If tables don't exist yet, generate CREATE TABLE migrations using this pattern:
+If a required table doesn't exist yet, add a CREATE TABLE migration:
 CREATE TABLE IF NOT EXISTS "${dbSchema}"."table_name" (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ...columns
 );
 
 Call the wire_database tool with the patched files and required SQL migrations.`;
 
-  const userMessage = `Here are the app's current source files:\n\n${filesSummary}\n\nWire this app to use its live database. Replace all mock/static data with real DB calls.`;
+  const userMessage = `Here are the app's current source files:\n\n${filesSummary}\n\nRewrite the data layer:\n1. REMOVE every hardcoded array (INITIAL_X, const items = [...], seed data)\n2. Add the Supabase client (createClient + db = supabase.schema(...)) at the top of each data file\n3. Replace every hardcoded read with a useEffect + db.from(...).select() call\n4. Replace every mock create/update/delete with the matching db.from(...).insert/update/delete call\n5. Return the changed files and any required CREATE TABLE migrations`;
 
   let patchedFiles: Array<{ path: string; content: string }>;
   let migrationSql: string[];
