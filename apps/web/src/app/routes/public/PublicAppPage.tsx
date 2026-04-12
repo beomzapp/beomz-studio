@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, useRef } from "react";
 import { getPublicProject, type PublicProjectResponse } from "../../../lib/api";
+import type { StudioFile, TemplateId } from "@beomz-studio/contracts";
 import {
   buildPreviewFileTree,
   getOrBootWebContainer,
@@ -78,10 +79,13 @@ export function PublicAppPage({ slug }: { slug: string }) {
           }
         : null;
 
-      const studioFiles = data.files.map((f) => ({
+      const studioFiles: StudioFile[] = data.files.map((f) => ({
         path: f.path,
         content: f.content,
         kind: "generated" as const,
+        language: f.path.endsWith(".css") ? "css" : "typescript",
+        source: "ai" as const,
+        locked: false,
       }));
 
       const fileTree = buildPreviewFileTree(
@@ -89,7 +93,7 @@ export function PublicAppPage({ slug }: { slug: string }) {
         {
           id: data.projectId,
           name: data.projectName,
-          templateId: (data.templateId ?? "blank-canvas") as any,
+          templateId: (data.templateId ?? "blank-canvas") as TemplateId,
         },
         dbEnv,
       );
