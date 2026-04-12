@@ -19,6 +19,7 @@ const WORKSPACE_PACKAGE_JSON = JSON.stringify(
     type: "module",
     scripts: { dev: "vite" },
     dependencies: {
+      "@supabase/supabase-js": "^2.39.0",
       clsx: "^2.0.0",
       "framer-motion": "^11.0.0",
       "lucide-react": "^0.400.0",
