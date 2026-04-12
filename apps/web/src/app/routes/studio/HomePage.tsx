@@ -4,7 +4,7 @@
  * Light mode — uses StudioLayout sidebar (dark) as wrapper.
  */
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   FolderOpen,
@@ -14,12 +14,12 @@ import {
   Eye,
   MoreHorizontal,
   Pencil,
-  Copy,
   Trash2,
   BarChart2,
   BookOpen,
   Briefcase,
   CheckSquare,
+  Database,
   ListChecks,
   ShoppingCart,
   Smartphone,
@@ -31,12 +31,15 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import type { Project } from "@beomz-studio/contracts";
 import { cn } from "../../../lib/cn";
-import { listProjectsWithMeta } from "../../../lib/api";
+import { listProjectsWithMeta, deleteProject, renameProject } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
 import { useCredits } from "../../../lib/CreditsContext";
 
 interface ProjectCard extends Project {
   generationCount: number;
+  database_enabled?: boolean;
+  db_wired?: boolean;
+  thumbnail_url?: string | null;
 }
 
 const PROJECT_ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -94,6 +97,29 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
+  // Rename state
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick() {
+      setMenuOpen(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
+
+  // Focus rename input when entering rename mode
+  useEffect(() => {
+    if (renamingId) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [renamingId]);
+
   // Fetch projects via the authenticated API (avoids needing Supabase RLS)
   useEffect(() => {
     void (async () => {
@@ -107,6 +133,52 @@ export function HomePage() {
         setLoading(false);
       }
     })();
+  }, []);
+
+  const handleDelete = useCallback(async (e: React.MouseEvent, project: ProjectCard) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setMenuOpen(null);
+    const confirmed = window.confirm(`Delete "${project.name}"? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteProject(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    } catch (err) {
+      console.error("Failed to delete project:", err);
+    }
+  }, []);
+
+  const handleStartRename = useCallback((e: React.MouseEvent, project: ProjectCard) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setMenuOpen(null);
+    setRenamingId(project.id);
+    setRenameValue(project.name);
+  }, []);
+
+  const handleFinishRename = useCallback(async (projectId: string) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenamingId(null);
+      return;
+    }
+    try {
+      await renameProject(projectId, trimmed);
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId ? { ...p, name: trimmed } : p)),
+      );
+    } catch (err) {
+      console.error("Failed to rename project:", err);
+    }
+    setRenamingId(null);
+  }, [renameValue]);
+
+  const handleDuplicate = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setMenuOpen(null);
+    // Duplicate API not yet available — close menu silently
   }, []);
 
   const userName = session?.user?.user_metadata?.full_name?.split(" ")[0] ?? "there";
@@ -209,46 +281,88 @@ export function HomePage() {
           {projects.map((project) => (
             <div
               key={project.id}
-              className="group cursor-pointer overflow-hidden rounded-xl border border-[#e5e7eb] bg-white shadow-sm transition-shadow hover:shadow-md"
+              className="group relative cursor-pointer overflow-hidden rounded-xl border border-[#e5e7eb] bg-white shadow-sm transition-shadow hover:shadow-md"
               onClick={() =>
+                renamingId !== project.id &&
                 navigate({
                   to: "/studio/project/$id",
                   params: { id: project.id },
                 })
               }
             >
-              {/* Gradient thumbnail with icon */}
+              {/* Thumbnail or gradient */}
               <div
                 className={cn(
-                  "relative flex h-32 items-center justify-center bg-gradient-to-br",
-                  projectGradient(project.id),
+                  "relative flex h-32 items-center justify-center overflow-hidden",
+                  !project.thumbnail_url && `bg-gradient-to-br ${projectGradient(project.id)}`,
                 )}
               >
-                <ProjectIconBadge name={project.icon ?? null} className="text-white/80" />
+                {project.thumbnail_url ? (
+                  <img
+                    src={project.thumbnail_url}
+                    alt={project.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <ProjectIconBadge name={project.icon ?? null} className="text-white/80" />
+                )}
                 {/* Status badge */}
-                <span
-                  className={cn(
-                    "absolute top-2 right-2 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                    project.status === "published"
-                      ? "bg-[#1a1a1a] text-white"
-                      : project.status === "building"
-                        ? "bg-blue-500 text-white"
-                        : "bg-white/80 text-[#6b7280]",
+                <div className="absolute top-2 right-2 flex items-center gap-1">
+                  {/* DB badge */}
+                  {project.database_enabled && (
+                    <span
+                      className={cn(
+                        "flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                        project.db_wired
+                          ? "bg-emerald-500/90 text-white"
+                          : "bg-amber-500/90 text-white",
+                      )}
+                    >
+                      <Database size={8} />
+                      DB
+                    </span>
                   )}
-                >
-                  {project.status}
-                </span>
+                  {/* Project status badge */}
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                      project.status === "published"
+                        ? "bg-[#1a1a1a] text-white"
+                        : project.status === "building"
+                          ? "bg-blue-500 text-white"
+                          : "bg-white/80 text-[#6b7280]",
+                    )}
+                  >
+                    {project.status}
+                  </span>
+                </div>
               </div>
 
               {/* Card body */}
               <div className="p-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="truncate text-sm font-semibold text-[#1a1a1a]">
-                    {project.name}
-                  </h3>
+                  {renamingId === project.id ? (
+                    <input
+                      ref={renameInputRef}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => void handleFinishRename(project.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void handleFinishRename(project.id);
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex-1 truncate rounded border border-[#F97316]/50 px-1.5 py-0.5 text-sm font-semibold text-[#1a1a1a] outline-none"
+                    />
+                  ) : (
+                    <h3 className="truncate text-sm font-semibold text-[#1a1a1a]">
+                      {project.name}
+                    </h3>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      e.preventDefault();
                       setMenuOpen(menuOpen === project.id ? null : project.id);
                     }}
                     className="rounded p-1 text-[#9ca3af] opacity-0 transition-all hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280] group-hover:opacity-100"
@@ -259,14 +373,26 @@ export function HomePage() {
 
                 {/* Menu dropdown */}
                 {menuOpen === project.id && (
-                  <div className="absolute z-20 mt-1 w-36 rounded-lg border border-[#e5e7eb] bg-white py-1 shadow-lg">
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]">
+                  <div
+                    className="absolute right-3 z-20 mt-1 w-36 rounded-lg border border-[#e5e7eb] bg-white py-1 shadow-lg"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={(e) => handleStartRename(e, project)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]"
+                    >
                       <Pencil size={12} /> Rename
                     </button>
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]">
-                      <Copy size={12} /> Duplicate
+                    <button
+                      onClick={handleDuplicate}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]"
+                    >
+                      <Sparkles size={12} /> Duplicate
                     </button>
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50">
+                    <button
+                      onClick={(e) => void handleDelete(e, project)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                    >
                       <Trash2 size={12} /> Delete
                     </button>
                   </div>

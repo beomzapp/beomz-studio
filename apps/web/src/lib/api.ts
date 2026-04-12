@@ -269,6 +269,17 @@ export async function listProjectsWithMeta(): Promise<ProjectsListResponse> {
   return requestJson<ProjectsListResponse>("/projects", { method: "GET" });
 }
 
+export async function deleteProject(projectId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}`, { method: "DELETE" });
+}
+
+export async function renameProject(projectId: string, name: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function enhancePrompt(prompt: string): Promise<string> {
   const url = `${getApiBaseUrl()}/enhance`;
   const res = await fetch(url, {
