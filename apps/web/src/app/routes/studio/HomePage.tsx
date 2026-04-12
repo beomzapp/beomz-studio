@@ -5,6 +5,7 @@
  */
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Plus,
   FolderOpen,
@@ -96,6 +97,10 @@ export function HomePage() {
   const [canCreateMore, setCanCreateMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  // Delete confirmation modal
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   // Rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -111,6 +116,16 @@ export function HomePage() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [menuOpen]);
+
+  // Escape key closes delete modal
+  useEffect(() => {
+    if (!deleteTarget) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDeleteTarget(null);
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [deleteTarget]);
 
   // Focus rename input when entering rename mode
   useEffect(() => {
@@ -135,19 +150,23 @@ export function HomePage() {
     })();
   }, []);
 
-  const handleDelete = useCallback(async (e: React.MouseEvent, project: ProjectCard) => {
+  const handleDeleteClick = useCallback((e: React.MouseEvent, project: ProjectCard) => {
     e.stopPropagation();
     e.preventDefault();
     setMenuOpen(null);
-    const confirmed = window.confirm(`Delete "${project.name}"? This cannot be undone.`);
-    if (!confirmed) return;
+    setDeleteTarget({ id: project.id, name: project.name });
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteProject(project.id);
-      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      await deleteProject(deleteTarget.id);
+      setProjects((prev) => prev.filter((p) => p.id !== deleteTarget.id));
     } catch (err) {
       console.error("Failed to delete project:", err);
     }
-  }, []);
+    setDeleteTarget(null);
+  }, [deleteTarget]);
 
   const handleStartRename = useCallback((e: React.MouseEvent, project: ProjectCard) => {
     e.stopPropagation();
@@ -363,7 +382,13 @@ export function HomePage() {
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      setMenuOpen(menuOpen === project.id ? null : project.id);
+                      if (menuOpen === project.id) {
+                        setMenuOpen(null);
+                      } else {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        setMenuPos({ top: rect.bottom + 4, left: rect.right - 144 });
+                        setMenuOpen(project.id);
+                      }
                     }}
                     className="rounded p-1 text-[#9ca3af] opacity-0 transition-all hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280] group-hover:opacity-100"
                   >
@@ -371,32 +396,7 @@ export function HomePage() {
                   </button>
                 </div>
 
-                {/* Menu dropdown */}
-                {menuOpen === project.id && (
-                  <div
-                    className="absolute right-3 z-20 mt-1 w-36 rounded-lg border border-[#e5e7eb] bg-white py-1 shadow-lg"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={(e) => handleStartRename(e, project)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]"
-                    >
-                      <Pencil size={12} /> Rename
-                    </button>
-                    <button
-                      onClick={handleDuplicate}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]"
-                    >
-                      <Sparkles size={12} /> Duplicate
-                    </button>
-                    <button
-                      onClick={(e) => void handleDelete(e, project)}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
-                    >
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  </div>
-                )}
+                {/* Portal dropdown rendered below */}
 
                 {/* Stats row */}
                 <div className="mt-2 flex items-center gap-3 text-[10px] text-[#9ca3af]">
@@ -412,6 +412,78 @@ export function HomePage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Portal: 3-dot dropdown menu */}
+      {menuOpen && createPortal(
+        <div
+          className="fixed z-50 w-36 rounded-lg border border-[#e5e7eb] bg-white py-1 shadow-lg"
+          style={{ top: menuPos.top, left: menuPos.left }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {(() => {
+            const project = projects.find((p) => p.id === menuOpen);
+            if (!project) return null;
+            return (
+              <>
+                <button
+                  onClick={(e) => handleStartRename(e, project)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]"
+                >
+                  <Pencil size={12} /> Rename
+                </button>
+                <button
+                  onClick={handleDuplicate}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)]"
+                >
+                  <Sparkles size={12} /> Duplicate
+                </button>
+                <button
+                  onClick={(e) => handleDeleteClick(e, project)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                >
+                  <Trash2 size={12} /> Delete
+                </button>
+              </>
+            );
+          })()}
+        </div>,
+        document.body,
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/50"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="mt-40 w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-[#1a1a1a]">
+              Delete &ldquo;{deleteTarget.name}&rdquo;?
+            </h3>
+            <p className="mt-1 text-sm text-[#6b7280]">
+              This cannot be undone.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-lg border border-[#e5e7eb] px-4 py-2 text-sm font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleConfirmDelete()}
+                className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
