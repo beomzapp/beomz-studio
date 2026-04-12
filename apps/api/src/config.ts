@@ -38,6 +38,10 @@ const envSchema = z.object({
   USER_DATA_SUPABASE_ANON_KEY: z.string().min(1).optional(),
   // Supabase Management API personal access token — for schema provisioning
   SUPABASE_MANAGEMENT_API_KEY: z.string().min(1).optional(),
+  // Vercel deploy — published apps at slug.beomz.app
+  VERCEL_TOKEN: z.string().min(1).optional(),
+  VERCEL_PROJECT_ID: z.string().min(1).optional(),
+  VERCEL_TEAM_ID: z.string().min(1).optional(),
 });
 
 export type ApiConfig = z.infer<typeof envSchema>;

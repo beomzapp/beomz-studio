@@ -74,6 +74,9 @@ export interface ProjectRow extends Record<string, unknown> {
   published: boolean;
   published_slug: string | null;
   published_at: string | null;
+  // Vercel deploy — slug.beomz.app
+  beomz_app_url: string | null;
+  beomz_app_deployed_at: string | null;
 }
 
 export interface GenerationRow extends Record<string, unknown> {
@@ -217,6 +220,9 @@ export interface ProjectUpdate extends Record<string, unknown> {
   published?: boolean;
   published_slug?: string | null;
   published_at?: string | null;
+  // Vercel deploy — slug.beomz.app
+  beomz_app_url?: string | null;
+  beomz_app_deployed_at?: string | null;
 }
 
 export interface GenerationInsert extends Record<string, unknown> {

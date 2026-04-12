@@ -1,0 +1,152 @@
+/**
+ * Vercel deploy helper — BEO-XXX
+ *
+ * Uploads a set of files to Vercel and creates a production deployment
+ * aliased to <slug>.beomz.app, returning { url } when the deployment is READY.
+ */
+import crypto from "node:crypto";
+
+import { apiConfig } from "../config.js";
+
+export interface VercelDeployFile {
+  filename: string;
+  content: string;
+}
+
+export interface VercelDeployResult {
+  url: string;
+  deploymentId: string;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function sha1(content: string): string {
+  return crypto.createHash("sha1").update(content).digest("hex");
+}
+
+function requireVercelConfig(): { token: string; projectId: string; teamId: string } {
+  const { VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID } = apiConfig;
+  if (!VERCEL_TOKEN || !VERCEL_PROJECT_ID || !VERCEL_TEAM_ID) {
+    throw new Error("Vercel env vars not configured (VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID)");
+  }
+  return { token: VERCEL_TOKEN, projectId: VERCEL_PROJECT_ID, teamId: VERCEL_TEAM_ID };
+}
+
+// ── File upload ───────────────────────────────────────────────────────────────
+
+async function uploadFile(
+  token: string,
+  file: { filename: string; content: string },
+): Promise<{ filename: string; sha: string; size: number }> {
+  const buf = Buffer.from(file.content);
+  const sha = sha1(file.content);
+  const size = buf.byteLength;
+
+  const res = await fetch("https://api.vercel.com/v2/now/files", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/octet-stream",
+      "x-vercel-digest": sha,
+      "Content-Length": String(size),
+    },
+    body: buf,
+  });
+
+  // 200 = uploaded, 409 = already exists — both are fine
+  if (!res.ok && res.status !== 409) {
+    const body = await res.text();
+    throw new Error(`Vercel file upload failed (${res.status}): ${body}`);
+  }
+
+  return { filename: file.filename, sha, size };
+}
+
+// ── Poll for READY ────────────────────────────────────────────────────────────
+
+async function pollUntilReady(
+  token: string,
+  teamId: string,
+  deploymentId: string,
+  maxMs = 120_000,
+): Promise<void> {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    await new Promise<void>((r) => setTimeout(r, 3_000));
+    const res = await fetch(
+      `https://api.vercel.com/v13/deployments/${deploymentId}?teamId=${teamId}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Vercel poll failed (${res.status}): ${body}`);
+    }
+    const data = (await res.json()) as { readyState: string; errorCode?: string; errorMessage?: string };
+    if (data.readyState === "READY") return;
+    if (data.readyState === "ERROR") {
+      throw new Error(`Vercel deployment error: ${data.errorCode ?? "unknown"} — ${data.errorMessage ?? ""}`);
+    }
+  }
+  throw new Error("Vercel deployment timed out after 120s");
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export async function vercelDeploy(opts: {
+  files: VercelDeployFile[];
+  slug: string;
+}): Promise<VercelDeployResult> {
+  const { token, projectId, teamId } = requireVercelConfig();
+
+  // Add vercel.json for SPA client-side routing
+  const allFiles: VercelDeployFile[] = [
+    ...opts.files,
+    {
+      filename: "vercel.json",
+      content: JSON.stringify({
+        rewrites: [{ source: "/(.*)", destination: "/index.html" }],
+      }),
+    },
+  ];
+
+  // Upload all files (parallel, Vercel deduplicates by SHA)
+  const uploaded = await Promise.all(
+    allFiles.map((f) => uploadFile(token, f)),
+  );
+
+  // Create deployment
+  const deployRes = await fetch(
+    `https://api.vercel.com/v13/deployments?teamId=${teamId}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "beomz-apps",
+        project: projectId,
+        files: uploaded.map(({ filename, sha, size }) => ({ file: filename, sha, size })),
+        projectSettings: { framework: "vite" },
+        target: "production",
+        alias: [`${opts.slug}.beomz.app`],
+      }),
+    },
+  );
+
+  if (!deployRes.ok) {
+    const body = await deployRes.text();
+    throw new Error(`Vercel deployment creation failed (${deployRes.status}): ${body}`);
+  }
+
+  const deploy = (await deployRes.json()) as { id: string };
+  const deploymentId = deploy.id;
+
+  // Poll until READY
+  await pollUntilReady(token, teamId, deploymentId);
+
+  return {
+    url: `https://${opts.slug}.beomz.app`,
+    deploymentId,
+  };
+}

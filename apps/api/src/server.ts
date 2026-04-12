@@ -35,6 +35,7 @@ import {
   publicSlugRoute,
   publishRoute,
 } from "./routes/projects/publish.js";
+import { vercelDeployRoute } from "./routes/projects/vercel.js";
 const app = new Hono();
 
 app.use(
@@ -90,6 +91,8 @@ app.route("/projects/:id/publish", publishRoute);
 app.route("/projects/:id/export", exportRoute);
 app.route("/projects/check-slug", checkSlugRoute);
 app.route("/p", publicSlugRoute);
+// Vercel deploy — slug.beomz.app
+app.route("/projects/:id/deploy/vercel", vercelDeployRoute);
 
 serve(
   {
