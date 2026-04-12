@@ -41,6 +41,11 @@ import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { classifyPalette } from "../../lib/slm/client.js";
+import {
+  getSchemaTableList,
+  isAllowedMigrationStatement,
+  runSql,
+} from "../../lib/userDataClient.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,6 +69,7 @@ interface CustomiseResult {
   files: Array<{ path: string; content: string }>;
   summary: string;
   appName?: string;
+  migrations?: string[];
   outputTokens: number;
 }
 
@@ -101,6 +107,14 @@ const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
       appName: {
         type: "string",
         description: "The brand name of the app you built, e.g. 'Spendr', 'AssetHub', 'TrackMate'. Short, memorable, no spaces.",
+      },
+      migrations: {
+        type: "array",
+        description:
+          "SQL migration statements needed to support this iteration's changes (e.g. ALTER TABLE ... ADD COLUMN IF NOT EXISTS, CREATE TABLE IF NOT EXISTS). "
+          + "Empty array if no schema changes are needed. "
+          + "NEVER include DROP TABLE, DROP COLUMN, or ALTER COLUMN TYPE.",
+        items: { type: "string" },
       },
     },
     required: ["files", "summary"],
@@ -1141,7 +1155,7 @@ function buildUserMessage(prompt: string): string {
   ].join("\n");
 }
 
-function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?: unknown }, prompt: string): Omit<CustomiseResult, "outputTokens"> {
+function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?: unknown; migrations?: unknown }, prompt: string): Omit<CustomiseResult, "outputTokens"> {
   const files = Array.isArray(raw.files)
     ? (raw.files as Array<{ path: string; content: string }>).filter(
         (f) => typeof f.path === "string" && typeof f.content === "string",
@@ -1151,7 +1165,10 @@ function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?:
   const appName = typeof raw.appName === "string" && raw.appName.trim().length > 0
     ? raw.appName.trim()
     : undefined;
-  return { files, summary, appName };
+  const migrations = Array.isArray(raw.migrations)
+    ? (raw.migrations as unknown[]).filter((s): s is string => typeof s === "string")
+    : undefined;
+  return { files, summary, appName, migrations };
 }
 
 // ─── Anthropic provider ───────────────────────────────────────────────────────
@@ -1298,7 +1315,19 @@ async function callModelCustomise(
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
 
-function buildIterationSystemPrompt(): string {
+function buildIterationSystemPrompt(schemaSummary?: string): string {
+  const dbBlock = schemaSummary
+    ? [
+        "",
+        "DATABASE SCHEMA (current live schema for this project):",
+        schemaSummary,
+        "If the requested change needs new columns or tables, include the required SQL in the migrations array:",
+        "  - ALTER TABLE \"schema\".\"table\" ADD COLUMN IF NOT EXISTS col_name col_type;",
+        "  - CREATE TABLE IF NOT EXISTS \"schema\".\"table_name\" (id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY, ...);",
+        "NEVER include DROP TABLE, DROP COLUMN, or ALTER COLUMN TYPE.",
+        "If no schema changes are needed, return an empty migrations array.",
+      ].join("\n")
+    : "";
   return [
     "You are modifying an existing React application. Apply ONLY the specific change the user requests.",
     "",
@@ -1332,7 +1361,7 @@ function buildIterationSystemPrompt(): string {
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
     "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'",
+    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock,
   ].join("\n");
 }
 
@@ -1374,10 +1403,11 @@ async function callModelIterate(
   prompt: string,
   model: string,
   existingFiles: readonly StudioFile[],
+  schemaSummary?: string,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
 
-  const systemPrompt = buildIterationSystemPrompt();
+  const systemPrompt = buildIterationSystemPrompt(schemaSummary);
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {
@@ -1552,6 +1582,27 @@ async function _runBuildInBackground(
     if (input.isIteration && input.existingFiles.length > 0) {
       const existingFiles = input.existingFiles;
 
+      // Load DB schema for this project if database is enabled (BEO-288)
+      let iterSchemaSummary: string | undefined;
+      try {
+        const iterProject = await db.findProjectById(projectId);
+        if (iterProject?.database_enabled && iterProject.db_schema) {
+          const tables = await getSchemaTableList(iterProject.db_schema);
+          if (tables.length > 0) {
+            iterSchemaSummary = tables
+              .map(
+                (t) =>
+                  `Table: ${t.table_name} (${t.columns.map((col) => `${col.name} ${col.type}`).join(", ")})`,
+              )
+              .join("\n");
+            console.log("[generate] iteration: DB schema loaded for project", projectId, "tables:", tables.map((t) => t.table_name));
+          }
+        }
+      } catch (schemaErr) {
+        // non-fatal — iteration proceeds without schema context
+        console.warn("[generate] iteration: failed to load DB schema (non-fatal):", schemaErr instanceof Error ? schemaErr.message : String(schemaErr));
+      }
+
       await appendEventToDb(
         db, buildId,
         statusEvent("ai_iterating", "Applying changes…", "customising"),
@@ -1588,7 +1639,7 @@ async function _runBuildInBackground(
       let iterResult: CustomiseResult;
       let iterErrorReason: string | null = null;
       try {
-        iterResult = await callModelIterate(prompt, model, existingFiles);
+        iterResult = await callModelIterate(prompt, model, existingFiles, iterSchemaSummary);
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
         // Classify returned files as "new" (not in current build) vs "updated" (overwrite existing).
@@ -1633,6 +1684,33 @@ async function _runBuildInBackground(
         }
 
         console.log("[generate] iteration remapped files:", iterResult.files.map((f) => f.path));
+
+        // Apply DB schema migrations returned by the AI (non-fatal — BEO-288)
+        if (iterSchemaSummary && iterResult.migrations && iterResult.migrations.length > 0) {
+          const iterProject = await db.findProjectById(projectId).catch(() => null);
+          const dbSchemaName = iterProject?.db_schema ?? "";
+          let migrationsApplied = 0;
+          for (const stmt of iterResult.migrations) {
+            const s = stmt.trim();
+            if (!s) continue;
+            if (!isAdminEmail(userEmail) && !isAllowedMigrationStatement(s, dbSchemaName)) {
+              console.warn("[generate] iteration: migration rejected by allowlist:", s.slice(0, 100));
+              continue;
+            }
+            try {
+              await runSql(s.endsWith(";") ? s : `${s};`);
+              migrationsApplied++;
+            } catch (migErr) {
+              console.error("[generate] iteration: migration failed (non-fatal):", migErr instanceof Error ? migErr.message : String(migErr));
+            }
+          }
+          if (migrationsApplied > 0) {
+            try {
+              await runSql("NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';");
+            } catch { /* non-fatal */ }
+            console.log("[generate] iteration: migrations applied:", migrationsApplied);
+          }
+        }
       } catch (iterErr) {
         iterErrorReason = iterErr instanceof Error ? iterErr.message : String(iterErr);
         console.warn("[generate] iteration AI call failed.", {
