@@ -240,12 +240,33 @@ export async function getLatestBuildIdForProject(projectId: string): Promise<str
   return response?.build?.id ?? null;
 }
 
+export interface CreditsResponse {
+  balance: number;
+  monthly: number;
+  topup: number;
+  plan: string;
+  planCredits: number;
+}
+
+export async function getCredits(): Promise<CreditsResponse> {
+  return requestJson<CreditsResponse>("/credits", { method: "GET" });
+}
+
+export interface ProjectsListResponse {
+  projects: Array<Project & { generationCount: number }>;
+  plan: string;
+  maxProjects: number;
+  canCreateMore: boolean;
+  planCredits: number;
+}
+
 export async function listProjects(): Promise<Array<Project & { generationCount: number }>> {
-  const data = await requestJson<{ projects: Array<Project & { generationCount: number }> }>(
-    "/projects",
-    { method: "GET" },
-  );
+  const data = await requestJson<ProjectsListResponse>("/projects", { method: "GET" });
   return data.projects;
+}
+
+export async function listProjectsWithMeta(): Promise<ProjectsListResponse> {
+  return requestJson<ProjectsListResponse>("/projects", { method: "GET" });
 }
 
 export async function enhancePrompt(prompt: string): Promise<string> {

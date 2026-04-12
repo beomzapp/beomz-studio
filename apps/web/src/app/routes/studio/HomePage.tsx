@@ -31,8 +31,9 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import type { Project } from "@beomz-studio/contracts";
 import { cn } from "../../../lib/cn";
-import { listProjects } from "../../../lib/api";
+import { listProjectsWithMeta } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
+import { useCredits } from "../../../lib/CreditsContext";
 
 interface ProjectCard extends Project {
   generationCount: number;
@@ -87,7 +88,9 @@ function timeAgo(iso: string | null | undefined): string {
 export function HomePage() {
   const navigate = useNavigate();
   const { session } = useAuth();
+  const { credits } = useCredits();
   const [projects, setProjects] = useState<ProjectCard[]>([]);
+  const [canCreateMore, setCanCreateMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
@@ -95,8 +98,9 @@ export function HomePage() {
   useEffect(() => {
     void (async () => {
       try {
-        const apiProjects = await listProjects();
-        setProjects(apiProjects.map((p) => ({ ...p })));
+        const data = await listProjectsWithMeta();
+        setProjects(data.projects.map((p) => ({ ...p })));
+        setCanCreateMore(data.canCreateMore);
       } catch {
         // API may fail if user is not yet authenticated or session is loading
       } finally {
@@ -125,7 +129,7 @@ export function HomePage() {
           { label: "Apps", value: projects.length, icon: FolderOpen, color: "text-[#F97316]" },
           { label: "Published", value: projects.filter((p) => p.status === "published").length, icon: Globe, color: "text-emerald-500" },
           { label: "Total Builds", value: projects.reduce((a, p) => a + p.generationCount, 0), icon: Zap, color: "text-blue-500" },
-          { label: "Credits", value: "—", icon: Star, color: "text-amber-500" },
+          { label: "Credits", value: credits ? Math.round(credits.balance) : "—", icon: Star, color: "text-amber-500" },
         ]).map(({ label, value, icon: Icon, color }) => (
           <div
             key={label}
@@ -143,15 +147,27 @@ export function HomePage() {
       {/* Projects section */}
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-[#1a1a1a]">My Apps</h2>
-        <button
-          onClick={() =>
-            navigate({ to: "/studio/project/$id", params: { id: "new" } })
-          }
-          className="flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
-        >
-          <Plus size={16} />
-          New App
-        </button>
+        <div className="relative group">
+          <button
+            onClick={() => canCreateMore && navigate({ to: "/studio/project/$id", params: { id: "new" } })}
+            disabled={!canCreateMore}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors",
+              canCreateMore
+                ? "bg-[#F97316] text-white hover:bg-[#ea6c10]"
+                : "cursor-not-allowed bg-[#e5e7eb] text-[#9ca3af]",
+            )}
+          >
+            <Plus size={16} />
+            New App
+          </button>
+          {!canCreateMore && (
+            <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#1a1a1a] px-3 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+              Upgrade to create more projects
+              <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]" />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Loading */}
@@ -172,13 +188,17 @@ export function HomePage() {
             Create your first app to get started
           </p>
           <button
-            onClick={() =>
-              navigate({ to: "/studio/project/$id", params: { id: "new" } })
-            }
-            className="flex items-center gap-2 rounded-lg bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+            onClick={() => canCreateMore && navigate({ to: "/studio/project/$id", params: { id: "new" } })}
+            disabled={!canCreateMore}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold transition-colors",
+              canCreateMore
+                ? "bg-[#F97316] text-white hover:bg-[#ea6c10]"
+                : "cursor-not-allowed bg-[#e5e7eb] text-[#9ca3af]",
+            )}
           >
             <Plus size={16} />
-            New App
+            {canCreateMore ? "New App" : "Upgrade to create more"}
           </button>
         </div>
       )}

@@ -68,6 +68,7 @@ import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
 import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
 import { useBuilderTranscript } from "../../../hooks/useBuilderTranscript";
 import { cn } from "../../../lib/cn";
+import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
 import { streamBuildSummary } from "../../../lib/streamBuildSummary";
 
@@ -144,6 +145,9 @@ export function ProjectPage() {
   const summaryAbortRef = useRef<AbortController | null>(null);
   const lastUserPromptRef = useRef("");
   const buildSummaryTextRef = useRef("");
+
+  const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
+  const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
 
   const [showChat, setShowChat] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
@@ -377,7 +381,21 @@ export function ProjectPage() {
               status: status.build.status,
               hasResult: !!status.result,
               fileCount: status.result?.files?.length ?? 0,
+              fallbackUsed: event.fallbackUsed,
             });
+
+            // Detect fallback-only builds: fallbackUsed with 0 AI-generated files
+            const aiFileCount = status.result?.files?.length ?? 0;
+            if (event.fallbackUsed && aiFileCount === 0) {
+              const reason = event.fallbackReason || "The build didn't produce any files.";
+              upsertAssistantMessage(bid, (message) => ({
+                ...message,
+                error: `Build failed: ${reason} Please try again.`,
+              }));
+              // Don't show the success summary or preview
+              return;
+            }
+
             if (status.result) setBuildResult(status.result);
             if (status.trace.previewReady || status.build.status === "completed") {
               setPreviewGenerationId(bid);
@@ -402,6 +420,11 @@ export function ProjectPage() {
                 changedFiles: filePaths,
               },
             ]);
+
+            // Optimistic credit deduction: ~5 credits per build (rough avg)
+            deductOptimistic(5);
+            // Refresh real balance from API in background
+            void refreshCredits();
           })
           .catch((err) => {
             console.error("[SSE done] getBuildStatus failed — preview will not update", err);
@@ -422,6 +445,11 @@ export function ProjectPage() {
 
     if (event.type === "error") {
       console.error("[SSE error event]", event.message);
+      // Surface the error on the assistant message so ChatPanel can show retry UI
+      upsertAssistantMessage(buildId, (message) => ({
+        ...message,
+        error: event.message || "Build failed. Please try again.",
+      }));
     }
   }, [appendTranscriptEntry, projectName, upsertAssistantMessage]);
 
@@ -536,6 +564,12 @@ export function ProjectPage() {
   );
 
   const handleSendMessage = useCallback((text: string) => {
+    // Block submission if out of credits
+    if (credits && credits.balance <= 0) {
+      setShowOutOfCreditsModal(true);
+      return;
+    }
+
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -561,17 +595,29 @@ export function ProjectPage() {
       if (abortRef.current?.signal.aborted) return;
       setIsStreaming(false);
       setStreamingText("");
+      const errorMsg = error instanceof Error ? error.message : "Failed to start build.";
       setMessages((prev) => [
         ...prev,
         {
           id: `assistant-error-${Date.now()}`,
           role: "assistant",
-          content: error instanceof Error ? error.message : "Failed to start build.",
+          content: errorMsg,
           timestamp: new Date().toISOString(),
+          error: errorMsg,
         },
       ]);
     });
-  }, [startBuildSession]);
+  }, [credits, startBuildSession]);
+
+  const handleRetry = useCallback(() => {
+    const prompt = lastUserPromptRef.current;
+    if (!prompt) return;
+    // Clear the error from the last assistant message before retrying
+    setMessages((prev) => prev.map((m) =>
+      m.error ? { ...m, error: null } : m,
+    ));
+    handleSendMessage(prompt);
+  }, [handleSendMessage]);
 
   const handleStopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -963,6 +1009,7 @@ export function ProjectPage() {
               streamingText={transport === "idle" ? "" : streamingText}
               onSendMessage={handleSendMessage}
               onStopStreaming={handleStopStreaming}
+              onRetry={handleRetry}
               onViewCode={() => {
                 setActiveView("code");
                 const firstFile = buildResult?.files?.[0]?.path;
@@ -973,6 +1020,8 @@ export function ProjectPage() {
               onDismissChips={() => setSuggestionChips([])}
               selectedModel={selectedModel}
               onModelChange={handleModelChange}
+              plan={credits?.plan}
+              creditsBalance={credits?.balance}
             />
           </div>
         </div>
@@ -987,6 +1036,8 @@ export function ProjectPage() {
       <BuilderModals
         showShareModal={showShareModal}
         onCloseShareModal={() => setShowShareModal(false)}
+        showOutOfCreditsModal={showOutOfCreditsModal}
+        onCloseOutOfCreditsModal={() => setShowOutOfCreditsModal(false)}
       />
     </div>
   );

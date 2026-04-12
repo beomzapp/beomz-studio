@@ -4,8 +4,9 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
-import { LogOut, Settings, LayoutDashboard } from "lucide-react";
+import { LogOut, Settings, LayoutDashboard, AlertTriangle } from "lucide-react";
 import { useAuth } from "../../lib/useAuth";
+import { useCredits } from "../../lib/CreditsContext";
 import { supabase } from "../../lib/supabase";
 import { getApiBaseUrl } from "../../lib/api";
 
@@ -16,6 +17,7 @@ interface GlobalNavProps {
 
 export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
   const { session } = useAuth();
+  const { credits } = useCredits();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -61,15 +63,46 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
   return (
     <div className="flex items-center gap-3">
       {/* Credits pill */}
-      <span
-        className={
-          isLight
-            ? "rounded-full border border-white/10 px-2.5 py-1 font-mono text-xs text-white/40"
-            : "rounded-full border border-[#e5e5e5] px-2.5 py-1 font-mono text-xs text-[#6b7280]"
-        }
-      >
-        &#9889; 247 credits
-      </span>
+      {credits ? (
+        <div className="flex items-center gap-1.5">
+          {credits.balance < 5 && credits.balance > 0 && (
+            <span
+              className={
+                isLight
+                  ? "flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-medium text-amber-300"
+                  : "flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+              }
+              title="Low credits — top up to keep building"
+            >
+              <AlertTriangle size={10} />
+              Low
+            </span>
+          )}
+          <span
+            className={
+              isLight
+                ? "rounded-full border border-white/10 px-2.5 py-1 font-mono text-xs text-white/40"
+                : credits.balance === 0
+                  ? "rounded-full border border-red-200 bg-red-50 px-2.5 py-1 font-mono text-xs text-red-500"
+                  : credits.balance < 5
+                    ? "rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-mono text-xs text-amber-600"
+                    : "rounded-full border border-[#e5e5e5] px-2.5 py-1 font-mono text-xs text-[#6b7280]"
+            }
+          >
+            &#9889; {Math.round(credits.balance)} credits
+          </span>
+        </div>
+      ) : (
+        <span
+          className={
+            isLight
+              ? "rounded-full border border-white/10 px-2.5 py-1 font-mono text-xs text-white/40"
+              : "rounded-full border border-[#e5e5e5] px-2.5 py-1 font-mono text-xs text-[#6b7280]"
+          }
+        >
+          &#9889; &mdash;
+        </span>
+      )}
 
       {/* Dashboard link — always visible in nav bar */}
       <Link

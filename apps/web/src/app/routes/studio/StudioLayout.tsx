@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
+import { CreditsProvider } from "../../../lib/CreditsContext";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 const NAV_ITEMS = [
@@ -29,15 +30,18 @@ export function StudioLayout() {
 
   if (isProjectPage) {
     return (
-      <div className="flex h-screen flex-col">
-        <main className="flex-1 overflow-hidden">
-          <Outlet />
-        </main>
-      </div>
+      <CreditsProvider>
+        <div className="flex h-screen flex-col">
+          <main className="flex-1 overflow-hidden">
+            <Outlet />
+          </main>
+        </div>
+      </CreditsProvider>
     );
   }
 
   return (
+    <CreditsProvider>
     <div className="flex h-screen bg-[#faf9f6]">
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -118,5 +122,6 @@ export function StudioLayout() {
         </main>
       </div>
     </div>
+    </CreditsProvider>
   );
 }
