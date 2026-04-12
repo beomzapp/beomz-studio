@@ -10,3 +10,4 @@ export { BuilderModals } from "./BuilderModals";
 export { DatabasePanel } from "./DatabasePanel";
 export { IntegrationsPanel } from "./IntegrationsPanel";
 export { PhaseIndicator } from "./PhaseIndicator";
+export { PublishModal } from "./PublishModal";

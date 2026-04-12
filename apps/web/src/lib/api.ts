@@ -403,6 +403,69 @@ export async function runDbMigration(
   });
 }
 
+// ── Publish API ─────────────────────────────────��──────────────
+
+export async function publishProject(
+  projectId: string,
+  slug: string,
+): Promise<{ ok: boolean; url: string }> {
+  return requestJson<{ ok: boolean; url: string }>(`/projects/${projectId}/publish`, {
+    method: "POST",
+    body: JSON.stringify({ slug }),
+  });
+}
+
+export async function unpublishProject(projectId: string): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(`/projects/${projectId}/publish`, {
+    method: "DELETE",
+  });
+}
+
+export async function checkSlugAvailable(slug: string): Promise<{ available: boolean }> {
+  return requestJson<{ available: boolean }>(
+    `/projects/check-slug?slug=${encodeURIComponent(slug)}`,
+    { method: "GET" },
+  );
+}
+
+export interface PublicProjectResponse {
+  projectId: string;
+  projectName: string;
+  files: Array<{ path: string; content: string }>;
+  templateId?: string;
+  dbCredentials?: {
+    supabaseUrl: string;
+    supabaseAnonKey: string;
+    schemaName: string;
+    nonce?: string;
+  } | null;
+}
+
+export async function getPublicProject(slug: string): Promise<PublicProjectResponse> {
+  const url = `${getApiBaseUrl()}/p/${encodeURIComponent(slug)}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errorBody?.error ?? `Request failed with ${response.status}.`);
+  }
+  return response.json() as Promise<PublicProjectResponse>;
+}
+
+export async function exportProjectZip(projectId: string): Promise<Blob> {
+  const accessToken = await getAccessToken();
+  const url = `${getApiBaseUrl()}/projects/${projectId}/export`;
+  const response = await fetch(url, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errorBody?.error ?? `Export failed with ${response.status}.`);
+  }
+  return response.blob();
+}
+
+// ── Fix API ───────────────────────────────────���────────────────
+
 export async function fixFile(args: {
   buildId: string;
   filePath: string;

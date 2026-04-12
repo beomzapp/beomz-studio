@@ -49,6 +49,7 @@ import {
   BuilderModals,
   DatabasePanel,
   IntegrationsPanel,
+  PublishModal,
   AVAILABLE_MODELS,
   type ChatMessage,
   type ActiveView,
@@ -60,6 +61,8 @@ import {
   getBuildStatus,
   getLatestBuildForProject,
   getProjectDbState,
+  exportProjectZip,
+  listProjectsWithMeta,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -168,6 +171,12 @@ export function ProjectPage() {
 
   const [showShareModal, setShowShareModal] = useState(false);
 
+  // Publish state
+  const [isPublished, setIsPublished] = useState(false);
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
   // Database state (driven by GET /api/projects/:id)
   const [dbEnabled, setDbEnabled] = useState(false);
   const [dbProvider, setDbProvider] = useState<string | null>(null);
@@ -211,6 +220,20 @@ export function ProjectPage() {
       void fetchDbState();
     }
   }, [projectId, id, fetchDbState]);
+
+  // Fetch publish state when project is loaded
+  useEffect(() => {
+    if (!projectId || id === "new") return;
+    void listProjectsWithMeta().then((data) => {
+      const proj = data.projects.find((p) => p.id === projectId) as
+        | (typeof data.projects[number] & { published?: boolean; published_slug?: string | null })
+        | undefined;
+      if (proj) {
+        setIsPublished(Boolean(proj.published));
+        setPublishedSlug(proj.published_slug ?? null);
+      }
+    }).catch(() => {});
+  }, [projectId, id]);
 
   // ── Chat message persistence via localStorage ────────────────────────────
   // Restore messages when projectId is set (page load / navigation)
@@ -682,6 +705,23 @@ export function ProjectPage() {
     if (build?.id) setPreviewGenerationId(build.id);
   }, [build?.id]);
 
+  const handleExportZip = useCallback(async () => {
+    if (!projectId || isExporting) return;
+    setIsExporting(true);
+    try {
+      const blob = await exportProjectZip(projectId);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${projectName}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      console.error("[Export] Failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [projectId, projectName, isExporting]);
+
   // Resume existing build
   useEffect(() => {
     if (resumingBuildRef.current || id === "new" || !projectId || build) return;
@@ -1036,6 +1076,10 @@ export function ProjectPage() {
         onActiveViewChange={setActiveView}
         showSidebar={showChat}
         onToggleSidebar={() => setShowChat((v) => !v)}
+        isPublished={isPublished}
+        onPublish={() => setShowPublishModal(true)}
+        onExportZip={handleExportZip}
+        isExporting={isExporting}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -1095,6 +1139,24 @@ export function ProjectPage() {
         showOutOfCreditsModal={showOutOfCreditsModal}
         onCloseOutOfCreditsModal={() => setShowOutOfCreditsModal(false)}
       />
+
+      {showPublishModal && projectId && (
+        <PublishModal
+          projectId={projectId}
+          projectName={projectName}
+          isPublished={isPublished}
+          publishedSlug={publishedSlug ?? undefined}
+          onClose={() => setShowPublishModal(false)}
+          onPublished={(_url, slug) => {
+            setIsPublished(true);
+            setPublishedSlug(slug);
+          }}
+          onUnpublished={() => {
+            setIsPublished(false);
+            setPublishedSlug(null);
+          }}
+        />
+      )}
     </div>
   );
 }

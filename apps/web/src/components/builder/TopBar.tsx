@@ -21,6 +21,7 @@ import {
   BookOpen,
   Briefcase,
   CheckSquare,
+  Download,
   ListChecks,
   ShoppingCart,
   Sparkles,
@@ -69,6 +70,8 @@ interface TopBarProps {
   hasUnpublishedChanges?: boolean;
   isPublishing?: boolean;
   onPublish?: () => void;
+  onExportZip?: () => void;
+  isExporting?: boolean;
 }
 
 function toast(msg: string) {
@@ -106,6 +109,8 @@ export function TopBar({
   hasUnpublishedChanges = false,
   isPublishing = false,
   onPublish,
+  onExportZip,
+  isExporting = false,
 }: TopBarProps) {
   const navigate = useNavigate();
   const [editingName, setEditingName] = useState(false);
@@ -253,6 +258,17 @@ export function TopBar({
         </button>
 
         <div className="h-4 w-px bg-[#e5e5e5]" />
+
+        {/* Export ZIP */}
+        <button
+          onClick={onExportZip ?? (() => toast("Coming soon"))}
+          disabled={isExporting}
+          className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a] disabled:opacity-50"
+          aria-label="Export ZIP"
+        >
+          {isExporting ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
+          <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
+        </button>
 
         {/* Publish button with states */}
         {isPublished ? (

@@ -18,6 +18,7 @@ import { PricingPage } from "./app/routes/marketing/PricingPage";
 import { LoginPage } from "./app/routes/auth/login";
 import { SignupPage } from "./app/routes/auth/signup";
 import { AuthCallback } from "./app/routes/auth/callback";
+import { PublicAppPage } from "./app/routes/public/PublicAppPage";
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -60,6 +61,15 @@ const authCallbackRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/auth/callback",
   component: AuthCallback,
+});
+
+const publicAppRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/p/$slug",
+  component: () => {
+    const { slug } = publicAppRoute.useParams();
+    return PublicAppPage({ slug });
+  },
 });
 
 const studioRoute = createRoute({
@@ -110,6 +120,7 @@ const routeTree = rootRoute.addChildren([
   landingRoute,
   planRoute,
   pricingRoute,
+  publicAppRoute,
   authLoginRoute,
   authSignupRoute,
   authCallbackRoute,
