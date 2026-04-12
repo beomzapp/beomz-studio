@@ -37,7 +37,7 @@ enableDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json({ error: "Database service not configured" }, 503);
   }
 
-  const { id: projectId } = c.req.param() as { id: string };
+  const projectId = c.req.param("id") as string;
   const orgContext = c.get("orgContext") as OrgContext;
   const { db, org } = orgContext;
 

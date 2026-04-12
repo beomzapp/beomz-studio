@@ -16,7 +16,7 @@ import { deleteSchemaRegistry, isUserDataConfigured, runSql } from "../../lib/us
 const disableDbRoute = new Hono();
 
 disableDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
-  const { id: projectId } = c.req.param() as { id: string };
+  const projectId = c.req.param("id") as string;
   const orgContext = c.get("orgContext") as OrgContext;
   const { db, org } = orgContext;
 

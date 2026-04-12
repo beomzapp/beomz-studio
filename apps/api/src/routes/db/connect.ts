@@ -14,7 +14,7 @@ import type { OrgContext } from "../../types.js";
 const connectDbRoute = new Hono();
 
 connectDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
-  const { id: projectId } = c.req.param() as { id: string };
+  const projectId = c.req.param("id") as string;
   const orgContext = c.get("orgContext") as OrgContext;
   const { db, org } = orgContext;
 
