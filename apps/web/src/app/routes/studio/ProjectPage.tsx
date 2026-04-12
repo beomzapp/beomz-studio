@@ -425,16 +425,20 @@ export function ProjectPage() {
             if (status.trace.previewReady || status.build.status === "completed") {
               setPreviewGenerationId(bid);
             }
+            // BEO-281: Update project name from API so TopBar reflects the AI-generated name
+            if (status.project.name && status.project.name !== "Untitled project") {
+              setProjectName(status.project.name);
+            }
             // Completion summary: natural prose
+            const displayName = status.project.name || projectName;
             const filePaths = (status.result?.files ?? []).map((f) => f.path);
             const pageFiles = filePaths.filter((p) => /Page\.tsx$|Screen\.tsx$/i.test(p));
             const pageNames = pageFiles.map((p) => {
               const name = p.replace(/^.*\//, "").replace(/(Page|Screen)\.tsx$/i, "");
               return name.replace(/([a-z])([A-Z])/g, "$1 $2");
             });
-            const modelLabel = AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.label ?? "AI";
             const pagesLine = pageNames.length > 0 ? "\n\n" + pageNames.map((n) => `**${n}**`).join(" · ") : "";
-            const summary = `**${projectName}** is ready.${pagesLine}\n\nBuilt with ${modelLabel} · ${filePaths.length} files`;
+            const summary = `**${displayName}** is ready.${pagesLine}\n\nBuilt with Beomz · ${filePaths.length} files`;
             setMessages((prev) => [
               ...prev,
               {

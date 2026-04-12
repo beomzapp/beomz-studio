@@ -183,13 +183,30 @@ function sanitiseJsxAttributes(content: string): string {
 //   '../pages/WorkOrders'      → './WorkOrders'
 //   './styles.css'             → unchanged (already flat)
 function flattenRelativeImports(content: string): string {
-  return content.replace(
-    /(['"])(\.\.?\/(?:[^/'"]*\/)+[^/'"]+)(['"])/g,
-    (_match, open, importPath, close) => {
-      const basename = importPath.replace(/^.*\//, "");
-      return `${open}./${basename}${close}`;
-    },
-  );
+  return content
+    // Relative paths with directory components: './components/X' → './X'
+    .replace(
+      /(['"])(\.\.?\/(?:[^/'"]*\/)+[^/'"]+)(['"])/g,
+      (_match, open, importPath: string, close) => {
+        const basename = importPath.replace(/^.*\//, "");
+        return `${open}./${basename}${close}`;
+      },
+    )
+    // Alias paths: '@/components/X' or '~/components/X' → './X'
+    .replace(
+      /(['"])[@~]\/(?:[^/'"]*\/)*([^/'"]+)(['"])/g,
+      (_match, open, basename: string, close) => {
+        return `${open}./${basename}${close}`;
+      },
+    )
+    // Bare directory paths without ./ prefix: 'src/components/X' → './X'
+    .replace(
+      /(?<=from\s+)(['"])(?!\.\.?\/)([^/'"]+\/(?:[^/'"]*\/)*[^/'"]+)(['"])/g,
+      (_match, open, importPath: string, close) => {
+        const basename = importPath.replace(/^.*\//, "");
+        return `${open}./${basename}${close}`;
+      },
+    );
 }
 
 // ─── Path mapping for prebuilt templates ──────────────────────────────────────
