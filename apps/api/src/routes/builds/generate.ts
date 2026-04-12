@@ -198,6 +198,9 @@ function sanitiseJsxAttributes(content: string): string {
 //   './styles.css'             → unchanged (already flat)
 function flattenRelativeImports(content: string): string {
   return content
+    // Safety net: fix AI hallucinated supabase import paths before general flattening
+    .replace(/from\s+(['"])\.\.?\/supabase-js\1/g, 'from "@supabase/supabase-js"')
+    .replace(/from\s+(['"])supabase-js\1/g, 'from "@supabase/supabase-js"')
     // Relative paths with directory components: './components/X' → './X'
     .replace(
       /(['"])(\.\.?\/(?:[^/'"]*\/)+[^/'"]+)(['"])/g,
