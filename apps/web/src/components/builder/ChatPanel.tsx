@@ -202,7 +202,7 @@ function MarkdownText({ text }: { text: string }) {
       if (line.trim() === "") {
         elements.push(<div key={`br-${i}`} className="h-2" />);
       } else {
-        elements.push(<p key={`p-${i}`} className="text-sm leading-relaxed text-[#374151]">{renderInline(line)}</p>);
+        elements.push(<p key={`p-${i}`} className="text-sm leading-relaxed text-[#374151] break-words">{renderInline(line)}</p>);
       }
     }
   }
@@ -366,7 +366,7 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
           return (
             <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
               <Check size={12} className="mt-0.5 shrink-0 text-[#10b981]" />
-              <span className="text-[#1a1a1a]">{e.message}</span>
+              <span className="text-[#1a1a1a] break-words">{e.message}</span>
             </div>
           );
         }
@@ -375,7 +375,7 @@ function TraceEntryList({ entries }: { entries: readonly BuilderV3TranscriptEntr
           return (
             <div key={e.id ?? i} className="flex items-start gap-2 text-xs">
               <span className="mt-0.5 shrink-0 leading-none text-red-500">x</span>
-              <span className="text-red-600">{e.message}</span>
+              <span className="text-red-600 break-all">{e.message}</span>
             </div>
           );
         }
@@ -521,7 +521,7 @@ export function ChatPanel({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4"
       >
         {!hasMessages && (
           <div className="flex h-full items-center justify-center">
@@ -532,7 +532,7 @@ export function ChatPanel({
         )}
 
         {hasMessages && (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {messages.map((msg, msgIdx) => {
               const displayContent = getDisplayContent(msg);
               const hasTrace = (msg.traceEntries?.length ?? 0) > 0;
@@ -552,7 +552,7 @@ export function ChatPanel({
                   {msg.role === "user" ? (
                     /* User message — right-aligned compact bubble, V1 style */
                     <div className="flex flex-col items-end gap-1">
-                      <div className="max-w-[70%] rounded-2xl rounded-tr-md bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm">
+                      <div className="max-w-[70%] min-w-0 rounded-2xl rounded-tr-md bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm break-words">
                         {msg.content}
                       </div>
                     </div>
@@ -566,7 +566,7 @@ export function ChatPanel({
                       ) : (
                         <div className="w-5 flex-shrink-0" />
                       )}
-                      <div className="group relative min-w-0 flex-1 pt-0">
+                      <div className="group relative min-w-0 flex-1 pt-0 break-words">
                         {/* Prose content — hidden during builds (when trace entries exist) */}
                         {displayContent && !hasTrace && <MarkdownText text={displayContent} />}
 
@@ -608,7 +608,7 @@ export function ChatPanel({
                 <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-purple-600 mt-0.5">
                   <span className="text-[9px] font-bold text-white leading-none">B</span>
                 </div>
-                <div className="min-w-0 flex-1 pt-0.5">
+                <div className="min-w-0 flex-1 pt-0.5 break-words">
                   {displayStreamingText ? (
                     displayStreamingText.endsWith("\u2026") || displayStreamingText.endsWith("...") ? (
                       /* Step message — orange animated dot + text */
@@ -618,7 +618,7 @@ export function ChatPanel({
                       </div>
                     ) : (
                       /* Content text — normal rendering */
-                      <div className="text-sm leading-relaxed text-[#374151]">
+                      <div className="text-sm leading-relaxed text-[#374151] break-words">
                         <MarkdownText text={displayStreamingText} />
                         <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-[#9ca3af]" />
                       </div>
@@ -657,7 +657,7 @@ export function ChatPanel({
         <div className="mx-3 mb-2 flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 shadow-sm">
           <div className="flex items-start gap-2">
             <AlertCircle size={14} className="mt-0.5 flex-shrink-0 text-red-500" />
-            <span className="flex-1 text-xs leading-relaxed text-red-800">{lastError}</span>
+            <span className="min-w-0 flex-1 text-xs leading-relaxed text-red-800 break-all">{lastError}</span>
           </div>
           <div className="flex items-center gap-2">
             {onRetry && (
