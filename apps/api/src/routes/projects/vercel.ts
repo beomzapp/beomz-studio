@@ -13,6 +13,7 @@ import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
+import { apiConfig } from "../../config.js";
 
 // ── Scaffold files required for Vercel to build a Vite + React project ────────
 // Mirrors the WebContainer scaffold in apps/web/src/lib/webcontainer.ts
@@ -179,10 +180,32 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   // Scaffold + generated files (scaffold first so generated files can override if needed)
   const deployFiles = [...buildScaffold(), ...generatedFiles];
 
+  console.log(
+    `[vercel deploy] generated files mapped:`,
+    generatedFiles.map((f) => f.filename),
+  );
+
+  // If the project is db-wired, inject Supabase credentials as Vite build-time env vars.
+  // The wire process generates code using import.meta.env.VITE_SUPABASE_URL etc.,
+  // which Vite substitutes at build time — so they MUST be present in the Vercel build env.
+  const buildEnv: Record<string, string> = {};
+  if (project.db_wired && project.db_schema) {
+    const supabaseUrl = apiConfig.USER_DATA_SUPABASE_URL;
+    const supabaseAnonKey = apiConfig.USER_DATA_SUPABASE_ANON_KEY;
+    if (supabaseUrl && supabaseAnonKey) {
+      buildEnv["VITE_SUPABASE_URL"] = supabaseUrl;
+      buildEnv["VITE_SUPABASE_ANON_KEY"] = supabaseAnonKey;
+      buildEnv["VITE_DB_SCHEMA"] = project.db_schema;
+      console.log(`[vercel deploy] injecting DB env vars for schema ${project.db_schema}`);
+    } else {
+      console.warn(`[vercel deploy] project is db_wired but USER_DATA_SUPABASE_URL/ANON_KEY not configured`);
+    }
+  }
+
   // Phase 1: upload files + create deployment (~5-10s) — synchronous so errors surface
   let handle: Awaited<ReturnType<typeof vercelDeployStart>>;
   try {
-    handle = await vercelDeployStart({ files: deployFiles, slug });
+    handle = await vercelDeployStart({ files: deployFiles, slug, env: buildEnv });
   } catch (err) {
     console.error("[vercel deploy] start failed:", err);
     return c.json({ error: "deploy_failed", detail: String(err) }, 502);

@@ -105,6 +105,8 @@ export async function pollUntilReady(
 export async function vercelDeployStart(opts: {
   files: VercelDeployFile[];
   slug: string;
+  /** Build-time env vars injected into the Vite build (e.g. VITE_SUPABASE_URL) */
+  env?: Record<string, string>;
 }): Promise<VercelDeployHandle> {
   const { token, projectId, teamId } = requireVercelConfig();
 
@@ -124,6 +126,25 @@ export async function vercelDeployStart(opts: {
     allFiles.map((f) => uploadFile(token, f)),
   );
 
+  console.log(
+    `[vercel deploy] uploading ${uploaded.length} files:`,
+    uploaded.map((f) => `${f.filename} (${f.size}B)`),
+  );
+
+  // Build deployment body — include env vars if provided (e.g. VITE_SUPABASE_URL)
+  const deployBody: Record<string, unknown> = {
+    name: "beomz-apps",
+    project: projectId,
+    files: uploaded.map(({ filename, sha, size }) => ({ file: filename, sha, size })),
+    projectSettings: { framework: "vite" },
+    target: "production",
+    alias: [`${opts.slug}.beomz.app`],
+  };
+  if (opts.env && Object.keys(opts.env).length > 0) {
+    deployBody.env = opts.env;
+    console.log(`[vercel deploy] build env keys:`, Object.keys(opts.env));
+  }
+
   // Create deployment
   const deployRes = await fetch(
     `https://api.vercel.com/v13/deployments?teamId=${teamId}`,
@@ -133,14 +154,7 @@ export async function vercelDeployStart(opts: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        name: "beomz-apps",
-        project: projectId,
-        files: uploaded.map(({ filename, sha, size }) => ({ file: filename, sha, size })),
-        projectSettings: { framework: "vite" },
-        target: "production",
-        alias: [`${opts.slug}.beomz.app`],
-      }),
+      body: JSON.stringify(deployBody),
     },
   );
 
