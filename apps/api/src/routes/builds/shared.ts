@@ -241,6 +241,11 @@ export function mapProjectRowToProject(row: ProjectRow): Project {
     status: row.status,
     templateId: row.template,
     updatedAt: row.updated_at,
+    // BEO-197: Phased build system
+    phaseMode: Boolean(row.phase_mode),
+    currentPhase: row.current_phase ?? 0,
+    phasesTotal: row.phases_total ?? 0,
+    buildPhases: row.build_phases ?? null,
   };
 }
 

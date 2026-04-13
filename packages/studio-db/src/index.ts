@@ -77,6 +77,11 @@ export interface ProjectRow extends Record<string, unknown> {
   // Vercel deploy — slug.beomz.app
   beomz_app_url: string | null;
   beomz_app_deployed_at: string | null;
+  // BEO-197: Phased build system
+  build_phases: unknown | null;
+  current_phase: number;
+  phases_total: number;
+  phase_mode: boolean;
 }
 
 export interface GenerationRow extends Record<string, unknown> {
@@ -223,6 +228,11 @@ export interface ProjectUpdate extends Record<string, unknown> {
   // Vercel deploy — slug.beomz.app
   beomz_app_url?: string | null;
   beomz_app_deployed_at?: string | null;
+  // BEO-197: Phased build system
+  build_phases?: unknown | null;
+  current_phase?: number;
+  phases_total?: number;
+  phase_mode?: boolean;
 }
 
 export interface GenerationInsert extends Record<string, unknown> {

@@ -49,6 +49,11 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string | null;
+  // BEO-197: Phased build system
+  phaseMode?: boolean;
+  currentPhase?: number;
+  phasesTotal?: number;
+  buildPhases?: unknown | null;
 }
 
 export interface StudioFile {

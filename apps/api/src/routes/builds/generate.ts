@@ -41,6 +41,8 @@ import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
+import { planPhases } from "../../lib/planPhases.js";
+import type { Phase } from "../../lib/planPhases.js";
 import { sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
@@ -65,6 +67,12 @@ export interface BuildGenerateInput {
   operationId: string;
   isIteration: boolean;
   existingFiles: readonly StudioFile[];
+  // BEO-197: phased build context (supplied when continuing a phase)
+  phaseOverride?: {
+    phases: Phase[];
+    currentPhase: number;
+    phasesTotal: number;
+  };
 }
 
 interface CustomiseResult {
@@ -976,16 +984,80 @@ function buildThemeTs(paletteId: string): string {
   ].join("\n");
 }
 
+// ─── Phased build helpers ─────────────────────────────────────────────────────
+
+const ROLE_INDICATORS = [
+  "owner", "admin", "manager", "officer", "user", "staff",
+  "customer", "employee", "tenant", "operator",
+];
+
+export function isComplexPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  const roleMatches = ROLE_INDICATORS.filter((r) => lower.includes(r)).length;
+  return roleMatches >= 2 || prompt.length > 300;
+}
+
+function buildPhaseContextBlock(
+  currentPhase: number,
+  phasesTotal: number,
+  phases: Phase[],
+  existingFileNames: string[],
+): string {
+  const phase1 = phases[0];
+  const currentPhaseData = phases.find((p) => p.index === currentPhase);
+
+  if (!phase1 || !currentPhaseData) return "";
+
+  if (currentPhase === 1) {
+    return [
+      `--- BUILD PHASE 1 of ${phasesTotal}: ${phase1.title} ---`,
+      `This complex app will be built in ${phasesTotal} phases.`,
+      `Build ONLY Phase 1 now: ${phase1.description}`,
+      `Focus: ${phase1.focus.join(", ")}`,
+      "Keep it clean — subsequent phases will add to this foundation.",
+      "--- END PHASE CONTEXT ---",
+    ].join("\n");
+  }
+
+  const completedPhases = phases.filter((p) => p.index < currentPhase);
+  const completedBlock = completedPhases
+    .map((p) => `Phase ${p.index}: ${p.title}\n  Built: ${p.focus.join(", ")}`)
+    .join("\n");
+
+  return [
+    "--- BUILD PHASES ---",
+    `This app is being built in ${phasesTotal} phases.`,
+    "",
+    "COMPLETED PHASES:",
+    completedBlock,
+    "",
+    existingFileNames.length > 0
+      ? `EXISTING FILES (do not recreate, only extend):\n${existingFileNames.join(", ")}`
+      : "",
+    "",
+    `CURRENT PHASE ${currentPhase}: ${currentPhaseData.title}`,
+    `Build: ${currentPhaseData.description}`,
+    `Focus on: ${currentPhaseData.focus.join(", ")}`,
+    "",
+    "CRITICAL: Import from existing files. Add to App.tsx routing.",
+    "Do not rewrite files from previous phases unless extending them.",
+    "--- END BUILD PHASES ---",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
 // ─── Shared prompt builders ───────────────────────────────────────────────────
 
-function buildSystemPrompt(paletteId: string, designSystemSpec?: string): string {
+function buildSystemPrompt(paletteId: string, designSystemSpec?: string, phaseContextBlock?: string): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
     : "";
+  const phaseBlock = phaseContextBlock ? `${phaseContextBlock}\n\n` : "";
   const themeTsContent = buildThemeTs(paletteId);
   const variationSeed = Math.floor(Math.random() * 9000) + 1000;
   return [
-    designBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
+    designBlock + phaseBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
     "",
     `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
@@ -1149,8 +1221,9 @@ async function callAnthropicCustomise(
   model: string,
   paletteId: string,
   designSystemSpec?: string,
+  phaseContextBlock?: string,
 ): Promise<CustomiseResult> {
-  return callAnthropicWithMessages(model, buildSystemPrompt(paletteId, designSystemSpec), buildUserMessage(prompt), prompt);
+  return callAnthropicWithMessages(model, buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock), buildUserMessage(prompt), prompt);
 }
 
 // ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
@@ -1200,8 +1273,9 @@ async function callOpenAICompatibleCustomise(
   paletteId: string,
   baseURL?: string,
   designSystemSpec?: string,
+  phaseContextBlock?: string,
 ): Promise<CustomiseResult> {
-  return callOpenAICompatibleWithMessages(model, apiKey, buildSystemPrompt(paletteId, designSystemSpec), buildUserMessage(prompt), prompt, baseURL);
+  return callOpenAICompatibleWithMessages(model, apiKey, buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock), buildUserMessage(prompt), prompt, baseURL);
 }
 
 // ─── Model dispatch (initial build) ──────────────────────────────────────────
@@ -1210,6 +1284,7 @@ async function callModelCustomise(
   prompt: string,
   model: string,
   paletteId: string,
+  phaseContextBlock?: string,
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
@@ -1220,13 +1295,13 @@ async function callModelCustomise(
   }
 
   if (model.startsWith("claude-")) {
-    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec);
+    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec, phaseContextBlock);
   }
 
   if (model.startsWith("gpt-")) {
     const apiKey = apiConfig.OPENAI_API_KEY;
     if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
-    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId, undefined, designSystemSpec);
+    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId, undefined, designSystemSpec, phaseContextBlock);
   }
 
   if (model.startsWith("gemini-")) {
@@ -1235,13 +1310,13 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
-      designSystemSpec,
+      designSystemSpec, phaseContextBlock,
     );
   }
 
   // Unknown model — fall back to haiku
   console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
-  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec);
+  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec, phaseContextBlock);
 }
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
@@ -1443,6 +1518,44 @@ async function _runBuildInBackground(
   // Generic prompts (todo, calculator, etc.) skip this with zero delay.
   // Any failure returns the original prompt unchanged — never blocks the build.
   const workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);;
+
+  // ── Phase planning (initial builds only, non-iteration) ───────────────────
+  // If the enriched prompt is complex and no phase override is supplied,
+  // plan phases with Haiku. Failures here NEVER block the build.
+  let activePhasesData: Phase[] | null = null;
+  let activeCurrentPhase = 1;
+  let activePhasesTotal = 0;
+
+  if (!input.isIteration) {
+    if (input.phaseOverride) {
+      // Continuing an existing phased project
+      activePhasesData = input.phaseOverride.phases;
+      activeCurrentPhase = input.phaseOverride.currentPhase;
+      activePhasesTotal = input.phaseOverride.phasesTotal;
+      console.log("[generate] phase override supplied:", { currentPhase: activeCurrentPhase, phasesTotal: activePhasesTotal });
+    } else if (isComplexPrompt(workingPrompt)) {
+      try {
+        const phases = await planPhases(workingPrompt);
+        if (phases.length >= 2) {
+          activePhasesData = phases;
+          activeCurrentPhase = 1;
+          activePhasesTotal = phases.length;
+
+          // Persist phase plan to the project
+          await db.updateProject(projectId, {
+            build_phases: phases as unknown,
+            phases_total: activePhasesTotal,
+            current_phase: 1,
+            phase_mode: true,
+          }).catch((e) => console.warn("[generate] phase plan save failed (non-fatal):", e instanceof Error ? e.message : String(e)));
+
+          console.log("[generate] phases planned and saved:", activePhasesTotal, "phases");
+        }
+      } catch (phaseErr) {
+        console.warn("[generate] planPhases threw (non-fatal):", phaseErr instanceof Error ? phaseErr.message : String(phaseErr));
+      }
+    }
+  }
 
   const statusEvent = (code: string, message: string, phase: string): BuilderV3StatusEvent => ({
     type: "status",
@@ -1746,6 +1859,21 @@ async function _runBuildInBackground(
 
     console.log("[generate] scaffold_ready emitted.", { buildId, templateId: prebuilt.manifest.id });
 
+    // ── phases_planned SSE event (if phases were just planned) ─────────────
+    if (activePhasesData && activeCurrentPhase === 1 && !input.phaseOverride) {
+      const phasesPlannedEvent = {
+        type: "phases_planned" as const,
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        code: "phases_planned",
+        message: `Building in ${activePhasesTotal} phases. Starting Phase 1.`,
+        phases: activePhasesData,
+        currentPhase: 1,
+      };
+      await appendEventToDb(db, buildId, phasesPlannedEvent as unknown as BuilderV3StatusEvent);
+    }
+
     // ── 3. Anthropic customisation ──────────────────────────────────────────
     await appendEventToDb(
       db, buildId,
@@ -1755,8 +1883,18 @@ async function _runBuildInBackground(
     let customised: CustomiseResult;
     let fallbackUsed = false;
 
+    // Build phase context block if in phase mode
+    const phaseContextBlock = activePhasesData
+      ? buildPhaseContextBlock(
+          activeCurrentPhase,
+          activePhasesTotal,
+          activePhasesData,
+          input.existingFiles.map((f) => f.path.replace(/^.*\//, "")),
+        )
+      : undefined;
+
     try {
-      customised = await callModelCustomise(workingPrompt, model, paletteId);
+      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
       // we flatten into the generated directory. Patch any residual CJS React globals.

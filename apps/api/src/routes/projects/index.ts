@@ -15,6 +15,28 @@ import { PLAN_LIMITS } from "../../lib/credits.js";
 
 const projectsRoute = new Hono();
 
+projectsRoute.get("/:id", verifyPlatformJwt, loadOrgContext, async (c) => {
+  const orgContext = c.get("orgContext") as OrgContext;
+  const projectId = c.req.param("id");
+
+  const project = await orgContext.db.findProjectById(projectId);
+  if (!project || project.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  return c.json({
+    ...mapProjectRowToProject(project),
+    // Extra fields not on the core Project type
+    database_enabled: Boolean(project.database_enabled),
+    db_provider: project.db_provider ?? null,
+    db_wired: Boolean(project.db_wired),
+    thumbnail_url: project.thumbnail_url ?? null,
+    published: Boolean(project.published),
+    published_slug: project.published_slug ?? null,
+    beomz_app_url: project.beomz_app_url ?? null,
+  });
+});
+
 projectsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
 
@@ -38,7 +60,6 @@ projectsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     published_slug: row.published_slug ?? null,
     beomz_app_url: row.beomz_app_url ?? null,
   }));
-
   const plan = orgContext.org.plan ?? "free";
   const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free!;
   // Free plan is capped at 3 projects; paid plans are unlimited (-1 = unlimited)
