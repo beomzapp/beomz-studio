@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { Hono } from "hono";
 
 import { activeBuilds } from "./lib/activeBuilds.js";
+import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "./config.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
@@ -111,12 +112,32 @@ serve(
 
 // ── Graceful shutdown (BEO-255) ──────────────────────────────────────────────
 // PM2 sends SIGTERM (or SIGINT) when restarting. If any Sonnet build is still
-// running we wait up to 60s before exiting so the build can complete and write
+// running we wait up to 180s before exiting so the build can complete and write
 // its result to Supabase rather than dying mid-generation.
 async function gracefulShutdown(signal: string): Promise<void> {
+  // Mark any in-flight builds as failed immediately so the frontend can surface
+  // an error rather than spinning indefinitely after a restart (BEO-255).
   if (activeBuilds.size > 0) {
-    console.log(`[shutdown] ${signal} received — ${activeBuilds.size} active build(s) in flight. Waiting up to 60s...`);
-    const deadline = Date.now() + 60_000;
+    console.log(`[shutdown] ${signal} received — ${activeBuilds.size} active build(s) in flight. Marking as failed...`);
+    try {
+      const db = createStudioDbClient();
+      const completedAt = new Date().toISOString();
+      await Promise.allSettled(
+        [...activeBuilds].map((buildId) =>
+          db.updateGeneration(buildId, {
+            status: "failed",
+            error: "Server restarted during build",
+            completed_at: completedAt,
+          }),
+        ),
+      );
+      console.log(`[shutdown] marked ${activeBuilds.size} running build(s) as failed`);
+    } catch (err) {
+      console.warn("[shutdown] failed to mark builds as failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    }
+
+    console.log(`[shutdown] waiting up to 180s for builds to drain...`);
+    const deadline = Date.now() + 180_000;
     while (activeBuilds.size > 0 && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
     }
