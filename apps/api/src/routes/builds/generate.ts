@@ -40,6 +40,7 @@ import {
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
+import { sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
   getSchemaTableList,
@@ -152,80 +153,6 @@ function inferLanguage(path: string): string {
 }
 
 // ─── React import patcher ─────────────────────────────────────────────────────
-// All prebuilt templates use `const { useState, ... } = React;` (CJS/UMD style)
-// designed for the inline srcDoc preview where React is injected as window.React.
-// Vite inside WebContainer uses strict ESM — patch each destructure to a proper
-// import statement so the component compiles without errors.
-function patchReactGlobals(content: string): string {
-  const allNames = new Set<string>();
-  const cleaned = content.replace(
-    /^const\s*\{([^}]+)\}\s*=\s*React\s*;?\r?\n?/gm,
-    (_match, identifiers: string) => {
-      identifiers.split(",").map((s) => s.trim()).filter(Boolean).forEach((n) => allNames.add(n));
-      return "";
-    },
-  );
-  if (allNames.size === 0) return content;
-  return `import { ${Array.from(allNames).join(", ")} } from "react";\n${cleaned}`;
-}
-
-// ─── Sanitise JSX attributes ─────────────────────────────────────────────────
-// AI sometimes generates backslash-escaped quotes inside double-quoted JSX
-// attributes: placeholder="e.g. MacBook Pro 14\" (HW001)"
-// This is invalid JSX — Vite/oxc chokes on it. Replace \" inside
-// double-quoted attribute values with &quot; so the JSX parser is happy.
-function sanitiseJsxAttributes(content: string): string {
-  return content.replace(
-    /(<\w[^>]*?\s\w[\w-]*=)"((?:[^"\\]|\\.)*)"/g,
-    (_match, prefix: string, value: string) => {
-      if (!value.includes('\\"')) return _match;
-      const cleaned = value.replace(/\\"/g, "&quot;");
-      return `${prefix}"${cleaned}"`;
-    },
-  );
-}
-
-// ─── Flatten relative imports ─────────────────────────────────────────────────
-// After remapPrebuiltPath() all generated files live in the same flat directory.
-// If the AI generates App.tsx with `import X from './components/X'` but we
-// flatten components/X.tsx → X.tsx, the import breaks and Vite returns
-// index.html (text/html) instead of the module → MIME error.
-//
-// This function rewrites any relative import that has directory components
-// to a flat `./basename` form:
-//   './components/AssetsPage'  → './AssetsPage'
-//   '../pages/WorkOrders'      → './WorkOrders'
-//   './styles.css'             → unchanged (already flat)
-function flattenRelativeImports(content: string): string {
-  return content
-    // Safety net: fix AI hallucinated supabase import paths before general flattening
-    .replace(/from\s+(['"])\.\.?\/supabase-js\1/g, 'from "@supabase/supabase-js"')
-    .replace(/from\s+(['"])supabase-js\1/g, 'from "@supabase/supabase-js"')
-    // Relative paths with directory components: './components/X' → './X'
-    .replace(
-      /(['"])(\.\.?\/(?:[^/'"]*\/)+[^/'"]+)(['"])/g,
-      (_match, open, importPath: string, close) => {
-        const basename = importPath.replace(/^.*\//, "");
-        return `${open}./${basename}${close}`;
-      },
-    )
-    // Alias paths: '@/components/X' or '~/components/X' → './X'
-    .replace(
-      /(['"])[@~]\/(?:[^/'"]*\/)*([^/'"]+)(['"])/g,
-      (_match, open, basename: string, close) => {
-        return `${open}./${basename}${close}`;
-      },
-    )
-    // Bare directory paths without ./ prefix: 'src/components/X' → './X'
-    .replace(
-      /(?<=from\s+)(['"])(?!\.\.?\/)([^/'"]+\/(?:[^/'"]*\/)*[^/'"]+)(['"])/g,
-      (_match, open, importPath: string, close) => {
-        const basename = importPath.replace(/^.*\//, "");
-        return `${open}./${basename}${close}`;
-      },
-    );
-}
-
 // ─── Path mapping for prebuilt templates ──────────────────────────────────────
 // The WebContainer preview shell (WORKSPACE_PREVIEW_APP_TSX in webcontainer.ts)
 // globs `apps/web/src/app/generated/**/*.tsx` and reads routes from
@@ -291,7 +218,7 @@ function templateFilesToStudioFiles(
       path: targetPath,
       kind: inferFileKind(targetPath),
       language: inferLanguage(targetPath),
-      content: sanitiseJsxAttributes(patchReactGlobals(f.content)),
+      content: sanitiseContent(f.content, targetPath),
       source: "platform" as const,
       locked: false,
     });
@@ -1439,48 +1366,6 @@ async function callModelIterate(
   return callAnthropicWithMessages("claude-haiku-4-5-20251001", systemPrompt, userMessage, prompt);
 }
 
-// ─── Post-generation COEP sanitiser ─────────────────────────────────────────
-// Belt-and-suspenders: even if Claude ignores the system prompt rule, strip
-// any external resource references before files reach WebContainer.
-// WebContainer enforces COEP require-corp; resources without CORP headers
-// (Google Fonts, CDN scripts, external images) trigger
-// ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep.
-
-function sanitiseExternalUrls(content: string, path: string): string {
-  let out = content;
-
-  // 1. CSS @import url('https://fonts.googleapis.com/…') — entire line
-  out = out.replace(/@import\s+url\(['"]https?:\/\/[^'"]+['"]\)\s*;?\s*/gi, "");
-  out = out.replace(/@import\s+['"]https?:\/\/[^'"]+['"]\s*;?\s*/gi, "");
-
-  // 2. url('https://…') inside CSS properties (backgrounds, fonts, etc.)
-  //    Replace with none / transparent so the rule still applies but renders blank.
-  out = out.replace(/url\(['"]https?:\/\/[^'"]*['"]\)/gi, "none");
-
-  // 3. JSX <link href="https://fonts.googleapis.com/…" … /> or similar
-  //    Strip the whole element; these break COEP and are usually font imports.
-  out = out.replace(/<link[^>]+href=['"]https?:\/\/[^'"]*['"][^>]*\/?>/gi, "");
-
-  // 4. JSX/HTML <script src="https://…"> … </script>  (CDN scripts)
-  out = out.replace(/<script[^>]+src=['"]https?:\/\/[^'"]*['"][^>]*>[\s\S]*?<\/script>/gi, "");
-  out = out.replace(/<script[^>]+src=['"]https?:\/\/[^'"]*['"][^>]*\/>/gi, "");
-
-  // 5. Inline style / className strings referencing external font-family from Google
-  //    e.g.  fontFamily: "'Roboto', sans-serif"  after a Google Fonts import was stripped.
-  //    Leave font-family values intact — just remove the external import; the browser
-  //    will fall through to sans-serif naturally.
-
-  if (out !== content) {
-    console.warn("[generate] sanitiseExternalUrls: stripped external URL(s) from", path);
-  }
-  return out;
-}
-
-function sanitiseFiles(
-  files: Array<{ path: string; content: string }>,
-): Array<{ path: string; content: string }> {
-  return files.map((f) => ({ ...f, content: sanitiseExternalUrls(f.content, f.path) }));
-}
 const LEGACY_TEMPLATE_TAGS: Record<string, readonly string[]> = {
   "marketing-website": ["landing", "website", "launch"],
   "saas-dashboard": ["dashboard", "analytics", "saas"],
@@ -1668,7 +1553,7 @@ async function _runBuildInBackground(
           files: sanitiseFiles(
             iterResult.files.map((f) => ({
               path: remapPrebuiltPath(f.path, templateId),
-              content: sanitiseJsxAttributes(flattenRelativeImports(patchReactGlobals(f.content))),
+              content: f.content,
             })),
           ),
         };
@@ -1872,9 +1757,7 @@ async function _runBuildInBackground(
         files: sanitiseFiles(
           customised.files.map((f) => ({
             path: remapPrebuiltPath(f.path, templateId),
-            // patchReactGlobals: CJS React destructure → ESM import
-            // flattenRelativeImports: './components/X' → './X' (all files are flat)
-            content: sanitiseJsxAttributes(flattenRelativeImports(patchReactGlobals(f.content))),
+            content: f.content,
           })),
         ),
       };
@@ -1891,7 +1774,7 @@ async function _runBuildInBackground(
         files: sanitiseFiles(
           prebuilt.files.map((f) => ({
             path: remapPrebuiltPath(f.path, templateId),
-            content: sanitiseJsxAttributes(patchReactGlobals(f.content)),
+            content: f.content,
           })),
         ),
         summary: `${prebuilt.manifest.name} — ${prompt}`,

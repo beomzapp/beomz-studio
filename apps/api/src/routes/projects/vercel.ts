@@ -288,9 +288,10 @@ vercelDeployRoute.delete("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   // Extract slug from 'https://slug.beomz.app' → 'slug'
-  const slugMatch = project.beomz_app_url.match(/^https?:\/\/([^.]+)\.beomz\.app/);
+  const appUrl = project.beomz_app_url as string;
+  const slugMatch = appUrl.match(/^https?:\/\/([^.]+)\.beomz\.app/);
   if (!slugMatch) {
-    return c.json({ error: "invalid_url", detail: project.beomz_app_url }, 400);
+    return c.json({ error: "invalid_url", detail: appUrl }, 400);
   }
   const slug = slugMatch[1];
   const domain = `${slug}.beomz.app`;
