@@ -464,7 +464,16 @@ export async function exportProjectZip(projectId: string): Promise<Blob> {
   return response.blob();
 }
 
-// ── Fix API ───────────────────────────────────���────────────────
+export async function deployToVercel(
+  projectId: string,
+): Promise<{ ok: boolean; url: string }> {
+  return requestJson<{ ok: boolean; url: string }>(
+    `/projects/${projectId}/deploy/vercel`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+// ── Fix API ────────────────────────────────────────────────────
 
 export async function fixFile(args: {
   buildId: string;

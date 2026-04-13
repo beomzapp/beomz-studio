@@ -160,6 +160,7 @@ export function ProjectPage() {
   // Publish state
   const [isPublished, setIsPublished] = useState(false);
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  const [beomzAppUrl, setBeomzAppUrl] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -212,11 +213,16 @@ export function ProjectPage() {
     if (!projectId || id === "new") return;
     void listProjectsWithMeta().then((data) => {
       const proj = data.projects.find((p) => p.id === projectId) as
-        | (typeof data.projects[number] & { published?: boolean; published_slug?: string | null })
+        | (typeof data.projects[number] & {
+            published?: boolean;
+            published_slug?: string | null;
+            beomz_app_url?: string | null;
+          })
         | undefined;
       if (proj) {
         setIsPublished(Boolean(proj.published));
         setPublishedSlug(proj.published_slug ?? null);
+        setBeomzAppUrl(proj.beomz_app_url ?? null);
       }
     }).catch(() => {});
   }, [projectId, id]);
@@ -1061,6 +1067,7 @@ export function ProjectPage() {
         onPublish={() => setShowPublishModal(true)}
         onExportZip={handleExportZip}
         isExporting={isExporting}
+        beomzAppUrl={beomzAppUrl}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -1124,6 +1131,7 @@ export function ProjectPage() {
           projectName={projectName}
           isPublished={isPublished}
           publishedSlug={publishedSlug ?? undefined}
+          beomzAppUrl={beomzAppUrl}
           onClose={() => setShowPublishModal(false)}
           onPublished={(_url, slug) => {
             setIsPublished(true);
@@ -1132,6 +1140,9 @@ export function ProjectPage() {
           onUnpublished={() => {
             setIsPublished(false);
             setPublishedSlug(null);
+          }}
+          onVercelDeployed={(url) => {
+            setBeomzAppUrl(url);
           }}
         />
       )}

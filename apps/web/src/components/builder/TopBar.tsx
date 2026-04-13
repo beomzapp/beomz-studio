@@ -72,6 +72,7 @@ interface TopBarProps {
   onPublish?: () => void;
   onExportZip?: () => void;
   isExporting?: boolean;
+  beomzAppUrl?: string | null;
 }
 
 function toast(msg: string) {
@@ -111,6 +112,7 @@ export function TopBar({
   onPublish,
   onExportZip,
   isExporting = false,
+  beomzAppUrl,
 }: TopBarProps) {
   const navigate = useNavigate();
   const [editingName, setEditingName] = useState(false);
@@ -269,6 +271,17 @@ export function TopBar({
           {isExporting ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
           <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
         </button>
+
+        {/* beomz.app pill */}
+        {beomzAppUrl && (
+          <button
+            onClick={() => window.open(beomzAppUrl.startsWith("http") ? beomzAppUrl : `https://${beomzAppUrl}`, "_blank")}
+            className="flex items-center gap-1 rounded-full bg-[#111] px-2.5 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-[#333]"
+          >
+            <span className="text-[10px]">▲</span>
+            beomz.app
+          </button>
+        )}
 
         {/* Publish button with states */}
         {isPublished ? (

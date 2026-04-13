@@ -36,6 +36,7 @@ projectsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     // BEO-262: Publish
     published: Boolean(row.published),
     published_slug: row.published_slug ?? null,
+    beomz_app_url: row.beomz_app_url ?? null,
   }));
 
   const plan = orgContext.org.plan ?? "free";
