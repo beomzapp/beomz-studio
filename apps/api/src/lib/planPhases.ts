@@ -56,7 +56,10 @@ export async function planPhases(prompt: string): Promise<Phase[]> {
       return [];
     }
 
-    const raw = textBlock.text.trim();
+    const raw = textBlock.text
+      .trim()
+      .replace(/^```(?:json)?\n?/, "")
+      .replace(/\n?```$/, "");
     const phases = JSON.parse(raw) as unknown;
 
     if (!Array.isArray(phases)) {
