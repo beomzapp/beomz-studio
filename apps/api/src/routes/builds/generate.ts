@@ -25,6 +25,7 @@ import type {
   BuilderV3PreviewReadyEvent,
   BuilderV3StatusEvent,
   BuilderV3TraceMetadata,
+  PrebuiltTemplate,
   StudioFile,
   TemplateFile,
   TemplateId,
@@ -991,10 +992,40 @@ const ROLE_INDICATORS = [
   "customer", "employee", "tenant", "operator",
 ];
 
+const DOMAIN_COMPLEXITY_KEYWORDS = [
+  "scheduling", "workflow", "portal", "dashboard", "management",
+  "tracking", "reporting", "billing", "inventory", "compliance",
+  "admissions", "dispensing", "laboratory", "clinical", "surgical",
+];
+
+const MULTI_ENTITY_INDICATORS = [
+  "patients", "staff", "doctors", "nurses", "users", "clients",
+  "customers", "employees", "vendors", "suppliers", "tenants",
+];
+
 export function isComplexPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase();
+
+  // 2+ user role words
   const roleMatches = ROLE_INDICATORS.filter((r) => lower.includes(r)).length;
-  return roleMatches >= 2 || prompt.length > 300;
+  if (roleMatches >= 2) return true;
+
+  // Prompt length > 300 chars
+  if (prompt.length > 300) return true;
+
+  // 4+ feature nouns separated by commas, "and", or newlines
+  const featureTokens = lower.split(/,|\band\b|\n/).map((s) => s.trim()).filter(Boolean);
+  if (featureTokens.length >= 4) return true;
+
+  // 3+ domain complexity keywords
+  const domainMatches = DOMAIN_COMPLEXITY_KEYWORDS.filter((k) => lower.includes(k)).length;
+  if (domainMatches >= 3) return true;
+
+  // 2+ multi-entity indicators
+  const entityMatches = MULTI_ENTITY_INDICATORS.filter((k) => lower.includes(k)).length;
+  if (entityMatches >= 2) return true;
+
+  return false;
 }
 
 function buildPhaseContextBlock(
@@ -1456,6 +1487,110 @@ const LEGACY_TEMPLATE_TAGS: Record<string, readonly string[]> = {
   "interactive-tool": ["calculator", "timer", "converter"],
 };
 
+// Domain keyword → template tag mappings tried before blank scaffold fallback
+const DOMAIN_TAG_MAP: Array<{ keywords: readonly string[]; tags: readonly string[] }> = [
+  {
+    keywords: ["hospital", "medical", "clinical", "patient", "healthcare", "clinic", "ehr", "emr"],
+    tags: ["medical", "healthcare", "patient", "clinical", "hospital"],
+  },
+  {
+    keywords: ["logistics", "warehouse", "shipping", "freight", "fleet", "dispatch", "cargo"],
+    tags: ["logistics", "shipping", "inventory", "warehouse", "fleet"],
+  },
+  {
+    keywords: ["restaurant", "food", "menu", "kitchen", "dining", "cafe", "bistro"],
+    tags: ["restaurant", "food", "menu"],
+  },
+  {
+    keywords: ["real estate", "property", "realty", "lease", "landlord"],
+    tags: ["real-estate", "property", "lease"],
+  },
+  {
+    keywords: ["school", "education", "student", "teacher", "course", "university", "college"],
+    tags: ["education", "learning", "school", "student"],
+  },
+  {
+    keywords: ["construction", "contractor", "project management", "site management", "buildsite"],
+    tags: ["construction", "project", "management"],
+  },
+  {
+    keywords: ["legal", "law firm", "attorney", "case management", "contracts", "compliance"],
+    tags: ["legal", "law", "compliance"],
+  },
+  {
+    keywords: ["hr", "human resources", "recruitment", "payroll", "onboarding", "leave management"],
+    tags: ["hr", "recruitment", "payroll", "employee"],
+  },
+];
+
+/**
+ * Minimal blank scaffold — sidebar nav + main content area, no pre-built data tables or
+ * MRR dashboards. Forces Sonnet to generate entirely domain-specific content rather than
+ * reusing generic SaaS patterns.
+ */
+function buildBlankScaffold(): PrebuiltTemplate {
+  return {
+    manifest: {
+      id: "blank-scaffold",
+      name: "Blank Scaffold",
+      description: "Minimal sidebar shell — Sonnet writes all domain-specific content",
+      shell: "dashboard",
+      accentColor: "#3b82f6",
+      tags: [],
+    },
+    files: [
+      {
+        path: "App.tsx",
+        content: `import { useState } from 'react';
+import { LayoutDashboard, Settings } from 'lucide-react';
+
+const NAV_ITEMS = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'settings', label: 'Settings', icon: Settings },
+];
+
+export default function App() {
+  const [activeNav, setActiveNav] = useState('dashboard');
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif', backgroundColor: '#f8fafc' }}>
+      <div style={{ width: 220, backgroundColor: '#f1f5f9', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: '16px 0' }}>
+        <div style={{ padding: '0 16px 16px', borderBottom: '1px solid #e2e8f0', marginBottom: 8 }}>
+          <span style={{ fontWeight: 700, fontSize: 16, color: '#111827' }}>App</span>
+        </div>
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveNav(id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 16px', border: 'none', cursor: 'pointer',
+              backgroundColor: activeNav === id ? '#e2e8f0' : 'transparent',
+              color: activeNav === id ? '#111827' : '#6b7280',
+              textAlign: 'left', width: '100%', fontSize: 14,
+            }}
+          >
+            <Icon size={16} />
+            {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ flex: 1, padding: 32, overflowY: 'auto' }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
+          Welcome
+        </h1>
+        <p style={{ color: '#6b7280', fontSize: 14 }}>
+          Select a section from the sidebar to get started.
+        </p>
+      </div>
+    </div>
+  );
+}`,
+      },
+    ],
+  };
+}
+
 function pickBestPrebuilt(
   templateId: string,
   prompt: string,
@@ -1479,8 +1614,27 @@ function pickBestPrebuilt(
     if (byCat.length > 0) return byCat[0]!;
   }
 
-  // Last resort: first in registry
-  return listPrebuiltTemplates()[0]!;
+  // Domain-aware last resort: try domain tag map, then blank scaffold.
+  // A domain-specific prompt that matched nothing in the registry gets a blank
+  // shell rather than the generic SaaS dashboard — Sonnet writes everything fresh.
+  const lowerPrompt = prompt.toLowerCase();
+  for (const { keywords, tags } of DOMAIN_TAG_MAP) {
+    if (keywords.some((kw) => lowerPrompt.includes(kw))) {
+      const domainMatch = searchPrebuiltTemplatesByTags([...tags]);
+      if (domainMatch.length > 0) {
+        console.log("[generate] domain fallback matched tags:", tags, "→", domainMatch[0]!.manifest.id);
+        return domainMatch[0]!;
+      }
+      // Domain detected but no matching template → blank scaffold
+      console.log("[generate] domain detected, no template match — using blank scaffold:", keywords.find((k) => lowerPrompt.includes(k)));
+      return buildBlankScaffold();
+    }
+  }
+
+  // Final fallback: blank scaffold instead of generic SaaS dashboard.
+  // Forces Sonnet to build domain-specific content from scratch.
+  console.log("[generate] no template match — using blank scaffold");
+  return buildBlankScaffold();
 }
 
 /**
