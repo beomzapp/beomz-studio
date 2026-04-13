@@ -482,6 +482,15 @@ export async function getVercelDeployStatus(
   );
 }
 
+export async function unpublishVercel(
+  projectId: string,
+): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(
+    `/projects/${projectId}/deploy/vercel`,
+    { method: "DELETE" },
+  );
+}
+
 // ── Fix API ────────────────────────────────────────────────────
 
 export async function fixFile(args: {

@@ -1144,6 +1144,9 @@ export function ProjectPage() {
           onVercelDeployed={(url) => {
             setBeomzAppUrl(url);
           }}
+          onVercelUnpublished={() => {
+            setBeomzAppUrl(null);
+          }}
         />
       )}
     </div>

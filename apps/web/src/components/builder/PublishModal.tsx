@@ -10,6 +10,7 @@ import {
   Loader,
   X,
   Link2Off,
+  RefreshCw,
 } from "lucide-react";
 import {
   publishProject,
@@ -17,6 +18,7 @@ import {
   checkSlugAvailable,
   deployToVercel,
   getVercelDeployStatus,
+  unpublishVercel,
 } from "../../lib/api";
 
 interface PublishModalProps {
@@ -29,6 +31,7 @@ interface PublishModalProps {
   onPublished: (url: string, slug: string) => void;
   onUnpublished: () => void;
   onVercelDeployed: (url: string) => void;
+  onVercelUnpublished?: () => void;
 }
 
 function slugify(name: string): string {
@@ -53,6 +56,7 @@ export function PublishModal({
   onPublished,
   onUnpublished,
   onVercelDeployed,
+  onVercelUnpublished,
 }: PublishModalProps) {
   // Determine initial view
   const initialView = (): ModalView => {
@@ -160,22 +164,29 @@ export function PublishModal({
     };
   }, []);
 
+  const [redeploying, setRedeploying] = useState(false);
+  const [vercelUnpublishing, setVercelUnpublishing] = useState(false);
+
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   }, []);
 
-  const handleVercelDeploy = useCallback(async () => {
+  const startVercelDeploy = useCallback(async (isRedeploy: boolean) => {
     setView("vercel-deploying");
     setError(null);
     setVercelElapsed(0);
+    if (isRedeploy) setRedeploying(true);
+
+    const fallbackView: ModalView = isRedeploy ? "vercel-success" : "choose";
 
     // Step 1: kick off deploy (returns 202 quickly)
     try {
       await deployToVercel(projectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Deploy failed — please try again");
-      setView("choose");
+      setView(fallbackView);
+      setRedeploying(false);
       return;
     }
 
@@ -191,7 +202,8 @@ export function PublishModal({
       if (elapsed > 120) {
         stopPolling();
         setError("Deploy timed out — please try again");
-        setView("choose");
+        setView(fallbackView);
+        setRedeploying(false);
         return;
       }
       try {
@@ -201,16 +213,42 @@ export function PublishModal({
           setVercelUrl(status.url);
           onVercelDeployed(status.url);
           setView("vercel-success");
+          setRedeploying(false);
         } else if (status.status === "error") {
           stopPolling();
           setError("Deploy failed — please try again");
-          setView("choose");
+          setView(fallbackView);
+          setRedeploying(false);
         }
       } catch {
         // Transient network error — keep polling
       }
     }, 3000);
   }, [projectId, onVercelDeployed, stopPolling]);
+
+  const handleVercelDeploy = useCallback(() => {
+    void startVercelDeploy(false);
+  }, [startVercelDeploy]);
+
+  const handleVercelRedeploy = useCallback(() => {
+    void startVercelDeploy(true);
+  }, [startVercelDeploy]);
+
+  const handleVercelUnpublish = useCallback(async () => {
+    if (!window.confirm("Remove this app from beomz.app?")) return;
+    setVercelUnpublishing(true);
+    setError(null);
+    try {
+      await unpublishVercel(projectId);
+      setVercelUrl(null);
+      onVercelUnpublished?.();
+      setView("choose");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unpublish failed");
+    } finally {
+      setVercelUnpublishing(false);
+    }
+  }, [projectId, onVercelUnpublished]);
 
   const handleCopyBeomz = useCallback(() => {
     void navigator.clipboard.writeText(`https://${slug}.beomz.ai`);
@@ -498,6 +536,23 @@ export function PublishModal({
             </div>
             {copiedVercel && <p className="mt-1 text-xs text-emerald-600">Copied!</p>}
 
+            <div className="mt-4">
+              <button
+                onClick={handleVercelRedeploy}
+                disabled={redeploying}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-4 py-2 text-sm font-semibold text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6] disabled:opacity-50"
+              >
+                {redeploying ? (
+                  <><Loader size={14} className="animate-spin" /> Updating...</>
+                ) : (
+                  <><RefreshCw size={14} /> Update live app</>
+                )}
+              </button>
+              <p className="mt-1 text-center text-[11px] text-[#9ca3af]">Redeploy with your latest changes</p>
+            </div>
+
+            {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+
             <div className="mt-5 flex gap-2">
               <button
                 onClick={() => {
@@ -513,6 +568,17 @@ export function PublishModal({
                 className="flex flex-1 items-center justify-center rounded-lg border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6]"
               >
                 Done
+              </button>
+            </div>
+
+            <div className="mt-4 border-t border-[#e5e5e5] pt-3">
+              <button
+                onClick={handleVercelUnpublish}
+                disabled={vercelUnpublishing}
+                className="flex items-center gap-1.5 text-xs text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
+              >
+                {vercelUnpublishing ? <Loader size={12} className="animate-spin" /> : <Link2Off size={12} />}
+                {vercelUnpublishing ? "Removing..." : "Remove from beomz.app"}
               </button>
             </div>
           </>
