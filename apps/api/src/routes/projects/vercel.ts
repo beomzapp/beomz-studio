@@ -232,6 +232,60 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   return c.json({ ok: true, deploymentId, status: "deploying" }, 202);
 });
 
+// ── DELETE /api/projects/:id/deploy/vercel ────────────────────────────────────
+
+vercelDeployRoute.delete("/", verifyPlatformJwt, loadOrgContext, async (c) => {
+  const orgContext = c.get("orgContext") as OrgContext;
+  const projectId = c.req.param("id") as string;
+
+  const project = await orgContext.db.findProjectById(projectId);
+  if (!project || project.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  if (!project.beomz_app_url) {
+    return c.json({ error: "not_deployed" }, 400);
+  }
+
+  // Extract slug from 'https://slug.beomz.app' → 'slug'
+  const slugMatch = project.beomz_app_url.match(/^https?:\/\/([^.]+)\.beomz\.app/);
+  if (!slugMatch) {
+    return c.json({ error: "invalid_url", detail: project.beomz_app_url }, 400);
+  }
+  const slug = slugMatch[1];
+  const domain = `${slug}.beomz.app`;
+
+  const { VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID } = apiConfig;
+  if (!VERCEL_TOKEN || !VERCEL_PROJECT_ID || !VERCEL_TEAM_ID) {
+    return c.json({ error: "Vercel not configured" }, 503);
+  }
+
+  // Remove the alias from the Vercel project
+  const domainRes = await fetch(
+    `https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}/domains/${domain}?teamId=${VERCEL_TEAM_ID}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${VERCEL_TOKEN}` },
+    },
+  );
+
+  if (!domainRes.ok && domainRes.status !== 404) {
+    const body = await domainRes.text();
+    console.error(`[vercel undeploy] domain removal failed (${domainRes.status}):`, body);
+    return c.json({ error: "domain_removal_failed", detail: body }, 502);
+  }
+
+  console.log(`[vercel undeploy] removed domain ${domain} for project ${projectId}`);
+
+  // Clear deploy columns
+  await orgContext.db.updateProject(projectId, {
+    beomz_app_url: null,
+    beomz_app_deployed_at: null,
+  });
+
+  return c.json({ ok: true });
+});
+
 // ── GET /api/projects/:id/deploy/vercel/status ───────────────────────────────
 
 vercelDeployRoute.get("/status", verifyPlatformJwt, loadOrgContext, async (c) => {
