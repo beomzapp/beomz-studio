@@ -105,8 +105,6 @@ export async function pollUntilReady(
 export async function vercelDeployStart(opts: {
   files: VercelDeployFile[];
   slug: string;
-  /** Build-time env vars injected into the Vite build (e.g. VITE_SUPABASE_URL) */
-  env?: Record<string, string>;
 }): Promise<VercelDeployHandle> {
   const { token, projectId, teamId } = requireVercelConfig();
 
@@ -131,7 +129,7 @@ export async function vercelDeployStart(opts: {
     uploaded.map((f) => `${f.filename} (${f.size}B)`),
   );
 
-  // Build deployment body — include env vars if provided (e.g. VITE_SUPABASE_URL)
+  // Build deployment body
   const deployBody: Record<string, unknown> = {
     name: "beomz-apps",
     project: projectId,
@@ -140,10 +138,6 @@ export async function vercelDeployStart(opts: {
     target: "production",
     alias: [`${opts.slug}.beomz.app`],
   };
-  if (opts.env && Object.keys(opts.env).length > 0) {
-    deployBody.env = opts.env;
-    console.log(`[vercel deploy] build env keys:`, Object.keys(opts.env));
-  }
 
   // Create deployment
   const deployRes = await fetch(

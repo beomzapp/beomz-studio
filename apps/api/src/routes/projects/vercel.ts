@@ -146,6 +146,25 @@ function toDeployPath(fullPath: string): string {
   return `src/${basename}`;
 }
 
+// Replace import.meta.env.VITE_* references inline so Vite bakes the real
+// values into the bundle. This is more reliable than Vercel's `env` API field
+// (which only applies at runtime, not during `vite build`).
+const PLACEHOLDER_SUPABASE_URL = "https://placeholder.supabase.co";
+const PLACEHOLDER_SUPABASE_KEY = "placeholder";
+const PLACEHOLDER_SUPABASE_SCHEMA = "public";
+
+function injectSupabaseEnvVars(
+  content: string,
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+  dbSchema: string,
+): string {
+  return content
+    .replace(/import\.meta\.env\.VITE_SUPABASE_URL/g, JSON.stringify(supabaseUrl))
+    .replace(/import\.meta\.env\.VITE_SUPABASE_ANON_KEY/g, JSON.stringify(supabaseAnonKey))
+    .replace(/import\.meta\.env\.VITE_DB_SCHEMA/g, JSON.stringify(dbSchema));
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 export const vercelDeployRoute = new Hono();
@@ -172,40 +191,61 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     : slugify(project.name) || slugify(projectId.slice(0, 8));
 
   // Flatten the deep WebContainer paths to src/<filename>
-  const generatedFiles = (latestGen.files as Array<{ path: string; content: string }>).map((f) => ({
+  const rawGeneratedFiles = (latestGen.files as Array<{ path: string; content: string }>).map((f) => ({
     filename: toDeployPath(f.path),
     content: f.content,
   }));
 
-  // Scaffold + generated files (scaffold first so generated files can override if needed)
-  const deployFiles = [...buildScaffold(), ...generatedFiles];
-
   console.log(
     `[vercel deploy] generated files mapped:`,
-    generatedFiles.map((f) => f.filename),
+    rawGeneratedFiles.map((f) => f.filename),
   );
 
-  // If the project is db-wired, inject Supabase credentials as Vite build-time env vars.
-  // The wire process generates code using import.meta.env.VITE_SUPABASE_URL etc.,
-  // which Vite substitutes at build time — so they MUST be present in the Vercel build env.
-  const buildEnv: Record<string, string> = {};
-  if (project.db_wired && project.db_schema) {
-    const supabaseUrl = apiConfig.USER_DATA_SUPABASE_URL;
-    const supabaseAnonKey = apiConfig.USER_DATA_SUPABASE_ANON_KEY;
-    if (supabaseUrl && supabaseAnonKey) {
-      buildEnv["VITE_SUPABASE_URL"] = supabaseUrl;
-      buildEnv["VITE_SUPABASE_ANON_KEY"] = supabaseAnonKey;
-      buildEnv["VITE_DB_SCHEMA"] = project.db_schema;
-      console.log(`[vercel deploy] injecting DB env vars for schema ${project.db_schema}`);
+  // Replace import.meta.env.VITE_* references directly in source files.
+  // Vite substitutes these at build time; Vercel's API `env` field only applies
+  // at runtime (serverless), not during `vite build`, so inline replacement is
+  // the only reliable approach.
+  const usesSupabase = rawGeneratedFiles.some(
+    (f) =>
+      f.content.includes("@supabase/supabase-js") ||
+      f.content.includes("VITE_SUPABASE_URL"),
+  );
+
+  let supabaseUrl = PLACEHOLDER_SUPABASE_URL;
+  let supabaseAnonKey = PLACEHOLDER_SUPABASE_KEY;
+  let dbSchema = PLACEHOLDER_SUPABASE_SCHEMA;
+
+  if (usesSupabase) {
+    if (project.db_wired && project.db_schema) {
+      const cfgUrl = apiConfig.USER_DATA_SUPABASE_URL;
+      const cfgKey = apiConfig.USER_DATA_SUPABASE_ANON_KEY;
+      if (cfgUrl && cfgKey) {
+        supabaseUrl = cfgUrl;
+        supabaseAnonKey = cfgKey;
+        dbSchema = project.db_schema;
+        console.log(`[vercel deploy] injecting real DB creds for schema ${dbSchema}`);
+      } else {
+        console.warn(`[vercel deploy] db_wired=true but USER_DATA_SUPABASE_* not configured — using placeholders`);
+      }
     } else {
-      console.warn(`[vercel deploy] project is db_wired but USER_DATA_SUPABASE_URL/ANON_KEY not configured`);
+      console.log(`[vercel deploy] app uses Supabase but db_wired=false — injecting placeholder creds`);
     }
   }
+
+  const generatedFiles = usesSupabase
+    ? rawGeneratedFiles.map((f) => ({
+        filename: f.filename,
+        content: injectSupabaseEnvVars(f.content, supabaseUrl, supabaseAnonKey, dbSchema),
+      }))
+    : rawGeneratedFiles;
+
+  // Scaffold + generated files (scaffold first so generated files can override if needed)
+  const deployFiles = [...buildScaffold(), ...generatedFiles];
 
   // Phase 1: upload files + create deployment (~5-10s) — synchronous so errors surface
   let handle: Awaited<ReturnType<typeof vercelDeployStart>>;
   try {
-    handle = await vercelDeployStart({ files: deployFiles, slug, env: buildEnv });
+    handle = await vercelDeployStart({ files: deployFiles, slug });
   } catch (err) {
     console.error("[vercel deploy] start failed:", err);
     return c.json({ error: "deploy_failed", detail: String(err) }, 502);
