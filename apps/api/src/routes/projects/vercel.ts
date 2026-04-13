@@ -1,15 +1,19 @@
 /**
  * POST /api/projects/:id/deploy/vercel
+ *   → uploads files, creates Vercel deployment, returns 202 immediately.
+ *   → polls in background; writes beomz_app_url to DB when READY.
  *
- * Deploys the project's latest generated files to Vercel, creating a
- * production deployment aliased to <slug>.beomz.app.
+ * GET  /api/projects/:id/deploy/vercel/status
+ *   → { status: 'deploying' | 'ready', url?: string }
+ *   → frontend polls this every 3s instead of waiting on the POST.
  */
 import { Hono } from "hono";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
-import { vercelDeploy } from "../../lib/vercelDeploy.js";
+import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
+import { createStudioDbClient } from "@beomz-studio/studio-db";
 
 // Lowercase, spaces → hyphens, alphanumeric + hyphens only, max 40 chars
 function slugify(name: string): string {
@@ -21,6 +25,8 @@ function slugify(name: string): string {
 }
 
 export const vercelDeployRoute = new Hono();
+
+// ── POST /api/projects/:id/deploy/vercel ─────────────────────────────────────
 
 vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
@@ -46,18 +52,50 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     content: f.content,
   }));
 
-  let result: Awaited<ReturnType<typeof vercelDeploy>>;
+  // Phase 1: upload files + create deployment (~5-10s) — synchronous so errors surface
+  let handle: Awaited<ReturnType<typeof vercelDeployStart>>;
   try {
-    result = await vercelDeploy({ files, slug });
+    handle = await vercelDeployStart({ files, slug });
   } catch (err) {
-    console.error("[vercel deploy] failed:", err);
+    console.error("[vercel deploy] start failed:", err);
     return c.json({ error: "deploy_failed", detail: String(err) }, 502);
   }
 
-  await orgContext.db.updateProject(projectId, {
-    beomz_app_url: result.url,
-    beomz_app_deployed_at: new Date().toISOString(),
-  });
+  const { deploymentId, url, _token, _teamId } = handle;
 
-  return c.json({ ok: true, url: result.url });
+  // Phase 2: poll in background — use a fresh DB client so it outlives the request
+  void (async () => {
+    const db = createStudioDbClient();
+    try {
+      await pollUntilReady(_token, _teamId, deploymentId);
+      await db.updateProject(projectId, {
+        beomz_app_url: url,
+        beomz_app_deployed_at: new Date().toISOString(),
+      });
+      console.log(`[vercel deploy] ready: ${url}`);
+    } catch (err) {
+      console.error("[vercel deploy] background poll failed:", err);
+    }
+  })();
+
+  // Return 202 immediately — frontend polls /status
+  return c.json({ ok: true, deploymentId, status: "deploying" }, 202);
+});
+
+// ── GET /api/projects/:id/deploy/vercel/status ───────────────────────────────
+
+vercelDeployRoute.get("/status", verifyPlatformJwt, loadOrgContext, async (c) => {
+  const orgContext = c.get("orgContext") as OrgContext;
+  const projectId = c.req.param("id") as string;
+
+  const project = await orgContext.db.findProjectById(projectId);
+  if (!project || project.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  if (project.beomz_app_url) {
+    return c.json({ status: "ready", url: project.beomz_app_url });
+  }
+
+  return c.json({ status: "deploying" });
 });

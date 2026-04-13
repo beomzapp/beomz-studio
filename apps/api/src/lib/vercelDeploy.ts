@@ -1,8 +1,10 @@
 /**
  * Vercel deploy helper — BEO-XXX
  *
- * Uploads a set of files to Vercel and creates a production deployment
- * aliased to <slug>.beomz.app, returning { url } when the deployment is READY.
+ * vercelDeployStart  — uploads files + creates the Vercel deployment (fast, ~5-10s)
+ *                      returns deploymentId immediately without polling
+ * pollUntilReady     — polls until readyState === 'READY' or 'ERROR'
+ * vercelDeploy       — convenience wrapper: start + poll (sync, for direct use)
  */
 import crypto from "node:crypto";
 
@@ -16,6 +18,14 @@ export interface VercelDeployFile {
 export interface VercelDeployResult {
   url: string;
   deploymentId: string;
+}
+
+export interface VercelDeployHandle {
+  deploymentId: string;
+  url: string;
+  /** Credentials needed to poll — callers keep these if polling in background */
+  _token: string;
+  _teamId: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,7 +74,7 @@ async function uploadFile(
 
 // ── Poll for READY ────────────────────────────────────────────────────────────
 
-async function pollUntilReady(
+export async function pollUntilReady(
   token: string,
   teamId: string,
   deploymentId: string,
@@ -90,12 +100,12 @@ async function pollUntilReady(
   throw new Error("Vercel deployment timed out after 120s");
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── Create deployment (upload files + POST to Vercel) — returns immediately ──
 
-export async function vercelDeploy(opts: {
+export async function vercelDeployStart(opts: {
   files: VercelDeployFile[];
   slug: string;
-}): Promise<VercelDeployResult> {
+}): Promise<VercelDeployHandle> {
   const { token, projectId, teamId } = requireVercelConfig();
 
   // Add vercel.json for SPA client-side routing
@@ -140,13 +150,23 @@ export async function vercelDeploy(opts: {
   }
 
   const deploy = (await deployRes.json()) as { id: string };
-  const deploymentId = deploy.id;
-
-  // Poll until READY
-  await pollUntilReady(token, teamId, deploymentId);
 
   return {
+    deploymentId: deploy.id,
     url: `https://${opts.slug}.beomz.app`,
-    deploymentId,
+    _token: token,
+    _teamId: teamId,
   };
 }
+
+// ── Convenience sync wrapper (start + poll in one call) ──────────────────────
+
+export async function vercelDeploy(opts: {
+  files: VercelDeployFile[];
+  slug: string;
+}): Promise<VercelDeployResult> {
+  const handle = await vercelDeployStart(opts);
+  await pollUntilReady(handle._token, handle._teamId, handle.deploymentId);
+  return { url: handle.url, deploymentId: handle.deploymentId };
+}
+
