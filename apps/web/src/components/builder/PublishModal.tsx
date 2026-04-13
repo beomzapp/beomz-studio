@@ -16,6 +16,7 @@ import {
   unpublishProject,
   checkSlugAvailable,
   deployToVercel,
+  getVercelDeployStatus,
 } from "../../lib/api";
 
 interface PublishModalProps {
@@ -69,8 +70,11 @@ export function PublishModal({
   const [copiedVercel, setCopiedVercel] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [vercelUrl, setVercelUrl] = useState<string | null>(beomzAppUrl ?? null);
+  const [vercelElapsed, setVercelElapsed] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Focus slug input when entering beomz-idle
   useEffect(() => {
@@ -148,19 +152,65 @@ export function PublishModal({
     }
   }, [projectId, onUnpublished]);
 
+  // Clean up polling + timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  }, []);
+
   const handleVercelDeploy = useCallback(async () => {
     setView("vercel-deploying");
     setError(null);
+    setVercelElapsed(0);
+
+    // Step 1: kick off deploy (returns 202 quickly)
     try {
-      const result = await deployToVercel(projectId);
-      setVercelUrl(result.url);
-      onVercelDeployed(result.url);
-      setView("vercel-success");
+      await deployToVercel(projectId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Deploy failed");
+      setError(err instanceof Error ? err.message : "Deploy failed — please try again");
       setView("choose");
+      return;
     }
-  }, [projectId, onVercelDeployed]);
+
+    // Step 2: start elapsed timer
+    const startTime = Date.now();
+    timerRef.current = setInterval(() => {
+      setVercelElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+
+    // Step 3: poll status every 3s, max 120s
+    pollRef.current = setInterval(async () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      if (elapsed > 120) {
+        stopPolling();
+        setError("Deploy timed out — please try again");
+        setView("choose");
+        return;
+      }
+      try {
+        const status = await getVercelDeployStatus(projectId);
+        if (status.status === "ready" && status.url) {
+          stopPolling();
+          setVercelUrl(status.url);
+          onVercelDeployed(status.url);
+          setView("vercel-success");
+        } else if (status.status === "error") {
+          stopPolling();
+          setError("Deploy failed — please try again");
+          setView("choose");
+        }
+      } catch {
+        // Transient network error — keep polling
+      }
+    }, 3000);
+  }, [projectId, onVercelDeployed, stopPolling]);
 
   const handleCopyBeomz = useCallback(() => {
     void navigator.clipboard.writeText(`https://${slug}.beomz.ai`);
@@ -404,9 +454,13 @@ export function PublishModal({
             </div>
             <div className="mb-2 flex items-center gap-2">
               <Loader size={16} className="animate-spin text-[#6b7280]" />
-              <p className="text-sm font-semibold text-[#1a1a1a]">Deploying to beomz.app...</p>
+              <p className="text-sm font-semibold text-[#1a1a1a]">
+                {vercelElapsed < 12 ? "Uploading files..." : "Building on Vercel CDN..."}
+              </p>
             </div>
-            <p className="text-xs text-[#9ca3af]">Building your app on Vercel's CDN...</p>
+            <p className="text-xs text-[#9ca3af]">
+              {vercelElapsed}s elapsed
+            </p>
             {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
           </div>
         )}

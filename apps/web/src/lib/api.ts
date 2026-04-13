@@ -466,10 +466,19 @@ export async function exportProjectZip(projectId: string): Promise<Blob> {
 
 export async function deployToVercel(
   projectId: string,
-): Promise<{ ok: boolean; url: string }> {
-  return requestJson<{ ok: boolean; url: string }>(
+): Promise<{ ok: boolean; deploymentId: string; status: string }> {
+  return requestJson<{ ok: boolean; deploymentId: string; status: string }>(
     `/projects/${projectId}/deploy/vercel`,
     { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function getVercelDeployStatus(
+  projectId: string,
+): Promise<{ status: "deploying" | "ready" | "error"; url?: string }> {
+  return requestJson<{ status: "deploying" | "ready" | "error"; url?: string }>(
+    `/projects/${projectId}/deploy/vercel/status`,
+    { method: "GET" },
   );
 }
 
