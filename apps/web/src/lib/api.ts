@@ -513,6 +513,23 @@ export async function fixFile(args: {
   return data.fixedContent;
 }
 
+export async function startNextPhase(projectId: string): Promise<Response> {
+  const accessToken = await getAccessToken();
+  const url = `${getApiBaseUrl()}/projects/${encodeURIComponent(projectId)}/next-phase`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errorBody?.error ?? `Next phase failed with ${response.status}.`);
+  }
+  return response;
+}
+
 export async function streamBuildEvents(args: {
   buildId: string;
   lastEventId?: string | null;

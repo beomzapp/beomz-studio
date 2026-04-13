@@ -73,6 +73,9 @@ interface TopBarProps {
   onExportZip?: () => void;
   isExporting?: boolean;
   beomzAppUrl?: string | null;
+  phaseMode?: boolean;
+  currentPhase?: number;
+  phasesTotal?: number;
 }
 
 function toast(msg: string) {
@@ -113,6 +116,9 @@ export function TopBar({
   onExportZip,
   isExporting = false,
   beomzAppUrl,
+  phaseMode = false,
+  currentPhase = 0,
+  phasesTotal = 0,
 }: TopBarProps) {
   const navigate = useNavigate();
   const [editingName, setEditingName] = useState(false);
@@ -189,6 +195,15 @@ export function TopBar({
             )}
             <span className="truncate">{projectName}</span>
           </button>
+        )}
+
+        {/* Phase progress pill */}
+        {phaseMode && phasesTotal > 0 && (
+          <span className="ml-1.5 flex-none rounded-full bg-[#fff7ed] px-2 py-0.5 text-[10px] font-medium text-[#F97316]">
+            {currentPhase >= phasesTotal
+              ? "\u2713 All phases complete"
+              : `Phase ${currentPhase} of ${phasesTotal}`}
+          </span>
         )}
       </div>
 

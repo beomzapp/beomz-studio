@@ -53,9 +53,11 @@ import {
   DatabasePanel,
   IntegrationsPanel,
   PublishModal,
+  PhasePlanCard,
   type ChatMessage,
   type ActiveView,
 } from "../../../components/builder";
+import type { Phase } from "../../../components/builder/PhasePlanCard";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
   getBuildStatus,
@@ -63,6 +65,7 @@ import {
   getProjectDbState,
   exportProjectZip,
   listProjectsWithMeta,
+  startNextPhase,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -149,6 +152,12 @@ export function ProjectPage() {
   const summaryAbortRef = useRef<AbortController | null>(null);
   const lastUserPromptRef = useRef("");
   const buildSummaryTextRef = useRef("");
+
+  // Phased build state
+  const [phases, setPhases] = useState<Phase[]>([]);
+  const [currentPhase, setCurrentPhase] = useState(0);
+  const [phaseMode, setPhaseMode] = useState(false);
+  const [isPhaseBuilding, setIsPhaseBuilding] = useState(false);
 
   const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
@@ -368,6 +377,15 @@ export function ProjectPage() {
       return { ...message, content: nextContent, traceEntries: nextEntries };
     });
 
+    // Phased build: handle phases_planned event
+    if ((event as Record<string, unknown>).type === "phases_planned") {
+      const phaseEvent = event as unknown as { phases: Phase[]; currentPhase: number };
+      setPhases(phaseEvent.phases);
+      setCurrentPhase(phaseEvent.currentPhase);
+      setPhaseMode(true);
+      setIsPhaseBuilding(true);
+    }
+
     if (event.type === "tool_use_started") {
       // Advance thinking label on tool_use_started
       const labels = personality.thinkingLabels;
@@ -523,6 +541,9 @@ export function ProjectPage() {
         }
         return prev;
       });
+
+      // Phase mode: mark current phase build as done
+      setIsPhaseBuilding(false);
     }
 
     if (event.type === "error") {
@@ -750,6 +771,73 @@ export function ProjectPage() {
     }
   }, [projectId, projectName, isExporting]);
 
+  // ── Phased build: continue to next phase ──
+  const handleNextPhase = useCallback(async () => {
+    if (!projectId) return;
+    setIsPhaseBuilding(true);
+    setCurrentPhase((prev) => prev + 1);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsStreaming(true);
+    thinkingLabelIndexRef.current = 0;
+    setStreamingText(personality.thinkingLabels[0]);
+    if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
+    thinkingLabelIntervalRef.current = setInterval(() => {
+      const labels = personality.thinkingLabels;
+      thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
+      setStreamingText(labels[thinkingLabelIndexRef.current]);
+    }, 4000);
+
+    try {
+      const response = await startNextPhase(projectId);
+      // The response is an SSE stream — read it the same way as streamBuildEvents
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No stream body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let dataLines: string[] = [];
+
+      const flushEvent = () => {
+        if (dataLines.length === 0) return;
+        const payload = dataLines.join("\n");
+        dataLines = [];
+        try {
+          const event = JSON.parse(payload) as BuilderV3Event;
+          handleBuilderEvent(event);
+        } catch { /* ignore parse errors */ }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) { flushEvent(); break; }
+        buffer += decoder.decode(value, { stream: true });
+        while (true) {
+          const lineBreakIndex = buffer.indexOf("\n");
+          if (lineBreakIndex === -1) break;
+          const rawLine = buffer.slice(0, lineBreakIndex);
+          buffer = buffer.slice(lineBreakIndex + 1);
+          const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+          if (line.length === 0) { flushEvent(); continue; }
+          if (line.startsWith("id:") || line.startsWith("event:")) continue;
+          if (line.startsWith("data:")) { dataLines.push(line.slice(5).trim()); }
+        }
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        console.error("[NextPhase] Failed:", err);
+        setIsPhaseBuilding(false);
+        setIsStreaming(false);
+        setStreamingText("");
+      }
+    }
+  }, [projectId, handleBuilderEvent, personality.thinkingLabels]);
+
+  const handleSkipPhases = useCallback(() => {
+    setPhaseMode(false);
+  }, []);
+
   // Resume existing build
   useEffect(() => {
     if (resumingBuildRef.current || id === "new" || !projectId || build) return;
@@ -776,6 +864,21 @@ export function ProjectPage() {
       );
       replayTraceEvents(status.build.id, status.trace.events, status.build.summary ?? "");
       setLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
+
+      // Restore phase state from project data
+      const proj = status.project as Record<string, unknown>;
+      if (proj.phase_mode || proj.phaseMode) {
+        const buildPhases = (proj.build_phases ?? proj.buildPhases) as Phase[] | undefined;
+        const curPhase = (proj.current_phase ?? proj.currentPhase) as number | undefined;
+        if (buildPhases && Array.isArray(buildPhases) && buildPhases.length > 0) {
+          setPhases(buildPhases);
+          setCurrentPhase(curPhase ?? 1);
+          setPhaseMode(true);
+          // If the build is still running, phase is building
+          const isRunning = status.build.status === "queued" || status.build.status === "running";
+          setIsPhaseBuilding(isRunning);
+        }
+      }
 
       if (status.build.status === "queued" || status.build.status === "running") {
         abortRef.current = controller;
@@ -1109,6 +1212,9 @@ export function ProjectPage() {
         onExportZip={handleExportZip}
         isExporting={isExporting}
         beomzAppUrl={beomzAppUrl}
+        phaseMode={phaseMode}
+        currentPhase={currentPhase}
+        phasesTotal={phases.length}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -1131,24 +1237,37 @@ export function ProjectPage() {
           className="shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
           style={{ width: showChat ? chatPanelWidth : 0 }}
         >
-          <div className="h-full" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
-            <ChatPanel
-              messages={messages}
-              isStreaming={isStreaming}
-              streamingText={transport === "idle" ? "" : streamingText}
-              onSendMessage={handleSendMessage}
-              onStopStreaming={handleStopStreaming}
-              onRetry={handleRetry}
-              onViewCode={() => {
-                setActiveView("code");
-                const firstFile = buildResult?.files?.[0]?.path;
-                if (firstFile) setSelectedFile(firstFile);
-              }}
-              width={chatPanelWidth}
-              suggestionChips={suggestionChips}
-              onDismissChips={() => setSuggestionChips([])}
-              creditsBalance={credits?.balance}
-            />
+          <div className="flex h-full flex-col" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
+            {phaseMode && phases.length > 0 && (
+              <div className="flex-none overflow-y-auto pt-3">
+                <PhasePlanCard
+                  phases={phases}
+                  currentPhase={currentPhase}
+                  isBuilding={isPhaseBuilding}
+                  onContinue={handleNextPhase}
+                  onSkip={handleSkipPhases}
+                />
+              </div>
+            )}
+            <div className="min-h-0 flex-1">
+              <ChatPanel
+                messages={messages}
+                isStreaming={isStreaming}
+                streamingText={transport === "idle" ? "" : streamingText}
+                onSendMessage={handleSendMessage}
+                onStopStreaming={handleStopStreaming}
+                onRetry={handleRetry}
+                onViewCode={() => {
+                  setActiveView("code");
+                  const firstFile = buildResult?.files?.[0]?.path;
+                  if (firstFile) setSelectedFile(firstFile);
+                }}
+                width={chatPanelWidth}
+                suggestionChips={suggestionChips}
+                onDismissChips={() => setSuggestionChips([])}
+                creditsBalance={credits?.balance}
+              />
+            </div>
           </div>
         </div>
         {showChat && <ResizeHandle target="chat" />}
