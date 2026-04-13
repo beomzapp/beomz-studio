@@ -40,6 +40,7 @@ import {
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
+import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
@@ -1436,6 +1437,13 @@ async function _runBuildInBackground(
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
 
+  // ── Domain enrichment (initial builds only) ───────────────────────────────
+  // Run a fast Haiku + web-search call before template selection and Sonnet
+  // generation. Adds domain context for niche/regional/industry prompts.
+  // Generic prompts (todo, calculator, etc.) skip this with zero delay.
+  // Any failure returns the original prompt unchanged — never blocks the build.
+  const workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);;
+
   const statusEvent = (code: string, message: string, phase: string): BuilderV3StatusEvent => ({
     type: "status",
     id: nextId(),
@@ -1447,7 +1455,7 @@ async function _runBuildInBackground(
   });
 
   // ── Best-matching prebuilt template ──────────────────────────────────────
-  const prebuilt = pickBestPrebuilt(templateId, prompt);
+  const prebuilt = pickBestPrebuilt(templateId, workingPrompt);
 
   // Remap prebuilt files to apps/web/src/app/generated/{templateId}/ and add
   // the synthetic manifest. templateId is the SLM-matched legacy ID (e.g.
@@ -1458,7 +1466,7 @@ async function _runBuildInBackground(
 
   let paletteId = "professional-blue";
   try {
-    const p = await classifyPalette(prompt);
+    const p = await classifyPalette(workingPrompt);
     paletteId = p.palette;
     console.log("[generate] palette selected:", paletteId, { confidence: p.confidence });
   } catch {
@@ -1748,7 +1756,7 @@ async function _runBuildInBackground(
     let fallbackUsed = false;
 
     try {
-      customised = await callModelCustomise(prompt, model, paletteId);
+      customised = await callModelCustomise(workingPrompt, model, paletteId);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
       // we flatten into the generated directory. Patch any residual CJS React globals.
