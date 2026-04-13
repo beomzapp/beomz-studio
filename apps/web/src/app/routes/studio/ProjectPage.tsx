@@ -36,48 +36,7 @@ function extractProjectName(prompt: string): string | null {
     .join(" ");
 }
 
-// ── Context-aware intro message ───────────────────────────────────
-function buildIntroMessage(prompt: string, isIteration: boolean): string {
-  const lower = prompt.toLowerCase().trim();
-
-  // Detect questions (no build needed phrasing)
-  if (/^(why|how|what|where|when|can|does|is|are|do|should)\b/.test(lower) && lower.endsWith("?")) {
-    return "Let me take a look at that.";
-  }
-
-  if (isIteration) {
-    // Extract the core action from the user's message
-    const fixMatch = lower.match(/^fix\s+(.{3,40})/);
-    if (fixMatch) return `Fixing ${fixMatch[1].replace(/\.$/, "")}...`;
-
-    const addMatch = lower.match(/^add\s+(.{3,40})/);
-    if (addMatch) return `Adding ${addMatch[1].replace(/\.$/, "")}...`;
-
-    const makeMatch = lower.match(/^make\s+(?:it\s+)?(.{3,40})/);
-    if (makeMatch) return `On it — making it ${makeMatch[1].replace(/\.$/, "")}...`;
-
-    const changeMatch = lower.match(/^change\s+(.{3,40})/);
-    if (changeMatch) return `Changing ${changeMatch[1].replace(/\.$/, "")}...`;
-
-    const removeMatch = lower.match(/^(?:remove|delete)\s+(.{3,40})/);
-    if (removeMatch) return `Removing ${removeMatch[1].replace(/\.$/, "")}...`;
-
-    const updateMatch = lower.match(/^update\s+(.{3,40})/);
-    if (updateMatch) return `Updating ${updateMatch[1].replace(/\.$/, "")}...`;
-
-    // Generic iteration fallback — echo back a condensed version
-    const short = prompt.length > 60 ? prompt.slice(0, 57).replace(/\s+\S*$/, "") + "..." : prompt;
-    return `On it — ${short.charAt(0).toLowerCase()}${short.slice(1)}`;
-  }
-
-  // First build — acknowledge what they want to build
-  const name = extractProjectName(prompt);
-  if (name) return `Got it — building ${name} now.`;
-
-  // Fallback for first build
-  const condensed = prompt.length > 50 ? prompt.slice(0, 47).replace(/\s+\S*$/, "") + "..." : prompt;
-  return `${condensed.charAt(0).toUpperCase()}${condensed.slice(1)} — on it.`;
-}
+// buildIntroMessage removed — replaced by personality system
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3Event, TemplateId } from "@beomz-studio/contracts";
@@ -117,6 +76,12 @@ import { cn } from "../../../lib/cn";
 import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
 import { streamBuildSummary } from "../../../lib/streamBuildSummary";
+import {
+  getPersonality,
+  PERSONALITIES,
+  correctTypos,
+  type PersonalityId,
+} from "../../../lib/personalities";
 
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
@@ -144,6 +109,8 @@ export function ProjectPage() {
   const [projectIcon, setProjectIcon] = useState<string | null>(null);
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
   const [activeView, setActiveView] = useState<ActiveView>("preview");
+  const [personalityId] = useState<PersonalityId>(() => getPersonality());
+  const personality = PERSONALITIES[personalityId];
 
   const { appendTranscriptEntry } = useBuilderTranscript();
   const { startAndStreamBuild, subscribeToBuild } = useBuilderEngineStream();
@@ -171,6 +138,8 @@ export function ProjectPage() {
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
   const resumingBuildRef = useRef(false);
+  const thinkingLabelIndexRef = useRef(0);
+  const thinkingLabelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
 
@@ -400,11 +369,19 @@ export function ProjectPage() {
     });
 
     if (event.type === "tool_use_started") {
-      setStreamingText("Planning your app\u2026");
+      // Advance thinking label on tool_use_started
+      const labels = personality.thinkingLabels;
+      thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
+      setStreamingText(labels[thinkingLabelIndexRef.current]);
     }
 
     if (event.type === "assistant_delta" || event.type === "tool_use_progress") {
-      setStreamingText("Customising with AI\u2026");
+      const labels = personality.thinkingLabels;
+      const midIdx = Math.min(Math.floor(labels.length / 2), labels.length - 1);
+      if (thinkingLabelIndexRef.current < midIdx) {
+        thinkingLabelIndexRef.current = midIdx;
+        setStreamingText(labels[midIdx]);
+      }
     }
 
     if (event.type === "preview_ready") {
@@ -446,6 +423,10 @@ export function ProjectPage() {
     }
 
     if (event.type === "done" || event.type === "error") {
+      if (thinkingLabelIntervalRef.current) {
+        clearInterval(thinkingLabelIntervalRef.current);
+        thinkingLabelIntervalRef.current = null;
+      }
       setIsStreaming(false);
       setStreamingText("");
       if (event.type === "error") {
@@ -505,27 +486,12 @@ export function ProjectPage() {
             if (status.project.name && status.project.name !== "Untitled project") {
               setProjectName(status.project.name);
             }
-            // Completion summary: context-aware
+            // Personality-driven completion summary
             const displayName = status.project.name || projectName;
             const filePaths = (status.result?.files ?? []).map((f) => f.path);
             const changedPaths = status.result?.generation?.changedPaths;
-            const wasIteration = changedPaths && changedPaths.length > 0 && changedPaths.length < filePaths.length;
-            let summary: string;
-            if (wasIteration) {
-              const changedNames = changedPaths.map((p) => p.replace(/^.*\//, ""));
-              const changedList = changedNames.length <= 3
-                ? changedNames.join(", ")
-                : `${changedNames.slice(0, 2).join(", ")} + ${changedNames.length - 2} more`;
-              summary = `Done — updated ${changedList}.`;
-            } else {
-              const pageFiles = filePaths.filter((p) => /Page\.tsx$|Screen\.tsx$/i.test(p));
-              const pageNames = pageFiles.map((p) => {
-                const name = p.replace(/^.*\//, "").replace(/(Page|Screen)\.tsx$/i, "");
-                return name.replace(/([a-z])([A-Z])/g, "$1 $2");
-              });
-              const pagesLine = pageNames.length > 0 ? " with " + pageNames.join(", ") : "";
-              summary = `${displayName} is ready${pagesLine} — ${filePaths.length} files.`;
-            }
+            const changedNames = changedPaths?.map((p) => p.replace(/^.*\//, ""));
+            const summary = correctTypos(personality.summary(displayName, filePaths.length, changedNames));
             setMessages((prev) => [
               ...prev,
               {
@@ -620,7 +586,15 @@ export function ProjectPage() {
       abortRef.current = controller;
       resetHealth();
       setIsStreaming(true);
-      setStreamingText("Analysing your prompt\u2026");
+      // Start personality thinking labels cycling
+      thinkingLabelIndexRef.current = 0;
+      setStreamingText(personality.thinkingLabels[0]);
+      if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
+      thinkingLabelIntervalRef.current = setInterval(() => {
+        const labels = personality.thinkingLabels;
+        thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
+        setStreamingText(labels[thinkingLabelIndexRef.current]);
+      }, 4000);
       setPreviewGenerationId(null);
       setLastEventId(null);
       activeAssistantMessageIdRef.current = null;
@@ -697,9 +671,16 @@ export function ProjectPage() {
     summaryAbortRef.current?.abort();
     abortRef.current?.abort();
 
-    // Build a context-aware intro message
+    // Personality-driven intro message
     const isIteration = !!(buildResult?.files?.length);
-    const introContent = buildIntroMessage(text, isIteration);
+    const introContent = correctTypos(
+      isIteration
+        ? personality.iterationIntro(text)
+        : personality.intro(
+            extractProjectName(text) || "your app",
+            text.length > 60 ? text.slice(0, 57).replace(/\s+\S*$/, "") + "..." : text,
+          ),
+    );
     const introMessage: ChatMessage = {
       id: `assistant-intro-${Date.now()}`,
       role: "assistant",
@@ -738,6 +719,10 @@ export function ProjectPage() {
 
   const handleStopStreaming = useCallback(() => {
     abortRef.current?.abort();
+    if (thinkingLabelIntervalRef.current) {
+      clearInterval(thinkingLabelIntervalRef.current);
+      thinkingLabelIntervalRef.current = null;
+    }
     setIsStreaming(false);
     setStreamingText("");
     setTransport("idle");

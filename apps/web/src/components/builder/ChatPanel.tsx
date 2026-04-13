@@ -490,7 +490,8 @@ export function ChatPanel({
     return filterCodeFromText(msg.content);
   };
 
-  const displayStreamingText = filterCodeFromText(streamingText);
+  // streamingText is controlled by our personality system, not raw AI output — skip code filter
+  const displayStreamingText = streamingText;
 
   return (
     <div
