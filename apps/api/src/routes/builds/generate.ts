@@ -1176,9 +1176,28 @@ function buildSystemPrompt(paletteId: string, designSystemSpec?: string, phaseCo
   ].join("\n");
 }
 
-function buildUserMessage(prompt: string): string {
+interface PhaseScope {
+  index: number;
+  total: number;
+  title: string;
+  focus: string[];
+}
+
+function buildUserMessage(prompt: string, phaseScope?: PhaseScope): string {
+  const instruction = phaseScope
+    ? [
+        `Build Phase ${phaseScope.index} of ${phaseScope.total} for this app.`,
+        `THIS PHASE ONLY: ${phaseScope.title}`,
+        `Build ONLY these features: ${phaseScope.focus.join(", ")}`,
+        `Do NOT build features from other phases.`,
+        ``,
+        `Full app context (domain reference only — do not expand scope beyond this phase):`,
+        prompt,
+      ].join("\n")
+    : `Build this app: ${prompt}`;
+
   return [
-    `Build this app: ${prompt}`,
+    instruction,
     "",
     "Stack available (already configured — no setup needed):",
     "  React 18 + TypeScript",
@@ -1253,8 +1272,14 @@ async function callAnthropicCustomise(
   paletteId: string,
   designSystemSpec?: string,
   phaseContextBlock?: string,
+  phaseScope?: PhaseScope,
 ): Promise<CustomiseResult> {
-  return callAnthropicWithMessages(model, buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock), buildUserMessage(prompt), prompt);
+  return callAnthropicWithMessages(
+    model,
+    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock),
+    buildUserMessage(prompt, phaseScope),
+    prompt,
+  );
 }
 
 // ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
@@ -1305,8 +1330,14 @@ async function callOpenAICompatibleCustomise(
   baseURL?: string,
   designSystemSpec?: string,
   phaseContextBlock?: string,
+  phaseScope?: PhaseScope,
 ): Promise<CustomiseResult> {
-  return callOpenAICompatibleWithMessages(model, apiKey, buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock), buildUserMessage(prompt), prompt, baseURL);
+  return callOpenAICompatibleWithMessages(
+    model, apiKey,
+    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock),
+    buildUserMessage(prompt, phaseScope),
+    prompt, baseURL,
+  );
 }
 
 // ─── Model dispatch (initial build) ──────────────────────────────────────────
@@ -1316,6 +1347,7 @@ async function callModelCustomise(
   model: string,
   paletteId: string,
   phaseContextBlock?: string,
+  phaseScope?: PhaseScope,
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
@@ -1326,13 +1358,13 @@ async function callModelCustomise(
   }
 
   if (model.startsWith("claude-")) {
-    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec, phaseContextBlock);
+    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec, phaseContextBlock, phaseScope);
   }
 
   if (model.startsWith("gpt-")) {
     const apiKey = apiConfig.OPENAI_API_KEY;
     if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
-    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId, undefined, designSystemSpec, phaseContextBlock);
+    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId, undefined, designSystemSpec, phaseContextBlock, phaseScope);
   }
 
   if (model.startsWith("gemini-")) {
@@ -1341,13 +1373,13 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
-      designSystemSpec, phaseContextBlock,
+      designSystemSpec, phaseContextBlock, phaseScope,
     );
   }
 
   // Unknown model — fall back to haiku
   console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
-  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec, phaseContextBlock);
+  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec, phaseContextBlock, phaseScope);
 }
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
@@ -2047,8 +2079,23 @@ async function _runBuildInBackground(
         )
       : undefined;
 
+    // Scope the USER-turn instruction to this phase so Sonnet doesn't attempt
+    // the full app in a single call and hit max_tokens (BEO-197 diagnosis).
+    const activePhaseData = activePhasesData?.find((p) => p.index === activeCurrentPhase);
+    const phaseScope: PhaseScope | undefined = activePhaseData
+      ? {
+          index: activeCurrentPhase,
+          total: activePhasesTotal,
+          title: activePhaseData.title,
+          focus: activePhaseData.focus,
+        }
+      : undefined;
+    if (phaseScope) {
+      console.log("[generate] phase scope injected into user turn:", { phase: phaseScope.index, title: phaseScope.title });
+    }
+
     try {
-      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock);
+      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
       // we flatten into the generated directory. Patch any residual CJS React globals.
