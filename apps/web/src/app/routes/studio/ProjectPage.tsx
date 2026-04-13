@@ -35,6 +35,50 @@ function extractProjectName(prompt: string): string | null {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
 }
+
+// ── Context-aware intro message ───────────────────────────────────
+function buildIntroMessage(prompt: string, isIteration: boolean): string {
+  const lower = prompt.toLowerCase().trim();
+
+  // Detect questions (no build needed phrasing)
+  if (/^(why|how|what|where|when|can|does|is|are|do|should)\b/.test(lower) && lower.endsWith("?")) {
+    return "Let me take a look at that.";
+  }
+
+  if (isIteration) {
+    // Extract the core action from the user's message
+    const fixMatch = lower.match(/^fix\s+(.{3,40})/);
+    if (fixMatch) return `Fixing ${fixMatch[1].replace(/\.$/, "")}...`;
+
+    const addMatch = lower.match(/^add\s+(.{3,40})/);
+    if (addMatch) return `Adding ${addMatch[1].replace(/\.$/, "")}...`;
+
+    const makeMatch = lower.match(/^make\s+(?:it\s+)?(.{3,40})/);
+    if (makeMatch) return `On it — making it ${makeMatch[1].replace(/\.$/, "")}...`;
+
+    const changeMatch = lower.match(/^change\s+(.{3,40})/);
+    if (changeMatch) return `Changing ${changeMatch[1].replace(/\.$/, "")}...`;
+
+    const removeMatch = lower.match(/^(?:remove|delete)\s+(.{3,40})/);
+    if (removeMatch) return `Removing ${removeMatch[1].replace(/\.$/, "")}...`;
+
+    const updateMatch = lower.match(/^update\s+(.{3,40})/);
+    if (updateMatch) return `Updating ${updateMatch[1].replace(/\.$/, "")}...`;
+
+    // Generic iteration fallback — echo back a condensed version
+    const short = prompt.length > 60 ? prompt.slice(0, 57).replace(/\s+\S*$/, "") + "..." : prompt;
+    return `On it — ${short.charAt(0).toLowerCase()}${short.slice(1)}`;
+  }
+
+  // First build — acknowledge what they want to build
+  const name = extractProjectName(prompt);
+  if (name) return `Got it — building ${name} now.`;
+
+  // Fallback for first build
+  const condensed = prompt.length > 50 ? prompt.slice(0, 47).replace(/\s+\S*$/, "") + "..." : prompt;
+  return `${condensed.charAt(0).toUpperCase()}${condensed.slice(1)} — on it.`;
+}
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3Event, TemplateId } from "@beomz-studio/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -461,16 +505,27 @@ export function ProjectPage() {
             if (status.project.name && status.project.name !== "Untitled project") {
               setProjectName(status.project.name);
             }
-            // Completion summary: natural prose
+            // Completion summary: context-aware
             const displayName = status.project.name || projectName;
             const filePaths = (status.result?.files ?? []).map((f) => f.path);
-            const pageFiles = filePaths.filter((p) => /Page\.tsx$|Screen\.tsx$/i.test(p));
-            const pageNames = pageFiles.map((p) => {
-              const name = p.replace(/^.*\//, "").replace(/(Page|Screen)\.tsx$/i, "");
-              return name.replace(/([a-z])([A-Z])/g, "$1 $2");
-            });
-            const pagesLine = pageNames.length > 0 ? "\n\n" + pageNames.map((n) => `**${n}**`).join(" · ") : "";
-            const summary = `**${displayName}** is ready.${pagesLine}\n\nBuilt with Beomz · ${filePaths.length} files`;
+            const changedPaths = status.result?.generation?.changedPaths;
+            const wasIteration = changedPaths && changedPaths.length > 0 && changedPaths.length < filePaths.length;
+            let summary: string;
+            if (wasIteration) {
+              const changedNames = changedPaths.map((p) => p.replace(/^.*\//, ""));
+              const changedList = changedNames.length <= 3
+                ? changedNames.join(", ")
+                : `${changedNames.slice(0, 2).join(", ")} + ${changedNames.length - 2} more`;
+              summary = `Done — updated ${changedList}.`;
+            } else {
+              const pageFiles = filePaths.filter((p) => /Page\.tsx$|Screen\.tsx$/i.test(p));
+              const pageNames = pageFiles.map((p) => {
+                const name = p.replace(/^.*\//, "").replace(/(Page|Screen)\.tsx$/i, "");
+                return name.replace(/([a-z])([A-Z])/g, "$1 $2");
+              });
+              const pagesLine = pageNames.length > 0 ? " with " + pageNames.join(", ") : "";
+              summary = `${displayName} is ready${pagesLine} — ${filePaths.length} files.`;
+            }
             setMessages((prev) => [
               ...prev,
               {
@@ -642,12 +697,13 @@ export function ProjectPage() {
     summaryAbortRef.current?.abort();
     abortRef.current?.abort();
 
-    // Build a natural intro message
-    const nameForIntro = extractProjectName(text) || "your app";
+    // Build a context-aware intro message
+    const isIteration = !!(buildResult?.files?.length);
+    const introContent = buildIntroMessage(text, isIteration);
     const introMessage: ChatMessage = {
       id: `assistant-intro-${Date.now()}`,
       role: "assistant",
-      content: `I'm building **${nameForIntro}** for you. Let me analyse the requirements and start generating the code.`,
+      content: introContent,
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage, introMessage]);

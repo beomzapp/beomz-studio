@@ -61,6 +61,7 @@ interface ChatPanelProps {
 const ALLOWED_ASSISTANT_MESSAGES = new Set([
   "I’m designing the build plan.",
   "I’m building the approved app now.",
+  "Let me take a look at that.",
 ]);
 
 const PROSE_STARTER_PATTERN = /^(?:[A-Z][a-z]+|I(?:’|’)m|We(?:’|’)re|Building|Planning|Generating|Creating|Updating|Checking|Connecting|Reconnecting|Preview|Build|Error|Done|Ready|Almost|Starting|Finishing)\b/;
