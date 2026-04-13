@@ -378,7 +378,7 @@ export function ProjectPage() {
     });
 
     // Phased build: handle phases_planned event
-    if ((event as Record<string, unknown>).type === "phases_planned") {
+    if ((event as unknown as Record<string, unknown>).type === "phases_planned") {
       const phaseEvent = event as unknown as { phases: Phase[]; currentPhase: number };
       setPhases(phaseEvent.phases);
       setCurrentPhase(phaseEvent.currentPhase);
@@ -866,7 +866,7 @@ export function ProjectPage() {
       setLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
 
       // Restore phase state from project data
-      const proj = status.project as Record<string, unknown>;
+      const proj = status.project as unknown as Record<string, unknown>;
       if (proj.phase_mode || proj.phaseMode) {
         const buildPhases = (proj.build_phases ?? proj.buildPhases) as Phase[] | undefined;
         const curPhase = (proj.current_phase ?? proj.currentPhase) as number | undefined;
