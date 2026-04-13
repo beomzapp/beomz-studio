@@ -1329,7 +1329,6 @@ function buildIterationSystemPrompt(schemaSummary?: string): string {
         "  - CREATE TABLE IF NOT EXISTS \"schema\".\"table_name\" (id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY, ...);",
         "NEVER include DROP TABLE, DROP COLUMN, or ALTER COLUMN TYPE.",
         "If no schema changes are needed, return an empty migrations array.",
-        "IMPORTANT: Always import from the npm package '@supabase/supabase-js' (with @ prefix). Never use relative imports like './supabase-js'.",
       ].join("\n")
     : "";
   return [
@@ -1343,6 +1342,8 @@ function buildIterationSystemPrompt(schemaSummary?: string): string {
     "5. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
     "6. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
     "7. Keep all existing functionality that the user did NOT ask to change.",
+    "8. SUPABASE IMPORTS: Always use: import { createClient } from '@supabase/supabase-js'",
+    "   NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
     "",
     "COLOR CHANGES (highest priority rule):",
     "If the user asks to change colors, theme, accent, or visual style — ONLY return theme.ts.",
