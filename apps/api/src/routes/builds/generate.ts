@@ -260,6 +260,56 @@ function mergeFiles(
   return Array.from(byPath.values());
 }
 
+// ─── BEO-309: Post-generation import validator ────────────────────────────────
+// After sanitiseFiles() + mergeFiles(), scan every .tsx?/.jsx? file for
+// relative imports and check every referenced module exists in the file list.
+// Any missing module gets a minimal stub injected so Vite never throws
+// "Failed to resolve import" errors after phase builds.
+function validateAndInjectStubs(
+  files: StudioFile[],
+  templateId: string,
+): { files: StudioFile[]; missing: string[] } {
+  // Build a lookup of all basename stems present in this build (no extensions)
+  const fileStems = new Set(
+    files.map((f) => f.path.replace(/^.*\//, "").replace(/\.(tsx?|jsx?)$/, "")),
+  );
+
+  const missing: string[] = [];
+  const stubs: StudioFile[] = [];
+
+  for (const file of files) {
+    if (!/\.(tsx?|jsx?)$/.test(file.path)) continue;
+
+    const importMatches = [...file.content.matchAll(/from\s+['"](\.\/.+?)['"]/g)];
+    for (const match of importMatches) {
+      // Flatten any subdirectory prefix (./components/Foo → Foo) and strip extension
+      const stem = match[1]
+        .replace(/^\.\//, "")
+        .replace(/^.*\//, "")
+        .replace(/\.(tsx?|jsx?)$/, "");
+
+      if (!stem || fileStems.has(stem)) continue;
+
+      const importingFile = file.path.replace(/^.*\//, "");
+      const label = `${stem} (imported in ${importingFile})`;
+      if (!missing.includes(label)) {
+        missing.push(label);
+        fileStems.add(stem); // prevent duplicate stubs for the same component
+        stubs.push({
+          path: `apps/web/src/app/generated/${templateId}/${stem}.tsx`,
+          kind: "component",
+          language: "tsx",
+          content: `export default function ${stem}() {\n  return <div className="p-4 text-gray-500">${stem} — coming soon</div>;\n}\n`,
+          source: "platform" as const,
+          locked: false,
+        });
+      }
+    }
+  }
+
+  return { files: stubs.length > 0 ? [...files, ...stubs] : files, missing };
+}
+
 function readTrace(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
   const t = metadata.builderTrace;
   if (typeof t === "object" && t !== null && !Array.isArray(t)) {
@@ -1922,7 +1972,12 @@ async function _runBuildInBackground(
       }
 
       // Merge: new files are added, updated files override existing ones
-      const iterFinalFiles = mergeFiles([...existingFiles], iterResult.files);
+      const mergedIterFiles = mergeFiles([...existingFiles], iterResult.files);
+      const { files: iterFinalFiles, missing: iterMissingImports } = validateAndInjectStubs(mergedIterFiles, templateId);
+      if (iterMissingImports.length > 0) {
+        console.warn("[generate] WARNING: missing imports detected in iteration:", iterMissingImports);
+        console.log("[generate] generating stub files for missing components...", { count: iterMissingImports.length });
+      }
 
       const updatedCount = iterResult.files.filter((f) =>
         existingFiles.some((e) => e.path === f.path),
@@ -2130,7 +2185,12 @@ async function _runBuildInBackground(
       fallbackUsed = true;
     }
 
-    const finalFiles = mergeFiles(templateFiles, customised.files);
+    const mergedFiles = mergeFiles(templateFiles, customised.files);
+    const { files: finalFiles, missing: missingImports } = validateAndInjectStubs(mergedFiles, templateId);
+    if (missingImports.length > 0) {
+      console.warn("[generate] WARNING: missing imports detected:", missingImports);
+      console.log("[generate] generating stub files for missing components...", { count: missingImports.length });
+    }
     const completedAt = ts();
 
     // ── 4. done ─────────────────────────────────────────────────────────────
