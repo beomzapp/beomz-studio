@@ -1234,7 +1234,12 @@ interface PhaseScope {
 }
 
 function buildUserMessage(prompt: string, phaseScope?: PhaseScope): string {
-  const instruction = phaseScope
+  // BEO-319: Phase 1 user turn must NOT repeat the phase constraint — it's already
+  // in the system prompt via buildPhaseContextBlock. Double-messaging suppresses
+  // file generation (Sonnet interprets the narrow scope as "nothing to build").
+  // Phases 2+ keep the full header because it names what was already built and
+  // provides context that isn't present in the system prompt.
+  const instruction = phaseScope && phaseScope.index > 1
     ? [
         `Build Phase ${phaseScope.index} of ${phaseScope.total} for this app.`,
         `THIS PHASE ONLY: ${phaseScope.title}`,
@@ -1289,7 +1294,7 @@ async function callAnthropicWithMessages(
     const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
     const stream = client.messages.stream({
       model: modelId,
-      max_tokens: 32000,
+      max_tokens: 64000, // BEO-319: raised from 32000 — complex phase 1 builds hit the old cap, truncating tool JSON to {}
       system: systemPrompt,
       tools: [DELIVER_FILES_TOOL],
       tool_choice: { type: "tool", name: "deliver_customised_files" },
@@ -1298,6 +1303,10 @@ async function callAnthropicWithMessages(
     const message = await stream.finalMessage();
     const outputTokens = message.usage?.output_tokens ?? 0;
     console.log("[generate] Anthropic response:", { model: modelId, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
+    // BEO-319: warn when approaching the 64k ceiling so we can monitor token pressure
+    if (outputTokens >= 56000) {
+      console.warn("[generate] WARNING: output tokens approaching 64k limit — consider tightening phase scope:", { outputTokens, model: modelId });
+    }
     const toolBlock = message.content.find(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
@@ -2152,6 +2161,13 @@ async function _runBuildInBackground(
     try {
       customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
+      // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
+      // tool JSON → input={}) and any case where Sonnet returns files:[]. Throwing
+      // here routes to the existing catch block which sets fallbackUsed:true and
+      // shows the prebuilt scaffold instead of silently serving 2 template files.
+      if (customised.files.length === 0) {
+        throw new Error(`Model returned 0 files (stop_reason likely max_tokens or empty tool response; outputTokens: ${customised.outputTokens ?? 0})`);
+      }
       // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
       // we flatten into the generated directory. Patch any residual CJS React globals.
       customised = {
