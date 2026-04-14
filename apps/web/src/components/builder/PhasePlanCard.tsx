@@ -165,6 +165,13 @@ export function PhasePlanCard({
               Your app is fully built.
             </p>
           </div>
+        ) : isBuilding ? (
+          <div className="flex items-center justify-center gap-1.5 py-0.5">
+            <Loader size={12} className="animate-spin text-[#F97316]" />
+            <span className="text-[11px] font-medium text-[#6b7280]">
+              Building phase {currentPhase} of {phases.length}...
+            </span>
+          </div>
         ) : showContinue && nextPhase ? (
           <>
             <button
@@ -184,13 +191,6 @@ export function PhasePlanCard({
               I'm done — skip remaining phases
             </button>
           </>
-        ) : isBuilding ? (
-          <div className="flex items-center justify-center gap-1.5 py-0.5">
-            <Loader size={12} className="animate-spin text-[#F97316]" />
-            <span className="text-[11px] font-medium text-[#6b7280]">
-              Building phase {currentPhase} of {phases.length}...
-            </span>
-          </div>
         ) : null}
       </div>
     </div>
