@@ -113,13 +113,14 @@ Return a concise enrichment block (max 200 words) covering:
 
 Focus on what makes this domain DIFFERENT from a generic app. Skip generic advice.`;
 
+// BEO-317: Single search only — instructing Haiku to run 2 searches caused
+// multi-round-trip tool use that reliably exceeded the 8s AbortController timeout.
+// One well-targeted search completes in ~3-5s and provides sufficient context.
 const REFERENCE_ENRICH_SYSTEM = `You are a product researcher. A user wants to build an app inspired by a specific product or website.
 
-Use the web_search tool to research the reference product. You MUST run at least two searches:
-1. "[product] features"
-2. "[product] product overview"
+Use the web_search tool ONCE to research the reference product — search for "[product] features overview" to understand what it offers.
 
-Then return a concise reference analysis (max 180 words) covering:
+Return a concise reference analysis (max 150 words) covering:
 - What this product does (core value proposition)
 - Key features and capabilities
 - Terminology and concepts specific to this product
@@ -153,7 +154,7 @@ async function enrichWithReference(
   const message = await client.messages.create(
     {
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 600,
+      max_tokens: 400,
       system: REFERENCE_ENRICH_SYSTEM,
       tools: [
         { type: "web_search_20250305", name: "web_search" } as unknown as Anthropic.Messages.Tool,
@@ -161,7 +162,7 @@ async function enrichWithReference(
       messages: [
         {
           role: "user",
-          content: `Research the product "${brandRef}". Search for both "${brandRef} features" and "${brandRef} product overview", then provide a detailed analysis of what it does, its key features, terminology, user roles, and data entities.`,
+          content: `Research "${brandRef} features overview" and describe what this product does, its key features, terminology, user roles, and data entities.`,
         },
       ],
     },
@@ -247,11 +248,14 @@ export async function enrichPrompt(userPrompt: string): Promise<string> {
 
       console.log(`[enrichment] reference enrichment complete for: ${brandRef}`);
 
-      return `${userPrompt}
-
---- REFERENCE PRODUCT: ${brandRef} ---
+      // BEO-317: Prepend the reference block BEFORE the user prompt so Sonnet
+      // encounters the product context at the start of the message, giving it
+      // maximum weight over the original prompt text.
+      return `--- REFERENCE PRODUCT: ${brandRef} ---
 ${referenceText}
---- END REFERENCE PRODUCT ---`;
+--- END REFERENCE PRODUCT ---
+
+${userPrompt}`;
     } else {
       // ── Generic domain enrichment path (existing behaviour) ───────────────
       const enrichmentText = await enrichGeneric(client, userPrompt, controller.signal);
