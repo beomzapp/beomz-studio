@@ -51,9 +51,9 @@ export function PhasePlanCard({
       {/* Phase list */}
       <div className="divide-y divide-[#f5f3f0]">
         {phases.map((phase) => {
-          const isCurrent = phase.index === currentPhase;
-          const isCompleted = phase.index < currentPhase;
-          const isPending = phase.index > currentPhase;
+          const isCompleted = phase.index < currentPhase || (phase.index === currentPhase && !isBuilding);
+          const isCurrent = phase.index === currentPhase && isBuilding;
+          const isPending = !isCompleted && !isCurrent;
           const isExpanded = expandedPhase === phase.index;
           const visibleFocus = phase.focus.slice(0, MAX_VISIBLE_PILLS);
           const hiddenCount = phase.focus.length - MAX_VISIBLE_PILLS;
