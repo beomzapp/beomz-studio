@@ -251,6 +251,22 @@ export function ProjectPage() {
     }).catch(() => {});
   }, [projectId, id]);
 
+  // Fetch phase state when project is loaded (hard refresh recovery)
+  useEffect(() => {
+    if (!projectId || id === "new" || phaseMode) return;
+    void getProject(projectId).then((proj) => {
+      if (proj.phaseMode) {
+        const bp = proj.buildPhases as Phase[] | null | undefined;
+        if (bp && Array.isArray(bp) && bp.length > 0) {
+          setPhases(bp);
+          setCurrentPhase(proj.currentPhase ?? 1);
+          setPhaseMode(true);
+          setIsPhaseBuilding(false);
+        }
+      }
+    }).catch(() => {});
+  }, [projectId, id, phaseMode]);
+
   // ── Chat message persistence via localStorage ────────────────────────────
   // Restore messages when projectId is set (page load / navigation)
   useEffect(() => {
