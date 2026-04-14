@@ -16,7 +16,7 @@ const FILLER_WORDS = new Set([
 function extractDomain(prompt: string): string {
   // Strip leading verbs: "build me a", "create an", "make a", etc.
   const cleaned = prompt
-    .replace(/^(?:please\s+)?(?:build|create|make|design|generate|develop|code)\s+(?:me\s+)?(?:a|an|the)?\s*/i, "")
+    .replace(/^(?:please\s+)?(?:build|create|make|design|generate|develop|code)\s+(?:me\s+)?(?:an|a|the)\s+/i, "")
     .trim();
   // If the cleaning ate everything, fall back to original
   const domain = cleaned.length > 5 ? cleaned : prompt.trim();
