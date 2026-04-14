@@ -5,6 +5,7 @@
  * Streaming cursor, rotating build status messages, completion suggestions.
  * Human-readable build progress is shown as transcript rows.
  */
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3TranscriptEntry } from "@beomz-studio/contracts";
 import {
@@ -52,6 +53,8 @@ interface ChatPanelProps {
   onDismissChips?: () => void;
   /** Current credits balance — 0 disables send */
   creditsBalance?: number;
+  /** Optional node rendered at the bottom of the message list, inside the scroll container */
+  phaseCard?: ReactNode;
 }
 
 // ─────────────────────────────────────────────
@@ -398,6 +401,7 @@ export function ChatPanel({
   suggestionChips,
   onDismissChips,
   creditsBalance,
+  phaseCard,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
@@ -619,6 +623,9 @@ export function ChatPanel({
             )}
           </div>
         )}
+
+        {/* Phase plan card — inside scroll, after messages */}
+        {phaseCard}
 
         <div ref={chatEndRef} />
 

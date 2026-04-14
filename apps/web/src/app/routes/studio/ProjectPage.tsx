@@ -1237,37 +1237,35 @@ export function ProjectPage() {
           className="shrink-0 overflow-hidden transition-[width] duration-200 ease-in-out"
           style={{ width: showChat ? chatPanelWidth : 0 }}
         >
-          <div className="flex h-full flex-col" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
-            {phaseMode && phases.length > 0 && (
-              <div className="flex-none overflow-y-auto pt-3">
-                <PhasePlanCard
-                  phases={phases}
-                  currentPhase={currentPhase}
-                  isBuilding={isPhaseBuilding}
-                  onContinue={handleNextPhase}
-                  onSkip={handleSkipPhases}
-                />
-              </div>
-            )}
-            <div className="min-h-0 flex-1">
-              <ChatPanel
-                messages={messages}
-                isStreaming={isStreaming}
-                streamingText={transport === "idle" ? "" : streamingText}
-                onSendMessage={handleSendMessage}
-                onStopStreaming={handleStopStreaming}
-                onRetry={handleRetry}
-                onViewCode={() => {
-                  setActiveView("code");
-                  const firstFile = buildResult?.files?.[0]?.path;
-                  if (firstFile) setSelectedFile(firstFile);
-                }}
-                width={chatPanelWidth}
-                suggestionChips={suggestionChips}
-                onDismissChips={() => setSuggestionChips([])}
-                creditsBalance={credits?.balance}
-              />
-            </div>
+          <div className="h-full" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
+            <ChatPanel
+              messages={messages}
+              isStreaming={isStreaming}
+              streamingText={transport === "idle" ? "" : streamingText}
+              onSendMessage={handleSendMessage}
+              onStopStreaming={handleStopStreaming}
+              onRetry={handleRetry}
+              onViewCode={() => {
+                setActiveView("code");
+                const firstFile = buildResult?.files?.[0]?.path;
+                if (firstFile) setSelectedFile(firstFile);
+              }}
+              width={chatPanelWidth}
+              suggestionChips={suggestionChips}
+              onDismissChips={() => setSuggestionChips([])}
+              creditsBalance={credits?.balance}
+              phaseCard={
+                phaseMode && phases.length > 0 ? (
+                  <PhasePlanCard
+                    phases={phases}
+                    currentPhase={currentPhase}
+                    isBuilding={isPhaseBuilding}
+                    onContinue={handleNextPhase}
+                    onSkip={handleSkipPhases}
+                  />
+                ) : undefined
+              }
+            />
           </div>
         </div>
         {showChat && <ResizeHandle target="chat" />}
