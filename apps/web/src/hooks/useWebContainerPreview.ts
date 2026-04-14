@@ -245,14 +245,11 @@ export function useWebContainerPreview(
         const devProcess = await wc.spawn("npm", ["run", "dev"]);
         instance.devProcess = devProcess;
 
-        // ── Listen to dev server output for Vite parse errors ──────────────
+        // ── Listen to dev server output for Vite errors ──────────────────
         devProcess.output.pipeTo(new WritableStream({
           write: (chunk: string) => {
-            // Detect Vite oxc parse errors: [plugin:vite:oxc] or [PARSE_ERROR]
+            // 1) Detect Vite oxc parse errors: [plugin:vite:oxc] or [PARSE_ERROR]
             if (chunk.includes("[plugin:vite:oxc]") || chunk.includes("[PARSE_ERROR]")) {
-              // Extract file path and error message from output like:
-              // [plugin:vite:oxc] ... at /path/to/file.tsx:123:45
-              // or: Unexpected token at SomePage.tsx:42:10
               const fileMatch = chunk.match(/at\s+(?:\/[^\s:]+\/)?(\S+\.tsx?):(\d+)/);
               const errorLines = chunk.split("\n").filter((l: string) =>
                 l.includes("PARSE_ERROR") || l.includes("Unexpected") || l.includes("Expected") || l.includes("vite:oxc"),
@@ -262,6 +259,36 @@ export function useWebContainerPreview(
                 const fileName = fileMatch[1].replace(/^.*\//, "");
                 const errorMsg = errorLines || chunk.slice(0, 300);
                 void handleViteError(wc, fileName, errorMsg);
+              }
+            }
+
+            // 2) Detect import resolution errors:
+            //    "Failed to resolve import "X" from "Y.tsx""
+            //    "[plugin:vite:import-analysis] Failed to resolve import"
+            //    "Could not resolve "X""
+            if (
+              chunk.includes("Failed to resolve import") ||
+              chunk.includes("Could not resolve") ||
+              chunk.includes("[plugin:vite:import-analysis]")
+            ) {
+              // Try to extract the source file from 'from "file.tsx"'
+              const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
+              const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
+              const fileName = fromMatch
+                ? fromMatch[1].replace(/^.*\//, "")
+                : null;
+              const errorMsg = chunk.split("\n").filter((l: string) =>
+                l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
+              ).join(" ").trim() || chunk.slice(0, 300);
+
+              if (fileName) {
+                void handleViteError(wc, fileName, errorMsg);
+              } else if (resolveMatch) {
+                // No source file found — use the first .tsx file from the chunk
+                const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
+                if (anyFileMatch) {
+                  void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
+                }
               }
             }
           },

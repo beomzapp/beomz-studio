@@ -262,6 +262,8 @@ export function ProjectPage() {
           setCurrentPhase(proj.currentPhase ?? 1);
           setPhaseMode(true);
           setIsPhaseBuilding(false);
+          // Force preview refresh after WC has time to initialise
+          setTimeout(() => setPreviewRefreshKey((c) => c + 1), 500);
         }
       }
     }).catch(() => {});
