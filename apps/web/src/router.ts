@@ -14,6 +14,7 @@ import { ProjectPage } from "./app/routes/studio/ProjectPage";
 import { ImagesPage } from "./app/routes/studio/ImagesPage";
 import { AgentsPage } from "./app/routes/studio/AgentsPage";
 import { SettingsPage } from "./app/routes/studio/SettingsPage";
+import { ProfilePage } from "./app/routes/studio/ProfilePage";
 import { PricingPage } from "./app/routes/marketing/PricingPage";
 import { LoginPage } from "./app/routes/auth/login";
 import { SignupPage } from "./app/routes/auth/signup";
@@ -116,6 +117,12 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const profileRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: "/profile",
+  component: ProfilePage,
+});
+
 const routeTree = rootRoute.addChildren([
   landingRoute,
   planRoute,
@@ -130,6 +137,7 @@ const routeTree = rootRoute.addChildren([
     imagesRoute,
     agentsRoute,
     settingsRoute,
+    profileRoute,
   ]),
 ]);
 

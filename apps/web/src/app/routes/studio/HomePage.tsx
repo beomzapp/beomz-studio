@@ -35,6 +35,8 @@ import { cn } from "../../../lib/cn";
 import { listProjectsWithMeta, deleteProject, renameProject } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
 import { useCredits } from "../../../lib/CreditsContext";
+import { OnboardingModal, isOnboardingCompleted, markOnboardingCompleted } from "../../../components/studio/OnboardingModal";
+import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 
 interface ProjectCard extends Project {
   generationCount: number;
@@ -106,6 +108,7 @@ export function HomePage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Close menu on outside click
   useEffect(() => {
@@ -149,6 +152,13 @@ export function HomePage() {
       }
     })();
   }, []);
+
+  // Show onboarding for first-time users with no projects
+  useEffect(() => {
+    if (!loading && projects.length === 0 && !isOnboardingCompleted()) {
+      setShowOnboarding(true);
+    }
+  }, [loading, projects.length]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent, project: ProjectCard) => {
     e.stopPropagation();
@@ -204,6 +214,19 @@ export function HomePage() {
 
   return (
     <div className="min-h-full bg-[#faf9f6] p-6 lg:p-10">
+      {showOnboarding && (
+        <OnboardingModal
+          onSelect={(prompt) => {
+            setShowOnboarding(false);
+            markOnboardingCompleted();
+            if (prompt) {
+              saveProjectLaunchIntent({ prompt });
+              navigate({ to: "/studio/project/$id", params: { id: "new" } });
+            }
+          }}
+          onDismiss={() => setShowOnboarding(false)}
+        />
+      )}
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-[#1a1a1a]">
