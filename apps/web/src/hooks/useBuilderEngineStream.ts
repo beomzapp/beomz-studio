@@ -5,6 +5,7 @@ import {
   getBuildStatus,
   startBuild,
   streamBuildEvents,
+  StreamHttpError,
   type BuildStatusResponse,
   type StartBuildResponse,
 } from "../lib/api";
@@ -171,6 +172,43 @@ export function useBuilderEngineStream() {
           break;
         }
 
+        // Non-retryable HTTP errors — break the loop immediately
+        if (error instanceof StreamHttpError) {
+          if (error.status === 404) {
+            onStreamError?.("Build not found — it may have been interrupted. Please try again.");
+            terminal = true;
+            break;
+          }
+          if (error.status === 410) {
+            // Build superseded — switch to the latest build
+            const latestBuildId = error.body?.latestBuildId as string | undefined;
+            if (latestBuildId) {
+              console.log("[subscribeToBuild] Build superseded, switching to", latestBuildId);
+              try {
+                const status = await getBuildStatus(latestBuildId);
+                onBuildStatus?.(status);
+                const trace = synthesizeTraceFromBuildStatus(status);
+                for (const evt of trace.events) emitEvent(evt);
+              } catch (switchErr) {
+                onStreamError?.(
+                  switchErr instanceof Error ? switchErr.message : "Failed to load superseded build.",
+                );
+              }
+            } else {
+              onStreamError?.("Build was superseded by a newer build.");
+            }
+            terminal = true;
+            break;
+          }
+          // 4xx client errors (other than 404/410) — don't retry
+          if (error.status >= 400 && error.status < 500) {
+            onStreamError?.(error.message);
+            terminal = true;
+            break;
+          }
+        }
+
+        // 5xx / network errors — retry with polling fallback
         onStreamError?.(
           error instanceof Error ? error.message : "Build events stream failed.",
         );

@@ -94,6 +94,17 @@ function isAbortSignalLike(value: unknown): value is AbortSignal {
     && typeof value.removeEventListener === "function";
 }
 
+export class StreamHttpError extends Error {
+  status: number;
+  body: Record<string, unknown> | null;
+  constructor(status: number, body: Record<string, unknown> | null) {
+    super(body?.error ? String(body.error) : `Request failed with ${status}.`);
+    this.name = "StreamHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 function toLoggedError(error: unknown): { message: string; name: string } {
   if (error instanceof Error) {
     return {
@@ -636,8 +647,8 @@ export async function streamBuildEvents(args: {
   }
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(errorBody?.error ?? `Request failed with ${response.status}.`);
+    const errorBody = await response.json().catch(() => null) as Record<string, unknown> | null;
+    throw new StreamHttpError(response.status, errorBody);
   }
 
   const reader = response.body?.getReader();
