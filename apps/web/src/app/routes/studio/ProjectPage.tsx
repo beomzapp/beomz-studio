@@ -262,6 +262,17 @@ export function ProjectPage() {
           setCurrentPhase(proj.currentPhase ?? 1);
           setPhaseMode(true);
           setIsPhaseBuilding(false);
+          // Inject synthetic phase card message if not already present
+          setMessages((prev) => {
+            if (prev.some((m) => m.isPhaseCard)) return prev;
+            return [...prev, {
+              id: "phase-plan",
+              role: "assistant" as const,
+              content: "",
+              timestamp: new Date().toISOString(),
+              isPhaseCard: true,
+            }];
+          });
           // Force preview refresh after WC has time to initialise
           setTimeout(() => setPreviewRefreshKey((c) => c + 1), 500);
         }
@@ -404,6 +415,17 @@ export function ProjectPage() {
       setCurrentPhase(phaseEvent.currentPhase);
       setPhaseMode(true);
       setIsPhaseBuilding(true);
+      // Inject synthetic phase card message at current position in chat
+      setMessages((prev) => {
+        if (prev.some((m) => m.isPhaseCard)) return prev;
+        return [...prev, {
+          id: "phase-plan",
+          role: "assistant" as const,
+          content: "",
+          timestamp: new Date().toISOString(),
+          isPhaseCard: true,
+        }];
+      });
     }
 
     if (event.type === "tool_use_started") {
@@ -973,9 +995,19 @@ export function ProjectPage() {
           setPhases(buildPhases);
           setCurrentPhase(curPhase ?? 1);
           setPhaseMode(true);
-          // If the build is still running, phase is building
           const isRunning = status.build.status === "queued" || status.build.status === "running";
           setIsPhaseBuilding(isRunning);
+          // Inject synthetic phase card message if not already present
+          setMessages((prev) => {
+            if (prev.some((m) => m.isPhaseCard)) return prev;
+            return [...prev, {
+              id: "phase-plan",
+              role: "assistant" as const,
+              content: "",
+              timestamp: new Date().toISOString(),
+              isPhaseCard: true,
+            }];
+          });
         }
       }
 

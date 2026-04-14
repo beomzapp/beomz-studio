@@ -36,6 +36,8 @@ export interface ChatMessage {
   error?: string | null;
   suggestions?: readonly string[];
   phase?: { current: number; total: number; summary: string };
+  /** When true, ChatPanel renders the phaseCard ReactNode here instead of message content */
+  isPhaseCard?: boolean;
 }
 
 
@@ -530,7 +532,12 @@ export function ChatPanel({
                 (msg.planSteps && msg.planSteps.length > 0) ||
                 (msg.changedFiles && msg.changedFiles.length > 0);
 
-              if (msg.role === "assistant" && !hasVisibleContent) return null;
+              if (msg.role === "assistant" && !hasVisibleContent && !msg.isPhaseCard) return null;
+
+              // Phase card placeholder — render the phaseCard ReactNode here
+              if (msg.isPhaseCard) {
+                return <div key={msg.id}>{phaseCard}</div>;
+              }
 
               return (
                 <div key={msg.id}>
@@ -623,9 +630,6 @@ export function ChatPanel({
             )}
           </div>
         )}
-
-        {/* Phase plan card — inside scroll, after messages */}
-        {phaseCard}
 
         <div ref={chatEndRef} />
 
