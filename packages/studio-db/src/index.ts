@@ -753,6 +753,44 @@ export class StudioDbClient {
     return response.data;
   }
 
+  /**
+   * Given a build ID that can no longer be resolved, tries to find the most
+   * recent *completed* generation for the same project. Used by the SSE events
+   * endpoint to return 410 Gone (build superseded) instead of a bare 404 when
+   * the client reconnects with a stale build ID.
+   *
+   * Returns null if the build ID has no associated project or if no completed
+   * sibling generation exists.
+   */
+  async findLatestCompletedGenerationForProject(buildId: string): Promise<GenerationRow | null> {
+    const projectRes = await this.client
+      .schema("public")
+      .from("generations")
+      .select("project_id")
+      .eq("id", buildId)
+      .maybeSingle();
+
+    if (projectRes.error || !projectRes.data?.project_id) {
+      return null;
+    }
+
+    const latestRes = await this.client
+      .schema("public")
+      .from("generations")
+      .select("*")
+      .eq("project_id", projectRes.data.project_id)
+      .eq("status", "completed")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestRes.error) {
+      return null;
+    }
+
+    return latestRes.data;
+  }
+
   async listGenerationsByProjectId(projectId: string): Promise<GenerationRow[]> {
     const response = await this.client
       .from("generations")

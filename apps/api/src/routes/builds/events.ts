@@ -140,6 +140,14 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     c.req.raw.signal,
   );
   if (!generationRow) {
+    try {
+      const superseding = await orgContext.db.findLatestCompletedGenerationForProject(buildId);
+      if (superseding && superseding.id !== buildId) {
+        return c.json({ error: "build_superseded", latestBuildId: superseding.id }, 410);
+      }
+    } catch {
+      // ignore — fall through to 404
+    }
     return c.json({ error: "Build not found." }, 404);
   }
 
