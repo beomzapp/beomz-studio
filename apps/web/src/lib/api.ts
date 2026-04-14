@@ -269,6 +269,10 @@ export async function listProjectsWithMeta(): Promise<ProjectsListResponse> {
   return requestJson<ProjectsListResponse>("/projects", { method: "GET" });
 }
 
+export async function getProject(projectId: string): Promise<Project> {
+  return requestJson<Project>(`/projects/${projectId}`, { method: "GET" });
+}
+
 export async function deleteProject(projectId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/projects/${projectId}`, { method: "DELETE" });
 }

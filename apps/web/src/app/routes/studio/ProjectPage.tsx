@@ -62,6 +62,7 @@ import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
   getBuildStatus,
   getLatestBuildForProject,
+  getProject,
   getProjectDbState,
   exportProjectZip,
   listProjectsWithMeta,
@@ -158,6 +159,7 @@ export function ProjectPage() {
   const [currentPhase, setCurrentPhase] = useState(0);
   const [phaseMode, setPhaseMode] = useState(false);
   const [isPhaseBuilding, setIsPhaseBuilding] = useState(false);
+  const phasePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
@@ -774,8 +776,12 @@ export function ProjectPage() {
   // ── Phased build: continue to next phase ──
   const handleNextPhase = useCallback(async () => {
     if (!projectId) return;
+    const expectedPhase = currentPhase + 1;
     setIsPhaseBuilding(true);
-    setCurrentPhase((prev) => prev + 1);
+    setCurrentPhase(expectedPhase);
+
+    // Clear any prior phase poll
+    if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -789,9 +795,59 @@ export function ProjectPage() {
       setStreamingText(labels[thinkingLabelIndexRef.current]);
     }, 4000);
 
+    let phaseCompleted = false;
+
+    // Polling fallback: if SSE closes without done, poll project state
+    const startPhasePoll = () => {
+      if (phasePollRef.current) return; // already polling
+      console.log("[NextPhase] SSE closed without done — starting poll fallback for phase", expectedPhase);
+      const pollStart = Date.now();
+      const POLL_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
+      phasePollRef.current = setInterval(async () => {
+        if (phaseCompleted) {
+          if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
+          return;
+        }
+        // Timeout check
+        if (Date.now() - pollStart > POLL_TIMEOUT) {
+          console.error("[NextPhase] Poll timeout after 5 minutes");
+          if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
+          setIsPhaseBuilding(false);
+          setIsStreaming(false);
+          setStreamingText("");
+          return;
+        }
+        try {
+          const proj = await getProject(projectId);
+          const serverPhase = proj.currentPhase ?? 0;
+          if (serverPhase > expectedPhase || (serverPhase === expectedPhase && !proj.phaseMode)) {
+            // Server advanced past our expected phase — build completed
+            console.log("[NextPhase] Poll detected completion: server phase", serverPhase);
+            phaseCompleted = true;
+            if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
+            setCurrentPhase(serverPhase);
+            setIsPhaseBuilding(false);
+            setIsStreaming(false);
+            setStreamingText("");
+            // Fetch latest build to update preview
+            const latestBuild = await getLatestBuildForProject(projectId);
+            if (latestBuild) {
+              setBuild(latestBuild.build);
+              if (latestBuild.result) setBuildResult(latestBuild.result);
+              if (latestBuild.trace.previewReady || latestBuild.build.status === "completed") {
+                setPreviewGenerationId(latestBuild.build.id);
+              }
+            }
+          }
+        } catch (pollErr) {
+          console.warn("[NextPhase] Poll error:", pollErr);
+        }
+      }, 3000);
+    };
+
     try {
       const response = await startNextPhase(projectId);
-      // The response is an SSE stream — read it the same way as streamBuildEvents
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No stream body");
 
@@ -805,6 +861,11 @@ export function ProjectPage() {
         dataLines = [];
         try {
           const event = JSON.parse(payload) as BuilderV3Event;
+          // Track if we received a done event
+          if (event.type === "done" || event.type === "error") {
+            phaseCompleted = true;
+            if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
+          }
           handleBuilderEvent(event);
         } catch { /* ignore parse errors */ }
       };
@@ -824,18 +885,32 @@ export function ProjectPage() {
           if (line.startsWith("data:")) { dataLines.push(line.slice(5).trim()); }
         }
       }
+
+      // SSE stream closed — if we never got done, start polling
+      if (!phaseCompleted) {
+        startPhasePoll();
+      }
     } catch (err) {
       if (!controller.signal.aborted) {
-        console.error("[NextPhase] Failed:", err);
-        setIsPhaseBuilding(false);
-        setIsStreaming(false);
-        setStreamingText("");
+        console.error("[NextPhase] SSE failed:", err);
+        // SSE failed entirely — start polling fallback
+        if (!phaseCompleted) {
+          startPhasePoll();
+        }
       }
     }
-  }, [projectId, handleBuilderEvent, personality.thinkingLabels]);
+  }, [projectId, currentPhase, handleBuilderEvent, personality.thinkingLabels]);
 
   const handleSkipPhases = useCallback(() => {
+    if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
     setPhaseMode(false);
+  }, []);
+
+  // Cleanup phase poll on unmount
+  useEffect(() => {
+    return () => {
+      if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
+    };
   }, []);
 
   // Resume existing build
