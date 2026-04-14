@@ -12,8 +12,9 @@ module.exports = {
       kill_timeout: 185000,
       // Use SIGTERM so our server.ts handler fires
       kill_signal: "SIGTERM",
-      // Listen timeout for graceful reloads (pm2 reload)
-      listen_timeout: 10000,
+      // 60s for the process to call process.send('ready') before pm2 considers
+      // the reload failed. server.ts sends ready in the serve() callback.
+      listen_timeout: 60000,
       env: {
         NODE_ENV: "production",
       },

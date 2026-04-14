@@ -107,6 +107,11 @@ serve(
   (info) => {
     // eslint-disable-next-line no-console
     console.log(`Beomz Studio API listening on http://localhost:${info.port}`);
+    // Signal pm2 that the process is ready so it stops counting sub-restarts
+    // during graceful reloads (fixes the 350-restart-in-8h race condition).
+    if (process.send) {
+      process.send("ready");
+    }
   },
 );
 
