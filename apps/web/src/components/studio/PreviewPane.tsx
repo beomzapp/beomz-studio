@@ -220,7 +220,7 @@ export function PreviewPane({
 
     if (useWebContainer && previewUrl) {
       return {
-        key: `wc:${project.id}:${generationId ?? "draft"}`,
+        key: `wc:${project.id}:${generationId ?? "draft"}:${refreshToken}`,
         src: previewUrl,
         srcDoc: undefined,
       };

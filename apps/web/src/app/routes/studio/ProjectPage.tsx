@@ -560,8 +560,9 @@ export function ProjectPage() {
         return prev;
       });
 
-      // Phase mode: mark current phase build as done
+      // Phase mode: mark current phase build as done + force preview refresh
       setIsPhaseBuilding(false);
+      setPreviewRefreshKey((c) => c + 1);
     }
 
     if (event.type === "error") {
@@ -854,6 +855,7 @@ export function ProjectPage() {
               if (latestBuild.trace.previewReady || latestBuild.build.status === "completed") {
                 setPreviewGenerationId(latestBuild.build.id);
               }
+              setPreviewRefreshKey((c) => c + 1);
             }
           }
         } catch (pollErr) {
