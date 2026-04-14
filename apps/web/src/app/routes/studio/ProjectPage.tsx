@@ -877,6 +877,10 @@ export function ProjectPage() {
         dataLines = [];
         try {
           const event = JSON.parse(payload) as BuilderV3Event;
+          // Set activeBuildIdRef from the first event carrying a buildId
+          if ("buildId" in event && event.buildId) {
+            activeBuildIdRef.current = event.buildId;
+          }
           // Track if we received a done event
           if (event.type === "done" || event.type === "error") {
             phaseCompleted = true;

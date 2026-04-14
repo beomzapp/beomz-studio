@@ -267,8 +267,17 @@ export function TopBar({
 
         {/* Open in new tab */}
         <button
-          onClick={() => toast("Coming soon")}
-          className="rounded-md p-1.5 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+          onClick={() => {
+            if (beomzAppUrl) {
+              window.open(beomzAppUrl.startsWith("http") ? beomzAppUrl : `https://${beomzAppUrl}`, "_blank");
+            } else {
+              toast("Publish your app first to open in a new tab");
+            }
+          }}
+          className={cn(
+            "rounded-md p-1.5 transition-colors hover:bg-[#f3f4f6]",
+            beomzAppUrl ? "text-[#6b7280] hover:text-[#1a1a1a]" : "text-[#d1d5db]",
+          )}
           aria-label="Open in new tab"
         >
           <ExternalLink size={16} />
