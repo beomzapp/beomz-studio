@@ -12,6 +12,20 @@ const FILLER_WORDS = new Set([
   "please", "can", "you", "i", "want", "need", "like", "something",
 ]);
 
+/** Strip leading verbs/fillers from the raw prompt to get a clean noun phrase for the intro. */
+function extractDomain(prompt: string): string {
+  // Strip leading verbs: "build me a", "create an", "make a", etc.
+  const cleaned = prompt
+    .replace(/^(?:please\s+)?(?:build|create|make|design|generate|develop|code)\s+(?:me\s+)?(?:a|an|the)?\s*/i, "")
+    .trim();
+  // If the cleaning ate everything, fall back to original
+  const domain = cleaned.length > 5 ? cleaned : prompt.trim();
+  // Cap at a reasonable length without cutting mid-word
+  if (domain.length <= 60) return domain;
+  const truncated = domain.slice(0, 57).replace(/\s+\S*$/, "");
+  return truncated || domain.slice(0, 57);
+}
+
 function extractProjectName(prompt: string): string | null {
   // Check for explicit "called X" or "named X" patterns
   const namedMatch = prompt.match(/(?:called|named)\s+["']?([A-Z][A-Za-z0-9 ]{0,30})["']?/);
@@ -742,7 +756,7 @@ export function ProjectPage() {
         ? personality.iterationIntro(text)
         : personality.intro(
             extractProjectName(text) || "your app",
-            text.length > 60 ? text.slice(0, 57).replace(/\s+\S*$/, "") + "..." : text,
+            extractDomain(text),
           ),
     );
     const introMessage: ChatMessage = {

@@ -138,7 +138,7 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityConfig> = {
 
   director: {
     intro: (_appName, domain) =>
-      `Nice — building you a clean ${domain}. Starting now...`,
+      `Nice — building a clean ${domain}. Starting now...`,
     thinkingLabels: [
       "Researching best practices...",
       "Designing the layout...",
@@ -153,7 +153,7 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityConfig> = {
   },
 
   expert: {
-    intro: (_appName, domain) => `Building a ${domain}.`,
+    intro: (_appName, domain) => `Building ${/^[aeiou]/i.test(domain) ? "an" : "a"} ${domain}.`,
     thinkingLabels: [
       "Analysing requirements...",
       "Structuring data model...",
@@ -169,7 +169,7 @@ export const PERSONALITIES: Record<PersonalityId, PersonalityConfig> = {
 
   collaborator: {
     intro: (_appName, domain) =>
-      `A ${domain} — great choice! Setting things up for you now...`,
+      `${/^[aeiou]/i.test(domain) ? "An" : "A"} ${domain} — great choice! Setting things up for you now...`,
     thinkingLabels: [
       "Working on it with you...",
       "Setting up the main view...",
