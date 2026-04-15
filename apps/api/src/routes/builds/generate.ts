@@ -2351,7 +2351,7 @@ async function _runBuildInBackground(
     }
 
     try {
-      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope, input.forcedSimple ? 16000 : undefined);
+      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope, input.forcedSimple ? 32000 : undefined);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
       // tool JSON → input={}) and any case where Sonnet returns files:[]. Throwing
