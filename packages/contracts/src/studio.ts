@@ -26,7 +26,8 @@ export type GenerationStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "awaiting_scope_confirmation";
+  | "awaiting_scope_confirmation"
+  | "insufficient_credits";
 
 export type PlanPhase =
   | "idle"

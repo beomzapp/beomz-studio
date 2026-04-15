@@ -82,6 +82,9 @@ export interface BuildGenerateInput {
     features: string[];
     enrichedPrompt: string;
   };
+  // BEO-335: set by force-simple endpoint — skips planPhases and caps max_tokens
+  // to keep the build within ~23 credits for low-credit orgs.
+  forcedSimple?: boolean;
 }
 
 interface CustomiseResult {
@@ -1297,13 +1300,14 @@ async function callAnthropicWithMessages(
   systemPrompt: string,
   userMessage: string,
   prompt: string,
+  maxTokens = 64000,
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
     console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
     const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
     const stream = client.messages.stream({
       model: modelId,
-      max_tokens: 64000, // BEO-319: raised from 32000 — complex phase 1 builds hit the old cap, truncating tool JSON to {}
+      max_tokens: maxTokens, // BEO-319: raised from 32000; BEO-335: overridable for forcedSimple
       system: systemPrompt,
       tools: [DELIVER_FILES_TOOL],
       tool_choice: { type: "tool", name: "deliver_customised_files" },
@@ -1360,12 +1364,14 @@ async function callAnthropicCustomise(
   designSystemSpec?: string,
   phaseContextBlock?: string,
   phaseScope?: PhaseScope,
+  maxTokens?: number,
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
     buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock),
     buildUserMessage(prompt, phaseScope),
     prompt,
+    maxTokens,
   );
 }
 
@@ -1435,6 +1441,7 @@ async function callModelCustomise(
   paletteId: string,
   phaseContextBlock?: string,
   phaseScope?: PhaseScope,
+  maxTokens?: number,
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
@@ -1445,7 +1452,7 @@ async function callModelCustomise(
   }
 
   if (model.startsWith("claude-")) {
-    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec, phaseContextBlock, phaseScope);
+    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec, phaseContextBlock, phaseScope, maxTokens);
   }
 
   if (model.startsWith("gpt-")) {
@@ -1466,7 +1473,7 @@ async function callModelCustomise(
 
   // Unknown model — fall back to haiku
   console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
-  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec, phaseContextBlock, phaseScope);
+  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec, phaseContextBlock, phaseScope, maxTokens);
 }
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
@@ -1812,12 +1819,23 @@ async function _runBuildInBackground(
     }
 
     if (intent === "complex_build") {
+      // ── Credit balance check ────────────────────────────────────────────────
+      const CREDIT_THRESHOLD = 60;
+      let orgBalance = 0;
+      try {
+        const orgRow = await db.getOrgWithBalance(orgId);
+        orgBalance = (orgRow?.credits ?? 0) + (orgRow?.topup_credits ?? 0);
+      } catch (err) {
+        console.warn("[generate] credit check failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+      console.log("[generate] credit balance check:", { orgBalance, required: CREDIT_THRESHOLD, buildId });
+
       // Enrich first so extractFeatures has brand context
       const enrichedForScope = await enrichPrompt(prompt);
       const { features } = await extractFeatures(enrichedForScope, prompt);
 
       if (features.length > 0) {
-        // Store everything confirm-scope needs to resume
+        // Store everything confirm-scope / force-simple need to resume
         const pendingScope = {
           enrichedPrompt: enrichedForScope,
           featureCandidates: features,
@@ -1825,6 +1843,37 @@ async function _runBuildInBackground(
           templateId,
           originalPrompt: prompt,
         };
+
+        // ── Insufficient credits — show what they'd get but don't start ──────
+        if (!isAdminEmail(input.userEmail ?? "") && orgBalance < CREDIT_THRESHOLD) {
+          const insufficientEvent = {
+            type: "insufficient_credits" as const,
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            available: orgBalance,
+            required: CREDIT_THRESHOLD,
+            features,
+          };
+          // Step 1: persist event + status
+          await appendEventToDb(
+            db,
+            buildId,
+            insufficientEvent as unknown as BuilderV3StatusEvent,
+            { status: "insufficient_credits" },
+          );
+          // Step 2: store pendingScope so force-simple can access enrichedPrompt
+          const icRow = await db.findGenerationById(buildId);
+          const icMeta =
+            typeof icRow?.metadata === "object" && icRow.metadata !== null
+              ? (icRow.metadata as Record<string, unknown>)
+              : {};
+          await db.updateGeneration(buildId, {
+            metadata: { ...icMeta, pendingScope },
+          });
+          console.log("[generate] insufficient_credits — available:", orgBalance, "required:", CREDIT_THRESHOLD, { buildId });
+          return;
+        }
 
         const scopeEvent = {
           type: "scope_confirmation" as const,
@@ -1889,12 +1938,11 @@ async function _runBuildInBackground(
   // Any failure returns the original prompt unchanged — never blocks the build.
   let workingPrompt: string;
   if (input.confirmedScope) {
-    // Resume after scope confirmation — inject confirmed feature list
+    // Resume after scope confirmation — inject confirmed feature list if provided
     const featureList = input.confirmedScope.features.join(", ");
-    workingPrompt = `${input.confirmedScope.enrichedPrompt}
-
-Build ONLY these confirmed features: ${featureList}
-Do not add any feature not in this list.`;
+    workingPrompt = featureList
+      ? `${input.confirmedScope.enrichedPrompt}\n\nBuild ONLY these confirmed features: ${featureList}\nDo not add any feature not in this list.`
+      : input.confirmedScope.enrichedPrompt;
     console.log("[generate] resuming with confirmedScope:", input.confirmedScope.features.length, "features");
   } else {
     workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);
@@ -1914,7 +1962,7 @@ Do not add any feature not in this list.`;
       activeCurrentPhase = input.phaseOverride.currentPhase;
       activePhasesTotal = input.phaseOverride.phasesTotal;
       console.log("[generate] phase override supplied:", { currentPhase: activeCurrentPhase, phasesTotal: activePhasesTotal });
-    } else if (isComplexPrompt(workingPrompt)) {
+    } else if (isComplexPrompt(workingPrompt) && !input.forcedSimple) {
       try {
         const phases = await planPhases(workingPrompt);
         if (phases.length > 0) {
@@ -2303,7 +2351,7 @@ Do not add any feature not in this list.`;
     }
 
     try {
-      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope);
+      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope, input.forcedSimple ? 16000 : undefined);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
       // tool JSON → input={}) and any case where Sonnet returns files:[]. Throwing

@@ -105,6 +105,16 @@ export interface BuilderV3ConversationalResponseEvent extends BuilderV3BaseEvent
   message: string;
 }
 
+// BEO-335: emitted when org lacks enough credits to run a complex build.
+// The features list shows what they would have gotten; force-simple can start
+// a capped single-phase build instead.
+export interface BuilderV3InsufficientCreditsEvent extends BuilderV3BaseEvent {
+  type: "insufficient_credits";
+  available: number;
+  required: number;
+  features: string[];
+}
+
 export type BuilderV3Event =
   | BuilderV3AssistantDeltaEvent
   | BuilderV3StatusEvent
@@ -115,7 +125,8 @@ export type BuilderV3Event =
   | BuilderV3DoneEvent
   | BuilderV3ErrorEvent
   | BuilderV3ScopeConfirmationEvent
-  | BuilderV3ConversationalResponseEvent;
+  | BuilderV3ConversationalResponseEvent
+  | BuilderV3InsufficientCreditsEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;
