@@ -1,9 +1,15 @@
 /**
- * planPhases — BEO-197 Phased Build System
+ * planPhases — BEO-332 Fixed 5-phase progressive enhancement structure
  *
- * Uses claude-haiku-4-5-20251001 to decompose a complex prompt into 3-5
- * independently-shippable build phases. Returns empty array on any failure
- * so the caller can gracefully fall back to single-phase mode.
+ * Phase titles and purposes are ALWAYS the same 5 layers (Option D):
+ *   1. Core shell & data model   — full scaffold, all pages, mock data
+ *   2. Database integration      — wire real Supabase CRUD
+ *   3. Advanced features         — domain-specific analytics, exports, etc.
+ *   4. Polish & UX               — states, toasts, animations, validation
+ *   5. Optimise                  — responsiveness, perf, a11y
+ *
+ * Haiku only generates the domain-specific description for each phase.
+ * Falls back to the generic purpose string on any failure.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -12,82 +18,94 @@ import { apiConfig } from "../config.js";
 
 export interface Phase {
   index: number;     // 1-based
-  title: string;     // e.g. "Core shell + navigation"
+  title: string;     // fixed — e.g. "Core shell & data model"
   description: string;
-  focus: string[];   // key components / features
+  focus: string[];   // key domain items for this phase
 }
 
-const PHASE_PLANNER_SYSTEM = `You are a software architect. Given a complex app description, break it into 3-5 logical build phases. Each phase should be independently shippable and build on the previous.
+// ── Fixed phase structure ─────────────────────────────────────────────────────
 
-Rules:
-- Phase 1 always: core layout, navigation, data model, main entities
-- Final phase always: any public-facing or reporting features
-- Each phase: 1-3 major features, not more
-- Keep phases focused — don't try to do everything at once
-
-Return ONLY valid JSON array, no markdown, no explanation:
-[
+const FIXED_PHASES: ReadonlyArray<{ title: string; fallback: string }> = [
   {
-    "index": 1,
-    "title": "Core shell + data model",
-    "description": "Main layout, navigation, and primary data entities",
-    "focus": ["Navigation", "Dashboard", "Primary data model"]
-  }
-]`;
+    title: "Core shell & data model",
+    fallback: "Full app scaffold — complete UI, all pages, navigation, mock data. Build the entire app foundation.",
+  },
+  {
+    title: "Database integration",
+    fallback: "Replace all mock/hardcoded data with real Supabase queries. Wire up CRUD operations to the database.",
+  },
+  {
+    title: "Advanced features",
+    fallback: "Add domain-specific advanced functionality — analytics, reporting, bulk operations, exports, filters.",
+  },
+  {
+    title: "Polish & UX",
+    fallback: "Loading states, empty states, error handling, toast notifications, animations, form validation.",
+  },
+  {
+    title: "Optimise",
+    fallback: "Mobile responsiveness, performance optimisation, accessibility improvements.",
+  },
+];
+
+// ── Haiku prompt — generates ONLY descriptions ────────────────────────────────
+
+const DESCRIPTION_SYSTEM = `You write concise, domain-specific descriptions for 5 fixed build phases of a software project.
+
+The 5 phases are always:
+1. Core shell & data model — full UI scaffold, all pages, navigation, mock data
+2. Database integration — replace mock data with real Supabase CRUD operations
+3. Advanced features — domain-specific analytics, reporting, bulk ops, exports, filters
+4. Polish & UX — loading/empty states, error handling, toasts, animations, form validation
+5. Optimise — mobile responsiveness, performance, accessibility
+
+For the given app, write ONE concise sentence per phase describing what SPECIFICALLY will be built for THAT domain. Focus on domain content, not the generic phase purpose.
+
+Return ONLY a JSON array of exactly 5 strings (one per phase, in order). No markdown, no explanation:
+["phase 1 description", "phase 2 description", "phase 3 description", "phase 4 description", "phase 5 description"]`;
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export async function planPhases(prompt: string): Promise<Phase[]> {
+  let descriptions: string[] = [];
+
   try {
     const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
     const message = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 600,
-      system: PHASE_PLANNER_SYSTEM,
+      max_tokens: 400,
+      system: DESCRIPTION_SYSTEM,
       messages: [
         {
           role: "user",
-          content: `Plan the build phases for this app: ${prompt}`,
+          content: `Write phase descriptions for this app: ${prompt}`,
         },
       ],
     });
 
     const textBlock = message.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      console.warn("[planPhases] no text block in response");
-      return [];
+    if (textBlock?.type === "text") {
+      const raw = textBlock.text
+        .trim()
+        .replace(/^```(?:json)?\n?/, "")
+        .replace(/\n?```$/, "");
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.every((d) => typeof d === "string")) {
+        descriptions = parsed as string[];
+      }
     }
-
-    const raw = textBlock.text
-      .trim()
-      .replace(/^```(?:json)?\n?/, "")
-      .replace(/\n?```$/, "");
-    const phases = JSON.parse(raw) as unknown;
-
-    if (!Array.isArray(phases)) {
-      console.warn("[planPhases] response is not an array");
-      return [];
-    }
-
-    const validated = phases
-      .filter(
-        (p): p is Phase =>
-          typeof p === "object" &&
-          p !== null &&
-          typeof (p as Phase).index === "number" &&
-          typeof (p as Phase).title === "string" &&
-          typeof (p as Phase).description === "string" &&
-          Array.isArray((p as Phase).focus),
-      )
-      .map((p) => ({
-        index: p.index,
-        title: p.title,
-        description: p.description,
-        focus: (p.focus as unknown[]).filter((f): f is string => typeof f === "string"),
-      }));
-
-    console.log("[planPhases] planned", validated.length, "phases for prompt");
-    return validated;
   } catch (err) {
-    console.warn("[planPhases] failed (non-fatal):", err instanceof Error ? err.message : String(err));
-    return [];
+    console.warn("[planPhases] description generation failed (using fallbacks):", err instanceof Error ? err.message : String(err));
   }
+
+  // Assemble fixed structure with domain descriptions (or fallbacks)
+  const phases: Phase[] = FIXED_PHASES.map((p, i) => ({
+    index: i + 1,
+    title: p.title,
+    description: descriptions[i]?.trim() || p.fallback,
+    focus: [],
+  }));
+
+  console.log("[planPhases] planned", phases.length, "phases for prompt");
+  return phases;
 }

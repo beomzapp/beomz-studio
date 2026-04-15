@@ -1917,7 +1917,7 @@ Do not add any feature not in this list.`;
     } else if (isComplexPrompt(workingPrompt)) {
       try {
         const phases = await planPhases(workingPrompt);
-        if (phases.length >= 2) {
+        if (phases.length > 0) {
           activePhasesData = phases;
           activeCurrentPhase = 1;
           activePhasesTotal = phases.length;
@@ -2247,6 +2247,14 @@ Do not add any feature not in this list.`;
 
     // ── phases_planned SSE event (if phases were just planned) ─────────────
     if (activePhasesData && activeCurrentPhase === 1 && !input.phaseOverride) {
+      // Emit a friendly heads-up BEFORE the phases card
+      const phaseIntroEvent = statusEvent(
+        "phases_intro",
+        "This is a large app — I'll build it in 5 progressive phases. Phase 1 builds the complete foundation and usually takes 5–10 minutes. Each phase adds a deeper layer on top.",
+        "planning",
+      );
+      await appendEventToDb(db, buildId, phaseIntroEvent);
+
       const phasesPlannedEvent = {
         type: "phases_planned" as const,
         id: nextId(),
