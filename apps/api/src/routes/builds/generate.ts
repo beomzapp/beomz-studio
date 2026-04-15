@@ -1826,11 +1826,6 @@ async function _runBuildInBackground(
           originalPrompt: prompt,
         };
 
-        const row = await db.findGenerationById(buildId);
-        const existingMeta = typeof row?.metadata === "object" && row.metadata !== null
-          ? (row.metadata as Record<string, unknown>)
-          : {};
-
         const scopeEvent = {
           type: "scope_confirmation" as const,
           id: nextId(),
@@ -1840,15 +1835,24 @@ async function _runBuildInBackground(
           features,
           message: `I've identified ${features.length} features to build. Confirm or adjust before I start.`,
         };
+        // Step 1: persist the scope_confirmation event + status
+        // No metadata in extraPatch — prevents builderTrace from being overwritten
         await appendEventToDb(
           db,
           buildId,
           scopeEvent as unknown as BuilderV3StatusEvent,
-          {
-            status: "awaiting_scope_confirmation",
-            metadata: { ...existingMeta, pendingScope },
-          },
+          { status: "awaiting_scope_confirmation" },
         );
+
+        // Step 2: merge pendingScope into the freshly-written metadata (builderTrace now intact)
+        const scopeRow = await db.findGenerationById(buildId);
+        const scopeMeta =
+          typeof scopeRow?.metadata === "object" && scopeRow.metadata !== null
+            ? (scopeRow.metadata as Record<string, unknown>)
+            : {};
+        await db.updateGeneration(buildId, {
+          metadata: { ...scopeMeta, pendingScope },
+        });
 
         console.log("[generate] scope_confirmation emitted —", features.length, "features, awaiting confirm.");
 
