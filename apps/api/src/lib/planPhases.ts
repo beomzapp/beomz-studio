@@ -44,7 +44,7 @@ const FIXED_PHASES: ReadonlyArray<{ title: string; fallback: string }> = [
   },
   {
     title: "Optimise",
-    fallback: "Mobile responsiveness, performance optimisation, accessibility improvements.",
+    fallback: "Mobile responsiveness audit — fix layouts breaking below 768px, tablet breakpoints, touch-friendly tap targets (min 44px), performance optimisation, accessibility improvements (aria, keyboard nav, focus states).",
   },
 ];
 
@@ -57,7 +57,7 @@ The 5 phases are always:
 2. Database integration — replace mock data with real Supabase CRUD operations
 3. Advanced features — domain-specific analytics, reporting, bulk ops, exports, filters
 4. Polish & UX — loading/empty states, error handling, toasts, animations, form validation
-5. Optimise — mobile responsiveness, performance, accessibility
+5. Optimise — mobile responsiveness audit (fix layouts breaking below 768px), tablet breakpoints (sidebar/nav correct at 768px), touch-friendly interactions (tap targets min 44px), performance (lazy loading, memo on expensive components), accessibility (aria labels, keyboard navigation, focus states)
 
 For the given app, write ONE concise sentence per phase describing what SPECIFICALLY will be built for THAT domain. Focus on domain content, not the generic phase purpose.
 
