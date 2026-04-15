@@ -640,9 +640,9 @@ export function ProjectPage() {
         return prev;
       });
 
-      // Phase mode: mark current phase build as done + force preview refresh
+      // Phase mode: mark current phase build as done
+      // (preview updates via HMR — no refreshKey bump needed)
       setIsPhaseBuilding(false);
-      setPreviewRefreshKey((c) => c + 1);
     }
 
     if (event.type === "error") {

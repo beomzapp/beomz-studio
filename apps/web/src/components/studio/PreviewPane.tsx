@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, StudioFile } from "@beomz-studio/contracts";
 import {
   Monitor,
@@ -164,6 +164,8 @@ export function PreviewPane({
   onFilesWritten,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
+  const wcIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const prevRefreshTokenRef = useRef(refreshToken);
 
   // Viewport state
   const [viewMode, setViewMode] = useState<"web" | "tablet" | "mobile">("web");
@@ -219,8 +221,12 @@ export function PreviewPane({
     if (!project || !files || files.length === 0) return null;
 
     if (useWebContainer && previewUrl) {
+      // WC iframe must stay stable — Vite HMR handles file updates.
+      // DO NOT include generationId or refreshToken in the key:
+      // remounting the iframe while WC is mid-HMR causes 504 Outdated
+      // Request and MIME type errors.
       return {
-        key: `wc:${project.id}:${generationId ?? "draft"}:${refreshToken}`,
+        key: `wc:${project.id}`,
         src: previewUrl,
         srcDoc: undefined,
       };
@@ -243,6 +249,19 @@ export function PreviewPane({
     files, generationId, project, refreshToken, viewMode,
     mobileHtml, tabletHtml, webHtml,
   ]);
+
+  // WC refresh: reload the iframe in-place instead of remounting (avoids 504s)
+  useEffect(() => {
+    if (prevRefreshTokenRef.current === refreshToken) return;
+    prevRefreshTokenRef.current = refreshToken;
+    if (useWebContainer && wcIframeRef.current) {
+      try {
+        wcIframeRef.current.contentWindow?.location.reload();
+      } catch {
+        // cross-origin or destroyed — ignore
+      }
+    }
+  }, [refreshToken, useWebContainer]);
 
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
@@ -312,6 +331,7 @@ export function PreviewPane({
         </div>
       ) : activeFrame ? (
         <iframe
+          ref={useWebContainer ? wcIframeRef : undefined}
           key={activeFrame.key}
           allow="clipboard-read; clipboard-write"
           className={cn("flex-1 w-full bg-white", isAiCustomising && "invisible")}
@@ -374,7 +394,8 @@ export function PreviewPane({
               </div>
             ) : activeFrame ? (
               <iframe
-                key={`${activeFrame.key}:${viewMode}:${refreshToken}`}
+                ref={useWebContainer ? wcIframeRef : undefined}
+                key={useWebContainer ? `${activeFrame.key}:${viewMode}` : `${activeFrame.key}:${viewMode}:${refreshToken}`}
                 allow="clipboard-read; clipboard-write"
                 referrerPolicy="no-referrer"
                 src={activeFrame.src}
