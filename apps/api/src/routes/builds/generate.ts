@@ -1311,6 +1311,14 @@ async function callAnthropicWithMessages(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
     if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
+    const rawInput = toolBlock.input as Record<string, unknown>;
+    console.log("[generate] toolBlock.input diagnosis:", {
+      keys: Object.keys(rawInput),
+      filesType: Array.isArray(rawInput.files)
+        ? `array[${(rawInput.files as unknown[]).length}]`
+        : typeof rawInput.files,
+      sample: JSON.stringify(rawInput).slice(0, 300),
+    });
     return { ...parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt), outputTokens };
   };
 
