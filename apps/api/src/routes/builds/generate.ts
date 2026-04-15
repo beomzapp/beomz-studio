@@ -2226,7 +2226,7 @@ async function _runBuildInBackground(
     // prior phase's complete set; merging them between templateFiles and
     // customised.files means phase N = template + phases 1…N-1 + phase N.
     const mergedFiles = mergeFiles(
-      mergeFiles(templateFiles, input.existingFiles ?? []),
+      mergeFiles(templateFiles, [...(input.existingFiles ?? [])]),
       customised.files,
     );
     const { files: finalFiles, missing: missingImports } = validateAndInjectStubs(mergedFiles, templateId);
