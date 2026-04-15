@@ -4,7 +4,7 @@
  * User can uncheck features, add extras, then confirm or auto-confirm after 60s.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader, Plus } from "lucide-react";
+import { Check, Plus } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 interface FeatureScopeCardProps {
@@ -16,7 +16,7 @@ interface FeatureScopeCardProps {
 
 export function FeatureScopeCard({
   features,
-  buildId,
+  buildId: _buildId,
   message,
   onConfirm,
 }: FeatureScopeCardProps) {
