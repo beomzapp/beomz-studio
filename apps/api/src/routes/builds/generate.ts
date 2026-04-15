@@ -2229,6 +2229,27 @@ async function _runBuildInBackground(
     }
     const completedAt = ts();
 
+    // BEO-326: per-phase file diff — only meaningful when this is a phase build
+    // and the AI path succeeded (not fallback). Uses the remapped customised.files
+    // (what the model generated this phase) vs input.existingFiles (prior phase
+    // snapshot) to classify each path as created or modified.
+    let phaseDiff: { created: string[]; modified: string[]; unchangedCount: number } | null = null;
+    if (phaseScope && !fallbackUsed) {
+      const prevPathSet = new Set(input.existingFiles.map((f) => f.path));
+      const generatedPaths = customised.files.map((f) => f.path);
+      const created = generatedPaths.filter((p) => !prevPathSet.has(p));
+      const modified = generatedPaths.filter((p) => prevPathSet.has(p));
+      const unchangedCount = Math.max(0, prevPathSet.size - modified.length);
+      phaseDiff = { created, modified, unchangedCount };
+      console.log(`[phase ${phaseScope.index}] file diff:`, {
+        phase: phaseScope.title,
+        created,
+        modified,
+        unchanged: unchangedCount,
+        totalFiles: finalFiles.length,
+      });
+    }
+
     // ── 4. done ─────────────────────────────────────────────────────────────
     const doneEventId = nextId();
     const doneEvent: BuilderV3DoneEvent = {
@@ -2294,6 +2315,7 @@ async function _runBuildInBackground(
       user_iterated: input.isIteration,
       iteration_count: 0,
       model_used: model,
+      phase_file_diff: phaseDiff,
     }).catch(() => undefined);
 
     await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);

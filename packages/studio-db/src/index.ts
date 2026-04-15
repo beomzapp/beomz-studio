@@ -144,6 +144,7 @@ export interface BuildTelemetryRow extends Record<string, unknown> {
   user_iterated: boolean;
   iteration_count: number;
   model_used: string | null;
+  phase_file_diff: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -332,6 +333,7 @@ export interface BuildTelemetryInsert extends Record<string, unknown> {
   user_iterated?: boolean;
   iteration_count?: number;
   model_used?: string | null;
+  phase_file_diff?: Record<string, unknown> | null;
   created_at?: string;
 }
 
@@ -352,6 +354,7 @@ export interface BuildTelemetryUpdate extends Record<string, unknown> {
   user_iterated?: boolean;
   iteration_count?: number;
   model_used?: string | null;
+  phase_file_diff?: Record<string, unknown> | null;
   created_at?: string;
 }
 
