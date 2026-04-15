@@ -138,13 +138,42 @@ const externalUrls: Fixer = {
       .replace(/<script[^>]+src=['"]https?:\/\/[^'"]*['"][^>]*\/>/gi, ""),
 };
 
+// ── Fixer 6: apostropheStrings ───────────────────────────────────────────────
+// Sonnet sometimes writes JSX strings with unescaped word-apostrophes inside
+// single-quoted delimiters, e.g.:
+//   'Here's what's happening today.'  →  "Here's what's happening today."
+//   label='It's fine'                 →  label="It's fine"
+//
+// These are PARSE_ERRORs because the apostrophe prematurely closes the string.
+// Fix: scan for single-quoted strings where the content contains at least one
+// [letter]'[letter] pattern (contraction/possessive) and swap the outer quotes
+// to double quotes. Word-apostrophes are allowed inside the match by using
+// lookahead/lookbehind to distinguish them from the closing delimiter.
+
+const apostropheStrings: Fixer = {
+  name: "apostropheStrings",
+  fix: (content) =>
+    content.replace(
+      // Match a single-quoted string where inner apostrophes between letters
+      // are consumed into the group (they're contractions, not closing quotes).
+      // The closing ' is identified by NOT being followed by a letter.
+      /'((?:[^'\\]|(?<=[a-zA-Z])'(?=[a-zA-Z])|\\.)*)'(?=[^a-zA-Z]|$)/g,
+      (_m, inner: string) => {
+        if (!/[a-zA-Z]'[a-zA-Z]/.test(inner)) return _m; // no word-apostrophe → leave alone
+        if (inner.includes('"')) return _m;               // inner " → can't safely swap
+        return `"${inner}"`;
+      },
+    ),
+};
+
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 // Order matters:
-//   supabaseImport — before flatImports (don't re-flatten the corrected path)
-//   reactGlobals   — before flatImports (avoid flattening react import we just added)
-//   flatImports    — flatten all remaining deep relative/alias paths
-//   jsxQuotes      — independent, runs last for JSX files
-//   externalUrls   — independent, strip CDN URLs
+//   supabaseImport    — before flatImports (don't re-flatten the corrected path)
+//   reactGlobals      — before flatImports (avoid flattening react import we just added)
+//   flatImports       — flatten all remaining deep relative/alias paths
+//   jsxQuotes         — fix backslash-escaped double quotes in JSX attributes
+//   externalUrls      — strip CDN URLs
+//   apostropheStrings — convert single-quoted strings with word apostrophes to double-quoted
 
 const PIPELINE: readonly Fixer[] = [
   supabaseImport,
@@ -152,6 +181,7 @@ const PIPELINE: readonly Fixer[] = [
   flatImports,
   jsxQuotes,
   externalUrls,
+  apostropheStrings,
 ];
 
 // ── Public API ────────────────────────────────────────────────────────────────
