@@ -129,6 +129,7 @@ const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
       },
     },
     required: ["files", "summary"],
+    additionalProperties: false,
   },
 };
 
@@ -1311,23 +1312,34 @@ async function callAnthropicWithMessages(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
     if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
-    const rawInput = toolBlock.input as Record<string, unknown>;
-    console.log("[generate] toolBlock.input diagnosis:", {
-      keys: Object.keys(rawInput),
-      filesType: Array.isArray(rawInput.files)
-        ? `array[${(rawInput.files as unknown[]).length}]`
-        : typeof rawInput.files,
-      sample: JSON.stringify(rawInput).slice(0, 300),
-    });
     return { ...parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt), outputTokens };
   };
 
+  const runWithRetry = async (modelId: string): Promise<CustomiseResult> => {
+    const result = await executeCall(modelId);
+    if (result.files.length === 0) {
+      // BEO-319: intermittent streaming SDK delta reassembly can silently yield
+      // toolBlock.input={} / files:[] despite a valid tool_use response. One retry
+      // is enough — the second call almost always reassembles correctly.
+      console.warn("[generate] WARNING: empty files array — retrying once", {
+        outputTokens: result.outputTokens,
+        model: modelId,
+      });
+      const retry = await executeCall(modelId);
+      if (retry.files.length === 0) {
+        throw new Error(`Model returned 0 files on retry (outputTokens: ${retry.outputTokens})`);
+      }
+      return retry;
+    }
+    return result;
+  };
+
   try {
-    return await executeCall(model);
+    return await runWithRetry(model);
   } catch (err) {
     if (err instanceof Anthropic.APIError && err.status === 404 && model !== ANTHROPIC_HAIKU_FALLBACK) {
       console.error(`[model] ${model} not found, falling back to haiku`);
-      return await executeCall(ANTHROPIC_HAIKU_FALLBACK);
+      return await runWithRetry(ANTHROPIC_HAIKU_FALLBACK);
     }
     throw err;
   }
