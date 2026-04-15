@@ -38,6 +38,8 @@ export interface ChatMessage {
   phase?: { current: number; total: number; summary: string };
   /** When true, ChatPanel renders the phaseCard ReactNode here instead of message content */
   isPhaseCard?: boolean;
+  /** When true, ChatPanel renders the scopeCard ReactNode here instead of message content */
+  isScopeCard?: boolean;
 }
 
 
@@ -57,6 +59,8 @@ interface ChatPanelProps {
   creditsBalance?: number;
   /** Optional node rendered at the bottom of the message list, inside the scroll container */
   phaseCard?: ReactNode;
+  /** Optional node rendered at isScopeCard message position */
+  scopeCard?: ReactNode;
 }
 
 // ─────────────────────────────────────────────
@@ -404,6 +408,7 @@ export function ChatPanel({
   onDismissChips,
   creditsBalance,
   phaseCard,
+  scopeCard,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
@@ -532,11 +537,16 @@ export function ChatPanel({
                 (msg.planSteps && msg.planSteps.length > 0) ||
                 (msg.changedFiles && msg.changedFiles.length > 0);
 
-              if (msg.role === "assistant" && !hasVisibleContent && !msg.isPhaseCard) return null;
+              if (msg.role === "assistant" && !hasVisibleContent && !msg.isPhaseCard && !msg.isScopeCard) return null;
 
               // Phase card placeholder — render the phaseCard ReactNode here
               if (msg.isPhaseCard) {
                 return <div key={msg.id}>{phaseCard}</div>;
+              }
+
+              // Scope card placeholder — render the scopeCard ReactNode here
+              if (msg.isScopeCard) {
+                return <div key={msg.id}>{scopeCard}</div>;
               }
 
               return (

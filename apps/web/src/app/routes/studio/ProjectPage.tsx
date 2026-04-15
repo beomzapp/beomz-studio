@@ -72,6 +72,7 @@ import {
   type ActiveView,
 } from "../../../components/builder";
 import type { Phase } from "../../../components/builder/PhasePlanCard";
+import { FeatureScopeCard } from "../../../components/builder/FeatureScopeCard";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import {
   getBuildStatus,
@@ -81,6 +82,7 @@ import {
   exportProjectZip,
   listProjectsWithMeta,
   startNextPhase,
+  confirmScope,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -174,6 +176,11 @@ export function ProjectPage() {
   const [phaseMode, setPhaseMode] = useState(false);
   const [isPhaseBuilding, setIsPhaseBuilding] = useState(false);
   const phasePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Feature scope card state
+  const [scopeFeatures, setScopeFeatures] = useState<string[]>([]);
+  const [scopeBuildId, setScopeBuildId] = useState<string | null>(null);
+  const [scopeMessage, setScopeMessage] = useState("");
 
   const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
@@ -440,6 +447,41 @@ export function ProjectPage() {
           isPhaseCard: true,
         }];
       });
+    }
+
+    // Feature scope confirmation: render FeatureScopeCard in chat
+    if ((event as unknown as Record<string, unknown>).type === "scope_confirmation") {
+      const scopeEvent = event as unknown as { features: string[]; buildId: string; message: string };
+      setScopeFeatures(scopeEvent.features);
+      setScopeBuildId(scopeEvent.buildId);
+      setScopeMessage(scopeEvent.message);
+      // Inject synthetic scope card message at current position in chat
+      setMessages((prev) => {
+        if (prev.some((m) => m.isScopeCard)) return prev;
+        return [...prev, {
+          id: "scope-card",
+          role: "assistant" as const,
+          content: "",
+          timestamp: new Date().toISOString(),
+          isScopeCard: true,
+        }];
+      });
+      // Stop streaming indicator — scope card takes over
+      setIsStreaming(false);
+      setStreamingText("");
+    }
+
+    // Conversational response: render as a normal AI chat message, no build
+    if ((event as unknown as Record<string, unknown>).type === "conversational_response") {
+      const convEvent = event as unknown as { message: string };
+      setMessages((prev) => [...prev, {
+        id: `conv-${Date.now()}`,
+        role: "assistant" as const,
+        content: convEvent.message,
+        timestamp: new Date().toISOString(),
+      }]);
+      setIsStreaming(false);
+      setStreamingText("");
     }
 
     if (event.type === "tool_use_started") {
@@ -966,6 +1008,26 @@ export function ProjectPage() {
     setPhaseMode(false);
   }, []);
 
+  // ── Feature scope: confirm and start build ──
+  const handleScopeConfirm = useCallback(async (features: string[], extras: string) => {
+    if (!scopeBuildId) return;
+    try {
+      await confirmScope(scopeBuildId, features, extras);
+      // Build will resume via SSE — re-enable streaming indicator
+      setIsStreaming(true);
+      setStreamingText(personality.thinkingLabels[0]);
+      thinkingLabelIndexRef.current = 0;
+      if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
+      thinkingLabelIntervalRef.current = setInterval(() => {
+        const labels = personality.thinkingLabels;
+        thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
+        setStreamingText(labels[thinkingLabelIndexRef.current]);
+      }, 4000);
+    } catch (err) {
+      console.error("[ScopeConfirm] Failed:", err);
+    }
+  }, [scopeBuildId, personality.thinkingLabels]);
+
   // Cleanup phase poll on unmount
   useEffect(() => {
     return () => {
@@ -1407,6 +1469,16 @@ export function ProjectPage() {
                     isBuilding={isPhaseBuilding}
                     onContinue={handleNextPhase}
                     onSkip={handleSkipPhases}
+                  />
+                ) : undefined
+              }
+              scopeCard={
+                scopeBuildId && scopeFeatures.length > 0 ? (
+                  <FeatureScopeCard
+                    features={scopeFeatures}
+                    buildId={scopeBuildId}
+                    message={scopeMessage}
+                    onConfirm={handleScopeConfirm}
                   />
                 ) : undefined
               }

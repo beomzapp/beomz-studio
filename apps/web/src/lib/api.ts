@@ -545,6 +545,17 @@ export async function startNextPhase(projectId: string): Promise<Response> {
   return response;
 }
 
+export async function confirmScope(
+  buildId: string,
+  features: string[],
+  extras: string,
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/builds/${buildId}/confirm-scope`, {
+    method: "POST",
+    body: JSON.stringify({ features, extras }),
+  });
+}
+
 export async function streamBuildEvents(args: {
   buildId: string;
   lastEventId?: string | null;
