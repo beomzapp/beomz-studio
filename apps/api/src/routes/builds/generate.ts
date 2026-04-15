@@ -1834,6 +1834,48 @@ async function _runBuildInBackground(
       const enrichedForScope = await enrichPrompt(prompt);
       const { features } = await extractFeatures(enrichedForScope, prompt);
 
+      // ── Insufficient credits — bail out regardless of feature count ──────────
+      // Must be outside the `features.length > 0` guard so an empty feature
+      // extraction never silently falls through to the normal build path.
+      if (!isAdminEmail(input.userEmail ?? "") && orgBalance < CREDIT_THRESHOLD) {
+        const insufficientEvent = {
+          type: "insufficient_credits" as const,
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          available: orgBalance,
+          required: CREDIT_THRESHOLD,
+          features,
+        };
+        // Step 1: persist event + status
+        await appendEventToDb(
+          db,
+          buildId,
+          insufficientEvent as unknown as BuilderV3StatusEvent,
+          { status: "insufficient_credits" },
+        );
+        // Step 2: store pendingScope so force-simple can access enrichedPrompt
+        if (features.length > 0) {
+          const pendingScope = {
+            enrichedPrompt: enrichedForScope,
+            featureCandidates: features,
+            model,
+            templateId,
+            originalPrompt: prompt,
+          };
+          const icRow = await db.findGenerationById(buildId);
+          const icMeta =
+            typeof icRow?.metadata === "object" && icRow.metadata !== null
+              ? (icRow.metadata as Record<string, unknown>)
+              : {};
+          await db.updateGeneration(buildId, {
+            metadata: { ...icMeta, pendingScope },
+          });
+        }
+        console.log("[generate] insufficient_credits — available:", orgBalance, "required:", CREDIT_THRESHOLD, { buildId });
+        return;
+      }
+
       if (features.length > 0) {
         // Store everything confirm-scope / force-simple need to resume
         const pendingScope = {
@@ -1843,37 +1885,6 @@ async function _runBuildInBackground(
           templateId,
           originalPrompt: prompt,
         };
-
-        // ── Insufficient credits — show what they'd get but don't start ──────
-        if (!isAdminEmail(input.userEmail ?? "") && orgBalance < CREDIT_THRESHOLD) {
-          const insufficientEvent = {
-            type: "insufficient_credits" as const,
-            id: nextId(),
-            timestamp: ts(),
-            operation: op,
-            available: orgBalance,
-            required: CREDIT_THRESHOLD,
-            features,
-          };
-          // Step 1: persist event + status
-          await appendEventToDb(
-            db,
-            buildId,
-            insufficientEvent as unknown as BuilderV3StatusEvent,
-            { status: "insufficient_credits" },
-          );
-          // Step 2: store pendingScope so force-simple can access enrichedPrompt
-          const icRow = await db.findGenerationById(buildId);
-          const icMeta =
-            typeof icRow?.metadata === "object" && icRow.metadata !== null
-              ? (icRow.metadata as Record<string, unknown>)
-              : {};
-          await db.updateGeneration(buildId, {
-            metadata: { ...icMeta, pendingScope },
-          });
-          console.log("[generate] insufficient_credits — available:", orgBalance, "required:", CREDIT_THRESHOLD, { buildId });
-          return;
-        }
 
         const scopeEvent = {
           type: "scope_confirmation" as const,
