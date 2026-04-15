@@ -89,6 +89,22 @@ export interface BuilderV3ErrorEvent extends BuilderV3BaseEvent {
   payload?: Record<string, unknown> | null;
 }
 
+// BEO-312: emitted before a complex build starts; frontend renders a feature
+// selection card. Build is paused until confirm-scope is called (or 60 s timeout).
+export interface BuilderV3ScopeConfirmationEvent extends BuilderV3BaseEvent {
+  type: "scope_confirmation";
+  features: string[];
+  buildId: string;
+  message: string;
+}
+
+// BEO-312: emitted instead of starting a build when the prompt is conversational
+// ("what else can we add?"). No code is generated; frontend renders a suggestion reply.
+export interface BuilderV3ConversationalResponseEvent extends BuilderV3BaseEvent {
+  type: "conversational_response";
+  message: string;
+}
+
 export type BuilderV3Event =
   | BuilderV3AssistantDeltaEvent
   | BuilderV3StatusEvent
@@ -97,7 +113,9 @@ export type BuilderV3Event =
   | BuilderV3ToolResultEvent
   | BuilderV3PreviewReadyEvent
   | BuilderV3DoneEvent
-  | BuilderV3ErrorEvent;
+  | BuilderV3ErrorEvent
+  | BuilderV3ScopeConfirmationEvent
+  | BuilderV3ConversationalResponseEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;

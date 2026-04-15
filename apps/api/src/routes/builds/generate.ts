@@ -41,7 +41,9 @@ import {
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
+import { classifyIntent } from "../../lib/classifyIntent.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
+import { extractFeatures } from "../../lib/extractFeatures.js";
 import { planPhases } from "../../lib/planPhases.js";
 import type { Phase } from "../../lib/planPhases.js";
 import { sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
@@ -73,6 +75,12 @@ export interface BuildGenerateInput {
     phases: Phase[];
     currentPhase: number;
     phasesTotal: number;
+  };
+  // BEO-312: set by confirm-scope endpoint to skip re-classification and use
+  // pre-enriched context with confirmed feature list injected into the prompt
+  confirmedScope?: {
+    features: string[];
+    enrichedPrompt: string;
   };
 }
 
@@ -1777,12 +1785,116 @@ async function _runBuildInBackground(
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
 
+  // ── BEO-312: Intent detection + scope confirmation ───────────────────────
+  // For brand-new builds that haven't been through classification yet,
+  // run a fast Haiku intent check BEFORE enrichPrompt to avoid wasting time
+  // on conversational messages. Complex builds are paused for feature scoping.
+  if (!input.isIteration && !input.phaseOverride && !input.confirmedScope) {
+    const { intent } = await classifyIntent(prompt);
+    console.log("[generate] intent classified:", intent, { buildId });
+
+    if (intent === "conversational") {
+      // Respond conversationally — no generation
+      const convEvent = {
+        type: "conversational_response" as const,
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        message: "I'm not sure what you'd like me to build — could you describe a specific feature or app you have in mind?",
+      };
+      await appendEventToDb(db, buildId, convEvent as unknown as BuilderV3StatusEvent, {
+        status: "completed",
+        completed_at: ts(),
+        summary: "Conversational message — no build started.",
+      });
+      console.log("[generate] conversational intent — returning early, no build.");
+      return;
+    }
+
+    if (intent === "complex_build") {
+      // Enrich first so extractFeatures has brand context
+      const enrichedForScope = await enrichPrompt(prompt);
+      const { features } = await extractFeatures(enrichedForScope, prompt);
+
+      if (features.length > 0) {
+        // Store everything confirm-scope needs to resume
+        const pendingScope = {
+          enrichedPrompt: enrichedForScope,
+          featureCandidates: features,
+          model,
+          templateId,
+          originalPrompt: prompt,
+        };
+
+        const row = await db.findGenerationById(buildId);
+        const existingMeta = typeof row?.metadata === "object" && row.metadata !== null
+          ? (row.metadata as Record<string, unknown>)
+          : {};
+
+        const scopeEvent = {
+          type: "scope_confirmation" as const,
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          buildId,
+          features,
+          message: `I've identified ${features.length} features to build. Confirm or adjust before I start.`,
+        };
+        await appendEventToDb(
+          db,
+          buildId,
+          scopeEvent as unknown as BuilderV3StatusEvent,
+          {
+            status: "awaiting_scope_confirmation",
+            metadata: { ...existingMeta, pendingScope },
+          },
+        );
+
+        console.log("[generate] scope_confirmation emitted —", features.length, "features, awaiting confirm.");
+
+        // 60 s auto-confirm: if the user doesn't interact, start the build with all features
+        setTimeout(() => {
+          void db.findGenerationById(buildId).then(async (latest) => {
+            if (latest?.status !== "awaiting_scope_confirmation") return;
+            console.log("[generate] 60 s timeout — auto-confirming scope for build", buildId);
+            await runBuildInBackground(
+              {
+                ...input,
+                prompt: pendingScope.enrichedPrompt,
+                confirmedScope: { features: pendingScope.featureCandidates, enrichedPrompt: pendingScope.enrichedPrompt },
+              },
+              db,
+            );
+          }).catch((err: unknown) => {
+            console.warn("[generate] auto-confirm timeout error:", err instanceof Error ? err.message : String(err));
+          });
+        }, 60_000);
+
+        return;
+      }
+      // No features extracted — fall through to normal complex build
+    }
+    // simple_build (or complex_build with empty feature list) → continue normally
+  }
+
   // ── Domain enrichment (initial builds only) ───────────────────────────────
+  // For confirmedScope builds the workingPrompt is pre-built below.
   // Run a fast Haiku + web-search call before template selection and Sonnet
   // generation. Adds domain context for niche/regional/industry prompts.
   // Generic prompts (todo, calculator, etc.) skip this with zero delay.
   // Any failure returns the original prompt unchanged — never blocks the build.
-  const workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);;
+  let workingPrompt: string;
+  if (input.confirmedScope) {
+    // Resume after scope confirmation — inject confirmed feature list
+    const featureList = input.confirmedScope.features.join(", ");
+    workingPrompt = `${input.confirmedScope.enrichedPrompt}
+
+Build ONLY these confirmed features: ${featureList}
+Do not add any feature not in this list.`;
+    console.log("[generate] resuming with confirmedScope:", input.confirmedScope.features.length, "features");
+  } else {
+    workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);
+  }
 
   // ── Phase planning (initial builds only, non-iteration) ───────────────────
   // If the enriched prompt is complex and no phase override is supplied,
