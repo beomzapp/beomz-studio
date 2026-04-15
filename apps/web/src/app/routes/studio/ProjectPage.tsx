@@ -394,6 +394,26 @@ export function ProjectPage() {
 
         return { ...message, content: nextContent, traceEntries: nextEntries };
       });
+
+      // Restore scope card state if a scope_confirmation event is in the trace
+      const scopeEvent = events.find(
+        (e) => (e as unknown as { type: string }).type === "scope_confirmation",
+      ) as unknown as { type: "scope_confirmation"; features?: string[]; buildId: string; message?: string } | undefined;
+      if (scopeEvent) {
+        setScopeFeatures(scopeEvent.features ?? []);
+        setScopeBuildId(scopeEvent.buildId);
+        setScopeMessage(scopeEvent.message ?? "Here's what I'm planning to build:");
+        setMessages((prev) => {
+          if (prev.some((m) => m.isScopeCard)) return prev;
+          return [...prev, {
+            id: "scope-card",
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date().toISOString(),
+            isScopeCard: true,
+          }];
+        });
+      }
     },
     [appendTranscriptEntry, upsertAssistantMessage],
   );
@@ -1087,7 +1107,35 @@ export function ProjectPage() {
         }
       }
 
-      if (status.build.status === "queued" || status.build.status === "running") {
+      if (
+        status.build.status === "queued" ||
+        status.build.status === "running" ||
+        status.build.status === "awaiting_scope_confirmation"
+      ) {
+        // Restore scope card state from metadata if we're awaiting confirmation
+        // (scope_confirmation SSE event may have fired before the page loaded)
+        if (status.build.status === "awaiting_scope_confirmation") {
+          const pending = (status.build as unknown as {
+            metadata?: { pendingScope?: { featureCandidates?: string[]; message?: string } };
+          }).metadata?.pendingScope;
+          if (pending) {
+            setScopeFeatures(pending.featureCandidates ?? []);
+            setScopeBuildId(status.build.id);
+            setScopeMessage(pending.message ?? "Here's what I'm planning to build:");
+            // Inject synthetic scope card message if not already present
+            setMessages((prev) => {
+              if (prev.some((m) => m.isScopeCard)) return prev;
+              return [...prev, {
+                id: "scope-card",
+                role: "assistant" as const,
+                content: "",
+                timestamp: new Date().toISOString(),
+                isScopeCard: true,
+              }];
+            });
+          }
+        }
+
         abortRef.current = controller;
         setIsStreaming(true);
         setStreamingText("Reconnecting to the live build stream...");
