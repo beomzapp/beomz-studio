@@ -151,6 +151,8 @@ interface PreviewPaneProps {
   refreshToken?: number;
   publishedSlug?: string | null;
   onFilesWritten?: () => void;
+  /** BEO-340: Build ended in fallback (no AI files) — show error state instead of preview. */
+  buildFailed?: boolean;
 }
 
 export function PreviewPane({
@@ -162,6 +164,7 @@ export function PreviewPane({
   refreshToken = 0,
   publishedSlug,
   onFilesWritten,
+  buildFailed = false,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
   const wcIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -374,8 +377,23 @@ export function PreviewPane({
           </div>
         )}
 
-        {/* Empty states — only when no activeFrame and not loading */}
-        {!activeFrame && !showLoadingOverlay && files && files.length > 0 && (
+        {/* BEO-340: Build failed — show on top of any existing iframe */}
+        {buildFailed && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white">
+            <div className="flex max-w-sm flex-col items-center gap-3 text-center px-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-red-200 bg-red-50">
+                <span className="text-lg text-red-500">!</span>
+              </div>
+              <p className="text-sm font-semibold text-[#1a1a1a]">Build failed</p>
+              <p className="text-xs leading-relaxed text-[#6b7280]">
+                Click "Try again" in the chat to rebuild. Your credits have not been charged.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Empty states — only when no activeFrame, not loading, and not failed */}
+        {!activeFrame && !showLoadingOverlay && !buildFailed && files && files.length > 0 && (
           <div className="flex h-full items-center justify-center bg-white">
             <div className="flex flex-col items-center gap-3 text-center px-6">
               <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
@@ -383,7 +401,7 @@ export function PreviewPane({
             </div>
           </div>
         )}
-        {!activeFrame && !showLoadingOverlay && (!files || files.length === 0) && (
+        {!activeFrame && !showLoadingOverlay && !buildFailed && (!files || files.length === 0) && (
           <div className="flex h-full items-center justify-center bg-white">
             <div className="flex flex-col items-center gap-3 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#e5e5e5]">

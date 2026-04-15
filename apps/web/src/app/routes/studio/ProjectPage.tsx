@@ -151,6 +151,9 @@ export function ProjectPage() {
   const [lastEventId, setLastEventId] = useState<string | null>(null);
   const [build, setBuild] = useState<BuildPayload | null>(null);
   const [buildResult, setBuildResult] = useState<BuildStatusResponse["result"] | null>(null);
+  // BEO-340: set when a build finished with fallbackUsed=true (no AI files).
+  // Blocks the Product Catalog scaffold from being shown in preview.
+  const [buildFailed, setBuildFailed] = useState(false);
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [isAiCustomising, setIsAiCustomising] = useState(false);
@@ -667,15 +670,23 @@ export function ProjectPage() {
               fallbackUsed: event.fallbackUsed,
             });
 
-            // Detect fallback-only builds: fallbackUsed with 0 AI-generated files
-            const aiFileCount = status.result?.files?.length ?? 0;
-            if (event.fallbackUsed && aiFileCount === 0) {
-              const reason = event.fallbackReason || "The build didn't produce any files.";
+            // BEO-340: Any fallbackUsed=true means the AI build failed.
+            // Do NOT inject the scaffold template files (Product Catalog)
+            // into WebContainer — users think Beomz built the wrong app.
+            // Surface an error with retry instead.
+            if (event.fallbackUsed) {
               upsertAssistantMessage(bid, (message) => ({
                 ...message,
-                error: `Build failed: ${reason} Please try again.`,
+                error: "The build didn't generate any files — this sometimes happens with complex prompts. Your credits have not been charged.",
               }));
-              // Don't show the success summary or preview
+              setBuildFailed(true);
+              // Stop any in-progress customising overlay — nothing to reveal
+              if (aiCustomisingTimeoutRef.current) {
+                clearTimeout(aiCustomisingTimeoutRef.current);
+                aiCustomisingTimeoutRef.current = null;
+              }
+              setIsAiCustomising(false);
+              // Don't inject files into WebContainer — keep preview blank
               return;
             }
 
@@ -875,6 +886,9 @@ export function ProjectPage() {
     lastUserPromptRef.current = text;
     summaryAbortRef.current?.abort();
     abortRef.current?.abort();
+
+    // Clear any previous build-failed state so preview returns to normal
+    setBuildFailed(false);
 
     // Personality-driven intro message
     const isIteration = !!(buildResult?.files?.length);
@@ -1516,6 +1530,7 @@ export function ProjectPage() {
               : null}
             refreshToken={previewRefreshKey}
             onFilesWritten={handleFilesWrittenToWC}
+            buildFailed={buildFailed}
           />
         );
       case "code":
