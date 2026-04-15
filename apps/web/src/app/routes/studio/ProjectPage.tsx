@@ -73,7 +73,9 @@ import {
 } from "../../../components/builder";
 import type { Phase } from "../../../components/builder/PhasePlanCard";
 import { FeatureScopeCard } from "../../../components/builder/FeatureScopeCard";
+import { InsufficientCreditsCard } from "../../../components/builder/InsufficientCreditsCard";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
+import { usePricingModal } from "../../../contexts/PricingModalContext";
 import {
   getBuildStatus,
   getLatestBuildForProject,
@@ -83,6 +85,7 @@ import {
   listProjectsWithMeta,
   startNextPhase,
   confirmScope,
+  forceSimpleBuild,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -181,6 +184,14 @@ export function ProjectPage() {
   const [scopeFeatures, setScopeFeatures] = useState<string[]>([]);
   const [scopeBuildId, setScopeBuildId] = useState<string | null>(null);
   const [scopeMessage, setScopeMessage] = useState("");
+
+  // Insufficient credits card state
+  const [insufficientAvailable, setInsufficientAvailable] = useState(0);
+  const [insufficientRequired, setInsufficientRequired] = useState(0);
+  const [insufficientFeatures, setInsufficientFeatures] = useState<string[]>([]);
+  const [insufficientBuildId, setInsufficientBuildId] = useState<string | null>(null);
+
+  const { openPricingModal } = usePricingModal();
 
   const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
@@ -414,6 +425,33 @@ export function ProjectPage() {
           }];
         });
       }
+
+      // Restore insufficient credits card state if that event is in the trace
+      const icEvent = events.find(
+        (e) => (e as unknown as { type: string }).type === "insufficient_credits",
+      ) as unknown as {
+        type: "insufficient_credits";
+        available?: number;
+        required?: number;
+        features?: string[];
+        buildId?: string;
+      } | undefined;
+      if (icEvent) {
+        setInsufficientAvailable(icEvent.available ?? 0);
+        setInsufficientRequired(icEvent.required ?? 0);
+        setInsufficientFeatures(icEvent.features ?? []);
+        setInsufficientBuildId(icEvent.buildId ?? buildId);
+        setMessages((prev) => {
+          if (prev.some((m) => m.isInsufficientCreditsCard)) return prev;
+          return [...prev, {
+            id: "insufficient-credits-card",
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date().toISOString(),
+            isInsufficientCreditsCard: true,
+          }];
+        });
+      }
     },
     [appendTranscriptEntry, upsertAssistantMessage],
   );
@@ -487,6 +525,33 @@ export function ProjectPage() {
         }];
       });
       // Stop streaming indicator — scope card takes over
+      setIsStreaming(false);
+      setStreamingText("");
+    }
+
+    // Insufficient credits: render InsufficientCreditsCard in chat
+    if ((event as unknown as Record<string, unknown>).type === "insufficient_credits") {
+      const icEvent = event as unknown as {
+        available: number;
+        required: number;
+        features: string[];
+        buildId?: string;
+      };
+      setInsufficientAvailable(icEvent.available ?? 0);
+      setInsufficientRequired(icEvent.required ?? 0);
+      setInsufficientFeatures(icEvent.features ?? []);
+      setInsufficientBuildId(icEvent.buildId ?? buildId);
+      setMessages((prev) => {
+        if (prev.some((m) => m.isInsufficientCreditsCard)) return prev;
+        return [...prev, {
+          id: "insufficient-credits-card",
+          role: "assistant" as const,
+          content: "",
+          timestamp: new Date().toISOString(),
+          isInsufficientCreditsCard: true,
+        }];
+      });
+      // Stop streaming indicator — card takes over
       setIsStreaming(false);
       setStreamingText("");
     }
@@ -1048,6 +1113,31 @@ export function ProjectPage() {
     }
   }, [scopeBuildId, personality.thinkingLabels]);
 
+  // ── Insufficient credits: open upgrade modal OR force a simple build ──
+  const handleInsufficientCreditsUpgrade = useCallback(() => {
+    openPricingModal();
+  }, [openPricingModal]);
+
+  const handleForceSimple = useCallback(async () => {
+    if (!insufficientBuildId) return;
+    try {
+      await forceSimpleBuild(insufficientBuildId);
+      // Build resumes as a simple build — re-enable streaming indicator
+      setIsStreaming(true);
+      setStreamingText(personality.thinkingLabels[0]);
+      thinkingLabelIndexRef.current = 0;
+      if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
+      thinkingLabelIntervalRef.current = setInterval(() => {
+        const labels = personality.thinkingLabels;
+        thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
+        setStreamingText(labels[thinkingLabelIndexRef.current]);
+      }, 4000);
+    } catch (err) {
+      console.error("[ForceSimple] Failed:", err);
+      throw err; // Let the card re-enable its button
+    }
+  }, [insufficientBuildId, personality.thinkingLabels]);
+
   // Cleanup phase poll on unmount
   useEffect(() => {
     return () => {
@@ -1527,6 +1617,18 @@ export function ProjectPage() {
                     buildId={scopeBuildId}
                     message={scopeMessage}
                     onConfirm={handleScopeConfirm}
+                  />
+                ) : undefined
+              }
+              insufficientCreditsCard={
+                insufficientBuildId ? (
+                  <InsufficientCreditsCard
+                    available={insufficientAvailable}
+                    required={insufficientRequired}
+                    features={insufficientFeatures}
+                    buildId={insufficientBuildId}
+                    onUpgrade={handleInsufficientCreditsUpgrade}
+                    onSimpleBuild={handleForceSimple}
                   />
                 ) : undefined
               }

@@ -556,6 +556,13 @@ export async function confirmScope(
   });
 }
 
+export async function forceSimpleBuild(buildId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/builds/${buildId}/force-simple`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function streamBuildEvents(args: {
   buildId: string;
   lastEventId?: string | null;

@@ -40,6 +40,8 @@ export interface ChatMessage {
   isPhaseCard?: boolean;
   /** When true, ChatPanel renders the scopeCard ReactNode here instead of message content */
   isScopeCard?: boolean;
+  /** When true, ChatPanel renders the insufficientCreditsCard ReactNode here */
+  isInsufficientCreditsCard?: boolean;
 }
 
 
@@ -61,6 +63,8 @@ interface ChatPanelProps {
   phaseCard?: ReactNode;
   /** Optional node rendered at isScopeCard message position */
   scopeCard?: ReactNode;
+  /** Optional node rendered at isInsufficientCreditsCard message position */
+  insufficientCreditsCard?: ReactNode;
 }
 
 // ─────────────────────────────────────────────
@@ -409,6 +413,7 @@ export function ChatPanel({
   creditsBalance,
   phaseCard,
   scopeCard,
+  insufficientCreditsCard,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
@@ -537,7 +542,13 @@ export function ChatPanel({
                 (msg.planSteps && msg.planSteps.length > 0) ||
                 (msg.changedFiles && msg.changedFiles.length > 0);
 
-              if (msg.role === "assistant" && !hasVisibleContent && !msg.isPhaseCard && !msg.isScopeCard) return null;
+              if (
+                msg.role === "assistant"
+                && !hasVisibleContent
+                && !msg.isPhaseCard
+                && !msg.isScopeCard
+                && !msg.isInsufficientCreditsCard
+              ) return null;
 
               // Phase card placeholder — render the phaseCard ReactNode here
               if (msg.isPhaseCard) {
@@ -547,6 +558,11 @@ export function ChatPanel({
               // Scope card placeholder — render the scopeCard ReactNode here
               if (msg.isScopeCard) {
                 return <div key={msg.id}>{scopeCard}</div>;
+              }
+
+              // Insufficient credits card placeholder
+              if (msg.isInsufficientCreditsCard) {
+                return <div key={msg.id}>{insufficientCreditsCard}</div>;
               }
 
               return (
