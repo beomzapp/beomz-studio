@@ -2221,7 +2221,14 @@ async function _runBuildInBackground(
       fallbackUsed = true;
     }
 
-    const mergedFiles = mergeFiles(templateFiles, customised.files);
+    // BEO-330: accumulate all previous phases' files so each phase generation
+    // contains the full app, not just its own slice. existingFiles holds the
+    // prior phase's complete set; merging them between templateFiles and
+    // customised.files means phase N = template + phases 1…N-1 + phase N.
+    const mergedFiles = mergeFiles(
+      mergeFiles(templateFiles, input.existingFiles ?? []),
+      customised.files,
+    );
     const { files: finalFiles, missing: missingImports } = validateAndInjectStubs(mergedFiles, templateId);
     if (missingImports.length > 0) {
       console.warn("[generate] WARNING: missing imports detected:", missingImports);
@@ -2321,7 +2328,8 @@ async function _runBuildInBackground(
     await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
 
     // BEO-265: rename project to the AI-generated brand name (initial build only)
-    if (customised.appName) {
+    // BEO-330: guard against phase 2-5 overwriting the name set in phase 1
+    if (customised.appName && !input.phaseOverride) {
       console.log("[generate] renaming project to AI brand name:", customised.appName);
       await db.updateProject(projectId, { name: customised.appName }).catch(() => undefined);
     }
