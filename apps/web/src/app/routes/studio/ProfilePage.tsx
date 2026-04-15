@@ -16,10 +16,12 @@ import {
   type PersonalityId,
 } from "../../../lib/personalities";
 import { getApiBaseUrl } from "../../../lib/api";
+import { usePricingModal } from "../../../contexts/PricingModalContext";
 
 export function ProfilePage() {
   const { session } = useAuth();
   const { credits } = useCredits();
+  const { openPricingModal } = usePricingModal();
 
   const [selectedId, setSelectedId] = useState<PersonalityId | "random">(() =>
     isRandomMode() ? "random" : getPersonality(),
@@ -192,13 +194,14 @@ export function ProfilePage() {
             </p>
           )}
 
-          <a
-            href="/pricing"
+          <button
+            type="button"
+            onClick={openPricingModal}
             className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
           >
             <Zap size={14} />
             Upgrade plan
-          </a>
+          </button>
         </section>
       </div>
     </div>

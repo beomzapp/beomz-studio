@@ -15,7 +15,6 @@ import { ImagesPage } from "./app/routes/studio/ImagesPage";
 import { AgentsPage } from "./app/routes/studio/AgentsPage";
 import { SettingsPage } from "./app/routes/studio/SettingsPage";
 import { ProfilePage } from "./app/routes/studio/ProfilePage";
-import { PricingPage } from "./app/routes/marketing/PricingPage";
 import { LoginPage } from "./app/routes/auth/login";
 import { SignupPage } from "./app/routes/auth/signup";
 import { AuthCallback } from "./app/routes/auth/callback";
@@ -40,10 +39,15 @@ const planRoute = createRoute({
   }),
 });
 
+// /pricing is now served by a global modal (usePricingModal()), so the route
+// redirects to home. The PricingModal component is mounted in RootLayout.
 const pricingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/pricing",
-  component: PricingPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/" });
+  },
+  component: () => null,
 });
 
 const authLoginRoute = createRoute({
