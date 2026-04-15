@@ -160,6 +160,10 @@ export function ProjectPage() {
   // Safety ref: if onFilesWritten never fires (e.g. WC unsupported / fallback build),
   // force-clear isAiCustomising after 8s so the overlay doesn't get stuck.
   const aiCustomisingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BEO-342: Track whether the current build has finished (done event fired with
+  // real AI files). Until this is true, handleFilesWrittenToWC must NOT lift the
+  // overlay — those writes are the scaffold template, which the user must never see.
+  const buildDoneRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const activeAssistantMessageIdRef = useRef<string | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
@@ -690,6 +694,10 @@ export function ProjectPage() {
               return;
             }
 
+            // BEO-342: Real AI files are now about to be written — arm
+            // handleFilesWrittenToWC so the overlay lifts once Vite mounts them.
+            buildDoneRef.current = true;
+
             if (status.result) setBuildResult(status.result);
             if (status.trace.previewReady || status.build.status === "completed") {
               setPreviewGenerationId(bid);
@@ -756,6 +764,11 @@ export function ProjectPage() {
   // to propagate before revealing the iframe so the user never sees the
   // scaffold template flash through.
   const handleFilesWrittenToWC = useCallback(() => {
+    // BEO-342: Do NOT lift the overlay until the build has actually completed.
+    // Early WC writes (scaffold template mount) fire this callback too — if we
+    // clear isAiCustomising now, the Product Catalog scaffold becomes visible.
+    if (!buildDoneRef.current) return;
+
     if (aiCustomisingTimeoutRef.current) {
       clearTimeout(aiCustomisingTimeoutRef.current);
       aiCustomisingTimeoutRef.current = null;
@@ -889,6 +902,15 @@ export function ProjectPage() {
 
     // Clear any previous build-failed state so preview returns to normal
     setBuildFailed(false);
+    // BEO-342: Raise the overlay NOW — before the scaffold template is mounted
+    // into WebContainer. isAiCustomising stays true until the build completes
+    // with real AI-generated files (done event, non-fallback).
+    buildDoneRef.current = false;
+    setIsAiCustomising(true);
+    if (aiCustomisingTimeoutRef.current) {
+      clearTimeout(aiCustomisingTimeoutRef.current);
+      aiCustomisingTimeoutRef.current = null;
+    }
 
     // Personality-driven intro message
     const isIteration = !!(buildResult?.files?.length);
@@ -975,6 +997,14 @@ export function ProjectPage() {
     const expectedPhase = currentPhase + 1;
     setIsPhaseBuilding(true);
     setCurrentPhase(expectedPhase);
+
+    // BEO-342: Cover the preview until the new phase's real files land.
+    buildDoneRef.current = false;
+    setIsAiCustomising(true);
+    if (aiCustomisingTimeoutRef.current) {
+      clearTimeout(aiCustomisingTimeoutRef.current);
+      aiCustomisingTimeoutRef.current = null;
+    }
 
     // Clear any prior phase poll
     if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
@@ -1209,6 +1239,16 @@ export function ProjectPage() {
             }];
           });
         }
+      }
+
+      // BEO-342: If the build is still running on resume, raise the overlay
+      // so the in-progress scaffold never becomes visible.
+      if (status.build.status === "queued" || status.build.status === "running") {
+        buildDoneRef.current = false;
+        setIsAiCustomising(true);
+      } else if (status.build.status === "completed") {
+        // Completed builds have real files — no overlay needed
+        buildDoneRef.current = true;
       }
 
       if (
