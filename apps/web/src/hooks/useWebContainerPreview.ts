@@ -297,6 +297,11 @@ export function useWebContainerPreview(
         wc.on("server-ready", (_port: number, url: string) => {
           setPreviewUrl(url);
           setStatus("ready");
+          // Signal readiness so callers can run their reveal sequence
+          // (e.g. 400ms delay before making the iframe visible).
+          // Without this, isAiCustomising never clears on new builds
+          // and the iframe flashes errors while Vite is still compiling.
+          onFilesWrittenRef.current?.();
         });
       } else {
         // Subsequent file write: Vite is already running; wc.mount has landed

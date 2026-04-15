@@ -263,6 +263,27 @@ export function PreviewPane({
     }
   }, [refreshToken, useWebContainer]);
 
+  // Confirm WC is actually serving — server-ready event fires when the port
+  // binds, but Vite still needs a moment to serve initial content.
+  // Delay revealing the iframe by 600ms after wcStatus=ready+previewUrl set,
+  // so the user sees the loading spinner instead of a transient error page.
+  const [wcReadyConfirmed, setWcReadyConfirmed] = useState(false);
+  useEffect(() => {
+    if (wcStatus === "ready" && previewUrl) {
+      const t = setTimeout(() => setWcReadyConfirmed(true), 600);
+      return () => clearTimeout(t);
+    }
+    setWcReadyConfirmed(false);
+  }, [wcStatus, previewUrl]);
+
+  // Unified "should hide iframe behind overlay" — true when:
+  //  - WC is still booting (not ready yet), OR
+  //  - WC just became ready but we haven't confirmed it's serving, OR
+  //  - AI is actively writing files (iteration race)
+  const showLoadingOverlay =
+    !!(files && files.length > 0) &&
+    (wcIsLoading || !wcReadyConfirmed || isAiCustomising);
+
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
     if (viewMode === "tablet") setTabletPortrait((prev) => !prev);
@@ -313,52 +334,67 @@ export function PreviewPane({
           )}
         </div>
       </div>
-      {wcIsLoading ? (
-        <div
-          className="flex flex-1 items-center justify-center"
-          style={{ background: "#060612" }}
-        >
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative flex h-16 w-16 items-center justify-center">
-              <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
-              <span className="text-xl font-bold text-[#F97316]">B</span>
-            </div>
-            <div className="text-center">
-              <p className="text-sm text-[#9ca3af]">Starting preview…</p>
-              <p className="mt-1 text-xs text-[#6b7280]">{progressMessage}</p>
+      <div className="relative flex-1 overflow-hidden">
+        {/* iframe — always mounted when activeFrame exists (stable key for HMR).
+            Visibility is controlled below; overlay hides it while WC isn't ready. */}
+        {activeFrame && (
+          <iframe
+            ref={useWebContainer ? wcIframeRef : undefined}
+            key={activeFrame.key}
+            allow="clipboard-read; clipboard-write"
+            className="absolute inset-0 h-full w-full bg-white"
+            style={{ visibility: showLoadingOverlay ? "hidden" : "visible" }}
+            referrerPolicy="no-referrer"
+            sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
+            src={activeFrame.src}
+            srcDoc={activeFrame.srcDoc}
+            title="Beomz Studio Preview"
+          />
+        )}
+
+        {/* Loading overlay — shown while WC is booting or mid-HMR.
+            Layered ON TOP of iframe so the iframe can keep its stable mount. */}
+        {showLoadingOverlay && (
+          <div
+            className="absolute inset-0 flex items-center justify-center"
+            style={{ background: "#060612" }}
+          >
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative flex h-16 w-16 items-center justify-center">
+                <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
+                <span className="text-xl font-bold text-[#F97316]">B</span>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-[#9ca3af]">
+                  {isAiCustomising && wcStatus === "ready" ? "Customising…" : "Starting preview…"}
+                </p>
+                <p className="mt-1 text-xs text-[#6b7280]">{progressMessage}</p>
+              </div>
             </div>
           </div>
-        </div>
-      ) : activeFrame ? (
-        <iframe
-          ref={useWebContainer ? wcIframeRef : undefined}
-          key={activeFrame.key}
-          allow="clipboard-read; clipboard-write"
-          className={cn("flex-1 w-full bg-white", isAiCustomising && "invisible")}
-          referrerPolicy="no-referrer"
-          sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
-          src={activeFrame.src}
-          srcDoc={activeFrame.srcDoc}
-          title="Beomz Studio Preview"
-        />
-      ) : files && files.length > 0 ? (
-        <div className="flex flex-1 items-center justify-center bg-white">
-          <div className="flex flex-col items-center gap-3 text-center px-6">
-            <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
-            <p className="text-xs text-[#9ca3af]">Your files are ready in the Code tab</p>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-1 items-center justify-center bg-white">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#e5e5e5]">
-              <Monitor className="h-5 w-5 text-[#d1d5db]" />
+        )}
+
+        {/* Empty states — only when no activeFrame and not loading */}
+        {!activeFrame && !showLoadingOverlay && files && files.length > 0 && (
+          <div className="flex h-full items-center justify-center bg-white">
+            <div className="flex flex-col items-center gap-3 text-center px-6">
+              <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
+              <p className="text-xs text-[#9ca3af]">Your files are ready in the Code tab</p>
             </div>
-            <p className="text-sm font-medium text-[#6b7280]">Your app will appear here</p>
-            <p className="text-xs text-[#9ca3af]">Start a conversation to generate your app.</p>
           </div>
-        </div>
-      )}
+        )}
+        {!activeFrame && !showLoadingOverlay && (!files || files.length === 0) && (
+          <div className="flex h-full items-center justify-center bg-white">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-dashed border-[#e5e5e5]">
+                <Monitor className="h-5 w-5 text-[#d1d5db]" />
+              </div>
+              <p className="text-sm font-medium text-[#6b7280]">Your app will appear here</p>
+              <p className="text-xs text-[#9ca3af]">Start a conversation to generate your app.</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -378,7 +414,48 @@ export function PreviewPane({
         <div style={{ transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.2s ease" }}>
           {/* @ts-expect-error -- Frame union, props are compatible */}
           <Frame {...frameProps}>
-            {wcIsLoading ? (
+            {activeFrame ? (
+              <div className="relative" style={{ width: `${vpW}px`, height: `${vpH}px` }}>
+                <iframe
+                  ref={useWebContainer ? wcIframeRef : undefined}
+                  key={useWebContainer ? `${activeFrame.key}:${viewMode}` : `${activeFrame.key}:${viewMode}:${refreshToken}`}
+                  allow="clipboard-read; clipboard-write"
+                  referrerPolicy="no-referrer"
+                  src={activeFrame.src}
+                  srcDoc={activeFrame.srcDoc}
+                  width={String(vpW)}
+                  height={String(vpH)}
+                  style={{
+                    border: "none",
+                    display: "block",
+                    borderRadius: "inherit",
+                    overflowY: "auto",
+                    width: `${vpW}px`,
+                    height: `${vpH}px`,
+                    visibility: showLoadingOverlay ? "hidden" : "visible",
+                  }}
+                  sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
+                  title={`${viewMode} preview`}
+                />
+                {showLoadingOverlay && (
+                  <div
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-4"
+                    style={{ background: "#060612", borderRadius: "inherit" }}
+                  >
+                    <div className="relative flex h-14 w-14 items-center justify-center">
+                      <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
+                      <span className="text-lg font-bold text-[#F97316]">B</span>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-[#9ca3af]">
+                        {isAiCustomising && wcStatus === "ready" ? "Customising…" : "Starting preview…"}
+                      </p>
+                      <p className="mt-1 text-xs text-[#6b7280]">{progressMessage}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : showLoadingOverlay ? (
               <div
                 className="flex h-full flex-col items-center justify-center gap-4"
                 style={{ background: "#060612" }}
@@ -392,28 +469,6 @@ export function PreviewPane({
                   <p className="mt-1 text-xs text-[#6b7280]">{progressMessage}</p>
                 </div>
               </div>
-            ) : activeFrame ? (
-              <iframe
-                ref={useWebContainer ? wcIframeRef : undefined}
-                key={useWebContainer ? `${activeFrame.key}:${viewMode}` : `${activeFrame.key}:${viewMode}:${refreshToken}`}
-                allow="clipboard-read; clipboard-write"
-                referrerPolicy="no-referrer"
-                src={activeFrame.src}
-                srcDoc={activeFrame.srcDoc}
-                width={String(vpW)}
-                height={String(vpH)}
-                style={{
-                  border: "none",
-                  display: "block",
-                  borderRadius: "inherit",
-                  overflowY: "auto",
-                  width: `${vpW}px`,
-                  height: `${vpH}px`,
-                  visibility: isAiCustomising ? "hidden" : "visible",
-                }}
-                sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
-                title={`${viewMode} preview`}
-              />
             ) : files && files.length > 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                 <p className="text-sm font-medium text-[#6b7280]">Preview unavailable</p>
