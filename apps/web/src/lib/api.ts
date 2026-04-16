@@ -582,6 +582,16 @@ export async function createCheckoutSession(
   });
 }
 
+// BEO-360: Top-up credit pack checkout — POST /payments/topup/checkout
+export async function createTopupCheckout(
+  priceId: string,
+): Promise<{ url: string }> {
+  return requestJson<{ url: string }>("/payments/topup/checkout", {
+    method: "POST",
+    body: JSON.stringify({ priceId }),
+  });
+}
+
 export async function forceSimpleBuild(buildId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/builds/${buildId}/force-simple`, {
     method: "POST",

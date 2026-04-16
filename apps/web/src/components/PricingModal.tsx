@@ -4,10 +4,10 @@
  * Dismissable via click-outside, Escape, or X button.
  */
 import { useEffect, useState } from "react";
-import { Check, Info, Loader, X } from "lucide-react";
+import { Check, Info, Loader, X, Zap } from "lucide-react";
 import { cn } from "../lib/cn";
 import { usePricingModal } from "../contexts/PricingModalContext";
-import { createCheckoutSession } from "../lib/api";
+import { createCheckoutSession, createTopupCheckout } from "../lib/api";
 
 interface Plan {
   id: "free" | "starter" | "builder" | "business";
@@ -264,6 +264,9 @@ export function PricingModal() {
             })}
           </div>
 
+          {/* BEO-360: Top-up credit packs */}
+          <TopupSection onError={setCheckoutError} />
+
           {/* Checkout error */}
           {checkoutError && (
             <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-center text-sm text-red-400">
@@ -271,6 +274,84 @@ export function PricingModal() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BEO-360: Top-up credit packs ─────────────────────────────
+const TOPUP_PACKS = [
+  {
+    id: "starter",
+    label: "Starter Pack",
+    price: "$5",
+    credits: "50 credits",
+    priceId: "price_1TMrSK8PEPiIN5kIA4XBE0t4",
+  },
+  {
+    id: "growth",
+    label: "Growth Pack",
+    price: "$12",
+    credits: "150 credits",
+    priceId: "price_1TMrU58PEPiIN5kIzrCXmTnw",
+  },
+  {
+    id: "power",
+    label: "Power Pack",
+    price: "$29",
+    credits: "400 credits",
+    priceId: "price_1TMrVf8PEPiIN5kIphG84meu",
+  },
+] as const;
+
+function TopupSection({ onError }: { onError: (msg: string | null) => void }) {
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const handleBuy = async (pack: typeof TOPUP_PACKS[number]) => {
+    setLoadingId(pack.id);
+    onError(null);
+    try {
+      const { url } = await createTopupCheckout(pack.priceId);
+      window.location.href = url;
+    } catch (err) {
+      console.error("[PricingModal] Top-up checkout failed:", err);
+      onError("Something went wrong. Please try again.");
+      setLoadingId(null);
+    }
+  };
+
+  return (
+    <div className="mt-8 border-t border-white/10 pt-8">
+      <div className="mb-4 flex items-center gap-2">
+        <Zap size={14} className="text-[#F97316]" />
+        <span className="text-sm font-semibold text-white">Need more credits?</span>
+        <span className="text-xs text-white/40">One-time top-ups — never expire</span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {TOPUP_PACKS.map((pack) => (
+          <div
+            key={pack.id}
+            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3"
+          >
+            <div>
+              <p className="text-sm font-medium text-white">{pack.label}</p>
+              <p className="text-xs text-white/50">{pack.credits}</p>
+            </div>
+            <button
+              onClick={() => handleBuy(pack)}
+              disabled={loadingId !== null}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                "border border-[#F97316]/60 text-[#F97316] hover:bg-[#F97316]/10",
+              )}
+            >
+              {loadingId === pack.id ? (
+                <Loader size={11} className="animate-spin" />
+              ) : null}
+              {pack.price}
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

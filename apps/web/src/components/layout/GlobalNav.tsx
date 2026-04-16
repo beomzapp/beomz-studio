@@ -301,6 +301,13 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
           <Zap size={11} />
           Upgrade plan
         </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onUpgrade(); }}
+          className="mt-1.5 flex w-full items-center justify-center rounded-lg border border-zinc-200 px-3 py-1.5 text-[11px] font-semibold text-zinc-600 transition-colors hover:bg-zinc-50"
+        >
+          Buy credits
+        </button>
       </div>
     </div>
   );
