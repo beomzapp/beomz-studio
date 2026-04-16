@@ -4,9 +4,10 @@
  * Dismissable via click-outside, Escape, or X button.
  */
 import { useEffect, useState } from "react";
-import { Check, Info, ToggleLeft, ToggleRight, X } from "lucide-react";
+import { Check, Info, Loader, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { usePricingModal } from "../contexts/PricingModalContext";
+import { createCheckoutSession } from "../lib/api";
 
 interface Plan {
   id: "free" | "starter" | "builder" | "business";
@@ -97,7 +98,11 @@ function formatPrice(plan: Plan, annual: boolean): { price: string; period: stri
 
 export function PricingModal() {
   const { isOpen, closePricingModal } = usePricingModal();
-  const [annual, setAnnual] = useState(false);
+  // Annual pricing disabled until STRIPE_*_YEARLY_PRICE_IDs are configured (BEO-327)
+  const annual = false;
+  // BEO-327: loading + error state for Stripe checkout redirect
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   // Close on Escape
   useEffect(() => {
@@ -115,21 +120,43 @@ export function PricingModal() {
     };
   }, [isOpen, closePricingModal]);
 
+  // Reset checkout state each time the modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setLoadingPlanId(null);
+      setCheckoutError(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  const handlePlanSelect = (plan: Plan) => {
+  // BEO-327: Wire plan select to Stripe checkout.
+  // - free → close modal (user already signed up)
+  // - business → mailto contact-sales
+  // - starter / builder → POST /payments/checkout, redirect to Stripe
+  const handlePlanSelect = async (plan: Plan) => {
     if (plan.id === "business") {
       window.location.href = "mailto:hello@beomz.com?subject=Business plan enquiry";
       return;
     }
     if (plan.id === "free") {
-      // Free plan — just close, user is already signed up or should sign up
       closePricingModal();
       return;
     }
-    // Pro plans — redirect to Stripe checkout (not yet wired; for now close + log)
-    // TODO: wire to POST /api/billing/checkout-session with plan.id
-    closePricingModal();
+
+    setCheckoutError(null);
+    setLoadingPlanId(plan.id);
+    try {
+      const { url } = await createCheckoutSession(
+        plan.id,
+        annual ? "yearly" : "monthly",
+      );
+      window.location.href = url;
+    } catch (err) {
+      console.error("[PricingModal] Checkout failed:", err);
+      setCheckoutError("Something went wrong. Please try again.");
+      setLoadingPlanId(null);
+    }
   };
 
   return (
@@ -158,25 +185,7 @@ export function PricingModal() {
             Start free. Scale when you're ready.
           </p>
 
-          {/* Monthly / Annual toggle */}
-          <div className="mt-6 mb-8 flex items-center justify-center gap-3">
-            <span className={cn("text-sm", !annual ? "text-white" : "text-white/40")}>
-              Monthly
-            </span>
-            <button
-              onClick={() => setAnnual((v) => !v)}
-              className="text-[#F97316]"
-              aria-label="Toggle annual billing"
-            >
-              {annual ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
-            </button>
-            <span className={cn("text-sm flex items-center gap-1.5", annual ? "text-white" : "text-white/40")}>
-              Annual
-              <span className="rounded-full bg-[#F97316]/15 px-2 py-0.5 text-[10px] font-semibold text-[#F97316]">
-                Save 20%
-              </span>
-            </span>
-          </div>
+          {/* Annual toggle hidden — no yearly price IDs configured yet (BEO-327) */}
 
           {/* Plan grid */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -231,8 +240,9 @@ export function PricingModal() {
                   {/* CTA */}
                   <button
                     onClick={() => handlePlanSelect(plan)}
+                    disabled={loadingPlanId !== null}
                     className={cn(
-                      "w-full rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
+                      "flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                       plan.popular
                         ? "bg-[#F97316] text-white hover:bg-[#ea6c0e]"
                         : plan.id === "business"
@@ -240,12 +250,26 @@ export function PricingModal() {
                           : "bg-white/10 text-white hover:bg-white/15",
                     )}
                   >
-                    {plan.cta}
+                    {loadingPlanId === plan.id ? (
+                      <>
+                        <Loader size={14} className="animate-spin" />
+                        Redirecting&hellip;
+                      </>
+                    ) : (
+                      plan.cta
+                    )}
                   </button>
                 </div>
               );
             })}
           </div>
+
+          {/* Checkout error */}
+          {checkoutError && (
+            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-center text-sm text-red-400">
+              {checkoutError}
+            </div>
+          )}
         </div>
       </div>
     </div>
