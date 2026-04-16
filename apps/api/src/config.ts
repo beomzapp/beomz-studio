@@ -18,15 +18,22 @@ const envSchema = z.object({
   // Stripe — all optional so the API boots without payments configured
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  // Subscription price IDs
+  // Subscription price IDs (new 4-plan structure: pro_starter, pro_builder, business)
   STRIPE_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
   STRIPE_STARTER_YEARLY_PRICE_ID: z.string().optional(),
+  STRIPE_PRO_STARTER_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_PRO_STARTER_YEARLY_PRICE_ID: z.string().optional(),
   STRIPE_PRO_MONTHLY_PRICE_ID: z.string().optional(),
   STRIPE_PRO_YEARLY_PRICE_ID: z.string().optional(),
+  STRIPE_PRO_BUILDER_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_PRO_BUILDER_YEARLY_PRICE_ID: z.string().optional(),
   STRIPE_BUSINESS_MONTHLY_PRICE_ID: z.string().optional(),
   STRIPE_BUSINESS_YEARLY_PRICE_ID: z.string().optional(),
-  // Credit pack price IDs (V1: credits_200/500/1200)
+  // Credit pack price IDs (rescaled: 50/150/400 credits — BEO-345)
+  STRIPE_CREDITS_50_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_150_PRICE_ID: z.string().optional(),
   STRIPE_CREDITS_200_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_400_PRICE_ID: z.string().optional(),
   STRIPE_CREDITS_500_PRICE_ID: z.string().optional(),
   STRIPE_CREDITS_1200_PRICE_ID: z.string().optional(),
   // Redirect URLs for Stripe Checkout

@@ -83,7 +83,7 @@ export interface BuildGenerateInput {
     enrichedPrompt: string;
   };
   // BEO-335: set by force-simple endpoint — skips planPhases and caps max_tokens
-  // to keep the build within ~23 credits for low-credit orgs.
+  // to keep the build within ~6 credits for low-credit orgs.
   forcedSimple?: boolean;
 }
 
@@ -1832,7 +1832,7 @@ async function _runBuildInBackground(
 
     if (intent === "complex_build") {
       // ── Credit balance check ────────────────────────────────────────────────
-      const CREDIT_THRESHOLD = 60;
+      const CREDIT_THRESHOLD = 8; // BEO-345: rescaled from 60 (same real API cost, new human scale)
       let orgBalance = 0;
       try {
         const orgRow = await db.getOrgWithBalance(orgId);

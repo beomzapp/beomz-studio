@@ -1,52 +1,63 @@
 /**
- * BEO-261: Credit system constants and helpers.
+ * BEO-322 / BEO-345: Credit system constants and helpers.
  *
- * Mirrors V1 apps/builder/src/lib/plans.ts and ai/route.ts deduction logic.
- * All costs are NUMERIC(10,1) compatible — one decimal place.
+ * BEO-345 rescale: all credit costs divided by ~8 vs V1 so that
+ * 1 credit ≈ 1 small action (Lovable model). Actual Anthropic API
+ * cost to Beomz is IDENTICAL — purely a unit-of-account change.
+ *
+ * All costs are NUMERIC(10,2) compatible — one decimal place output.
  */
 
 // ─── Plan definitions ─────────────────────────────────────────────────────────
-// V1 strategy: monthly allowance resets via webhook (paid) or lazy daily reset (free).
-// topup_credits (purchased packs) are consumed FIRST and never expire.
+// Four plans: free, pro_starter, pro_builder, business.
+// Deduction order: topup_credits → rollover_credits → monthly_credits.
 
 export interface PlanLimit {
-  credits: number;          // monthly credit allowance
-  dailyReset?: number;      // free tier: daily reset amount (replaces monthlies)
-  maxTopup: boolean;        // whether paid topup packs are available
-  price: number;            // USD/month
+  credits: number;       // monthly_credits allocation (0 for free)
+  rolloverCap: number;   // max rollover_credits carried into next period
+  signupGrant: number;   // one-time grant on org creation (free plan only)
+  maxTopup: boolean;     // whether paid topup packs are available
+  price: number;         // USD/month
   label: string;
 }
 
 export const PLAN_LIMITS: Record<string, PlanLimit> = {
   free: {
-    credits: 30,            // 30 credits, reset daily (lazy reset) — V1 exact
-    dailyReset: 30,         // each reset gives back the full 30
+    credits: 0,
+    rolloverCap: 0,
+    signupGrant: 10,     // 10 credits on signup — enough for ~3 simple builds
     maxTopup: false,
     price: 0,
     label: "Free",
   },
-  starter: {
-    credits: 1000,          // 1000 credits/month — V1 exact
+  pro_starter: {
+    credits: 500,
+    rolloverCap: 500,    // 1x monthly
+    signupGrant: 0,
     maxTopup: true,
-    price: 25,
-    label: "Starter",
+    price: 19,
+    label: "Pro Starter",
   },
-  pro: {
-    credits: 2000,          // 2000 credits/month — V1 exact
+  pro_builder: {
+    credits: 1200,
+    rolloverCap: 2400,   // 2x monthly
+    signupGrant: 0,
     maxTopup: true,
-    price: 49,
-    label: "Pro",
+    price: 39,
+    label: "Pro Builder",
   },
   business: {
-    credits: 5000,          // 5000 credits/month — V1 exact
+    credits: 6000,
+    rolloverCap: 18000,  // 3x monthly
+    signupGrant: 0,
     maxTopup: true,
-    price: 119,
+    price: 199,
     label: "Business",
   },
 };
 
 // ─── Credit packs (one-time purchases) ───────────────────────────────────────
-// V1 pricing: Boost Pack $9/200cr, Power Pack $19/500cr, Mega Pack $39/1200cr
+// Rescaled to new human-scale credit amounts (BEO-345).
 
 export interface CreditPack {
   id: string;
@@ -56,47 +67,40 @@ export interface CreditPack {
 }
 
 export const CREDIT_PACKS: CreditPack[] = [
-  { id: "credits_200",  credits: 200,  priceUsd: 9,  label: "Boost Pack (200 Credits)"  },
-  { id: "credits_500",  credits: 500,  priceUsd: 19, label: "Power Pack (500 Credits)"  },
-  { id: "credits_1200", credits: 1200, priceUsd: 39, label: "Mega Pack (1200 Credits)"  },
+  { id: "credits_50",  credits: 50,  priceUsd: 5,  label: "Small Pack (50 Credits)"   },
+  { id: "credits_150", credits: 150, priceUsd: 12, label: "Medium Pack (150 Credits)" },
+  { id: "credits_400", credits: 400, priceUsd: 29, label: "Large Pack (400 Credits)"  },
 ];
 
 // ─── Cost formula ─────────────────────────────────────────────────────────────
-// V1: max(0.1, round((3.0 + totalOutputTokens / 600) * 10) / 10)
-// Minimum 0.1 credits; typical build with 12 000 output tokens ≈ 23 credits.
-// Complexity scales linearly with AI output — larger/more complex apps cost more.
+// BEO-345: divide by 8 to bring to human scale.
+// Old: max(0.1, round((3.0 + outputTokens / 600) * 10) / 10)
+// New: max(0.01, round((3.0 + outputTokens / 600) * 10 / 8) / 10)
+//
+// Typical costs at new scale:
+//   Tiny tweak (~1k tokens):     ~0.5 credits
+//   Small edit (~3k tokens):     ~1.0 credits
+//   Simple build (~8k tokens):   ~3.0 credits
+//   Complex build phase (~20k):  ~6.0 credits
+//   Full 5-phase (~100k tokens): ~30 credits
 
 export function calcCreditCost(outputTokens: number): number {
   if (outputTokens <= 0) return 0;
   const raw = 3.0 + outputTokens / 600;
-  return Math.max(0.1, Math.round(raw * 10) / 10);
+  return Math.max(0.01, Math.round((raw * 10) / 8) / 10);
 }
 
 // ─── USD cost helper ──────────────────────────────────────────────────────────
-// V1: $0.045 per credit (≈ $0.90 for a typical 20-credit build)
+// Rate adjusted for new scale: $0.36 per credit (same effective $/API-call).
 
-const USD_PER_CREDIT = 0.045;
+const USD_PER_CREDIT = 0.36;
 
 export function calcCostUsd(credits: number): number {
   return Math.round(credits * USD_PER_CREDIT * 10000) / 10000;
 }
 
-// ─── Free tier lazy daily reset ───────────────────────────────────────────────
-// V1: check if 24h have passed since daily_reset_at; if so, reset credits to
-// free daily amount and update daily_reset_at. No cron needed.
-// We reset to min(PLAN_LIMITS.free.dailyReset, PLAN_LIMITS.free.credits).
-
-export const FREE_DAILY_RESET_HOURS = 24;
-
-export function needsFreeDailyReset(dailyResetAt: string | null): boolean {
-  if (!dailyResetAt) return true;
-  const lastReset = Date.parse(dailyResetAt);
-  const hoursSince = (Date.now() - lastReset) / 3_600_000;
-  return hoursSince >= FREE_DAILY_RESET_HOURS;
-}
-
 // ─── Admin bypass ─────────────────────────────────────────────────────────────
-// Beomz team members bypass credit checks entirely. Mirror V1 admin list.
+// Beomz team members bypass credit checks entirely.
 
 const ADMIN_EMAILS = new Set([
   "omar@beomz.ai",

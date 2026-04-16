@@ -21,7 +21,7 @@ import {
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 import { runBuildInBackground } from "./generate.js";
-import { PLAN_LIMITS, isAdminEmail, needsFreeDailyReset } from "../../lib/credits.js";
+import { PLAN_LIMITS, isAdminEmail } from "../../lib/credits.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -194,25 +194,14 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     || buildProjectNameFromPrompt(prompt, selectedTemplateDef.defaultProjectName);
 
   // ── Credit balance check (synchronous 402 before generation row creation) ──
-  // Admins bypass; free plan lazily resets daily; block if totalAvailable <= 0.
+  // Admins bypass; block if totalAvailable <= 0.
+  // BEO-322: daily reset mechanic removed — free plan is signup grant only.
   const userEmail = orgContext.user.email;
   if (!isAdminEmail(userEmail)) {
     const freshOrg = await orgContext.db.getOrgWithBalance(orgContext.org.id);
     if (freshOrg) {
-      let monthlyCredits = Number(freshOrg.credits ?? 0);
-      const topupCredits  = Number(freshOrg.topup_credits ?? 0);
-
-      // Lazy daily reset for free plan
-      if (freshOrg.plan === "free") {
-        if (needsFreeDailyReset(freshOrg.daily_reset_at)) {
-          const dailyAmount = PLAN_LIMITS.free!.dailyReset ?? 10;
-          await orgContext.db.updateOrg(freshOrg.id, {
-            credits: dailyAmount,
-            daily_reset_at: new Date().toISOString(),
-          }).catch(() => undefined);
-          monthlyCredits = dailyAmount;
-        }
-      }
+      const monthlyCredits = Number(freshOrg.credits ?? 0);
+      const topupCredits   = Number(freshOrg.topup_credits ?? 0);
 
       const totalAvailable = monthlyCredits + topupCredits;
       if (totalAvailable <= 0) {

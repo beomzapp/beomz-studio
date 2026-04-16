@@ -24,8 +24,8 @@ const PLANS: Plan[] = [
     id: "free",
     name: "Free",
     priceMonthly: 0,
-    credits: "30 credits on signup",
-    bonus: "+ 5 credits/day on login",
+    credits: "10 credits on signup",
+    bonus: "one-time grant",
     features: [
       "1 project",
       "Basic templates",
@@ -37,8 +37,8 @@ const PLANS: Plan[] = [
     id: "starter",
     name: "Pro Starter",
     priceMonthly: 19,
-    credits: "300 credits/mo",
-    bonus: "+ 300 rollover",
+    credits: "500 credits/mo",
+    bonus: "+ 500 rollover",
     features: [
       "5 projects",
       "All templates",
@@ -51,8 +51,8 @@ const PLANS: Plan[] = [
     id: "builder",
     name: "Pro Builder",
     priceMonthly: 39,
-    credits: "750 credits/mo",
-    bonus: "+ 1,500 rollover",
+    credits: "1,200 credits/mo",
+    bonus: "+ 2,400 rollover",
     features: [
       "Unlimited projects",
       "All templates",
@@ -68,8 +68,8 @@ const PLANS: Plan[] = [
     id: "business",
     name: "Business",
     priceMonthly: 199,
-    credits: "4,000 credits/mo",
-    bonus: "+ 12,000 rollover",
+    credits: "6,000 credits/mo",
+    bonus: "+ 18,000 rollover",
     features: [
       "Everything in Pro Builder",
       "Dedicated support",
@@ -82,7 +82,7 @@ const PLANS: Plan[] = [
 ];
 
 const CREDITS_TOOLTIP =
-  "1 credit = a small edit or iteration. A full app build uses 20–50 credits depending on complexity.";
+  "1 credit ≈ a small edit or tweak. A full app build uses 3–30 credits depending on complexity.";
 
 const ANNUAL_DISCOUNT = 0.8; // 20% off
 

@@ -39,6 +39,13 @@ export interface OrgRow extends Record<string, unknown> {
   plan: string;
   credits: number;
   topup_credits: number;
+  monthly_credits: number;
+  rollover_credits: number;
+  rollover_cap: number;
+  credits_period_start: string | null;
+  credits_period_end: string | null;
+  downgrade_at_period_end: boolean;
+  pending_plan: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   daily_reset_at: string | null;
@@ -167,6 +174,13 @@ export interface OrgInsert extends Record<string, unknown> {
   plan?: string;
   credits?: number;
   topup_credits?: number;
+  monthly_credits?: number;
+  rollover_credits?: number;
+  rollover_cap?: number;
+  credits_period_start?: string | null;
+  credits_period_end?: string | null;
+  downgrade_at_period_end?: boolean;
+  pending_plan?: string | null;
   created_at?: string;
 }
 
@@ -176,6 +190,13 @@ export interface OrgUpdate extends Record<string, unknown> {
   plan?: string;
   credits?: number;
   topup_credits?: number;
+  monthly_credits?: number;
+  rollover_credits?: number;
+  rollover_cap?: number;
+  credits_period_start?: string | null;
+  credits_period_end?: string | null;
+  downgrade_at_period_end?: boolean;
+  pending_plan?: string | null;
   stripe_customer_id?: string | null;
   stripe_subscription_id?: string | null;
   daily_reset_at?: string | null;
@@ -982,7 +1003,7 @@ export class StudioDbClient {
   async getOrgWithBalance(orgId: string): Promise<OrgRow | null> {
     const response = await this.client
       .from("orgs")
-      .select("id,owner_id,name,plan,credits,topup_credits,stripe_customer_id,stripe_subscription_id,daily_reset_at,created_at")
+      .select("id,owner_id,name,plan,credits,topup_credits,monthly_credits,rollover_credits,rollover_cap,credits_period_start,credits_period_end,downgrade_at_period_end,pending_plan,stripe_customer_id,stripe_subscription_id,daily_reset_at,created_at")
       .eq("id", orgId)
       .maybeSingle();
 
@@ -1079,6 +1100,47 @@ export class StudioDbClient {
         amount: creditAmount,
         type: "subscription_reset",
         description: "Monthly credit refresh",
+        created_at: now,
+      });
+  }
+
+  /**
+   * Billing cycle reset with rollover calculation.
+   * Called on invoice.payment_succeeded for subscription renewals.
+   * Rollover = unused non-topup credits from previous period, capped by rollover_cap.
+   */
+  async resetOrgBillingCycle(
+    orgId: string,
+    monthlyAllocation: number,
+    rolloverCap: number,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<void> {
+    const org = await this.getOrgWithBalance(orgId);
+    const oldCredits = org?.credits ?? 0;
+
+    const newRollover = Math.min(Math.max(0, oldCredits), rolloverCap);
+    const newTotal = monthlyAllocation + newRollover;
+    const now = new Date().toISOString();
+
+    await this.updateOrg(orgId, {
+      monthly_credits: monthlyAllocation,
+      rollover_credits: newRollover,
+      rollover_cap: rolloverCap,
+      credits: newTotal,
+      credits_period_start: periodStart,
+      credits_period_end: periodEnd,
+      downgrade_at_period_end: false,
+      pending_plan: null,
+    });
+
+    await this.client
+      .from("credit_transactions")
+      .insert({
+        org_id: orgId,
+        amount: newTotal,
+        type: "subscription_reset",
+        description: `Monthly credit refresh (${monthlyAllocation} new + ${newRollover} rollover)`,
         created_at: now,
       });
   }

@@ -16,7 +16,7 @@ interface InsufficientCreditsCardProps {
   onSimpleBuild: () => void;
 }
 
-const SIMPLE_BUILD_COST = 23;
+const SIMPLE_BUILD_COST = 6; // BEO-345: rescaled from 23 (same real API cost)
 
 export function InsufficientCreditsCard({
   available,

@@ -2,7 +2,7 @@
  * POST /api/builds/:id/force-simple
  *
  * BEO-335 — Start a capped single-phase build for orgs that hit the credit
- * gate during a complex build. The build uses max_tokens: 16000 (≈23 credits)
+ * gate during a complex build. The build uses max_tokens: 16000 (~6 credits)
  * so it fits within the free-tier or low-credit balance.
  *
  * Flow:
