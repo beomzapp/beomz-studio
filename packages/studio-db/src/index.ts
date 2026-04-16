@@ -401,6 +401,38 @@ export interface CreditTransactionInsert extends Record<string, unknown> {
   created_at?: string;
 }
 
+// BEO-329: Per-project DB storage tiers
+export interface ProjectDbLimitsRow extends Record<string, unknown> {
+  id: string;
+  project_id: string;
+  plan_storage_mb: number;
+  plan_rows: number;
+  tables_limit: number;
+  extra_storage_mb: number;
+  extra_rows: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectDbLimitsInsert extends Record<string, unknown> {
+  id?: string;
+  project_id: string;
+  plan_storage_mb?: number;
+  plan_rows?: number;
+  tables_limit?: number;
+  extra_storage_mb?: number;
+  extra_rows?: number;
+}
+
+export interface ProjectDbLimitsUpdate extends Record<string, unknown> {
+  plan_storage_mb?: number;
+  plan_rows?: number;
+  tables_limit?: number;
+  extra_storage_mb?: number;
+  extra_rows?: number;
+  updated_at?: string;
+}
+
 export interface StudioDatabase {
   public: {
     Views: Record<string, never>;
@@ -460,6 +492,12 @@ export interface StudioDatabase {
         Row: UserRow;
         Insert: UserInsert;
         Update: UserUpdate;
+        Relationships: [];
+      };
+      project_db_limits: {
+        Row: ProjectDbLimitsRow;
+        Insert: ProjectDbLimitsInsert;
+        Update: ProjectDbLimitsUpdate;
         Relationships: [];
       };
     };
@@ -1161,6 +1199,71 @@ export class StudioDbClient {
     }
 
     return response.data ?? [];
+  }
+
+  // ── BEO-329: Project DB limits ────────────────────────────────────────────
+
+  async insertProjectDbLimits(
+    projectId: string,
+    storageMb: number,
+    rows: number,
+    tables: number,
+  ): Promise<ProjectDbLimitsRow> {
+    const response = await this.client
+      .from("project_db_limits")
+      .insert({
+        project_id: projectId,
+        plan_storage_mb: storageMb,
+        plan_rows: rows,
+        tables_limit: tables,
+        extra_storage_mb: 0,
+        extra_rows: 0,
+      })
+      .select("*")
+      .single();
+    return unwrapSingle(response);
+  }
+
+  async getProjectDbLimits(projectId: string): Promise<ProjectDbLimitsRow | null> {
+    const response = await this.client
+      .from("project_db_limits")
+      .select("*")
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (response.error) throw new Error(response.error.message);
+    return response.data;
+  }
+
+  async updateProjectDbPlanLimits(
+    projectId: string,
+    patch: { plan_storage_mb: number; plan_rows: number; tables_limit: number },
+  ): Promise<void> {
+    const response = await this.client
+      .from("project_db_limits")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("project_id", projectId);
+    if (response.error) throw new Error(response.error.message);
+  }
+
+  async incrementProjectDbExtraLimits(
+    projectId: string,
+    extraStorageMb: number,
+    extraRows: number,
+  ): Promise<void> {
+    const existing = await this.getProjectDbLimits(projectId);
+    if (!existing) {
+      console.warn("[studio-db] incrementProjectDbExtraLimits: no limits row for project", projectId);
+      return;
+    }
+    const response = await this.client
+      .from("project_db_limits")
+      .update({
+        extra_storage_mb: existing.extra_storage_mb + extraStorageMb,
+        extra_rows: existing.extra_rows + extraRows,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("project_id", projectId);
+    if (response.error) throw new Error(response.error.message);
   }
 }
 

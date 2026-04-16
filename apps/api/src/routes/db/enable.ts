@@ -29,6 +29,7 @@ import {
   isUserDataConfigured,
   runSql,
 } from "../../lib/userDataClient.js";
+import { getFeatureLimits } from "../../lib/features.js";
 
 const enableDbRoute = new Hono();
 
@@ -90,6 +91,21 @@ enableDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       db_config: null,
       db_wired: false,
     });
+
+    // 6. Insert plan-based DB limits for this project (idempotent ON CONFLICT via UNIQUE)
+    const plan = org.plan ?? "free";
+    const limits = getFeatureLimits(plan);
+    try {
+      await db.insertProjectDbLimits(
+        projectId,
+        limits.storage_mb,
+        limits.rows ?? 0,
+        limits.tables ?? 0,
+      );
+    } catch (limitsErr) {
+      // Non-fatal — log but don't fail provisioning
+      console.warn("[db/enable] insertProjectDbLimits failed (non-fatal):", limitsErr);
+    }
 
     return c.json({ status: "connected" });
   } catch (err) {

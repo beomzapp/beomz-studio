@@ -19,6 +19,16 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 
+// Check if a statement creates a new table
+function isCreateTableStatement(stmt: string): boolean {
+  return /^CREATE\s+TABLE\s+/i.test(stmt.trim());
+}
+
+// Check if a statement inserts data
+function isInsertStatement(stmt: string): boolean {
+  return /^INSERT\s+INTO\s+/i.test(stmt.trim());
+}
+
 const migrateDbRoute = new Hono();
 
 migrateDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
@@ -54,6 +64,92 @@ migrateDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     if (!project.db_schema) {
       return c.json({ error: "Schema not provisioned" }, 400);
     }
+
+    // ── BEO-329: Limit enforcement ─────────────────────────────────────────
+    const hasInserts = statements.some(isInsertStatement);
+    const hasNewTables = statements.some(isCreateTableStatement);
+
+    if (hasInserts || hasNewTables) {
+      const limitsRow = await db.getProjectDbLimits(projectId);
+
+      if (limitsRow && hasNewTables) {
+        const tableCountRows = await runSql(`
+          SELECT COUNT(*) AS tables_used
+          FROM information_schema.tables
+          WHERE table_schema = '${project.db_schema}'
+            AND table_type = 'BASE TABLE';
+        `);
+        const tablesUsed = parseInt(
+          String((tableCountRows[0] as Record<string, unknown>)?.tables_used ?? "0"),
+          10,
+        );
+        if (tablesUsed >= limitsRow.tables_limit && limitsRow.tables_limit > 0) {
+          return c.json(
+            {
+              error: "tables_limit_reached",
+              message: `Table limit of ${limitsRow.tables_limit} reached. Upgrade your plan or purchase a storage add-on.`,
+              tables_used: tablesUsed,
+              tables_limit: limitsRow.tables_limit,
+            },
+            402,
+          );
+        }
+      }
+
+      if (limitsRow && hasInserts) {
+        const [rowCountRows, storageRows] = await Promise.all([
+          runSql(`
+            SELECT COALESCE(SUM(n_live_tup), 0) AS rows_used
+            FROM pg_stat_user_tables
+            WHERE schemaname = '${project.db_schema}';
+          `),
+          runSql(`
+            SELECT COALESCE(
+              SUM(pg_total_relation_size(quote_ident('${project.db_schema}') || '.' || quote_ident(tablename))),
+              0
+            ) / (1024 * 1024.0) AS storage_mb
+            FROM pg_tables
+            WHERE schemaname = '${project.db_schema}';
+          `),
+        ]);
+
+        const rowsUsed = parseInt(
+          String((rowCountRows[0] as Record<string, unknown>)?.rows_used ?? "0"),
+          10,
+        );
+        const storageMbUsed = parseFloat(
+          String((storageRows[0] as Record<string, unknown>)?.storage_mb ?? "0"),
+        );
+
+        const totalRows = limitsRow.plan_rows + limitsRow.extra_rows;
+        const totalStorageMb = limitsRow.plan_storage_mb + limitsRow.extra_storage_mb;
+
+        if (totalRows > 0 && rowsUsed >= totalRows) {
+          return c.json(
+            {
+              error: "row_limit_reached",
+              message: `Row limit of ${totalRows.toLocaleString()} reached. Upgrade your plan or purchase a storage add-on.`,
+              rows_used: rowsUsed,
+              total_rows: totalRows,
+            },
+            402,
+          );
+        }
+
+        if (storageMbUsed >= totalStorageMb) {
+          return c.json(
+            {
+              error: "storage_limit_reached",
+              message: `Storage limit of ${totalStorageMb} MB reached. Upgrade your plan or purchase a storage add-on.`,
+              storage_mb_used: Math.round(storageMbUsed * 100) / 100,
+              total_storage_mb: totalStorageMb,
+            },
+            402,
+          );
+        }
+      }
+    }
+    // ── End limit enforcement ──────────────────────────────────────────────
 
     for (const stmt of statements) {
       if (!isAllowedMigrationStatement(stmt, project.db_schema)) {

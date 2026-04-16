@@ -18,6 +18,7 @@ import wireDbRoute from "./wire.js";
 import disableDbRoute from "./disable.js";
 import connectDbRoute from "./connect.js";
 import migrateDbRoute from "./migrate.js";
+import usageDbRoute from "./usage.js";
 
 const dbRouter = new Hono();
 
@@ -28,5 +29,6 @@ dbRouter.route("/wire", wireDbRoute);
 dbRouter.route("/disable", disableDbRoute);
 dbRouter.route("/connect", connectDbRoute);
 dbRouter.route("/migrate", migrateDbRoute);
+dbRouter.route("/usage", usageDbRoute);
 
 export default dbRouter;

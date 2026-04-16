@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
 import { CREDIT_PACKS, PLAN_LIMITS } from "../../lib/credits.js";
+import { getFeatureLimits } from "../../lib/features.js";
 
 // Maps Stripe price ID → plan key — populated from env vars.
 // Supports both legacy keys (starter/pro) and new 4-plan keys (pro_starter/pro_builder).
@@ -75,7 +76,28 @@ webhookRoute.post("/", async (c) => {
 
         // ── Pack purchase (one-time payment) ──────────────────────────────────
         if (session.mode === "payment") {
-          const orgId      = session.metadata?.org_id;
+          const orgId  = session.metadata?.org_id;
+          const type   = session.metadata?.type;
+
+          // ── BEO-329: Storage add-on purchase ────────────────────────────
+          if (type === "storage_addon") {
+            const projectId      = session.metadata?.project_id;
+            const extraStorageMb = parseInt(session.metadata?.extra_storage_mb ?? "0", 10);
+            const extraRows      = parseInt(session.metadata?.extra_rows ?? "0", 10);
+
+            if (!orgId || !projectId || !extraStorageMb) {
+              console.warn("[webhook] checkout.session.completed(storage_addon): missing metadata", {
+                orgId, projectId, extraStorageMb, extraRows,
+              });
+              break;
+            }
+
+            await db.incrementProjectDbExtraLimits(projectId, extraStorageMb, extraRows);
+            console.log("[webhook] storage_addon applied:", { orgId, projectId, extraStorageMb, extraRows });
+            break;
+          }
+
+          // ── Credit pack purchase ─────────────────────────────────────────
           const packId     = session.metadata?.pack_id;
           const creditsStr = session.metadata?.credits;
           const credits    = creditsStr ? parseFloat(creditsStr) : 0;
@@ -159,6 +181,9 @@ webhookRoute.post("/", async (c) => {
           console.log("[webhook] checkout.session.completed(sub): org upgraded to", plan, {
             orgId, monthly: planLimit.credits, rolloverCap: planLimit.rolloverCap,
           });
+
+          // BEO-329: Sync DB limits for all DB-enabled projects in this org
+          await syncOrgProjectDbLimits(db, orgId, plan);
           break;
         }
 
@@ -193,6 +218,9 @@ webhookRoute.post("/", async (c) => {
         });
         await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
         console.log("[webhook] subscription.created: org upgraded to", plan, { orgId });
+
+        // BEO-329: Sync DB limits for all DB-enabled projects in this org
+        await syncOrgProjectDbLimits(db, orgId, plan);
         break;
       }
 
@@ -246,6 +274,9 @@ webhookRoute.post("/", async (c) => {
           });
           await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
           console.log("[webhook] subscription.updated: org plan upgraded to", newPlan, { orgId });
+
+          // BEO-329: Sync DB limits for all DB-enabled projects in this org
+          await syncOrgProjectDbLimits(db, orgId, newPlan);
         }
 
         void prevSub; // suppress unused var warning
@@ -375,6 +406,35 @@ async function resolveOrgByCustomer(
 ): Promise<string | null> {
   const org = await db.findOrgByStripeCustomerId(customerId);
   return org?.id ?? null;
+}
+
+/**
+ * BEO-329: Update plan_storage_mb, plan_rows, tables_limit for every DB-enabled
+ * project in the org when the plan changes.
+ * Extra storage purchased via add-ons is preserved (only plan_ columns are touched).
+ */
+async function syncOrgProjectDbLimits(
+  db: ReturnType<typeof createStudioDbClient>,
+  orgId: string,
+  plan: string,
+): Promise<void> {
+  try {
+    const limits = getFeatureLimits(plan);
+    const projects = await db.findProjectsByOrgId(orgId);
+    const dbEnabled = projects.filter((p) => p.database_enabled && p.db_provider === "beomz");
+    await Promise.all(
+      dbEnabled.map((p) =>
+        db.updateProjectDbPlanLimits(p.id, {
+          plan_storage_mb: limits.storage_mb,
+          plan_rows: limits.rows ?? 0,
+          tables_limit: limits.tables ?? 0,
+        }),
+      ),
+    );
+    console.log("[webhook] syncOrgProjectDbLimits: updated", dbEnabled.length, "project(s) to plan", plan, { orgId });
+  } catch (err) {
+    console.warn("[webhook] syncOrgProjectDbLimits failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
 }
 
 export default webhookRoute;
