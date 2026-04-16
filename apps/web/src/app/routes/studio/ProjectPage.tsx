@@ -642,12 +642,17 @@ export function ProjectPage() {
       setStreamingText("");
       setStreamingFileCount(null);
       if (event.type === "error") {
-        // On error, reveal immediately — no new files will arrive.
-        if (aiCustomisingTimeoutRef.current) {
-          clearTimeout(aiCustomisingTimeoutRef.current);
-          aiCustomisingTimeoutRef.current = null;
+        if (event.code === "server_restarting") {
+          // BEO-361: keep overlay up — scaffold must not show. Card shown below.
+          buildDoneRef.current = false;
+        } else {
+          // On error, reveal immediately — no new files will arrive.
+          if (aiCustomisingTimeoutRef.current) {
+            clearTimeout(aiCustomisingTimeoutRef.current);
+            aiCustomisingTimeoutRef.current = null;
+          }
+          setIsAiCustomising(false);
         }
-        setIsAiCustomising(false);
       } else {
         // On done: keep the overlay up until WebContainer writes the new files
         // and Vite HMR propagates (handled by handleFilesWrittenToWC below).
@@ -754,12 +759,26 @@ export function ProjectPage() {
     }
 
     if (event.type === "error") {
-      console.error("[SSE error event]", event.message);
-      // Surface the error on the assistant message so ChatPanel can show retry UI
-      upsertAssistantMessage(buildId, (message) => ({
-        ...message,
-        error: event.message || "Build failed. Please try again.",
-      }));
+      if (event.code === "server_restarting") {
+        // BEO-361: show amber ServerRestartedCard — same as NetworkDisconnectError path
+        setMessages((prev) => {
+          if (prev.some((m) => m.isServerRestartCard)) return prev;
+          return [...prev, {
+            id: `server-restart-${Date.now()}`,
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date().toISOString(),
+            isServerRestartCard: true,
+          }];
+        });
+      } else {
+        console.error("[SSE error event]", event.message);
+        // Surface the error on the assistant message so ChatPanel can show retry UI
+        upsertAssistantMessage(buildId, (message) => ({
+          ...message,
+          error: event.message || "Build failed. Please try again.",
+        }));
+      }
     }
   }, [appendTranscriptEntry, projectName, upsertAssistantMessage]);
 
