@@ -70,7 +70,7 @@ export function FeatureScopeCard({
 
   if (locked) {
     return (
-      <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-[#22c55e]/30 bg-white shadow-sm">
+      <div className="mx-2 mb-2 overflow-hidden rounded-2xl border border-[#22c55e]/30 bg-white shadow-sm">
         <div className="flex items-center gap-2 px-3 py-3">
           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#22c55e]">
             <Check size={12} className="text-white" />
@@ -84,7 +84,7 @@ export function FeatureScopeCard({
   }
 
   return (
-    <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-[#e5e5e5] bg-white shadow-sm">
+    <div className="mx-2 mb-2 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
       {/* Intro message */}
       <div className="border-b border-[#f0eeeb] px-3 py-2.5">
         <p className="text-[13px] text-[#374151]" style={{ fontFamily: "DM Sans, sans-serif" }}>

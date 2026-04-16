@@ -24,6 +24,15 @@ interface PhasePlanCardProps {
 
 const MAX_VISIBLE_PILLS = 3;
 
+// BEO-316: distinct colour per phase item (cycles if >5 phases)
+const PHASE_DOT_COLOURS = [
+  "bg-[#F97316]", // orange
+  "bg-[#3b82f6]", // blue
+  "bg-[#22c55e]", // green
+  "bg-[#a855f7]", // purple
+  "bg-[#eab308]", // yellow/amber
+];
+
 export function PhasePlanCard({
   phases,
   currentPhase,
@@ -37,19 +46,24 @@ export function PhasePlanCard({
   const showContinue = !isBuilding && currentPhase < phases.length;
 
   return (
-    <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-[#e5e5e5] bg-white shadow-sm">
+    <div className="mx-2 mb-2 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
       {/* Header */}
-      <div className="border-b border-[#f0eeeb] px-3 py-2.5">
-        <p className="text-[13px] font-semibold text-[#1a1a1a]" style={{ fontFamily: "DM Sans, sans-serif" }}>
-          Building in {phases.length} phases
-        </p>
-        <p className="mt-0.5 text-[11px] text-[#9ca3af]">
-          I'll build each phase and check in with you.
-        </p>
+      <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
+        <div>
+          <p className="text-[13px] font-semibold text-zinc-900" style={{ fontFamily: "DM Sans, sans-serif" }}>
+            Build plan
+          </p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">
+            I'll build each phase and check in with you.
+          </p>
+        </div>
+        <span className="flex-none rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500">
+          {phases.length} phases
+        </span>
       </div>
 
       {/* Phase list */}
-      <div className="divide-y divide-[#f5f3f0]">
+      <div className="divide-y divide-zinc-100">
         {phases.map((phase) => {
           const isCompleted = phase.index < currentPhase || (phase.index === currentPhase && !isBuilding);
           const isCurrent = phase.index === currentPhase && isBuilding;
@@ -57,14 +71,14 @@ export function PhasePlanCard({
           const isExpanded = expandedPhase === phase.index;
           const visibleFocus = phase.focus.slice(0, MAX_VISIBLE_PILLS);
           const hiddenCount = phase.focus.length - MAX_VISIBLE_PILLS;
+          const dotColor = PHASE_DOT_COLOURS[(phase.index - 1) % PHASE_DOT_COLOURS.length];
 
           return (
             <div
               key={phase.index}
               className={cn(
                 "relative transition-all duration-200",
-                isCompleted && "border-l-2 border-l-[#22c55e]",
-                isCurrent && "border-l-2 border-l-[#F97316] bg-[#fffbf7]",
+                isCurrent && "border-l-2 border-l-[#F97316] bg-orange-50/40",
                 isPending && "opacity-60",
               )}
             >
@@ -72,22 +86,16 @@ export function PhasePlanCard({
                 onClick={() => setExpandedPhase(isExpanded ? null : phase.index)}
                 className="w-full px-3 py-2.5 text-left"
               >
-                {/* Top row: circle + title + status */}
-                <div className="flex items-center gap-2">
-                  {/* Phase circle — fixed 24px, never shrinks */}
-                  <div className="h-6 w-6 min-w-[24px] flex-none">
+                {/* Top row: coloured dot + title + status */}
+                <div className="flex items-center gap-2.5">
+                  {/* Coloured dot / check — compact 12px marker */}
+                  <div className="flex h-3 w-3 min-w-[12px] flex-none items-center justify-center">
                     {isCompleted ? (
-                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#22c55e]">
-                        <Check size={12} className="text-white" />
-                      </div>
-                    ) : isCurrent ? (
-                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#F97316]">
-                        <span className="text-[10px] font-bold text-white">{phase.index}</span>
+                      <div className="flex h-3 w-3 items-center justify-center rounded-full bg-[#22c55e]">
+                        <Check size={8} className="text-white" strokeWidth={3} />
                       </div>
                     ) : (
-                      <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[#d1d5db]">
-                        <span className="text-[10px] font-medium text-[#9ca3af]">{phase.index}</span>
-                      </div>
+                      <span className={cn("h-2.5 w-2.5 rounded-full", dotColor)} />
                     )}
                   </div>
 
@@ -125,7 +133,7 @@ export function PhasePlanCard({
 
                 {/* Focus pills — below title, indented to align with title text */}
                 {isCurrent && visibleFocus.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1 pl-8">
+                  <div className="mt-1.5 flex flex-wrap gap-1 pl-[22px]">
                     {visibleFocus.map((f) => (
                       <span
                         key={f}
@@ -144,7 +152,7 @@ export function PhasePlanCard({
 
                 {/* Description — shown when expanded, 2-line clamp, indented */}
                 {isExpanded && (
-                  <p className="mt-1.5 line-clamp-2 break-words pl-8 text-[11px] leading-relaxed text-[#9ca3af]">
+                  <p className="mt-1.5 line-clamp-2 break-words pl-[22px] text-[11px] leading-relaxed text-zinc-500">
                     {phase.description}
                   </p>
                 )}
@@ -155,7 +163,7 @@ export function PhasePlanCard({
       </div>
 
       {/* Footer CTA area */}
-      <div className="border-t border-[#f0eeeb] px-3 py-2.5">
+      <div className="border-t border-zinc-100 px-3 py-2.5">
         {allComplete ? (
           <div className="text-center">
             <p className="text-[13px] font-semibold text-[#22c55e]">

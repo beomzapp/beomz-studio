@@ -65,6 +65,8 @@ interface ChatPanelProps {
   scopeCard?: ReactNode;
   /** Optional node rendered at isInsufficientCreditsCard message position */
   insufficientCreditsCard?: ReactNode;
+  /** BEO-316: muted "Writing N of M files..." counter shown below shimmer label */
+  streamingFileCount?: { current: number; total: number } | null;
 }
 
 // ─────────────────────────────────────────────
@@ -414,6 +416,7 @@ export function ChatPanel({
   phaseCard,
   scopeCard,
   insufficientCreditsCard,
+  streamingFileCount,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
@@ -578,8 +581,8 @@ export function ChatPanel({
                     /* AI message — free-flowing text, avatar only on first in group */
                     <div className="flex items-start gap-2">
                       {showAvatar ? (
-                        <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-purple-600 mt-0.5">
-                          <span className="text-[9px] font-bold text-white leading-none">B</span>
+                        <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900 mt-0.5">
+                          <span className="text-[9px] font-bold text-[#F97316] leading-none">B</span>
                         </div>
                       ) : (
                         <div className="w-5 flex-shrink-0" />
@@ -620,20 +623,19 @@ export function ChatPanel({
               );
             })}
 
-            {/* Streaming — V1-style bouncing dots + step text */}
+            {/* Streaming — BEO-316 shimmer thinking label + muted file counter */}
             {isStreaming && (
               <div className="flex items-start gap-2 px-1">
-                <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-purple-600 mt-0.5">
-                  <span className="text-[9px] font-bold text-white leading-none">B</span>
+                <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900 mt-0.5">
+                  <span className="text-[9px] font-bold text-[#F97316] leading-none">B</span>
                 </div>
                 <div className="min-w-0 flex-1 pt-0.5 break-words">
                   {displayStreamingText ? (
                     displayStreamingText.endsWith("\u2026") || displayStreamingText.endsWith("...") ? (
-                      /* Step message — orange animated dot + text */
-                      <div className="flex items-center gap-2 py-0.5">
-                        <span className="inline-block h-2 w-2 rounded-full bg-[#F97316] animate-pulse" />
-                        <span className="text-sm text-[#6b7280]">{displayStreamingText}</span>
-                      </div>
+                      /* Thinking/status label — shimmer gradient sweep */
+                      <p className="thinking-shimmer py-0.5 text-sm font-medium">
+                        {displayStreamingText}
+                      </p>
                     ) : (
                       /* Content text — normal rendering */
                       <div className="text-sm leading-relaxed text-[#374151] break-words">
@@ -642,14 +644,15 @@ export function ChatPanel({
                       </div>
                     )
                   ) : (
-                    <div className="flex items-center gap-1.5 py-1">
-                      <div className="flex gap-1">
-                        {[0, 1, 2].map((i) => (
-                          <span key={i} className="h-1.5 w-1.5 rounded-full bg-[#F97316] animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-                        ))}
-                      </div>
-                      <span className="text-xs text-[#9ca3af] ml-1">Thinking…</span>
-                    </div>
+                    <p className="thinking-shimmer py-0.5 text-sm font-medium">
+                      Thinking&hellip;
+                    </p>
+                  )}
+                  {/* Muted file counter (no shimmer) */}
+                  {streamingFileCount && streamingFileCount.total > 0 && (
+                    <p className="mt-0.5 text-xs text-[#9ca3af]">
+                      Writing {streamingFileCount.current} of {streamingFileCount.total} files&hellip;
+                    </p>
                   )}
                 </div>
               </div>

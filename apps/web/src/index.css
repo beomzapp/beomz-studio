@@ -66,15 +66,31 @@ body {
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
+/* BEO-316: Thinking/status label shimmer — orange glow sweeps across muted text */
+@keyframes thinking-shimmer {
+  to { background-position: 200% center; }
+}
+.thinking-shimmer {
+  background: linear-gradient(90deg, #71717a 0%, #f97316 40%, #71717a 80%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-shimmer 2s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .streaming-shimmer,
+  .thinking-shimmer,
   .plan-step-icon-spin,
   .plan-step-icon-pop {
     animation: none !important;
   }
 
-  .streaming-shimmer {
+  .streaming-shimmer,
+  .thinking-shimmer {
     -webkit-text-fill-color: unset;
     background: none;
+    color: #71717a;
   }
 }

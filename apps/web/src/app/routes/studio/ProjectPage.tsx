@@ -148,6 +148,8 @@ export function ProjectPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
+  // BEO-316: muted "Writing N of M files..." counter shown below the shimmer label.
+  const [streamingFileCount, setStreamingFileCount] = useState<{ current: number; total: number } | null>(null);
   const [lastEventId, setLastEventId] = useState<string | null>(null);
   const [build, setBuild] = useState<BuildPayload | null>(null);
   const [buildResult, setBuildResult] = useState<BuildStatusResponse["result"] | null>(null);
@@ -596,22 +598,21 @@ export function ProjectPage() {
       setProjectId(event.projectId);
       setIsAiCustomising(true);
 
-      // Animate file writing progress
+      // BEO-316: Animate the "Writing N of M files..." counter underneath the
+      // shimmering personality thinking label (no longer overwrites streamingText).
       const fileCount = ("filesCount" in event ? event.filesCount : null) as number | null;
       if (fileCount && fileCount > 0) {
         let i = 1;
         const tick = () => {
           if (i <= fileCount) {
-            setStreamingText("Writing file " + i + " of " + fileCount + "\u2026");
+            setStreamingFileCount({ current: i, total: fileCount });
             i++;
             setTimeout(tick, 300);
           } else {
-            setStreamingText("Starting preview\u2026");
+            setStreamingFileCount({ current: fileCount, total: fileCount });
           }
         };
         tick();
-      } else {
-        setStreamingText("Writing code\u2026");
       }
       console.log("[SSE preview_ready] fetching build status for", buildId);
       void getBuildStatus(event.buildId)
@@ -637,6 +638,7 @@ export function ProjectPage() {
       }
       setIsStreaming(false);
       setStreamingText("");
+      setStreamingFileCount(null);
       if (event.type === "error") {
         // On error, reveal immediately — no new files will arrive.
         if (aiCustomisingTimeoutRef.current) {
@@ -1687,6 +1689,7 @@ export function ProjectPage() {
                   />
                 ) : undefined
               }
+              streamingFileCount={streamingFileCount}
             />
           </div>
         </div>

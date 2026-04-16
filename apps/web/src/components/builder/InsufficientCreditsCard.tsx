@@ -54,7 +54,7 @@ export function InsufficientCreditsCard({
 
   if (locked === "simple") {
     return (
-      <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-[#22c55e]/30 bg-white shadow-sm">
+      <div className="mx-2 mb-2 overflow-hidden rounded-2xl border border-[#22c55e]/30 bg-white shadow-sm">
         <div className="flex items-center gap-2 px-3 py-3">
           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#22c55e]">
             <Check size={12} className="text-white" />
@@ -69,7 +69,7 @@ export function InsufficientCreditsCard({
 
   if (locked === "upgrade") {
     return (
-      <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-[#F97316]/30 bg-white shadow-sm">
+      <div className="mx-2 mb-2 overflow-hidden rounded-2xl border border-[#F97316]/30 bg-white shadow-sm">
         <div className="flex items-center gap-2 px-3 py-3">
           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#F97316]">
             <Zap size={12} className="text-white" />
@@ -83,7 +83,7 @@ export function InsufficientCreditsCard({
   }
 
   return (
-    <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-[#e5e5e5] bg-white shadow-sm">
+    <div className="mx-2 mb-2 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
       {/* Header */}
       <div className="border-b border-[#f0eeeb] px-3 py-2.5">
         <p className="text-[13px] font-semibold text-[#1a1a1a]" style={{ fontFamily: "DM Sans, sans-serif" }}>
