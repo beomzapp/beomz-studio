@@ -55,8 +55,8 @@ checkoutRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     await orgContext.db.updateOrg(org.id, { stripe_customer_id: customerId });
   }
 
-  const successUrl = apiConfig.STRIPE_SUCCESS_URL ?? "https://beomz.ai/dashboard?checkout=success";
-  const cancelUrl  = apiConfig.STRIPE_CANCEL_URL  ?? "https://beomz.ai/dashboard?checkout=cancel";
+  const successUrl = apiConfig.STRIPE_SUCCESS_URL ?? "https://beomz.ai/studio/home?checkout=success";
+  const cancelUrl  = apiConfig.STRIPE_CANCEL_URL  ?? "https://beomz.ai/studio/home?checkout=cancel";
 
   if (body.type === "subscription") {
     const plan     = body.plan as string;
