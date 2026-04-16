@@ -42,6 +42,8 @@ export interface ChatMessage {
   isScopeCard?: boolean;
   /** When true, ChatPanel renders the insufficientCreditsCard ReactNode here */
   isInsufficientCreditsCard?: boolean;
+  /** When true, ChatPanel renders the serverRestartedCard ReactNode here */
+  isServerRestartCard?: boolean;
 }
 
 
@@ -65,6 +67,8 @@ interface ChatPanelProps {
   scopeCard?: ReactNode;
   /** Optional node rendered at isInsufficientCreditsCard message position */
   insufficientCreditsCard?: ReactNode;
+  /** Optional node rendered at isServerRestartCard message position (BEO-348) */
+  serverRestartedCard?: ReactNode;
   /** BEO-316: muted "Writing N of M files..." counter shown below shimmer label */
   streamingFileCount?: { current: number; total: number } | null;
 }
@@ -416,6 +420,7 @@ export function ChatPanel({
   phaseCard,
   scopeCard,
   insufficientCreditsCard,
+  serverRestartedCard,
   streamingFileCount,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -551,6 +556,7 @@ export function ChatPanel({
                 && !msg.isPhaseCard
                 && !msg.isScopeCard
                 && !msg.isInsufficientCreditsCard
+                && !msg.isServerRestartCard
               ) return null;
 
               // Phase card placeholder — render the phaseCard ReactNode here
@@ -566,6 +572,11 @@ export function ChatPanel({
               // Insufficient credits card placeholder
               if (msg.isInsufficientCreditsCard) {
                 return <div key={msg.id}>{insufficientCreditsCard}</div>;
+              }
+
+              // Server-restarted amber card placeholder (BEO-348)
+              if (msg.isServerRestartCard) {
+                return <div key={msg.id}>{serverRestartedCard}</div>;
               }
 
               return (

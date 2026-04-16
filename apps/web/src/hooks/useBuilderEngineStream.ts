@@ -5,6 +5,7 @@ import {
   getBuildStatus,
   startBuild,
   streamBuildEvents,
+  NetworkDisconnectError,
   StreamHttpError,
   type BuildStatusResponse,
   type StartBuildResponse,
@@ -90,6 +91,11 @@ export function useBuilderEngineStream() {
     let firstEventReceived = false;
     let pollingStarted = false;
     let pollingPromise: Promise<void> | null = null;
+    // BEO-348: track consecutive network failures so we can emit a
+    // NetworkDisconnectError after the server has been unreachable long
+    // enough to treat it as a restart (vs a transient blip).
+    let consecutiveNetworkFailures = 0;
+    const DISCONNECT_THRESHOLD = 6; // ~12s at 2s wait between retries
 
     const emitEvent = (event: BuilderV3Event) => {
       if (event.id === latestEventId) {
@@ -98,6 +104,8 @@ export function useBuilderEngineStream() {
 
       latestEventId = event.id;
       firstEventReceived = true;
+      // Got a live event — server is reachable, reset disconnect counter.
+      consecutiveNetworkFailures = 0;
       onEvent?.(event);
 
       if (isBuilderV3TerminalEvent(event)) {
@@ -208,7 +216,18 @@ export function useBuilderEngineStream() {
           }
         }
 
-        // 5xx / network errors — retry with polling fallback
+        // 5xx / network errors — retry with polling fallback.
+        // BEO-348: if the server is unreachable for long enough, bubble up
+        // a NetworkDisconnectError so the caller can show the amber card.
+        consecutiveNetworkFailures += 1;
+        if (consecutiveNetworkFailures >= DISCONNECT_THRESHOLD) {
+          console.warn("[subscribeToBuild] Network disconnect threshold exceeded", {
+            consecutiveNetworkFailures,
+          });
+          terminal = true;
+          throw new NetworkDisconnectError();
+        }
+
         onStreamError?.(
           error instanceof Error ? error.message : "Build events stream failed.",
         );

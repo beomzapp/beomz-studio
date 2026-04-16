@@ -74,6 +74,7 @@ import {
 import type { Phase } from "../../../components/builder/PhasePlanCard";
 import { FeatureScopeCard } from "../../../components/builder/FeatureScopeCard";
 import { InsufficientCreditsCard } from "../../../components/builder/InsufficientCreditsCard";
+import { ServerRestartedCard } from "../../../components/builder/ServerRestartedCard";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import { usePricingModal } from "../../../contexts/PricingModalContext";
 import {
@@ -86,6 +87,7 @@ import {
   startNextPhase,
   confirmScope,
   forceSimpleBuild,
+  NetworkDisconnectError,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -904,6 +906,8 @@ export function ProjectPage() {
 
     // Clear any previous build-failed state so preview returns to normal
     setBuildFailed(false);
+    // BEO-348: drop any previously shown "connection lost" amber card
+    setMessages((prev) => prev.filter((m) => !m.isServerRestartCard));
     // BEO-342: Raise the overlay NOW — before the scaffold template is mounted
     // into WebContainer. isAiCustomising stays true until the build completes
     // with real AI-generated files (done event, non-fallback).
@@ -936,6 +940,23 @@ export function ProjectPage() {
       if (abortRef.current?.signal.aborted) return;
       setIsStreaming(false);
       setStreamingText("");
+      setStreamingFileCount(null);
+
+      // BEO-348: infra disconnect → amber friendly card, not red error
+      if (error instanceof NetworkDisconnectError) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.isServerRestartCard)) return prev;
+          return [...prev, {
+            id: `server-restart-${Date.now()}`,
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date().toISOString(),
+            isServerRestartCard: true,
+          }];
+        });
+        return;
+      }
+
       const errorMsg = error instanceof Error ? error.message : "Failed to start build.";
       setMessages((prev) => [
         ...prev,
@@ -1689,6 +1710,7 @@ export function ProjectPage() {
                   />
                 ) : undefined
               }
+              serverRestartedCard={<ServerRestartedCard onRetry={handleRetry} />}
               streamingFileCount={streamingFileCount}
             />
           </div>

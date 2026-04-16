@@ -105,6 +105,16 @@ export class StreamHttpError extends Error {
   }
 }
 
+/** BEO-348: Thrown when the API is unreachable (e.g. PM2 reload during deploy).
+ *  Distinct from real build failures so the UI can show a friendly amber
+ *  "Connection lost" card instead of a red error. */
+export class NetworkDisconnectError extends Error {
+  constructor(message = "Connection lost") {
+    super(message);
+    this.name = "NetworkDisconnectError";
+  }
+}
+
 function toLoggedError(error: unknown): { message: string; name: string } {
   if (error instanceof Error) {
     return {
@@ -163,8 +173,10 @@ async function requestJson<TResponse>(
   try {
     response = await fetch(url, { ...init, headers });
   } catch {
-    // Network error, CORS block, DNS failure — do NOT retry
-    throw new Error("Generation failed — please try again");
+    // Network error, CORS block, DNS failure — do NOT retry.
+    // BEO-348: surface as NetworkDisconnectError so callers can show the
+    // friendly amber "Connection lost" state instead of a red build error.
+    throw new NetworkDisconnectError();
   }
 
   // Retry once on transient 5xx
@@ -172,7 +184,7 @@ async function requestJson<TResponse>(
     try {
       response = await fetch(url, { ...init, headers });
     } catch {
-      throw new Error("Generation failed — please try again");
+      throw new NetworkDisconnectError();
     }
   }
 
