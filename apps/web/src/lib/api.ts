@@ -269,6 +269,10 @@ export interface CreditsResponse {
   topup: number;
   plan: string;
   planCredits: number;
+  // BEO-346 / BEO-322: optional three-bucket breakdown. Backend may not
+  // populate these yet — consumers should fall back to `balance` when absent.
+  rollover?: number;
+  used?: number;
 }
 
 export async function getCredits(): Promise<CreditsResponse> {
