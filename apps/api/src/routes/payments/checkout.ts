@@ -62,7 +62,7 @@ checkoutRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     const plan     = body.plan as string;
     const interval = body.interval as "monthly" | "yearly";
 
-    if (!["starter", "pro", "business"].includes(plan)) {
+    if (!["starter", "pro", "builder", "business"].includes(plan)) {
       return c.json({ error: "Invalid plan." }, 400);
     }
     if (!["monthly", "yearly"].includes(interval)) {
@@ -72,9 +72,11 @@ checkoutRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       return c.json({ error: "Manage your existing subscription via the billing portal." }, 409);
     }
 
-    const priceId = getPlanPriceId(plan, interval);
+    // "builder" is the PricingModal alias for "pro" (maps to STRIPE_PRO_*_PRICE_ID)
+    const planKey = plan === "builder" ? "pro" : plan;
+    const priceId = getPlanPriceId(planKey, interval);
     if (!priceId) {
-      return c.json({ error: `Price ID for ${plan} ${interval} not configured.` }, 503);
+      return c.json({ error: `Price ID for ${planKey} ${interval} not configured.` }, 503);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -83,9 +85,9 @@ checkoutRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { org_id: org.id, plan, interval },
+      metadata: { org_id: org.id, plan: planKey, interval },
       subscription_data: {
-        metadata: { org_id: org.id, plan },
+        metadata: { org_id: org.id, plan: planKey },
       },
     });
 
