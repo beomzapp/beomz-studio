@@ -72,41 +72,96 @@ webhookRoute.post("/", async (c) => {
       // ── One-time credit pack purchase ───────────────────────────────────────
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        if (session.mode !== "payment") break;
 
-        const orgId      = session.metadata?.org_id;
-        const packId     = session.metadata?.pack_id;
-        const creditsStr = session.metadata?.credits;
-        const credits    = creditsStr ? parseFloat(creditsStr) : 0;
+        // ── Pack purchase (one-time payment) ──────────────────────────────────
+        if (session.mode === "payment") {
+          const orgId      = session.metadata?.org_id;
+          const packId     = session.metadata?.pack_id;
+          const creditsStr = session.metadata?.credits;
+          const credits    = creditsStr ? parseFloat(creditsStr) : 0;
 
-        if (!orgId || !credits || credits <= 0) {
-          console.warn("[webhook] checkout.session.completed: missing metadata", { orgId, credits });
+          if (!orgId || !credits || credits <= 0) {
+            console.warn("[webhook] checkout.session.completed: missing metadata", { orgId, credits });
+            break;
+          }
+
+          let paymentIntentId: string | null = null;
+          if (typeof session.payment_intent === "string") {
+            paymentIntentId = session.payment_intent;
+          } else if (session.payment_intent && typeof (session.payment_intent as Stripe.PaymentIntent).id === "string") {
+            paymentIntentId = (session.payment_intent as Stripe.PaymentIntent).id;
+          }
+          if (!paymentIntentId) {
+            const expanded = await stripe.checkout.sessions.retrieve(session.id, {
+              expand: ["payment_intent"],
+            });
+            const pi = expanded.payment_intent;
+            paymentIntentId = typeof pi === "string" ? pi : (pi as Stripe.PaymentIntent | null)?.id ?? null;
+          }
+          if (!paymentIntentId) {
+            console.error("[webhook] checkout.session.completed: no payment_intent_id", { sessionId: session.id });
+            break;
+          }
+
+          const pack = CREDIT_PACKS.find((p) => p.id === packId);
+          const description = pack ? `${pack.label} purchase` : `${credits} credits purchase`;
+
+          const applied = await db.applyOrgTopupPurchase(orgId, credits, paymentIntentId, description);
+          console.log("[webhook] topup applied:", { orgId, credits, applied });
           break;
         }
 
-        let paymentIntentId: string | null = null;
-        if (typeof session.payment_intent === "string") {
-          paymentIntentId = session.payment_intent;
-        } else if (session.payment_intent && typeof (session.payment_intent as Stripe.PaymentIntent).id === "string") {
-          paymentIntentId = (session.payment_intent as Stripe.PaymentIntent).id;
-        }
-        if (!paymentIntentId) {
-          const expanded = await stripe.checkout.sessions.retrieve(session.id, {
-            expand: ["payment_intent"],
+        // ── New subscription checkout ──────────────────────────────────────────
+        // BEO-354: grant plan credits immediately on checkout completion.
+        // customer.subscription.created also fires and writes the same values
+        // (idempotent), but this ensures credits are available right away.
+        if (session.mode === "subscription") {
+          const orgId = session.metadata?.org_id;
+          if (!orgId) {
+            console.warn("[webhook] checkout.session.completed(sub): no org_id", { sessionId: session.id });
+            break;
+          }
+
+          // Resolve plan: prefer price ID from the subscription object (most reliable),
+          // fall back to the plan stored in session metadata by checkout.ts.
+          const subId = typeof session.subscription === "string" ? session.subscription : null;
+          let plan: string = session.metadata?.plan ?? "pro_starter";
+          if (subId) {
+            try {
+              const sub = await stripe.subscriptions.retrieve(subId);
+              const priceId = sub.items.data[0]?.price.id;
+              if (priceId && PRICE_TO_PLAN[priceId]) plan = PRICE_TO_PLAN[priceId];
+            } catch { /* fall back to metadata plan */ }
+          }
+          // Normalise checkout.ts aliases ("pro", "starter") → canonical PLAN_LIMITS keys
+          if (plan === "pro" || plan === "builder") plan = "pro_builder";
+          if (plan === "starter")                   plan = "pro_starter";
+
+          const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.pro_starter!;
+          const now = new Date();
+          const periodEnd = new Date(Date.UTC(
+            now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate(),
+          )).toISOString();
+
+          await db.updateOrg(orgId, {
+            plan,
+            stripe_subscription_id: subId ?? undefined,
+            monthly_credits: planLimit.credits,
+            rollover_credits: 0,
+            rollover_cap: planLimit.rolloverCap,
+            credits_period_start: now.toISOString(),
+            credits_period_end: periodEnd,
+            downgrade_at_period_end: false,
+            pending_plan: null,
           });
-          const pi = expanded.payment_intent;
-          paymentIntentId = typeof pi === "string" ? pi : (pi as Stripe.PaymentIntent | null)?.id ?? null;
-        }
-        if (!paymentIntentId) {
-          console.error("[webhook] checkout.session.completed: no payment_intent_id", { sessionId: session.id });
+          // resetOrgMonthlyCredits also writes the legacy `credits` column
+          await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
+          console.log("[webhook] checkout.session.completed(sub): org upgraded to", plan, {
+            orgId, monthly: planLimit.credits, rolloverCap: planLimit.rolloverCap,
+          });
           break;
         }
 
-        const pack = CREDIT_PACKS.find((p) => p.id === packId);
-        const description = pack ? `${pack.label} purchase` : `${credits} credits purchase`;
-
-        const applied = await db.applyOrgTopupPurchase(orgId, credits, paymentIntentId, description);
-        console.log("[webhook] topup applied:", { orgId, credits, applied });
         break;
       }
 
