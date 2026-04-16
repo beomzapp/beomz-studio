@@ -1,5 +1,6 @@
 export * from "./agents.js";
 export * from "./auth.js";
+export * from "./chat.js";
 export * from "./build-workflows.js";
 export * from "./builder-v3.js";
 export * from "./generated-surface.js";
