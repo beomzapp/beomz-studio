@@ -224,7 +224,11 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
       {/* Hover popover — full breakdown */}
       <div
         className={
-          "pointer-events-none absolute right-0 top-full z-50 mt-2 w-64 origin-top-right rounded-xl border border-zinc-200 bg-white p-3 opacity-0 shadow-lg transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+          // BEO-355: no mt gap — panel sits flush with the button so the
+          // cursor can reach it without losing hover. pt-4 inside the panel
+          // keeps the visible top-padding we want, while an extra invisible
+          // strip above the content (via -mt-2 wrapper) bridges the seam.
+          "pointer-events-none absolute right-0 top-full z-50 w-64 origin-top-right rounded-xl border border-zinc-200 bg-white pt-4 pb-3 px-3 opacity-0 shadow-lg transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
         }
         role="tooltip"
       >
