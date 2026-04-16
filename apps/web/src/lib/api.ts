@@ -572,6 +572,16 @@ export async function confirmScope(
   });
 }
 
+export async function createCheckoutSession(
+  plan: string,
+  interval: "monthly" | "yearly",
+): Promise<{ url: string }> {
+  return requestJson<{ url: string }>("/payments/checkout", {
+    method: "POST",
+    body: JSON.stringify({ type: "subscription", plan, interval }),
+  });
+}
+
 export async function forceSimpleBuild(buildId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/builds/${buildId}/force-simple`, {
     method: "POST",
