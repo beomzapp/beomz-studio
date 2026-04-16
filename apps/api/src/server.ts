@@ -30,6 +30,7 @@ import creditsRoute from "./routes/credits/index.js";
 import checkoutRoute from "./routes/payments/checkout.js";
 import confirmTopupRoute from "./routes/payments/confirm-topup.js";
 import portalRoute from "./routes/payments/portal.js";
+import topupCheckoutRoute from "./routes/payments/topup.js";
 import webhookRoute from "./routes/payments/webhook.js";
 import dbRouter from "./routes/db/index.js";
 import {
@@ -89,6 +90,7 @@ app.route("/credits", creditsRoute);
 app.route("/payments/checkout", checkoutRoute);
 app.route("/payments/confirm-topup", confirmTopupRoute);
 app.route("/payments/portal", portalRoute);
+app.route("/payments/topup/checkout", topupCheckoutRoute);
 app.route("/payments/webhook", webhookRoute);
 // BEO-130: Built-in DB + BYO Supabase
 app.route("/projects/:id/db", dbRouter);
