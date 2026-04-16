@@ -94,8 +94,10 @@ function timeAgo(iso: string | null | undefined): string {
 export function HomePage() {
   const navigate = useNavigate();
   const { session } = useAuth();
-  const { credits } = useCredits();
+  const { credits, refresh: refreshCredits } = useCredits();
   const [projects, setProjects] = useState<ProjectCard[]>([]);
+  // BEO-352: Stripe checkout redirect success banner
+  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [canCreateMore, setCanCreateMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -109,6 +111,31 @@ export function HomePage() {
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // BEO-352: After Stripe checkout, Stripe redirects back with
+  // ?checkout=success (or ?checkout=cancel). Show a toast for success,
+  // silently strip the param for cancel, and refresh credits so the
+  // CreditBar reflects the freshly activated plan.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("checkout");
+    if (!outcome) return;
+
+    if (outcome === "success") {
+      setCheckoutSuccess(true);
+      void refreshCredits();
+    }
+    // Strip the param either way so it doesn't linger in the URL
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [refreshCredits]);
+
+  // Auto-dismiss the success banner after 5s
+  useEffect(() => {
+    if (!checkoutSuccess) return;
+    const t = setTimeout(() => setCheckoutSuccess(false), 5000);
+    return () => clearTimeout(t);
+  }, [checkoutSuccess]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -214,6 +241,30 @@ export function HomePage() {
 
   return (
     <div className="min-h-full bg-[#faf9f6] p-6 lg:p-10">
+      {/* BEO-352: Checkout success banner — auto-dismiss after 5s */}
+      {checkoutSuccess && (
+        <div className="fixed left-1/2 top-6 z-[150] -translate-x-1/2">
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-lg">
+            <span className="text-lg">🎉</span>
+            <div className="text-sm">
+              <p className="font-semibold text-emerald-800" style={{ fontFamily: "DM Sans, sans-serif" }}>
+                You're now on Pro!
+              </p>
+              <p className="text-[12px] text-emerald-700">
+                Your plan has been activated.
+              </p>
+            </div>
+            <button
+              onClick={() => setCheckoutSuccess(false)}
+              className="ml-2 text-emerald-500 transition-colors hover:text-emerald-700"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       {showOnboarding && (
         <OnboardingModal
           onSelect={(prompt) => {
