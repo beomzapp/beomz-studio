@@ -60,7 +60,7 @@ export interface StartBuildRequest extends BuildPlanContext {
 export const startBuildRequestSchema = z.object({
   existingFiles: z.array(studioFileSchema).optional(),
   model: z.string().trim().min(1).optional(),
-  prompt: z.string().trim().min(8).max(5000),
+  prompt: z.string().trim().min(8).max(50000),
   projectId: z.string().trim().uuid().optional(),
   projectName: z.string().trim().min(1).max(120).optional(),
 }).merge(buildPlanContextSchema) satisfies z.ZodType<StartBuildRequest>;
