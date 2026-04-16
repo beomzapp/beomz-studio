@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 
 import Anthropic from "@anthropic-ai/sdk";
 import type {
+  BuildIntent,
   BuilderV3DoneEvent,
   BuilderV3ErrorEvent,
   BuilderV3PreviewReadyEvent,
@@ -41,7 +42,6 @@ import {
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
-import { classifyIntent } from "../../lib/classifyIntent.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { extractFeatures } from "../../lib/extractFeatures.js";
 import { planPhases } from "../../lib/planPhases.js";
@@ -1775,6 +1775,192 @@ function pickBestPrebuilt(
   return buildBlankScaffold();
 }
 
+// ─── BEO-362: 4-way intent engine ────────────────────────────────────────────
+
+const DETECT_INTENT_TIMEOUT_MS = 4_000;
+
+const DETECT_INTENT_SYSTEM_PROMPT = `You classify a user message into exactly one of four intent categories.
+
+question — user is asking for information, explanation, or advice. No code change intended.
+Keywords: what, how, why, explain, does, is, can you tell me, what if.
+Examples: "What does this component do?" "How do I add auth?" "Why is the sidebar dark?"
+
+edit — user wants a specific change to the existing app. Refers to something that already exists.
+Keywords: change, update, make, add, remove, fix, adjust, rename, move, replace, switch, darker, lighter, bigger, smaller.
+Examples: "Make the sidebar darker" "Add a delete button" "Fix the navigation" "Change the font size"
+
+build — user wants a new app or major feature from scratch. No existing context referenced.
+Keywords: build, create, generate, make me, I want, I need a.
+Examples: "Build me a CRM" "Create a todo app" "Generate a restaurant POS"
+
+ambiguous — intent unclear. Could be edit or question. Unclear what action to take.
+Examples: "I don't like the layout" "Can you improve this?" "This doesn't look right"
+
+Reply with ONLY one word: question, edit, build, or ambiguous.`;
+
+export async function detectIntent(
+  prompt: string,
+  hasExistingProject: boolean,
+): Promise<BuildIntent> {
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) return hasExistingProject ? "edit" : "build";
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DETECT_INTENT_TIMEOUT_MS);
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const context = hasExistingProject
+      ? "Context: The user has an existing project open."
+      : "Context: No existing project — this is a new build request.";
+    const response = await client.messages.create(
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 10,
+        system: DETECT_INTENT_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: `${context}\n\nUser message: ${prompt}` }],
+      },
+      { signal: controller.signal },
+    );
+    const raw = (response.content[0] as { type: string; text?: string })?.text?.trim().toLowerCase() ?? "";
+    if (raw === "question") return "question";
+    if (raw === "edit") return "edit";
+    if (raw === "build") return "build";
+    if (raw === "ambiguous") return "ambiguous";
+    return hasExistingProject ? "edit" : "build";
+  } catch (err) {
+    console.warn("[detectIntent] failed, using fallback:", err instanceof Error ? err.message : String(err));
+    return hasExistingProject ? "edit" : "build";
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generatePreBuildAck(prompt: string, intent: "edit" | "build"): Promise<string> {
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) return intent === "edit" ? "Applying your changes..." : "Building your app...";
+
+  const systemPrompt = intent === "edit"
+    ? `Generate a one-sentence acknowledgement that you're about to make the edit the user requested.
+Format: "I'll [verb] the [target]..." — max 15 words, present tense, no filler.
+Examples: "I'll darken the sidebar and update the icon contrast." "I'll add a delete button to the table rows."`
+    : `Generate a one-sentence acknowledgement that you're about to build what the user requested.
+Format: "Building your [app type]..." — max 15 words, present tense, no filler.
+Examples: "Building your restaurant POS system." "Building your task management dashboard."`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create(
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 60,
+        system: systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: controller.signal },
+    );
+    return (response.content[0] as { type: string; text?: string })?.text?.trim()
+      ?? (intent === "edit" ? "Applying your changes..." : "Building your app...");
+  } catch {
+    return intent === "edit" ? "Applying your changes..." : "Building your app...";
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generateConversationalAnswer(
+  prompt: string,
+  existingFiles: readonly StudioFile[],
+): Promise<string> {
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) return "I'm not sure — could you give me more details?";
+
+  const fileContext = existingFiles.length > 0
+    ? `\n\nThe user has an existing project with these files: ${existingFiles.map((f) => f.path.replace(/^.*\//, "")).join(", ")}.`
+    : "";
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create(
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        system: `You are Beomz, an AI app builder assistant. Answer the user's question concisely and helpfully.${fileContext}Keep responses under 3 sentences. Be direct and friendly. No filler phrases.`,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: controller.signal },
+    );
+    return (response.content[0] as { type: string; text?: string })?.text?.trim()
+      ?? "I'm not sure — could you describe what you'd like to build?";
+  } catch {
+    return "I'm not sure — could you describe what you'd like to build?";
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generateClarifyingQuestion(prompt: string): Promise<string> {
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) return "Could you be more specific about what you'd like to change?";
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create(
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 60,
+        system: `Generate one focused clarifying question to understand the user's intent.
+Max 20 words. No filler. Start with "Do you want to" or "Would you like me to" or similar.
+Examples: "Do you want me to redesign the layout or just adjust the spacing?" "Would you like to add a new feature or change the visual style?"`,
+        messages: [{ role: "user", content: prompt }],
+      },
+      { signal: controller.signal },
+    );
+    return (response.content[0] as { type: string; text?: string })?.text?.trim()
+      ?? "Could you be more specific about what you'd like to change?";
+  } catch {
+    return "Could you be more specific about what you'd like to change?";
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function generateBuildSummary(prompt: string, changedFiles: string[]): Promise<string> {
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) return `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
+
+  const fileList = changedFiles.slice(0, 5).join(", ") + (changedFiles.length > 5 ? ` and ${changedFiles.length - 5} more` : "");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create(
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 150,
+        system: `Generate a 2-3 sentence natural language summary of what was just built or changed.
+Cover: what changed and why, what the user should notice, and optionally a follow-up suggestion.
+Be conversational and specific. Start with "Done —". Reference the specific changes, not just file names.
+Example: "Done — I've darkened the sidebar to a deeper grey and improved the icon contrast across 3 files. The navigation should feel much more defined now. Want me to adjust the hover states too?"`,
+        messages: [{ role: "user", content: `User request: "${prompt}"\nFiles changed: ${fileList}` }],
+      },
+      { signal: controller.signal },
+    );
+    return (response.content[0] as { type: string; text?: string })?.text?.trim()
+      ?? `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
+  } catch {
+    return `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /**
  * Fire-and-forget background build.  Called after start.ts returns 202.
  * Writes events directly to the generation row's builderTrace so the
@@ -1804,34 +1990,61 @@ async function _runBuildInBackground(
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
 
-  // ── BEO-312: Intent detection + scope confirmation ───────────────────────
-  // For brand-new builds that haven't been through classification yet,
-  // run a fast Haiku intent check BEFORE enrichPrompt to avoid wasting time
-  // on conversational messages. Complex builds are paused for feature scoping.
-  if (!input.isIteration && !input.phaseOverride && !input.confirmedScope) {
-    const { intent } = await classifyIntent(prompt);
-    console.log("[generate] intent classified:", intent, { buildId });
+  // ── BEO-362: 4-way intent detection ─────────────────────────────────────
+  // Run for all builds except confirmed-scope resumes and phase continuations.
+  // Stores the intent so pre_build_ack and build_summary can reference it later.
+  let detectedIntent: BuildIntent = input.isIteration ? "edit" : "build";
 
-    if (intent === "conversational") {
-      // Respond conversationally — no generation
-      const convEvent = {
+  if (!input.phaseOverride && !input.confirmedScope) {
+    const hasExistingProject = input.isIteration || input.existingFiles.length > 0;
+    detectedIntent = await detectIntent(prompt, hasExistingProject);
+    console.log("[generate] intent detected:", detectedIntent, { buildId });
+
+    // Emit intent_detected so the frontend can show a visual cue
+    await appendEventToDb(db, buildId, {
+      type: "intent_detected",
+      id: nextId(),
+      timestamp: ts(),
+      operation: op,
+      intent: detectedIntent,
+    } as unknown as BuilderV3StatusEvent);
+
+    if (detectedIntent === "question") {
+      const answer = await generateConversationalAnswer(prompt, input.existingFiles);
+      await appendEventToDb(db, buildId, {
         type: "conversational_response" as const,
         id: nextId(),
         timestamp: ts(),
         operation: op,
-        message: "I'm not sure what you'd like me to build — could you describe a specific feature or app you have in mind?",
-      };
-      await appendEventToDb(db, buildId, convEvent as unknown as BuilderV3StatusEvent, {
+        message: answer,
+      } as unknown as BuilderV3StatusEvent, {
         status: "completed",
         completed_at: ts(),
-        summary: "Conversational message — no build started.",
+        summary: "Question answered — no build started.",
       });
-      console.log("[generate] conversational intent — returning early, no build.");
+      console.log("[generate] question intent — answered conversationally, no build.");
       return;
     }
 
-    if (intent === "complex_build") {
-      // ── Credit balance check ────────────────────────────────────────────────
+    if (detectedIntent === "ambiguous") {
+      const clarifyingQuestion = await generateClarifyingQuestion(prompt);
+      await appendEventToDb(db, buildId, {
+        type: "clarifying_question" as const,
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        message: clarifyingQuestion,
+      } as unknown as BuilderV3StatusEvent, {
+        status: "completed",
+        completed_at: ts(),
+        summary: "Clarifying question sent — awaiting user response.",
+      });
+      console.log("[generate] ambiguous intent — clarifying question sent, no build.");
+      return;
+    }
+
+    // For build intent: run credit check + scope confirmation (replaces complex_build path)
+    if (detectedIntent === "build" && !input.isIteration) {
       let orgBalance = 0;
       try {
         const orgRow = await db.getOrgWithBalance(orgId);
@@ -1841,13 +2054,9 @@ async function _runBuildInBackground(
       }
       console.log("[generate] credit balance check:", { orgBalance, required: CREDIT_THRESHOLD, buildId });
 
-      // Enrich first so extractFeatures has brand context
       const enrichedForScope = await enrichPrompt(prompt);
       const { features } = await extractFeatures(enrichedForScope, prompt);
 
-      // ── Insufficient credits — bail out regardless of feature count ──────────
-      // Must be outside the `features.length > 0` guard so an empty feature
-      // extraction never silently falls through to the normal build path.
       if (!isAdminEmail(input.userEmail ?? "") && orgBalance < CREDIT_THRESHOLD) {
         const insufficientEvent = {
           type: "insufficient_credits" as const,
@@ -1858,14 +2067,12 @@ async function _runBuildInBackground(
           required: CREDIT_THRESHOLD,
           features,
         };
-        // Step 1: persist event + status
         await appendEventToDb(
           db,
           buildId,
           insufficientEvent as unknown as BuilderV3StatusEvent,
           { status: "insufficient_credits" },
         );
-        // Step 2: store pendingScope so force-simple can access enrichedPrompt
         if (features.length > 0) {
           const pendingScope = {
             enrichedPrompt: enrichedForScope,
@@ -1888,7 +2095,6 @@ async function _runBuildInBackground(
       }
 
       if (features.length > 0) {
-        // Store everything confirm-scope / force-simple need to resume
         const pendingScope = {
           enrichedPrompt: enrichedForScope,
           featureCandidates: features,
@@ -1906,8 +2112,6 @@ async function _runBuildInBackground(
           features,
           message: `I've identified ${features.length} features to build. Confirm or adjust before I start.`,
         };
-        // Step 1: persist the scope_confirmation event + status
-        // No metadata in extraPatch — prevents builderTrace from being overwritten
         await appendEventToDb(
           db,
           buildId,
@@ -1915,7 +2119,6 @@ async function _runBuildInBackground(
           { status: "awaiting_scope_confirmation" },
         );
 
-        // Step 2: merge pendingScope into the freshly-written metadata (builderTrace now intact)
         const scopeRow = await db.findGenerationById(buildId);
         const scopeMeta =
           typeof scopeRow?.metadata === "object" && scopeRow.metadata !== null
@@ -1927,7 +2130,6 @@ async function _runBuildInBackground(
 
         console.log("[generate] scope_confirmation emitted —", features.length, "features, awaiting confirm.");
 
-        // 60 s auto-confirm: if the user doesn't interact, start the build with all features
         setTimeout(() => {
           void db.findGenerationById(buildId).then(async (latest) => {
             if (latest?.status !== "awaiting_scope_confirmation") return;
@@ -1947,9 +2149,8 @@ async function _runBuildInBackground(
 
         return;
       }
-      // No features extracted — fall through to normal complex build
+      // No features extracted — fall through to normal build
     }
-    // simple_build (or complex_build with empty feature list) → continue normally
   }
 
   // ── Domain enrichment (initial builds only) ───────────────────────────────
@@ -2098,6 +2299,20 @@ async function _runBuildInBackground(
         statusEvent("ai_customising", "Applying your changes with AI…", "customising"),
       );
 
+      // Emit pre_build_ack before Sonnet fires (BEO-362)
+      try {
+        const ackMessage = await generatePreBuildAck(prompt, "edit");
+        await appendEventToDb(db, buildId, {
+          type: "pre_build_ack",
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          message: ackMessage,
+        } as unknown as BuilderV3StatusEvent);
+      } catch {
+        // non-fatal
+      }
+
       let iterResult: CustomiseResult;
       let iterErrorReason: string | null = null;
       try {
@@ -2226,6 +2441,24 @@ async function _runBuildInBackground(
         summary: iterResult.summary,
       });
 
+      // BEO-362: post-build summary via Haiku
+      if (iterResult.files.length > 0) {
+        try {
+          const changedPaths = iterResult.files.map((f) => f.path.replace(/^.*\//, ""));
+          const summaryMessage = await generateBuildSummary(prompt, changedPaths);
+          await appendEventToDb(db, buildId, {
+            type: "build_summary",
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            message: summaryMessage,
+            filesChanged: changedPaths,
+          } as unknown as BuilderV3StatusEvent);
+        } catch {
+          // non-fatal
+        }
+      }
+
       console.log("[generate] iteration complete.", {
         buildId,
         changedFiles: iterResult.files.length,
@@ -2343,6 +2576,21 @@ async function _runBuildInBackground(
       db, buildId,
       statusEvent("ai_customising", "Customising with AI…", "customising"),
     );
+
+    // Emit pre_build_ack before Sonnet fires (BEO-362)
+    try {
+      const ackIntent = detectedIntent === "edit" ? "edit" : "build";
+      const ackMessage = await generatePreBuildAck(prompt, ackIntent);
+      await appendEventToDb(db, buildId, {
+        type: "pre_build_ack",
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        message: ackMessage,
+      } as unknown as BuilderV3StatusEvent);
+    } catch {
+      // non-fatal
+    }
 
     let customised: CustomiseResult;
     let fallbackUsed = false;
@@ -2472,6 +2720,24 @@ async function _runBuildInBackground(
       status: "completed",
       summary: customised.summary,
     });
+
+    // BEO-362: post-build summary via Haiku
+    if (!fallbackUsed) {
+      try {
+        const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
+        const summaryMessage = await generateBuildSummary(prompt, changedPaths);
+        await appendEventToDb(db, buildId, {
+          type: "build_summary",
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          message: summaryMessage,
+          filesChanged: changedPaths,
+        } as unknown as BuilderV3StatusEvent);
+      } catch {
+        // non-fatal
+      }
+    }
 
     console.log("[generate] Build complete.", {
       buildId,

@@ -115,6 +115,34 @@ export interface BuilderV3InsufficientCreditsEvent extends BuilderV3BaseEvent {
   features: string[];
 }
 
+// BEO-362: 4-way intent classifier result emitted before any build action.
+export type BuildIntent = "question" | "edit" | "build" | "ambiguous";
+
+export interface BuilderV3IntentDetectedEvent extends BuilderV3BaseEvent {
+  type: "intent_detected";
+  intent: BuildIntent;
+}
+
+// BEO-362: one-sentence Haiku acknowledgement streamed before Sonnet fires.
+export interface BuilderV3PreBuildAckEvent extends BuilderV3BaseEvent {
+  type: "pre_build_ack";
+  message: string;
+}
+
+// BEO-362: focused clarifying question emitted for ambiguous intent.
+// Build is paused; next user message re-runs detectIntent.
+export interface BuilderV3ClarifyingQuestionEvent extends BuilderV3BaseEvent {
+  type: "clarifying_question";
+  message: string;
+}
+
+// BEO-362: 2-3 sentence natural-language summary emitted after Sonnet completes.
+export interface BuilderV3BuildSummaryEvent extends BuilderV3BaseEvent {
+  type: "build_summary";
+  message: string;
+  filesChanged: string[];
+}
+
 export type BuilderV3Event =
   | BuilderV3AssistantDeltaEvent
   | BuilderV3StatusEvent
@@ -126,7 +154,11 @@ export type BuilderV3Event =
   | BuilderV3ErrorEvent
   | BuilderV3ScopeConfirmationEvent
   | BuilderV3ConversationalResponseEvent
-  | BuilderV3InsufficientCreditsEvent;
+  | BuilderV3InsufficientCreditsEvent
+  | BuilderV3IntentDetectedEvent
+  | BuilderV3PreBuildAckEvent
+  | BuilderV3ClarifyingQuestionEvent
+  | BuilderV3BuildSummaryEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;

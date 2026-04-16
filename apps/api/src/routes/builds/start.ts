@@ -23,7 +23,7 @@ import {
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 import { runBuildInBackground } from "./generate.js";
 import { CREDIT_THRESHOLD, PLAN_LIMITS, SIMPLE_BUILD_MIN, isAdminEmail } from "../../lib/credits.js";
-import { classifyIntent } from "../../lib/classifyIntent.js";
+import { detectIntent } from "./generate.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -291,14 +291,14 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   // ── BEO-320: minimum balance guard ───────────────────────────────────────
   // Only fires when balance is below CREDIT_THRESHOLD (8) to skip the Haiku
-  // call for well-funded orgs. Conversational intent needs no credits.
+  // call for well-funded orgs. Question/ambiguous intent needs no credits.
   // Iterations are excluded — they already have a project and prior credits spent.
   if (!isAdminEmail(userEmail) && !isIteration && totalAvailable < CREDIT_THRESHOLD) {
-    const { intent } = await classifyIntent(prompt);
+    const intent = await detectIntent(prompt, false);
     const minRequired =
-      intent === "complex_build" ? CREDIT_THRESHOLD :
-      intent === "simple_build"  ? SIMPLE_BUILD_MIN  :
-      0; // conversational — no guard needed
+      intent === "build" ? CREDIT_THRESHOLD :
+      intent === "edit"  ? SIMPLE_BUILD_MIN  :
+      0; // question/ambiguous — no build triggered, no guard needed
 
     if (minRequired > 0 && totalAvailable < minRequired) {
       const icEventId = "2";
