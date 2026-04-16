@@ -40,7 +40,7 @@ import {
 
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
-import { calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
+import { CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { classifyIntent } from "../../lib/classifyIntent.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { extractFeatures } from "../../lib/extractFeatures.js";
@@ -1832,7 +1832,6 @@ async function _runBuildInBackground(
 
     if (intent === "complex_build") {
       // ── Credit balance check ────────────────────────────────────────────────
-      const CREDIT_THRESHOLD = 8; // BEO-345: rescaled from 60 (same real API cost, new human scale)
       let orgBalance = 0;
       try {
         const orgRow = await db.getOrgWithBalance(orgId);

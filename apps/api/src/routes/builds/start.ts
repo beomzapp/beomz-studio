@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { initialBuildOperation, projectIterationOperation } from "@beomz-studio/operations";
 import type {
+  BuilderV3InsufficientCreditsEvent,
   BuilderV3TraceMetadata,
   OrgPlan,
   PlanStep,
@@ -21,7 +22,8 @@ import {
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 import { runBuildInBackground } from "./generate.js";
-import { PLAN_LIMITS, isAdminEmail } from "../../lib/credits.js";
+import { CREDIT_THRESHOLD, PLAN_LIMITS, SIMPLE_BUILD_MIN, isAdminEmail } from "../../lib/credits.js";
+import { classifyIntent } from "../../lib/classifyIntent.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -197,13 +199,14 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   // Admins bypass; block if totalAvailable <= 0.
   // BEO-322: daily reset mechanic removed — free plan is signup grant only.
   const userEmail = orgContext.user.email;
+  let totalAvailable = Infinity; // admins never reach the threshold checks below
   if (!isAdminEmail(userEmail)) {
     const freshOrg = await orgContext.db.getOrgWithBalance(orgContext.org.id);
     if (freshOrg) {
       const monthlyCredits = Number(freshOrg.credits ?? 0);
       const topupCredits   = Number(freshOrg.topup_credits ?? 0);
 
-      const totalAvailable = monthlyCredits + topupCredits;
+      totalAvailable = monthlyCredits + topupCredits;
       if (totalAvailable <= 0) {
         return c.json(
           { error: "Insufficient credits. Please purchase a credit pack or upgrade your plan." },
@@ -285,6 +288,70 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       : `Queued initial build for ${projectName}.`,
     template_id: selectedTemplateId as TemplateId, warnings: [],
   });
+
+  // ── BEO-320: minimum balance guard ───────────────────────────────────────
+  // Only fires when balance is below CREDIT_THRESHOLD (8) to skip the Haiku
+  // call for well-funded orgs. Conversational intent needs no credits.
+  // Iterations are excluded — they already have a project and prior credits spent.
+  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable < CREDIT_THRESHOLD) {
+    const { intent } = await classifyIntent(prompt);
+    const minRequired =
+      intent === "complex_build" ? CREDIT_THRESHOLD :
+      intent === "simple_build"  ? SIMPLE_BUILD_MIN  :
+      0; // conversational — no guard needed
+
+    if (minRequired > 0 && totalAvailable < minRequired) {
+      const icEventId = "2";
+      const icEvent: BuilderV3InsufficientCreditsEvent = {
+        type: "insufficient_credits",
+        id: icEventId,
+        timestamp: new Date().toISOString(),
+        operation: operation,
+        available: totalAvailable,
+        required: minRequired,
+        features: [],
+      };
+
+      const icTrace: BuilderV3TraceMetadata = {
+        ...initialBuilderTrace,
+        events: [...initialBuilderTrace.events, icEvent],
+        lastEventId: icEventId,
+      };
+
+      await orgContext.db.updateGeneration(buildId, {
+        metadata: { ...initialMetadata, builderTrace: icTrace },
+        status: "insufficient_credits",
+      });
+
+      console.log("[BEO-320] minimum balance guard fired — build blocked.", {
+        buildId, intent, available: totalAvailable, required: minRequired,
+      });
+
+      const metadata = readBuildMetadata(generationRow.metadata);
+      return c.json(
+        {
+          build: {
+            completedAt: generationRow.completed_at,
+            error: generationRow.error,
+            id: generationRow.id,
+            phase: metadata.phase ?? null,
+            projectId: generationRow.project_id,
+            source: metadata.resultSource ?? null,
+            startedAt: generationRow.started_at,
+            status: "insufficient_credits",
+            summary: generationRow.summary,
+            templateId: generationRow.template_id,
+            workflowId: null,
+          },
+          project: mapProjectRowToProject(projectRow),
+          result: null,
+          template: selectedTemplateDef,
+          trace: icTrace,
+        },
+        202,
+      );
+    }
+  }
 
   // ── Fire-and-forget background build (BEO-210 — no Temporal) ──────────────
   runBuildInBackground(

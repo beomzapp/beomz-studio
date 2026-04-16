@@ -72,6 +72,13 @@ export const CREDIT_PACKS: CreditPack[] = [
   { id: "credits_400", credits: 400, priceUsd: 29, label: "Large Pack (400 Credits)"  },
 ];
 
+// ─── Credit thresholds (BEO-320) ──────────────────────────────────────────────
+// Minimum balance required before a build is allowed to start.
+// Keeps Anthropic spend recoverable when deduction caps at available balance.
+
+export const CREDIT_THRESHOLD = 8; // complex_build minimum (BEO-345 rescale)
+export const SIMPLE_BUILD_MIN = 3; // simple_build minimum
+
 // ─── Cost formula ─────────────────────────────────────────────────────────────
 // BEO-345: divide by 8 to bring to human scale.
 // Old: max(0.1, round((3.0 + outputTokens / 600) * 10) / 10)
