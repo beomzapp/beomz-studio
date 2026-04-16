@@ -124,45 +124,115 @@ serve(
   },
 );
 
-// ── Graceful shutdown (BEO-255) ──────────────────────────────────────────────
-// PM2 sends SIGTERM (or SIGINT) when restarting. If any Sonnet build is still
-// running we wait up to 180s before exiting so the build can complete and write
-// its result to Supabase rather than dying mid-generation.
+// ── Graceful shutdown (BEO-255 / BEO-318) ────────────────────────────────────
+// PM2 sends SIGTERM when reloading. We:
+//  1. Write a server_restarting error event to each active build's builderTrace
+//     (so events.ts SSE relay delivers it to the frontend before the stream dies).
+//  2. Mark the generation as failed so the polling loop terminates cleanly.
+//  3. Exit — no 180s drain needed; the DB write is the only critical work.
+//     kill_timeout in ecosystem.config.cjs is set to 35s to allow the write.
+
+/** Read the builderTrace from generation metadata (same logic as readTrace in generate.ts). */
+function readBuilderTrace(metadata: Record<string, unknown>): {
+  events: unknown[];
+  lastEventId: string | null;
+  previewReady: boolean;
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+} {
+  const t = metadata.builderTrace;
+  if (typeof t === "object" && t !== null && !Array.isArray(t)) {
+    const raw = t as Record<string, unknown>;
+    return {
+      events: Array.isArray(raw.events) ? raw.events : [],
+      lastEventId: typeof raw.lastEventId === "string" ? raw.lastEventId : null,
+      previewReady: raw.previewReady === true,
+      fallbackUsed: raw.fallbackUsed === true,
+      fallbackReason: typeof raw.fallbackReason === "string" ? raw.fallbackReason : null,
+    };
+  }
+  return { events: [], lastEventId: null, previewReady: false, fallbackUsed: false, fallbackReason: null };
+}
+
 async function gracefulShutdown(signal: string): Promise<void> {
-  // Mark any in-flight builds as failed immediately so the frontend can surface
-  // an error rather than spinning indefinitely after a restart (BEO-255).
-  if (activeBuilds.size > 0) {
-    console.log(`[shutdown] ${signal} received — ${activeBuilds.size} active build(s) in flight. Marking as failed...`);
-    try {
-      const db = createStudioDbClient();
-      const completedAt = new Date().toISOString();
-      await Promise.allSettled(
-        [...activeBuilds].map((buildId) =>
-          db.updateGeneration(buildId, {
+  if (activeBuilds.size === 0) {
+    console.log(`[shutdown] ${signal} received — no active builds. Exiting immediately.`);
+    process.exit(0);
+  }
+
+  console.log(`[shutdown] ${signal} received — ${activeBuilds.size} active build(s). Writing server_restarting events...`);
+
+  try {
+    const db = createStudioDbClient();
+    const completedAt = new Date().toISOString();
+
+    await Promise.allSettled(
+      [...activeBuilds].map(async (buildId) => {
+        try {
+          const row = await db.findGenerationById(buildId);
+          if (!row) {
+            // Row not found — just mark failed without trace update
+            await db.updateGeneration(buildId, {
+              status: "failed",
+              error: "Server restarted during build",
+              completed_at: completedAt,
+            });
+            return;
+          }
+
+          const meta = typeof row.metadata === "object" && row.metadata !== null
+            ? (row.metadata as Record<string, unknown>)
+            : {};
+
+          const trace = readBuilderTrace(meta);
+
+          // Append server_restarting error event to trace so events.ts emits
+          // it as the terminal event — frontend receives code "server_restarting"
+          // (CC's frontend handler keeps the overlay up rather than dropping it).
+          const restartingEvent = {
+            id: `${buildId}:server-restarting`,
+            type: "error" as const,
+            code: "server_restarting",
+            message: "Server is restarting. Your build will resume shortly.",
+            buildId,
+            projectId: row.project_id,
+            operation: "initial_build" as const,
+            timestamp: completedAt,
+          };
+
+          const newTrace = {
+            ...trace,
+            events: [...trace.events, restartingEvent],
+            lastEventId: restartingEvent.id,
+          };
+
+          await db.updateGeneration(buildId, {
             status: "failed",
             error: "Server restarted during build",
             completed_at: completedAt,
-          }),
-        ),
-      );
-      console.log(`[shutdown] marked ${activeBuilds.size} running build(s) as failed`);
-    } catch (err) {
-      console.warn("[shutdown] failed to mark builds as failed (non-fatal):", err instanceof Error ? err.message : String(err));
-    }
+            metadata: { ...meta, builderTrace: newTrace },
+          });
 
-    console.log(`[shutdown] waiting up to 180s for builds to drain...`);
-    const deadline = Date.now() + 180_000;
-    while (activeBuilds.size > 0 && Date.now() < deadline) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
-    }
-    if (activeBuilds.size > 0) {
-      console.warn(`[shutdown] Deadline reached — forcing exit with ${activeBuilds.size} build(s) still running.`);
-    } else {
-      console.log("[shutdown] All builds drained. Exiting cleanly.");
-    }
-  } else {
-    console.log(`[shutdown] ${signal} received — no active builds. Exiting immediately.`);
+          console.log(`[shutdown] server_restarting event written for build ${buildId}`);
+        } catch (err) {
+          console.warn(`[shutdown] failed to write server_restarting for build ${buildId}:`, err instanceof Error ? err.message : String(err));
+          // Best-effort fallback: mark failed without trace
+          try {
+            await db.updateGeneration(buildId, {
+              status: "failed",
+              error: "Server restarted during build",
+              completed_at: completedAt,
+            });
+          } catch { /* ignore */ }
+        }
+      }),
+    );
+
+    console.log(`[shutdown] DB writes complete. Exiting.`);
+  } catch (err) {
+    console.warn("[shutdown] gracefulShutdown DB write failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
+
   process.exit(0);
 }
 

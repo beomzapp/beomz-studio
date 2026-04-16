@@ -30,7 +30,9 @@ function sliceEventsAfterEventId<T extends { id: string }>(
 }
 
 function isSyntheticTerminalEventId(buildId: string, eventId: string | null): boolean {
-  return eventId === `${buildId}:done` || eventId === `${buildId}:error`;
+  return eventId === `${buildId}:done`
+    || eventId === `${buildId}:error`
+    || eventId === `${buildId}:server-restarting`;
 }
 
 function buildTerminalSafetyEvent(
@@ -53,11 +55,17 @@ function buildTerminalSafetyEvent(
   const timestamp = row.completed_at ?? row.started_at;
 
   if (row.status === "failed" || row.status === "cancelled") {
+    // BEO-318: Use server_restarting code when the build was interrupted by a
+    // server shutdown. The frontend CC handler checks this code to keep the
+    // WebContainer overlay up instead of dropping it.
+    const isServerRestart = row.error === "Server restarted during build";
     return {
       buildId: row.id,
-      code: "build_failed",
-      id: `${row.id}:error`,
-      message: row.error ?? "Build failed.",
+      code: isServerRestart ? "server_restarting" : "build_failed",
+      id: isServerRestart ? `${row.id}:server-restarting` : `${row.id}:error`,
+      message: isServerRestart
+        ? "Server is restarting. Your build will resume shortly."
+        : (row.error ?? "Build failed."),
       operation: "initial_build" as const,
       payload: {
         phase: metadata.phase ?? null,

@@ -182,11 +182,15 @@ function synthesizeBuilderTrace(
   }
 
   if (row.status === "failed" || row.status === "cancelled") {
+    const isServerRestart = metadata.startError === undefined
+      && (row.error === "Server restarted during build");
     events.push({
       buildId: row.id,
-      code: "build_failed",
-      id: events.length === 0 ? "legacy-1" : "legacy-2",
-      message: row.error ?? "Build failed.",
+      code: isServerRestart ? "server_restarting" : "build_failed",
+      id: isServerRestart ? `${row.id}:server-restarting` : (events.length === 0 ? "legacy-1" : "legacy-2"),
+      message: isServerRestart
+        ? "Server is restarting. Your build will resume shortly."
+        : (row.error ?? "Build failed."),
       operation,
       payload: {
         phase: metadata.phase ?? null,
@@ -254,7 +258,6 @@ export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput 
   if (row.status === "failed" || row.status === "cancelled") {
     return null;
   }
-
   // Return files as soon as they exist — even while the build is still
   // "running" (e.g. right after scaffold_ready writes the template files).
   // This lets the frontend mount the WebContainer preview immediately without
