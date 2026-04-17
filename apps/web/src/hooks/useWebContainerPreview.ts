@@ -255,9 +255,13 @@ export function useWebContainerPreview(
           if (cachedNm) {
             // Cache hit: mount the binary snapshot — node_modules is instantly
             // available without running npm install.
+            // IMPORTANT: export("node_modules") stores paths relative to that
+            // directory, so mountPoint must be set to restore them at the right
+            // location. Without it the contents land at fs root and npm can't
+            // find node_modules/.bin/vite, silently killing the dev server.
             setStatus("installing");
             setProgressMessage("Restoring packages from cache…");
-            await instance.wc.mount(cachedNm);
+            await instance.wc.mount(cachedNm, { mountPoint: "node_modules" });
             if (cancelled) return;
             instance.installedAt = Date.now();
             console.log("[wc-cache] node_modules restored from IndexedDB");
