@@ -73,14 +73,17 @@ export function HistoryPanel({
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
-  // Realtime subscription for new generations — depends only on projectId
-  // so the channel is created once per project and all postgres_changes
-  // listeners are registered before .subscribe() is called.
+  // Realtime subscription for new generations — depends only on projectId.
+  // The channel name includes Date.now() to guarantee a fresh channel instance
+  // on every effect invocation. Without this, if the previous removeChannel()
+  // call hasn't resolved yet (it's async), supabase.channel() returns the
+  // existing subscribed instance and calling .on('postgres_changes', ...) on
+  // an already-subscribed channel throws a synchronous error.
   useEffect(() => {
     if (!projectId) return;
 
     const channel = supabase
-      .channel(`history-${projectId}`)
+      .channel(`history-${projectId}-${Date.now()}`)
       .on(
         "postgres_changes",
         {
