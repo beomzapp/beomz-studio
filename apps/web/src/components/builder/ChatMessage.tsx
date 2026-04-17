@@ -1,11 +1,11 @@
 /**
  * ChatMessage — BEO-364 / BEO-373 / BEO-378 / BEO-379.
  * One component per message type in the discriminated union.
- * Building state: cycling text status (no shimmer bars).
+ * Building state: static orange dot only (no cycling text).
  * BEO-378: copy button, FileChangeBadge, bubble tail, thinking dots.
  * BEO-379: copy button moved inline — no absolute positioning.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { Check, ChevronDown, ChevronRight, Copy, FileCode } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
@@ -44,17 +44,7 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
-// ─── Cycling status ───────────────────────────────────────────────────────────
-// BEO-373: replaces the two grey shimmer bars with a cycling text status.
-// Shows "Writing file N of M..." when filesWritten/totalFiles are present.
-
-const CYCLING_PHRASES = [
-  "Thinking...",
-  "Planning the structure...",
-  "Writing components...",
-  "Building your app...",
-  "Almost done...",
-];
+// ─── Building indicator ───────────────────────────────────────────────────────
 
 interface BuildingShimmerProps {
   filesWritten?: number;
@@ -65,40 +55,14 @@ export function BuildingShimmer({ filesWritten, totalFiles }: BuildingShimmerPro
   const showFileCount =
     typeof filesWritten === "number" && typeof totalFiles === "number" && totalFiles > 0;
 
-  const [phraseIdx, setPhraseIdx] = useState(
-    () => Math.floor(Math.random() * CYCLING_PHRASES.length),
-  );
-  const [fading, setFading] = useState(false);
-
-  useEffect(() => {
-    if (showFileCount) return;
-    let fadeTimeout: ReturnType<typeof setTimeout> | null = null;
-    const id = setInterval(() => {
-      setFading(true);
-      fadeTimeout = setTimeout(() => {
-        setPhraseIdx(i => (i + 1) % CYCLING_PHRASES.length);
-        setFading(false);
-      }, 300);
-    }, 2500);
-    return () => {
-      clearInterval(id);
-      if (fadeTimeout) clearTimeout(fadeTimeout);
-    };
-  }, [showFileCount]);
-
   const text = showFileCount
     ? `Writing file ${filesWritten} of ${totalFiles}...`
-    : CYCLING_PHRASES[phraseIdx];
+    : "Building your app...";
 
   return (
     <div className="flex items-center gap-1.5">
       <span className="animate-pulse text-[#F97316]">◌</span>
-      <span
-        className="text-sm text-zinc-500 transition-opacity duration-300"
-        style={{ opacity: fading ? 0 : 1 }}
-      >
-        {text}
-      </span>
+      <span className="text-sm text-zinc-500">{text}</span>
     </div>
   );
 }
