@@ -22,8 +22,8 @@ function BAvatar() {
 export function BuildingShimmer() {
   return (
     <div className="space-y-1.5">
-      <div className="h-3 w-[60%] animate-[beomz-shimmer_1.8s_ease-in-out_infinite] rounded-sm bg-[rgba(255,255,255,0.06)]" />
-      <div className="h-3 w-[40%] animate-[beomz-shimmer_1.8s_ease-in-out_infinite] rounded-sm bg-[rgba(255,255,255,0.06)]" />
+      <div className="h-3 w-[60%] animate-[beomz-shimmer_1.8s_ease-in-out_infinite] rounded-sm bg-zinc-200" />
+      <div className="h-3 w-[40%] animate-[beomz-shimmer_1.8s_ease-in-out_infinite] rounded-sm bg-zinc-200" />
     </div>
   );
 }

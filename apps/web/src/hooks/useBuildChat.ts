@@ -279,6 +279,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         },
         signal,
       });
+      // If subscription ended without a terminal SSE event (e.g. aborted by the
+      // resume effect's cleanup), reset isBuilding so the user can still type.
+      if (!signal.aborted) {
+        setIsBuilding(false);
+      }
     },
     [subscribeToBuild, handleEvent],
   );
