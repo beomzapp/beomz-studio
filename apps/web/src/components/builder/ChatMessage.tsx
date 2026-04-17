@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
-import { Check, Copy, FileCode } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileCode } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 
 // ─── B avatar ─────────────────────────────────────────────────────────────────
@@ -190,6 +190,65 @@ function AIMessage({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── BuildSummaryMessage ──────────────────────────────────────────────────────
+// BEO-380: "N files changed" badge is expandable — click to reveal filenames.
+
+function BuildSummaryMessage({
+  message,
+}: {
+  message: Extract<ChatMessage, { type: "build_summary" }>;
+}) {
+  const [filesExpanded, setFilesExpanded] = useState(false);
+
+  const { durationMs, creditsUsed } = message;
+  const showFooter =
+    typeof durationMs === "number" && durationMs > 0 &&
+    typeof creditsUsed === "number" && creditsUsed > 0;
+  const formatDuration = (ms: number) => {
+    if (ms >= 60000) {
+      const m = Math.floor(ms / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      return `${m}m ${s}s`;
+    }
+    return `${Math.floor(ms / 1000)}s`;
+  };
+
+  return (
+    <AIMessage>
+      <MarkdownText text={message.content} />
+      {/* BEO-379: single footer row — files badge + duration/credits + copy right-aligned */}
+      <div className="mt-1.5 flex items-center gap-2 text-xs text-zinc-400">
+        {message.filesChanged.length > 0 && (
+          <button
+            className="flex cursor-pointer items-center gap-1 hover:text-zinc-300 transition-colors"
+            onClick={() => setFilesExpanded(p => !p)}
+          >
+            <FileCode className="h-2.5 w-2.5" />
+            {message.filesChanged.length} files changed
+            {filesExpanded
+              ? <ChevronDown className="h-3 w-3" />
+              : <ChevronRight className="h-3 w-3" />
+            }
+          </button>
+        )}
+        {showFooter && (
+          <span>{formatDuration(durationMs!)} · {creditsUsed} credits used</span>
+        )}
+        <span className="ml-auto">
+          <CopyButton content={message.content} />
+        </span>
+      </div>
+      {filesExpanded && message.filesChanged.length > 0 && (
+        <div className="mt-1 space-y-0.5 pl-4">
+          {message.filesChanged.map((filename, i) => (
+            <p key={i} className="font-mono text-xs text-zinc-400">{filename}</p>
+          ))}
+        </div>
+      )}
+    </AIMessage>
+  );
+}
+
 // ─── ChatMessageView ──────────────────────────────────────────────────────────
 
 export function ChatMessageView({
@@ -248,40 +307,8 @@ export function ChatMessageView({
       );
 
     // Post-build summary — text + single footer row: files badge · duration · copy.
-    case "build_summary": {
-      const { durationMs, creditsUsed } = message;
-      const showFooter =
-        typeof durationMs === "number" && durationMs > 0 &&
-        typeof creditsUsed === "number" && creditsUsed > 0;
-      const formatDuration = (ms: number) => {
-        if (ms >= 60000) {
-          const m = Math.floor(ms / 60000);
-          const s = Math.floor((ms % 60000) / 1000);
-          return `${m}m ${s}s`;
-        }
-        return `${Math.floor(ms / 1000)}s`;
-      };
-      return (
-        <AIMessage>
-          <MarkdownText text={message.content} />
-          {/* BEO-379: single footer row — files badge + duration/credits + copy right-aligned */}
-          <div className="mt-1.5 flex items-center gap-2 text-xs text-zinc-400">
-            {message.filesChanged.length > 0 && (
-              <span className="flex items-center gap-1">
-                <FileCode className="h-2.5 w-2.5" />
-                {message.filesChanged.length} files changed
-              </span>
-            )}
-            {showFooter && (
-              <span>{formatDuration(durationMs!)} · {creditsUsed} credits used</span>
-            )}
-            <span className="ml-auto">
-              <CopyButton content={message.content} />
-            </span>
-          </div>
-        </AIMessage>
-      );
-    }
+    case "build_summary":
+      return <BuildSummaryMessage message={message} />;
 
     // AI asking a clarifying question — same layout as question_answer.
     case "clarifying_question":
