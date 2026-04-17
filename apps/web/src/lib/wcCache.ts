@@ -3,7 +3,12 @@
  *
  * Two stores:
  *   files-v1       — source file list keyed by wc-{projectId}-{generationId}
- *   node-modules-v1 — node_modules binary snapshot (fixed key "v1")
+ *   node-modules-v2 — node_modules binary snapshot (fixed key "v2")
+ *
+ * DB_VERSION bumped to 2 (BEO-202): old "node-modules-v1" binaries were
+ * exported without the mountPoint fix and silently break Vite on mount.
+ * Bumping the key guarantees a cache miss for all existing users, forcing a
+ * clean npm install that exports a correct v2 binary.
  *
  * All errors are swallowed — cache is best-effort and never blocks the boot path.
  */
@@ -11,10 +16,10 @@
 import type { StudioFile } from "@beomz-studio/contracts";
 
 const DB_NAME = "beomz-wc-cache";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_FILES = "files-v1";
-const STORE_NM = "node-modules-v1";
-const NM_KEY = "v1";
+const STORE_NM = "node-modules-v2";
+const NM_KEY = "v2";
 
 // Cached DB handle — opened once, reused across calls.
 let _db: IDBDatabase | null = null;
@@ -100,6 +105,20 @@ export async function wcCacheGetNodeModules(): Promise<Uint8Array | null> {
 export async function wcCacheSetNodeModules(data: Uint8Array): Promise<void> {
   try {
     await idbPut(STORE_NM, NM_KEY, data);
+  } catch {
+    // non-fatal
+  }
+}
+
+export async function wcCacheDeleteNodeModules(): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NM, "readwrite");
+      tx.objectStore(STORE_NM).delete(NM_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   } catch {
     // non-fatal
   }

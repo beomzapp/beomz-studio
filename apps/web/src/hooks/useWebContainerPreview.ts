@@ -15,6 +15,7 @@ import {
   wcCacheSetFiles,
   wcCacheGetNodeModules,
   wcCacheSetNodeModules,
+  wcCacheDeleteNodeModules,
 } from "../lib/wcCache";
 import { fixFile } from "../lib/api";
 
@@ -47,6 +48,12 @@ export function useWebContainerPreview(
   const viteStartedRef = useRef(false);
   const prevFilesRef = useRef<readonly StudioFile[] | null>(null);
   const fixAttemptsRef = useRef<Record<string, number>>({});
+
+  // BEO-202: refs for the 15s stale-cache fallback.
+  // cacheTimeoutIdRef  — setTimeout handle; cleared when server-ready fires.
+  // cacheFallbackFnRef — the fallback fn; called on [FS] ERROR in output or timeout.
+  const cacheTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cacheFallbackFnRef = useRef<(() => void) | null>(null);
 
   // Live refs so the boot closure (which has [] deps and captures stale values)
   // can always read the most-recent files/project at any point in time.
@@ -115,39 +122,52 @@ export function useWebContainerPreview(
               }
             }
 
-            // 2) Detect import resolution errors:
-            //    "Failed to resolve import "X" from "Y.tsx""
-            //    "[plugin:vite:import-analysis] Failed to resolve import"
-            //    "Could not resolve "X""
-            if (
-              chunk.includes("Failed to resolve import") ||
-              chunk.includes("Could not resolve") ||
-              chunk.includes("[plugin:vite:import-analysis]")
-            ) {
-              // Try to extract the source file from 'from "file.tsx"'
-              const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
-              const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
-              const fileName = fromMatch
-                ? fromMatch[1].replace(/^.*\//, "")
-                : null;
-              const errorMsg = chunk.split("\n").filter((l: string) =>
-                l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
-              ).join(" ").trim() || chunk.slice(0, 300);
+              // 2) Detect import resolution errors:
+              //    "Failed to resolve import "X" from "Y.tsx""
+              //    "[plugin:vite:import-analysis] Failed to resolve import"
+              //    "Could not resolve "X""
+              if (
+                chunk.includes("Failed to resolve import") ||
+                chunk.includes("Could not resolve") ||
+                chunk.includes("[plugin:vite:import-analysis]")
+              ) {
+                // Try to extract the source file from 'from "file.tsx"'
+                const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
+                const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
+                const fileName = fromMatch
+                  ? fromMatch[1].replace(/^.*\//, "")
+                  : null;
+                const errorMsg = chunk.split("\n").filter((l: string) =>
+                  l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
+                ).join(" ").trim() || chunk.slice(0, 300);
 
-              if (fileName) {
-                void handleViteError(wc, fileName, errorMsg);
-              } else if (resolveMatch) {
-                // No source file found — use the first .tsx file from the chunk
-                const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
-                if (anyFileMatch) {
-                  void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
+                if (fileName) {
+                  void handleViteError(wc, fileName, errorMsg);
+                } else if (resolveMatch) {
+                  // No source file found — use the first .tsx file from the chunk
+                  const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
+                  if (anyFileMatch) {
+                    void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
+                  }
                 }
               }
-            }
+
+              // 3) Detect FS mount failures from a stale cached node_modules binary.
+              //    If this fires the 15s timeout is also armed; either path triggers
+              //    the same cache-bust fallback.
+              if (chunk.includes("[FS]") && chunk.includes("ERROR") && cacheFallbackFnRef.current) {
+                cacheFallbackFnRef.current();
+              }
           },
         })).catch(() => { /* stream closed */ });
 
         wc.on("server-ready", (_port: number, url: string) => {
+          // Cancel any pending stale-cache fallback — server came up cleanly.
+          if (cacheTimeoutIdRef.current !== null) {
+            clearTimeout(cacheTimeoutIdRef.current);
+            cacheTimeoutIdRef.current = null;
+          }
+          cacheFallbackFnRef.current = null;
           setPreviewUrl(url);
           setStatus("ready");
           // Signal readiness so callers can run their reveal sequence
@@ -235,7 +255,7 @@ export function useWebContainerPreview(
   useEffect(() => {
     if (!isWebContainerSupported()) return;
 
-    let cancelled = false;
+        let cancelled = false;
 
     async function boot() {
       try {
@@ -246,6 +266,8 @@ export function useWebContainerPreview(
         if (cancelled) return;
 
         instanceRef.current = instance;
+
+        let usedCachedNm = false;
 
         if (instance.installedAt === null) {
           // ── BEO-375: try restoring node_modules from IndexedDB cache ──
@@ -264,6 +286,7 @@ export function useWebContainerPreview(
             await instance.wc.mount(cachedNm, { mountPoint: "node_modules" });
             if (cancelled) return;
             instance.installedAt = Date.now();
+            usedCachedNm = true;
             console.log("[wc-cache] node_modules restored from IndexedDB");
           } else {
             // Cache miss: run npm install then export and store the snapshot.
@@ -337,8 +360,54 @@ export function useWebContainerPreview(
         const currentFiles = filesRef.current;
         const currentProject = projectRef.current;
 
+        // BEO-202: Helper to arm the 15s stale-cache fallback after a cached
+        // mount. Called once per boot if usedCachedNm is true. If server-ready
+        // fires first the timeout is cancelled cleanly.
+        function armCacheFallback() {
+          if (!usedCachedNm) return;
+          let fired = false;
+          const runCacheFallback = async () => {
+            if (fired || cancelled) return;
+            fired = true;
+            cacheFallbackFnRef.current = null;
+            if (cacheTimeoutIdRef.current !== null) {
+              clearTimeout(cacheTimeoutIdRef.current);
+              cacheTimeoutIdRef.current = null;
+            }
+            console.warn("[wc-cache] Stale node_modules cache — running fresh npm install");
+            await wcCacheDeleteNodeModules();
+            instance.devProcess?.kill();
+            viteStartedRef.current = false;
+            instance.installedAt = null;
+            setStatus("installing");
+            setProgressMessage("Installing packages…");
+            const install = await instance.wc.spawn("npm", ["install"]);
+            const exitCode = await install.exit;
+            if (cancelled) return;
+            if (exitCode !== 0) {
+              setStatus("error");
+              setProgressMessage("Package installation failed.");
+              return;
+            }
+            instance.installedAt = Date.now();
+            // Re-export and cache the freshly installed binary as v2.
+            instance.wc
+              .export("node_modules", { format: "binary" })
+              .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
+              .catch((err) => console.warn("[wc-cache] Failed to re-cache node_modules:", err));
+            const fbFiles = filesRef.current;
+            const fbProject = projectRef.current;
+            if (fbFiles && fbFiles.length > 0 && fbProject?.id) {
+              void startVite(instance, fbFiles, fbProject);
+            }
+          };
+          cacheFallbackFnRef.current = runCacheFallback;
+          cacheTimeoutIdRef.current = setTimeout(() => void runCacheFallback(), 15_000);
+        }
+
         if (currentFiles && currentFiles.length > 0 && currentProject?.id) {
           void startVite(instance, currentFiles, currentProject);
+          armCacheFallback();
         } else {
           // No live files yet — check if IndexedDB has a cached build for this project.
           // BEO-375: this lets the preview warm up before the API responds.
@@ -350,6 +419,7 @@ export function useWebContainerPreview(
             if (cached && cached.length > 0 && !filesRef.current?.length) {
               console.log("[wc-cache] Mounting source files from IndexedDB cache");
               void startVite(instance, cached as StudioFile[], proj);
+              armCacheFallback();
               return;
             }
           }
@@ -369,6 +439,10 @@ export function useWebContainerPreview(
 
     return () => {
       cancelled = true;
+      if (cacheTimeoutIdRef.current !== null) {
+        clearTimeout(cacheTimeoutIdRef.current);
+        cacheTimeoutIdRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run exactly once per component mount
