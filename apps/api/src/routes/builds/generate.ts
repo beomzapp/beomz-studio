@@ -2455,9 +2455,9 @@ async function _runBuildInBackground(
             operation: op,
             message: ackMessage,
           } as unknown as BuilderV3StatusEvent);
-          // BEO-370: persist pre_build_ack + user prompt
-          void appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-          void appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
+          // BEO-374: await sequentially to prevent race condition (both reads getting [])
+          await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
+          await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
         } catch {
           // non-fatal
         }
@@ -2638,8 +2638,8 @@ async function _runBuildInBackground(
             durationMs: iterDurationMs,
             creditsUsed: iterCreditsUsed,
           } as unknown as BuilderV3StatusEvent);
-          // BEO-370: persist build summary
-          void appendSessionEventToDb(db, buildId, {
+          // BEO-374: await so session_events is written before the function returns
+          await appendSessionEventToDb(db, buildId, {
             type: "build_summary",
             content: summaryMessage,
             filesChanged: changedPaths,
@@ -2753,9 +2753,9 @@ async function _runBuildInBackground(
           operation: op,
           message: ackMessage,
         } as unknown as BuilderV3StatusEvent);
-        // BEO-370: persist pre_build_ack + user prompt
-        void appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-        void appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
+        // BEO-374: await sequentially to prevent race condition (both reads getting [])
+        await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
+        await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
       } catch {
         // non-fatal
       }
@@ -2924,8 +2924,8 @@ async function _runBuildInBackground(
           durationMs: finalDurationMs,
           creditsUsed,
         } as unknown as BuilderV3StatusEvent);
-        // BEO-370: persist build summary
-        void appendSessionEventToDb(db, buildId, {
+        // BEO-374: await so session_events is written before the function returns
+        await appendSessionEventToDb(db, buildId, {
           type: "build_summary",
           content: summaryMessage,
           filesChanged: changedPaths,
