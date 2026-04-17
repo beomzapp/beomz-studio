@@ -221,6 +221,31 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               .then(status => {
                 existingFilesRef.current = status.result?.files ?? [];
                 optionsRef.current.onBuildStatus?.(status);
+                // BEO-372: recover build_summary from sessionEvents if the SSE event was
+                // missed because the server closed the stream before it was flushed.
+                // Dedup guard prevents doubling when the SSE event did arrive normally.
+                const se = status.build.sessionEvents;
+                if (Array.isArray(se)) {
+                  const summaryEv = se.find(e => e.type === "build_summary");
+                  if (summaryEv) {
+                    setMessages(prev => {
+                      if (prev.some(m => m.type === "build_summary")) return prev;
+                      return [
+                        ...prev,
+                        {
+                          id: makeId(),
+                          type: "build_summary" as const,
+                          content: typeof summaryEv.content === "string" ? summaryEv.content : "",
+                          filesChanged: Array.isArray(summaryEv.filesChanged)
+                            ? summaryEv.filesChanged.map(String)
+                            : [],
+                          durationMs: typeof summaryEv.durationMs === "number" ? summaryEv.durationMs : undefined,
+                          creditsUsed: typeof summaryEv.creditsUsed === "number" ? summaryEv.creditsUsed : undefined,
+                        },
+                      ];
+                    });
+                  }
+                }
               })
               .catch(() => {});
           }
