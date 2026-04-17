@@ -1991,6 +1991,8 @@ async function _runBuildInBackground(
   const nextId = () => String(eventSeq++);
   // BEO-366: guard against emitting pre_build_ack more than once per build run.
   let preBuildAckEmitted = false;
+  // BEO-368: record wall-clock start for duration footer in build_summary.
+  const buildStartTime = Date.now();
 
   // ── BEO-362: 4-way intent detection ─────────────────────────────────────
   // Run for all builds except confirmed-scope resumes and phase continuations.
@@ -2472,6 +2474,38 @@ async function _runBuildInBackground(
         summary: iterResult.summary,
       });
 
+      // BEO-368: credit deduction runs first so iterCreditsUsed is available for the summary footer.
+      // Post-deduction for successful iteration (no charge on failure)
+      const iterTokens = iterResult.outputTokens ?? 0;
+      let iterCreditsUsed = 0;
+      if (iterResult.files.length > 0 && iterTokens > 0 && !isAdminEmail(userEmail)) {
+        const iterCost = calcCreditCost(iterTokens);
+        const iterCostUsd = calcCostUsd(iterCost);
+        try {
+          const deduction = await db.applyOrgUsageDeduction(orgId, iterCost, buildId, "App iteration");
+          iterCreditsUsed = deduction.deducted;
+          await db.upsertBuildTelemetry({
+            id: buildId,
+            project_id: projectId,
+            user_id: userId,
+            prompt: input.sourcePrompt,
+            template_used: templateId,
+            palette_used: "iteration",
+            files_generated: iterFinalFiles.length,
+            succeeded: true,
+            output_tokens: iterTokens,
+            credits_used: deduction.deducted,
+            cost_usd: iterCostUsd,
+            user_iterated: true,
+            iteration_count: 0,
+            model_used: model,
+          }).catch(() => undefined);
+          console.log("[generate] iteration credits deducted:", { deducted: deduction.deducted, tokens: iterTokens, buildId });
+        } catch (deductErr) {
+          console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
+        }
+      }
+
       // BEO-362: post-build summary via Haiku
       if (iterResult.files.length > 0) {
         try {
@@ -2484,6 +2518,8 @@ async function _runBuildInBackground(
             operation: op,
             message: summaryMessage,
             filesChanged: changedPaths,
+            durationMs: Date.now() - buildStartTime,
+            creditsUsed: iterCreditsUsed,
           } as unknown as BuilderV3StatusEvent);
         } catch {
           // non-fatal
@@ -2510,41 +2546,12 @@ async function _runBuildInBackground(
         fallback_reason: iterErrorReason,
         error_log: iterErrorReason ? { message: iterErrorReason } : null,
         generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
-        credits_used: 0,
-        output_tokens: 0,
+        credits_used: iterCreditsUsed,
+        output_tokens: iterTokens,
         user_iterated: true,
         iteration_count: 0,
         model_used: model,
       }).catch(() => undefined);
-
-      // Post-deduction for successful iteration (no charge on failure)
-      const iterTokens = iterResult.outputTokens ?? 0;
-      if (iterResult.files.length > 0 && iterTokens > 0 && !isAdminEmail(userEmail)) {
-        const iterCost = calcCreditCost(iterTokens);
-        const iterCostUsd = calcCostUsd(iterCost);
-        try {
-          const deduction = await db.applyOrgUsageDeduction(orgId, iterCost, buildId, "App iteration");
-          await db.upsertBuildTelemetry({
-            id: buildId,
-            project_id: projectId,
-            user_id: userId,
-            prompt: input.sourcePrompt,
-            template_used: templateId,
-            palette_used: "iteration",
-            files_generated: iterFinalFiles.length,
-            succeeded: true,
-            output_tokens: iterTokens,
-            credits_used: deduction.deducted,
-            cost_usd: iterCostUsd,
-            user_iterated: true,
-            iteration_count: 0,
-            model_used: model,
-          }).catch(() => undefined);
-          console.log("[generate] iteration credits deducted:", { deducted: deduction.deducted, tokens: iterTokens, buildId });
-        } catch (deductErr) {
-          console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
-        }
-      }
 
       await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
       return;
@@ -2756,31 +2763,7 @@ async function _runBuildInBackground(
     });
 
     // BEO-362: post-build summary via Haiku
-    if (!fallbackUsed) {
-      try {
-        const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
-        const summaryMessage = await generateBuildSummary(prompt, changedPaths);
-        await appendEventToDb(db, buildId, {
-          type: "build_summary",
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          message: summaryMessage,
-          filesChanged: changedPaths,
-        } as unknown as BuilderV3StatusEvent);
-      } catch {
-        // non-fatal
-      }
-    }
-
-    console.log("[generate] Build complete.", {
-      buildId,
-      filesCount: finalFiles.length,
-      fallbackUsed,
-    });
-
-    // ── 5. Telemetry + credit deduction (non-fatal) ───────────────────────────
-    const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
+    // BEO-368: credit deduction runs first so creditsUsed is available for the summary footer.
     const outputTokens = customised.outputTokens ?? 0;
     let creditsUsed = 0;
     let costUsd: number | null = null;
@@ -2797,6 +2780,34 @@ async function _runBuildInBackground(
         console.error("[generate] credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
       }
     }
+
+    if (!fallbackUsed) {
+      try {
+        const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
+        const summaryMessage = await generateBuildSummary(prompt, changedPaths);
+        await appendEventToDb(db, buildId, {
+          type: "build_summary",
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          message: summaryMessage,
+          filesChanged: changedPaths,
+          durationMs: Date.now() - buildStartTime,
+          creditsUsed,
+        } as unknown as BuilderV3StatusEvent);
+      } catch {
+        // non-fatal
+      }
+    }
+
+    console.log("[generate] Build complete.", {
+      buildId,
+      filesCount: finalFiles.length,
+      fallbackUsed,
+    });
+
+    // ── 5. Telemetry (non-fatal) ───────────────────────────────────────────
+    const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
 
     await db.upsertBuildTelemetry({
       id: buildId,

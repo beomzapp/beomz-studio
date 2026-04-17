@@ -139,10 +139,13 @@ export interface BuilderV3ClarifyingQuestionEvent extends BuilderV3BaseEvent {
 }
 
 // BEO-362: 2-3 sentence natural-language summary emitted after Sonnet completes.
+// BEO-368: durationMs and creditsUsed added for the summary footer.
 export interface BuilderV3BuildSummaryEvent extends BuilderV3BaseEvent {
   type: "build_summary";
   message: string;
   filesChanged: string[];
+  durationMs: number;
+  creditsUsed: number;
 }
 
 export type BuilderV3Event =
