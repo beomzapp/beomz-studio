@@ -76,6 +76,8 @@ export interface BuilderV3DoneEvent extends BuilderV3BaseEvent {
   fallbackUsed: boolean;
   fallbackReason?: string | null;
   payload?: Record<string, unknown> | null;
+  /** True when the stream terminated due to a conversational/clarifying response (no build was run). */
+  conversational?: boolean;
 }
 
 export interface BuilderV3ErrorEvent extends BuilderV3BaseEvent {

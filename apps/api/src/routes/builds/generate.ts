@@ -1989,6 +1989,8 @@ async function _runBuildInBackground(
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
+  // BEO-366: guard against emitting pre_build_ack more than once per build run.
+  let preBuildAckEmitted = false;
 
   // ── BEO-362: 4-way intent detection ─────────────────────────────────────
   // Run for all builds except confirmed-scope resumes and phase continuations.
@@ -2017,7 +2019,21 @@ async function _runBuildInBackground(
         timestamp: ts(),
         operation: op,
         message: answer,
-      } as unknown as BuilderV3StatusEvent, {
+      } as unknown as BuilderV3StatusEvent);
+      // BEO-366: emit terminal done so the SSE relay closes cleanly and
+      // buildDoneRef resets to true on the frontend (no overlay stuck).
+      await appendEventToDb(db, buildId, {
+        type: "done",
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        buildId,
+        projectId,
+        code: "conversational",
+        message: "Question answered — no build started.",
+        fallbackUsed: false,
+        conversational: true,
+      }, {
         status: "completed",
         completed_at: ts(),
         summary: "Question answered — no build started.",
@@ -2034,7 +2050,20 @@ async function _runBuildInBackground(
         timestamp: ts(),
         operation: op,
         message: clarifyingQuestion,
-      } as unknown as BuilderV3StatusEvent, {
+      } as unknown as BuilderV3StatusEvent);
+      // BEO-366: emit terminal done so the SSE relay closes cleanly.
+      await appendEventToDb(db, buildId, {
+        type: "done",
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        buildId,
+        projectId,
+        code: "conversational",
+        message: "Clarifying question sent — awaiting user response.",
+        fallbackUsed: false,
+        conversational: true,
+      }, {
         status: "completed",
         completed_at: ts(),
         summary: "Clarifying question sent — awaiting user response.",
@@ -2300,19 +2329,21 @@ async function _runBuildInBackground(
       );
 
       // Emit pre_build_ack before Sonnet fires (BEO-362)
-      try {
-        const ackMessage = await generatePreBuildAck(prompt, "edit");
-        await appendEventToDb(db, buildId, {
-          type: "pre_build_ack",
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          message: ackMessage,
-        } as unknown as BuilderV3StatusEvent);
-      } catch {
-        // non-fatal
+      if (!preBuildAckEmitted) {
+        try {
+          preBuildAckEmitted = true;
+          const ackMessage = await generatePreBuildAck(prompt, "edit");
+          await appendEventToDb(db, buildId, {
+            type: "pre_build_ack",
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            message: ackMessage,
+          } as unknown as BuilderV3StatusEvent);
+        } catch {
+          // non-fatal
+        }
       }
-
       let iterResult: CustomiseResult;
       let iterErrorReason: string | null = null;
       try {
@@ -2578,18 +2609,21 @@ async function _runBuildInBackground(
     );
 
     // Emit pre_build_ack before Sonnet fires (BEO-362)
-    try {
-      const ackIntent = detectedIntent === "edit" ? "edit" : "build";
-      const ackMessage = await generatePreBuildAck(prompt, ackIntent);
-      await appendEventToDb(db, buildId, {
-        type: "pre_build_ack",
-        id: nextId(),
-        timestamp: ts(),
-        operation: op,
-        message: ackMessage,
-      } as unknown as BuilderV3StatusEvent);
-    } catch {
-      // non-fatal
+    if (!preBuildAckEmitted) {
+      try {
+        preBuildAckEmitted = true;
+        const ackIntent = detectedIntent === "edit" ? "edit" : "build";
+        const ackMessage = await generatePreBuildAck(prompt, ackIntent);
+        await appendEventToDb(db, buildId, {
+          type: "pre_build_ack",
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          message: ackMessage,
+        } as unknown as BuilderV3StatusEvent);
+      } catch {
+        // non-fatal
+      }
     }
 
     let customised: CustomiseResult;
