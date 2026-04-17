@@ -29,6 +29,8 @@ export interface BuildPayload {
   templateId: string;
   templateReason?: string | null;
   workflowId?: string | null;
+  /** BEO-370: chat history written by the backend for session restore on hard refresh. */
+  sessionEvents?: readonly Record<string, unknown>[];
 }
 
 export interface BuildStatusResponse {

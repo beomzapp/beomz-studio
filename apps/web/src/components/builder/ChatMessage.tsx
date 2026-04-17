@@ -194,7 +194,7 @@ export function ChatMessageView({
     // Error — inline red text, no card.
     case "error":
       return (
-        <p className="text-sm text-red-400">Something went wrong. Try again.</p>
+        <p className="text-sm text-red-400">{message.content}</p>
       );
 
     // Server restart — amber card (ServerRestartedCard already exists).

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3Event, ChatMessage, StudioFile } from "@beomz-studio/contracts";
 import {
   getBuildStatus,
+  getLatestBuildForProject,
   NetworkDisconnectError,
   type BuildStatusResponse,
   type StartBuildResponse,
@@ -17,6 +18,45 @@ import { useBuilderEngineStream } from "./useBuilderEngineStream";
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// ─── Session-events → ChatMessage mapper ──────────────────────────────────────
+// Maps the session_events persisted by the backend into the ChatMessage
+// discriminated union so chat history survives a hard refresh (BEO-370).
+// Only completed-build events are persisted (user, pre_build_ack,
+// question_answer, clarifying_question, build_summary). In-flight types
+// (building, error, server_restarting) are never stored and are skipped here.
+
+function mapSessionEventsToMessages(
+  events: readonly Record<string, unknown>[],
+): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  for (const ev of events) {
+    const type = ev.type;
+    const content = typeof ev.content === "string" ? ev.content : "";
+    const timestamp = typeof ev.timestamp === "string" ? new Date(ev.timestamp) : new Date();
+
+    if (type === "user") {
+      result.push({ id: makeId(), type: "user", content, timestamp });
+    } else if (type === "pre_build_ack") {
+      result.push({ id: makeId(), type: "pre_build_ack", content });
+    } else if (type === "question_answer") {
+      result.push({ id: makeId(), type: "question_answer", content, streaming: false });
+    } else if (type === "clarifying_question") {
+      result.push({ id: makeId(), type: "clarifying_question", content });
+    } else if (type === "build_summary") {
+      result.push({
+        id: makeId(),
+        type: "build_summary",
+        content,
+        filesChanged: Array.isArray(ev.filesChanged) ? ev.filesChanged.map(String) : [],
+        durationMs: typeof ev.durationMs === "number" ? ev.durationMs : undefined,
+        creditsUsed: typeof ev.creditsUsed === "number" ? ev.creditsUsed : undefined,
+      });
+    }
+    // building / error / server_restarting — not persisted, skip
+  }
+  return result;
 }
 
 export interface UseBuildChatOptions {
@@ -56,6 +96,28 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   useEffect(() => {
     optionsRef.current = options;
   });
+
+  // ─── Seed chat history from session_events on mount (BEO-370) ────────────
+  // Fetches the latest completed build and restores chat history so a hard
+  // refresh shows the previous conversation. Only runs for existing projects
+  // (not "new") and only seeds when the messages array is still empty.
+  const historySeededRef = useRef(false);
+  useEffect(() => {
+    const pid = resolvedProjectIdRef.current;
+    if (!pid || historySeededRef.current) return;
+    historySeededRef.current = true;
+    void getLatestBuildForProject(pid)
+      .then(status => {
+        if (!status) return;
+        // Only restore from terminal builds — in-progress builds stream live events.
+        if (status.build.status !== "completed" && status.build.status !== "failed") return;
+        const events = status.build.sessionEvents;
+        if (!events?.length) return;
+        setMessages(prev => (prev.length > 0 ? prev : mapSessionEventsToMessages(events)));
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { startAndStreamBuild, subscribeToBuild } = useBuilderEngineStream();
 
