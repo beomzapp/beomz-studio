@@ -54,6 +54,10 @@ export function useWebContainerPreview(
   // cacheFallbackFnRef — the fallback fn; called on [FS] ERROR in output or timeout.
   const cacheTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cacheFallbackFnRef = useRef<(() => void) | null>(null);
+  // pendingNmExportRef — true after a fresh npm install; server-ready handler
+  // exports + caches node_modules only after Vite confirms a healthy start,
+  // preventing a bad binary from being written during a partially-settled FS.
+  const pendingNmExportRef = useRef(false);
 
   // Live refs so the boot closure (which has [] deps and captures stale values)
   // can always read the most-recent files/project at any point in time.
@@ -168,6 +172,15 @@ export function useWebContainerPreview(
             cacheTimeoutIdRef.current = null;
           }
           cacheFallbackFnRef.current = null;
+          // Export + cache node_modules only after Vite confirms a healthy start.
+          // This is the only safe point — npm install may have settled but the FS
+          // can still be in a bad state until Vite resolves its module graph.
+          if (pendingNmExportRef.current) {
+            pendingNmExportRef.current = false;
+            wc.export("node_modules", { format: "binary" })
+              .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
+              .catch((err) => console.warn("[wc-cache] Failed to cache node_modules:", err));
+          }
           setPreviewUrl(url);
           setStatus("ready");
           // Signal readiness so callers can run their reveal sequence
@@ -343,14 +356,9 @@ export function useWebContainerPreview(
 
             instance.installedAt = Date.now();
 
-            // BEO-375: export node_modules as binary and cache it for next time.
-            // Non-blocking — Vite startup continues while this runs in background.
-            instance.wc
-              .export("node_modules", { format: "binary" })
-              .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
-              .catch((err) =>
-                console.warn("[wc-cache] Failed to cache node_modules:", err),
-              );
+            // Flag that node_modules needs caching. The actual export happens
+            // inside server-ready, after Vite confirms the install is healthy.
+            pendingNmExportRef.current = true;
           }
         }
 
@@ -390,11 +398,8 @@ export function useWebContainerPreview(
               return;
             }
             instance.installedAt = Date.now();
-            // Re-export and cache the freshly installed binary as v2.
-            instance.wc
-              .export("node_modules", { format: "binary" })
-              .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
-              .catch((err) => console.warn("[wc-cache] Failed to re-cache node_modules:", err));
+            // Flag for server-ready to export + cache after Vite confirms healthy.
+            pendingNmExportRef.current = true;
             const fbFiles = filesRef.current;
             const fbProject = projectRef.current;
             if (fbFiles && fbFiles.length > 0 && fbProject?.id) {
