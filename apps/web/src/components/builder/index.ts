@@ -1,7 +1,7 @@
 export { TopBar } from "./TopBar";
 export type { ActiveView } from "./TopBar";
 export { ChatPanel } from "./ChatPanel";
-export type { ChatMessage } from "./ChatPanel";
+export { ChatMessageView, BuildingShimmer } from "./ChatMessage";
 export { PreviewPanel } from "./PreviewPanel";
 export { PlanCard } from "./PlanCard";
 export { PlanTypewriter } from "./PlanTypewriter";

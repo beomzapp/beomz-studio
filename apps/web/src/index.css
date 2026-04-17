@@ -79,6 +79,12 @@ body {
   animation: thinking-shimmer 2s linear infinite;
 }
 
+/* BEO-364: Building shimmer bars — calm opacity fade */
+@keyframes beomz-shimmer {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .streaming-shimmer,
   .thinking-shimmer,

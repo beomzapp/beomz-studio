@@ -21,11 +21,9 @@ import {
   PhasePlanCard,
   type ActiveView,
 } from "../../../components/builder";
-import type { ChatMessage as LegacyChatMessage } from "../../../components/builder/ChatPanel";
 import type { Phase } from "../../../components/builder/PhasePlanCard";
 import { FeatureScopeCard } from "../../../components/builder/FeatureScopeCard";
 import { InsufficientCreditsCard } from "../../../components/builder/InsufficientCreditsCard";
-import { ServerRestartedCard } from "../../../components/builder/ServerRestartedCard";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
 import { usePricingModal } from "../../../contexts/PricingModalContext";
 import {
@@ -49,12 +47,6 @@ import { useBuildChat } from "../../../hooks/useBuildChat";
 import { cn } from "../../../lib/cn";
 import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
-import {
-  getPersonality,
-  PERSONALITIES,
-  type PersonalityId,
-} from "../../../lib/personalities";
-
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
 // ─────────────────────────────────────────────
@@ -81,10 +73,8 @@ export function ProjectPage() {
   const [projectIcon, setProjectIcon] = useState<string | null>(null);
   const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
   const [activeView, setActiveView] = useState<ActiveView>("preview");
-  const [personalityId] = useState<PersonalityId>(() => getPersonality());
-  const personality = PERSONALITIES[personalityId];
 
-  const { setLastError, setTransport, transport } = useBuilderSessionHealth();
+  const { setLastError, setTransport } = useBuilderSessionHealth();
   const { clearState, restoreState, saveState } = useBuilderPersistence(projectId);
 
   // ─── useBuildChat ────────────────────────────────────────────────────────
@@ -140,13 +130,6 @@ export function ProjectPage() {
   const aiCustomisingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeBuildIdRef = useRef<string | null>(null);
   const resumingBuildRef = useRef(false);
-
-  // ─── Thinking-label animation (personality) ────────────────────────────────
-
-  const [streamingText, setStreamingText] = useState("");
-  const [streamingFileCount, setStreamingFileCount] = useState<{ current: number; total: number } | null>(null);
-  const thinkingLabelIndexRef = useRef(0);
-  const thinkingLabelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─── Suggestion chips ─────────────────────────────────────────────────────
 
@@ -239,7 +222,6 @@ export function ProjectPage() {
       setScopeFeatures(scopeEvent.features);
       setScopeBuildId(scopeEvent.buildId);
       setScopeMessage(scopeEvent.message);
-      setStreamingText("");
     }
 
     // Insufficient credits — show InsufficientCreditsCard
@@ -254,43 +236,12 @@ export function ProjectPage() {
       setInsufficientRequired(icEvent.required ?? 0);
       setInsufficientFeatures(icEvent.features ?? []);
       setInsufficientBuildId(icEvent.buildId ?? buildId);
-      setStreamingText("");
-    }
-
-    // Thinking-label advancement on tool use events
-    if (event.type === "tool_use_started") {
-      const labels = personality.thinkingLabels;
-      thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
-      setStreamingText(labels[thinkingLabelIndexRef.current]);
-    }
-
-    if (event.type === "assistant_delta" || event.type === "tool_use_progress") {
-      const labels = personality.thinkingLabels;
-      const midIdx = Math.min(Math.floor(labels.length / 2), labels.length - 1);
-      if (thinkingLabelIndexRef.current < midIdx) {
-        thinkingLabelIndexRef.current = midIdx;
-        setStreamingText(labels[midIdx]);
-      }
     }
 
     // Preview ready — begin writing AI files to WebContainer
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
       setIsAiCustomising(true);
-      const fileCount = ("filesCount" in event ? event.filesCount : null) as number | null;
-      if (fileCount && fileCount > 0) {
-        let i = 1;
-        const tick = () => {
-          if (i <= fileCount) {
-            setStreamingFileCount({ current: i, total: fileCount });
-            i++;
-            setTimeout(tick, 300);
-          } else {
-            setStreamingFileCount({ current: fileCount, total: fileCount });
-          }
-        };
-        tick();
-      }
       void getBuildStatus(event.buildId)
         .then(status => {
           if (status.result) setBuildResult(status.result);
@@ -303,13 +254,6 @@ export function ProjectPage() {
 
     // Done — manage overlay timer, update project meta, generate suggestion chips
     if (event.type === "done") {
-      if (thinkingLabelIntervalRef.current) {
-        clearInterval(thinkingLabelIntervalRef.current);
-        thinkingLabelIntervalRef.current = null;
-      }
-      setStreamingText("");
-      setStreamingFileCount(null);
-
       if (!event.fallbackUsed) {
         if (aiCustomisingTimeoutRef.current) clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = setTimeout(() => {
@@ -352,13 +296,6 @@ export function ProjectPage() {
 
     // Error — manage overlay
     if (event.type === "error") {
-      if (thinkingLabelIntervalRef.current) {
-        clearInterval(thinkingLabelIntervalRef.current);
-        thinkingLabelIntervalRef.current = null;
-      }
-      setStreamingText("");
-      setStreamingFileCount(null);
-
       if (event.code !== "server_restarting") {
         if (aiCustomisingTimeoutRef.current) {
           clearTimeout(aiCustomisingTimeoutRef.current);
@@ -379,9 +316,6 @@ export function ProjectPage() {
     if (status.result) setBuildResult(status.result);
     if (status.trace.previewReady || status.build.status === "completed") {
       setPreviewGenerationId(status.build.id);
-    }
-    if (status.build.status === "completed" || status.build.status === "failed") {
-      setStreamingText("");
     }
   }
 
@@ -414,29 +348,15 @@ export function ProjectPage() {
         clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = null;
       }
-      // Start personality thinking-label cycle
-      thinkingLabelIndexRef.current = 0;
-      setStreamingText(personality.thinkingLabels[0]);
-      if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
-      thinkingLabelIntervalRef.current = setInterval(() => {
-        const labels = personality.thinkingLabels;
-        thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
-        setStreamingText(labels[thinkingLabelIndexRef.current]);
-      }, 4000);
 
       sendMessage(text);
     },
-    [credits, sendMessage, personality.thinkingLabels, buildDoneRef],
+    [credits, sendMessage, buildDoneRef],
   );
 
   // ─── Stop streaming ───────────────────────────────────────────────────────
 
   const handleStopStreaming = useCallback(() => {
-    if (thinkingLabelIntervalRef.current) {
-      clearInterval(thinkingLabelIntervalRef.current);
-      thinkingLabelIntervalRef.current = null;
-    }
-    setStreamingText("");
     setTransport("idle");
     // The abort is handled inside useBuildChat; we just clean up local UI
   }, [setTransport]);
@@ -583,15 +503,6 @@ export function ProjectPage() {
           }
         }
 
-        setStreamingText("Reconnecting to the live build stream...");
-        thinkingLabelIndexRef.current = 0;
-        if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
-        thinkingLabelIntervalRef.current = setInterval(() => {
-          const labels = personality.thinkingLabels;
-          thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
-          setStreamingText(labels[thinkingLabelIndexRef.current]);
-        }, 4000);
-
         await subscribeToExistingBuild(
           status.build.id,
           restoredState?.lastEventId ?? status.trace.lastEventId,
@@ -646,15 +557,6 @@ export function ProjectPage() {
 
     if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
 
-    thinkingLabelIndexRef.current = 0;
-    setStreamingText(personality.thinkingLabels[0]);
-    if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
-    thinkingLabelIntervalRef.current = setInterval(() => {
-      const labels = personality.thinkingLabels;
-      thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
-      setStreamingText(labels[thinkingLabelIndexRef.current]);
-    }, 4000);
-
     let phaseCompleted = false;
 
     const startPhasePoll = () => {
@@ -670,7 +572,6 @@ export function ProjectPage() {
         if (Date.now() - pollStart > POLL_TIMEOUT) {
           if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
           setIsPhaseBuilding(false);
-          setStreamingText("");
           return;
         }
         try {
@@ -681,7 +582,6 @@ export function ProjectPage() {
             if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
             setCurrentPhase(serverPhase);
             setIsPhaseBuilding(false);
-            setStreamingText("");
             const latestBuild = await getLatestBuildForProject(projectId);
             if (latestBuild) {
               setBuild(latestBuild.build);
@@ -744,7 +644,7 @@ export function ProjectPage() {
     } catch (err) {
       if (!controller.signal.aborted && !phaseCompleted) startPhasePoll();
     }
-  }, [projectId, currentPhase, personality.thinkingLabels, buildDoneRef]);
+  }, [projectId, currentPhase, buildDoneRef]);
 
   const handleSkipPhases = useCallback(() => {
     if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
@@ -757,18 +657,10 @@ export function ProjectPage() {
     if (!scopeBuildId) return;
     try {
       await confirmScope(scopeBuildId, features, extras);
-      thinkingLabelIndexRef.current = 0;
-      setStreamingText(personality.thinkingLabels[0]);
-      if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
-      thinkingLabelIntervalRef.current = setInterval(() => {
-        const labels = personality.thinkingLabels;
-        thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
-        setStreamingText(labels[thinkingLabelIndexRef.current]);
-      }, 4000);
     } catch (err) {
       console.error("[ScopeConfirm] Failed:", err);
     }
-  }, [scopeBuildId, personality.thinkingLabels]);
+  }, [scopeBuildId]);
 
   // ─── Insufficient credits actions ─────────────────────────────────────────
 
@@ -780,19 +672,11 @@ export function ProjectPage() {
     if (!insufficientBuildId) return;
     try {
       await forceSimpleBuild(insufficientBuildId);
-      thinkingLabelIndexRef.current = 0;
-      setStreamingText(personality.thinkingLabels[0]);
-      if (thinkingLabelIntervalRef.current) clearInterval(thinkingLabelIntervalRef.current);
-      thinkingLabelIntervalRef.current = setInterval(() => {
-        const labels = personality.thinkingLabels;
-        thinkingLabelIndexRef.current = Math.min(thinkingLabelIndexRef.current + 1, labels.length - 1);
-        setStreamingText(labels[thinkingLabelIndexRef.current]);
-      }, 4000);
     } catch (err) {
       console.error("[ForceSimple] Failed:", err);
       throw err;
     }
-  }, [insufficientBuildId, personality.thinkingLabels]);
+  }, [insufficientBuildId]);
 
   // ─── Preview refresh ──────────────────────────────────────────────────────
 
@@ -1001,74 +885,6 @@ export function ProjectPage() {
     }
   };
 
-  // ─── Adapt new ChatMessage to legacy ChatPanel interface ──────────────────
-  // BEO-364 will update ChatPanel to accept the new discriminated union directly.
-  // Until then, map the new types to the shape ChatPanel currently renders.
-
-  const legacyMessages: LegacyChatMessage[] = messages.map(msg => {
-    switch (msg.type) {
-      case "user":
-        return {
-          id: msg.id,
-          role: "user" as const,
-          content: msg.content,
-          timestamp: msg.timestamp.toISOString(),
-        };
-      case "question_answer":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: msg.content,
-          timestamp: new Date().toISOString(),
-        };
-      case "pre_build_ack":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: msg.content,
-          timestamp: new Date().toISOString(),
-        };
-      case "building":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: msg.phase ?? "",
-          timestamp: new Date().toISOString(),
-        };
-      case "build_summary":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: msg.content,
-          timestamp: new Date().toISOString(),
-          changedFiles: msg.filesChanged,
-        };
-      case "clarifying_question":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: msg.content,
-          timestamp: new Date().toISOString(),
-        };
-      case "error":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: msg.content,
-          timestamp: new Date().toISOString(),
-          error: msg.content,
-        };
-      case "server_restarting":
-        return {
-          id: msg.id,
-          role: "assistant" as const,
-          content: "",
-          timestamp: new Date().toISOString(),
-          isServerRestartCard: true,
-        };
-    }
-  });
-
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -1113,17 +929,11 @@ export function ProjectPage() {
         >
           <div className="h-full" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
             <ChatPanel
-              messages={legacyMessages}
-              isStreaming={isBuilding}
-              streamingText={transport === "idle" ? "" : streamingText}
+              messages={messages}
+              isBuilding={isBuilding}
               onSendMessage={handleSendMessage}
               onStopStreaming={handleStopStreaming}
               onRetry={retryLastBuild}
-              onViewCode={() => {
-                setActiveView("code");
-                const firstFile = buildResult?.files?.[0]?.path;
-                if (firstFile) setSelectedFile(firstFile);
-              }}
               width={chatPanelWidth}
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
@@ -1161,8 +971,6 @@ export function ProjectPage() {
                   />
                 ) : undefined
               }
-              serverRestartedCard={<ServerRestartedCard onRetry={retryLastBuild} />}
-              streamingFileCount={streamingFileCount}
             />
           </div>
         </div>
