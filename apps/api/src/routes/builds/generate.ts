@@ -43,7 +43,6 @@ import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
-import { extractFeatures } from "../../lib/extractFeatures.js";
 import { planPhases } from "../../lib/planPhases.js";
 import type { Phase } from "../../lib/planPhases.js";
 import { sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
@@ -2187,7 +2186,9 @@ async function _runBuildInBackground(
       return;
     }
 
-    // For build intent: run credit check + scope confirmation (replaces complex_build path)
+    // BEO-377: scope confirmation gate removed — frontend no longer shows the
+    // confirmation UI (removed in BEO-367). Run credit check then proceed
+    // straight to Sonnet build without pausing for confirmation.
     if (detectedIntent === "build" && !input.isIteration) {
       let orgBalance = 0;
       try {
@@ -2198,102 +2199,25 @@ async function _runBuildInBackground(
       }
       console.log("[generate] credit balance check:", { orgBalance, required: CREDIT_THRESHOLD, buildId });
 
-      const enrichedForScope = await enrichPrompt(prompt);
-      const { features } = await extractFeatures(enrichedForScope, prompt);
-
       if (!isAdminEmail(input.userEmail ?? "") && orgBalance < CREDIT_THRESHOLD) {
-        const insufficientEvent = {
-          type: "insufficient_credits" as const,
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          available: orgBalance,
-          required: CREDIT_THRESHOLD,
-          features,
-        };
         await appendEventToDb(
           db,
           buildId,
-          insufficientEvent as unknown as BuilderV3StatusEvent,
+          {
+            type: "insufficient_credits" as const,
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            available: orgBalance,
+            required: CREDIT_THRESHOLD,
+            features: [],
+          } as unknown as BuilderV3StatusEvent,
           { status: "insufficient_credits" },
         );
-        if (features.length > 0) {
-          const pendingScope = {
-            enrichedPrompt: enrichedForScope,
-            featureCandidates: features,
-            model,
-            templateId,
-            originalPrompt: prompt,
-          };
-          const icRow = await db.findGenerationById(buildId);
-          const icMeta =
-            typeof icRow?.metadata === "object" && icRow.metadata !== null
-              ? (icRow.metadata as Record<string, unknown>)
-              : {};
-          await db.updateGeneration(buildId, {
-            metadata: { ...icMeta, pendingScope },
-          });
-        }
         console.log("[generate] insufficient_credits — available:", orgBalance, "required:", CREDIT_THRESHOLD, { buildId });
         return;
       }
-
-      if (features.length > 0) {
-        const pendingScope = {
-          enrichedPrompt: enrichedForScope,
-          featureCandidates: features,
-          model,
-          templateId,
-          originalPrompt: prompt,
-        };
-
-        const scopeEvent = {
-          type: "scope_confirmation" as const,
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          buildId,
-          features,
-          message: `I've identified ${features.length} features to build. Confirm or adjust before I start.`,
-        };
-        await appendEventToDb(
-          db,
-          buildId,
-          scopeEvent as unknown as BuilderV3StatusEvent,
-          { status: "awaiting_scope_confirmation" },
-        );
-
-        const scopeRow = await db.findGenerationById(buildId);
-        const scopeMeta =
-          typeof scopeRow?.metadata === "object" && scopeRow.metadata !== null
-            ? (scopeRow.metadata as Record<string, unknown>)
-            : {};
-        await db.updateGeneration(buildId, {
-          metadata: { ...scopeMeta, pendingScope },
-        });
-
-        console.log("[generate] scope_confirmation emitted —", features.length, "features, awaiting confirm.");
-
-        setTimeout(() => {
-          void db.findGenerationById(buildId).then(async (latest) => {
-            if (latest?.status !== "awaiting_scope_confirmation") return;
-            console.log("[generate] 60 s timeout — auto-confirming scope for build", buildId);
-            await runBuildInBackground(
-              {
-                ...input,
-                prompt: pendingScope.enrichedPrompt,
-                confirmedScope: { features: pendingScope.featureCandidates, enrichedPrompt: pendingScope.enrichedPrompt },
-              },
-              db,
-            );
-          }).catch((err: unknown) => {
-            console.warn("[generate] auto-confirm timeout error:", err instanceof Error ? err.message : String(err));
-          });
-        }, 60_000);
-
-        return;
-      }
-      // No features extracted — fall through to normal build
+      // Credit check passed — fall through to build
     }
   }
 
