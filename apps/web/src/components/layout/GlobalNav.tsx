@@ -63,8 +63,13 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
 
   const isLight = variant === "light";
 
+  const plan = credits?.plan ?? null;
+
   return (
     <div className="flex items-center gap-3">
+      {/* Plan badge — shown when credits are loaded */}
+      {plan && <PlanBadge plan={plan} isLight={isLight} onUpgrade={openPricingModal} />}
+
       {/* BEO-346: Credit bar — mini segmented bar + balance + hover popover */}
       {credits ? (
         <CreditPill
@@ -162,6 +167,45 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// BEO-284: Plan badge — pill next to the credit pill
+// ─────────────────────────────────────────────
+
+const PLAN_LABELS: Record<string, string> = {
+  free: "Free",
+  pro_starter: "Starter",
+  pro_builder: "Pro",
+  business: "Business",
+};
+
+interface PlanBadgeProps {
+  plan: string;
+  isLight: boolean;
+  onUpgrade: () => void;
+}
+
+function PlanBadge({ plan, isLight, onUpgrade }: PlanBadgeProps) {
+  const isFree = plan === "free";
+  const label = PLAN_LABELS[plan] ?? plan;
+  if (isLight) return null;
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${isFree ? "bg-[#fff7ed] text-[#F97316]" : "bg-[#f3f4f6] text-[#6b7280]"}`}>
+        {label}
+      </span>
+      {isFree && (
+        <button
+          type="button"
+          onClick={onUpgrade}
+          className="text-[11px] font-medium text-[#F97316] underline-offset-2 hover:underline"
+        >
+          Upgrade
+        </button>
+      )}
     </div>
   );
 }

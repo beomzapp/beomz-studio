@@ -32,7 +32,6 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
 import { GlobalNav } from "../layout/GlobalNav";
-import { useCredits } from "../../lib/CreditsContext";
 
 export type ActiveView = "preview" | "code" | "database" | "integrations";
 
@@ -90,41 +89,6 @@ function toast(msg: string) {
   }, 2000);
 }
 
-const PLAN_LABELS: Record<string, string> = {
-  free: "Free",
-  pro_starter: "Starter",
-  pro_builder: "Pro",
-  business: "Business",
-};
-
-function PlanBadge({ plan }: { plan: string | null }) {
-  if (!plan) return null;
-  const isFree = plan === "free";
-  const label = PLAN_LABELS[plan] ?? plan;
-  return (
-    <div className="flex items-center gap-1.5">
-      <span
-        className={cn(
-          "rounded-full px-2.5 py-0.5 text-[11px] font-semibold",
-          isFree
-            ? "bg-[#fff7ed] text-[#F97316]"
-            : "bg-[#f3f4f6] text-[#6b7280]",
-        )}
-      >
-        {label}
-      </span>
-      {isFree && (
-        <button
-          onClick={() => { window.location.href = "/plan"; }}
-          className="text-[11px] font-medium text-[#F97316] underline-offset-2 hover:underline"
-        >
-          Upgrade
-        </button>
-      )}
-    </div>
-  );
-}
-
 const VIEW_TABS: { key: ActiveView; icon: typeof Smartphone; label: string }[] = [
   { key: "preview", icon: Smartphone, label: "Preview" },
   { key: "code", icon: Code2, label: "Code" },
@@ -153,7 +117,6 @@ export function TopBar({
   phasesTotal = 0,
 }: TopBarProps) {
   const navigate = useNavigate();
-  const { credits } = useCredits();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -261,11 +224,6 @@ export function TopBar({
 
       {/* Right group */}
       <div className="flex flex-1 items-center justify-end gap-1.5">
-        {/* Plan badge */}
-        <PlanBadge plan={credits?.plan ?? null} />
-
-        <div className="h-4 w-px bg-[#e5e5e5]" />
-
         {/* Refresh preview */}
         <button
           onClick={onRefreshPreview}
