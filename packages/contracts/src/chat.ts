@@ -4,6 +4,7 @@
  */
 export type ChatMessage =
   | { id: string; type: "user"; content: string; timestamp: Date }
+  | { id: string; type: "thinking" }
   | { id: string; type: "question_answer"; content: string; streaming: boolean }
   | { id: string; type: "pre_build_ack"; content: string }
   | { id: string; type: "building"; phase?: string; filesWritten?: number; totalFiles?: number }

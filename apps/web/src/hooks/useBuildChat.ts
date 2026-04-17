@@ -133,23 +133,26 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         break;
 
       case "pre_build_ack":
+        // BEO-378: replace the thinking dots with the real ack message.
         setMessages(prev => [
-          ...prev,
+          ...prev.filter(m => m.type !== "thinking"),
           { id: makeId(), type: "pre_build_ack", content: event.message },
         ]);
         break;
 
       case "conversational_response":
+        // BEO-378: filter thinking dots (no pre_build_ack fires for conversational).
         setMessages(prev => [
-          ...prev,
+          ...prev.filter(m => m.type !== "thinking"),
           { id: makeId(), type: "question_answer", content: event.message, streaming: false },
         ]);
         setIsBuilding(false);
         break;
 
       case "clarifying_question":
+        // BEO-378: filter thinking dots.
         setMessages(prev => [
-          ...prev,
+          ...prev.filter(m => m.type !== "thinking"),
           { id: makeId(), type: "clarifying_question", content: event.message },
         ]);
         break;
@@ -205,8 +208,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       case "done":
         if (event.fallbackUsed) {
           buildDoneRef.current = false;
+          // BEO-378: clear thinking dots on failed builds.
           setMessages(prev => [
-            ...prev,
+            ...prev.filter(m => m.type !== "thinking"),
             {
               id: makeId(),
               type: "error",
@@ -292,10 +296,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       activeBuildingMsgIdRef.current = null;
 
       setIsBuilding(true);
+      // BEO-378: show thinking dots immediately while the network round-trip completes.
       setMessages(prev => [
         // Drop any stale server_restarting card from the previous session
         ...prev.filter(m => m.type !== "server_restarting"),
         { id: makeId(), type: "user", content: text, timestamp: new Date() },
+        { id: `thinking-${makeId()}`, type: "thinking" },
       ]);
 
       void startAndStreamBuild({

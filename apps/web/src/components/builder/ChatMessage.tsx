@@ -1,10 +1,12 @@
 /**
- * ChatMessage — BEO-364 / BEO-373.
+ * ChatMessage — BEO-364 / BEO-373 / BEO-378.
  * One component per message type in the discriminated union.
  * Building state: cycling text status (no shimmer bars).
+ * BEO-378: hover copy button, FileChangeBadge, bubble tail, thinking dots.
  */
 import { useEffect, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
+import { Check, Copy, FileCode } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 
 // ─── B avatar ─────────────────────────────────────────────────────────────────
@@ -153,12 +155,36 @@ function MarkdownText({ text }: { text: string }) {
 
 // ─── AI message wrapper ───────────────────────────────────────────────────────
 // B avatar top-left, text flows freely — no bubble, no container.
+// BEO-378: optional `content` prop wires up the hover copy button.
 
-function AIMessage({ children }: { children: React.ReactNode }) {
+function AIMessage({ children, content }: { children: React.ReactNode; content?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!content) return;
+    void navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
-    <div className="flex items-start gap-2">
+    <div className="group relative flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 break-words">{children}</div>
+      {content && (
+        <button
+          onClick={handleCopy}
+          className="absolute -right-6 top-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          title="Copy"
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-zinc-400" />
+          ) : (
+            <Copy className="h-3.5 w-3.5 text-zinc-400 hover:text-zinc-600" />
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -173,11 +199,22 @@ export function ChatMessageView({
   onRetry?: () => void;
 }) {
   switch (message.type) {
+    // BEO-378: pulsing dots shown immediately after send, before first SSE event.
+    case "thinking":
+      return (
+        <div className="flex items-center gap-1 py-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse" style={{ animationDelay: "0ms" }} />
+          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse" style={{ animationDelay: "150ms" }} />
+          <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse" style={{ animationDelay: "300ms" }} />
+        </div>
+      );
+
     // User message — dark bubble, right-aligned, no avatar.
+    // BEO-378: rounded-br-sm gives an asymmetric "sent" tail.
     case "user":
       return (
         <div className="flex flex-col items-end">
-          <div className="max-w-[70%] min-w-0 rounded-2xl rounded-tr-md bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm break-words">
+          <div className="max-w-[70%] min-w-0 rounded-2xl rounded-br-sm bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm break-words">
             {message.content}
           </div>
         </div>
@@ -197,15 +234,15 @@ export function ChatMessageView({
         <BuildingShimmer filesWritten={message.filesWritten} totalFiles={message.totalFiles} />
       );
 
-    // Conversational AI response — B avatar, text flows freely.
+    // Conversational AI response — B avatar, text flows freely, hover copy button.
     case "question_answer":
       return (
-        <AIMessage>
+        <AIMessage content={message.content}>
           <MarkdownText text={message.content} />
         </AIMessage>
       );
 
-    // Post-build summary — same style as question_answer, with duration + credits footer.
+    // Post-build summary — same style as question_answer, with files badge + footer.
     case "build_summary": {
       const { durationMs, creditsUsed } = message;
       const showFooter =
@@ -220,10 +257,17 @@ export function ChatMessageView({
         return `${Math.floor(ms / 1000)}s`;
       };
       return (
-        <AIMessage>
+        <AIMessage content={message.content}>
           <MarkdownText text={message.content} />
+          {/* BEO-378: file change badge */}
+          {message.filesChanged.length > 0 && (
+            <span className="mt-1.5 flex items-center gap-1 text-xs text-zinc-400">
+              <FileCode className="h-2.5 w-2.5" />
+              {message.filesChanged.length} files changed
+            </span>
+          )}
           {showFooter && (
-            <span className="text-xs text-zinc-400 mt-2 block">
+            <span className="mt-1 block text-xs text-zinc-400">
               {formatDuration(durationMs!)} · {creditsUsed} credits used
             </span>
           )}
@@ -231,10 +275,10 @@ export function ChatMessageView({
       );
     }
 
-    // AI asking a clarifying question — same style as question_answer.
+    // AI asking a clarifying question — same style as question_answer, hover copy button.
     case "clarifying_question":
       return (
-        <AIMessage>
+        <AIMessage content={message.content}>
           <MarkdownText text={message.content} />
         </AIMessage>
       );
