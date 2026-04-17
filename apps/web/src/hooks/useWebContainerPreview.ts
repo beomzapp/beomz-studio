@@ -10,6 +10,12 @@ import {
   type WcInstance,
   type WcStatus,
 } from "../lib/webcontainer";
+import {
+  wcCacheGetFiles,
+  wcCacheSetFiles,
+  wcCacheGetNodeModules,
+  wcCacheSetNodeModules,
+} from "../lib/wcCache";
 import { fixFile } from "../lib/api";
 
 export type { WcStatus };
@@ -29,6 +35,7 @@ export function useWebContainerPreview(
   project: Pick<Project, "id" | "name" | "templateId"> | null | undefined,
   onFilesWritten?: () => void,
   dbEnv?: DbEnv | null,
+  generationId?: string | null,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -57,173 +64,12 @@ export function useWebContainerPreview(
   const dbEnvRef = useRef(dbEnv);
   dbEnvRef.current = dbEnv;
 
-  // ── Eager boot + npm install ──────────────────────────────────────────────
-  useEffect(() => {
-    if (!isWebContainerSupported()) return;
-
-    let cancelled = false;
-
-    async function boot() {
-      try {
-        setStatus("booting");
-        setProgressMessage("Booting sandbox…");
-
-        const instance = await getOrBootWebContainer();
-        if (cancelled) return;
-
-        instanceRef.current = instance;
-
-        // Mount a minimal package.json so npm install can run immediately
-        // without waiting for the full AI-generated file set.
-        if (instance.installedAt === null) {
-          await instance.wc.mount({
-            "package.json": {
-              file: {
-                contents: JSON.stringify(
-                  {
-                    name: "beomz-preview",
-                    private: true,
-                    type: "module",
-                    scripts: { dev: "vite" },
-                    dependencies: {
-                      "@supabase/supabase-js": "^2.39.0",
-                      clsx: "^2.0.0",
-                      "framer-motion": "^11.0.0",
-                      "lucide-react": "^0.400.0",
-                      react: "^19.2.0",
-                      "react-dom": "^19.2.0",
-                      "react-icons": "^5.5.0",
-                      "react-router-dom": "^7.0.0",
-                      "tailwind-merge": "^2.0.0",
-                    },
-                    devDependencies: {
-                      "@tailwindcss/vite": "^4.2.2",
-                      "@types/react": "^19.2.2",
-                      "@types/react-dom": "^19.2.2",
-                      "@vitejs/plugin-react": "^6.0.1",
-                      tailwindcss: "^4.2.2",
-                      typescript: "^5.9.3",
-                      vite: "^8.0.1",
-                    },
-                  },
-                  null,
-                  2,
-                ),
-              },
-            },
-          });
-          if (cancelled) return;
-
-          setStatus("installing");
-          setProgressMessage("Installing packages…");
-
-          const install = await instance.wc.spawn("npm", ["install"]);
-          const exitCode = await install.exit;
-          if (cancelled) return;
-
-          if (exitCode !== 0) {
-            setStatus("error");
-            setProgressMessage("Package installation failed.");
-            return;
-          }
-
-          instance.installedAt = Date.now();
-        }
-
-        // Read from live refs, NOT from the stale closure capture — this is
-        // critical for the page-reload case where files arrive from the API
-        // while npm install is in progress and the closure still sees null.
-        const currentFiles = filesRef.current;
-        const currentProject = projectRef.current;
-        if (currentFiles && currentFiles.length > 0 && currentProject?.id) {
-          void startVite(instance, currentFiles, currentProject);
-        } else {
-          setStatus("idle");
-          setProgressMessage("Waiting for build…");
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setStatus("error");
-        setProgressMessage(
-          err instanceof Error ? err.message : "WebContainer failed to start.",
-        );
-      }
-    }
-
-    void boot();
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run exactly once per component mount
-
-  // ── Self-healing: fix Vite parse errors via AI ────────────────────────────
-  const handleViteError = useCallback(
-    async (wc: import("@webcontainer/api").WebContainer, fileName: string, errorMessage: string) => {
-      const MAX_ATTEMPTS = 2;
-      const attempts = fixAttemptsRef.current[fileName] ?? 0;
-      if (attempts >= MAX_ATTEMPTS) {
-        console.warn(`[self-heal] Max fix attempts reached for ${fileName}`);
-        return;
-      }
-      fixAttemptsRef.current[fileName] = attempts + 1;
-
-      // Read the broken file from WebContainer
-      const readPaths = [
-        `apps/web/src/app/generated/${fileName}`,
-        `src/${fileName}`,
-        fileName,
-      ];
-      let fileContent: string | null = null;
-      for (const p of readPaths) {
-        try {
-          fileContent = await wc.fs.readFile(p, "utf-8");
-          break;
-        } catch {
-          continue;
-        }
-      }
-      if (!fileContent) {
-        console.warn(`[self-heal] Could not read ${fileName} from WebContainer`);
-        return;
-      }
-
-      setIsFixing(true);
-      setProgressMessage("Fixing a code issue…");
-
-      try {
-        const fixedContent = await fixFile({
-          buildId: projectRef.current?.id ?? "unknown",
-          filePath: fileName,
-          errorMessage,
-          fileContent,
-        });
-
-        // Write the fixed file back to WebContainer
-        const paths = [
-          `apps/web/src/app/generated/${fileName}`,
-          `src/${fileName}`,
-        ];
-        for (const p of paths) {
-          try {
-            await wc.fs.readFile(p, "utf-8"); // check it exists
-            await wc.fs.writeFile(p, fixedContent);
-            break;
-          } catch {
-            continue;
-          }
-        }
-      } catch (err) {
-        console.error("[self-heal] Fix failed:", err instanceof Error ? err.message : err);
-      } finally {
-        setIsFixing(false);
-      }
-    },
-    [],
-  );
+  // BEO-375: keep generationId in a ref for access inside stable closures.
+  const generationIdRef = useRef(generationId);
+  generationIdRef.current = generationId;
 
   // ── Start Vite + hot-reload when files change ─────────────────────────────
+  // Defined before boot so boot() can reference it.
   const startVite = useCallback(
     async (
       instance: WcInstance,
@@ -235,6 +81,13 @@ export function useWebContainerPreview(
       // Mount the full file tree (scaffold + generated files + runtime.json + DB env).
       const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
       await wc.mount(tree);
+
+      // BEO-375: persist source files to IndexedDB so the next page load can
+      // skip the API round-trip and mount immediately while npm install is warm.
+      const gId = generationIdRef.current;
+      if (gId) {
+        void wcCacheSetFiles(currentProject.id, gId, currentFiles);
+      }
 
       if (!viteStartedRef.current) {
         // First time: start the dev server.
@@ -312,6 +165,232 @@ export function useWebContainerPreview(
     },
     [],
   );
+
+  // ── Self-healing: fix Vite parse errors via AI ────────────────────────────
+  const handleViteError = useCallback(
+    async (wc: import("@webcontainer/api").WebContainer, fileName: string, errorMessage: string) => {
+      const MAX_ATTEMPTS = 2;
+      const attempts = fixAttemptsRef.current[fileName] ?? 0;
+      if (attempts >= MAX_ATTEMPTS) {
+        console.warn(`[self-heal] Max fix attempts reached for ${fileName}`);
+        return;
+      }
+      fixAttemptsRef.current[fileName] = attempts + 1;
+
+      // Read the broken file from WebContainer
+      const readPaths = [
+        `apps/web/src/app/generated/${fileName}`,
+        `src/${fileName}`,
+        fileName,
+      ];
+      let fileContent: string | null = null;
+      for (const p of readPaths) {
+        try {
+          fileContent = await wc.fs.readFile(p, "utf-8");
+          break;
+        } catch {
+          continue;
+        }
+      }
+      if (!fileContent) {
+        console.warn(`[self-heal] Could not read ${fileName} from WebContainer`);
+        return;
+      }
+
+      setIsFixing(true);
+      setProgressMessage("Fixing a code issue…");
+
+      try {
+        const fixedContent = await fixFile({
+          buildId: projectRef.current?.id ?? "unknown",
+          filePath: fileName,
+          errorMessage,
+          fileContent,
+        });
+
+        // Write the fixed file back to WebContainer
+        const paths = [
+          `apps/web/src/app/generated/${fileName}`,
+          `src/${fileName}`,
+        ];
+        for (const p of paths) {
+          try {
+            await wc.fs.readFile(p, "utf-8"); // check it exists
+            await wc.fs.writeFile(p, fixedContent);
+            break;
+          } catch {
+            continue;
+          }
+        }
+      } catch (err) {
+        console.error("[self-heal] Fix failed:", err instanceof Error ? err.message : err);
+      } finally {
+        setIsFixing(false);
+      }
+    },
+    [],
+  );
+
+  // ── Eager boot + npm install ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!isWebContainerSupported()) return;
+
+    let cancelled = false;
+
+    async function boot() {
+      try {
+        setStatus("booting");
+        setProgressMessage("Booting sandbox…");
+
+        const instance = await getOrBootWebContainer();
+        if (cancelled) return;
+
+        instanceRef.current = instance;
+
+        if (instance.installedAt === null) {
+          // ── BEO-375: try restoring node_modules from IndexedDB cache ──
+          const cachedNm = await wcCacheGetNodeModules();
+          if (cancelled) return;
+
+          if (cachedNm) {
+            // Cache hit: mount the binary snapshot — node_modules is instantly
+            // available without running npm install.
+            setStatus("installing");
+            setProgressMessage("Restoring packages from cache…");
+            await instance.wc.mount(cachedNm);
+            if (cancelled) return;
+            instance.installedAt = Date.now();
+            console.log("[wc-cache] node_modules restored from IndexedDB");
+          } else {
+            // Cache miss: run npm install then export and store the snapshot.
+            await instance.wc.mount({
+              "package.json": {
+                file: {
+                  contents: JSON.stringify(
+                    {
+                      name: "beomz-preview",
+                      private: true,
+                      type: "module",
+                      scripts: { dev: "vite" },
+                      dependencies: {
+                        "@supabase/supabase-js": "^2.39.0",
+                        clsx: "^2.0.0",
+                        "framer-motion": "^11.0.0",
+                        "lucide-react": "^0.400.0",
+                        react: "^19.2.0",
+                        "react-dom": "^19.2.0",
+                        "react-icons": "^5.5.0",
+                        "react-router-dom": "^7.0.0",
+                        "tailwind-merge": "^2.0.0",
+                      },
+                      devDependencies: {
+                        "@tailwindcss/vite": "^4.2.2",
+                        "@types/react": "^19.2.2",
+                        "@types/react-dom": "^19.2.2",
+                        "@vitejs/plugin-react": "^6.0.1",
+                        tailwindcss: "^4.2.2",
+                        typescript: "^5.9.3",
+                        vite: "^8.0.1",
+                      },
+                    },
+                    null,
+                    2,
+                  ),
+                },
+              },
+            });
+            if (cancelled) return;
+
+            setStatus("installing");
+            setProgressMessage("Installing packages…");
+
+            const install = await instance.wc.spawn("npm", ["install"]);
+            const exitCode = await install.exit;
+            if (cancelled) return;
+
+            if (exitCode !== 0) {
+              setStatus("error");
+              setProgressMessage("Package installation failed.");
+              return;
+            }
+
+            instance.installedAt = Date.now();
+
+            // BEO-375: export node_modules as binary and cache it for next time.
+            // Non-blocking — Vite startup continues while this runs in background.
+            instance.wc
+              .export("node_modules", { format: "binary" })
+              .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
+              .catch((err) =>
+                console.warn("[wc-cache] Failed to cache node_modules:", err),
+              );
+          }
+        }
+
+        // Read from live refs, NOT from the stale closure capture — this is
+        // critical for the page-reload case where files arrive from the API
+        // while npm install is in progress and the closure still sees null.
+        const currentFiles = filesRef.current;
+        const currentProject = projectRef.current;
+
+        if (currentFiles && currentFiles.length > 0 && currentProject?.id) {
+          void startVite(instance, currentFiles, currentProject);
+        } else {
+          // No live files yet — check if IndexedDB has a cached build for this project.
+          // BEO-375: this lets the preview warm up before the API responds.
+          const gId = generationIdRef.current;
+          const proj = currentProject;
+          if (proj?.id && gId) {
+            const cached = await wcCacheGetFiles(proj.id, gId);
+            if (cancelled) return;
+            if (cached && cached.length > 0 && !filesRef.current?.length) {
+              console.log("[wc-cache] Mounting source files from IndexedDB cache");
+              void startVite(instance, cached as StudioFile[], proj);
+              return;
+            }
+          }
+          setStatus("idle");
+          setProgressMessage("Waiting for build…");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setStatus("error");
+        setProgressMessage(
+          err instanceof Error ? err.message : "WebContainer failed to start.",
+        );
+      }
+    }
+
+    void boot();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run exactly once per component mount
+
+  // ── BEO-375: when generationId becomes known after boot finishes ──────────
+  // Handle the case where the WC is already warm (installedAt set, no live files)
+  // but generationId arrived after the boot effect completed.
+  useEffect(() => {
+    if (!generationId || !project?.id) return;
+
+    const instance = instanceRef.current;
+    if (!instance || instance.installedAt === null) return;
+
+    // Real files from the API already landed — no need for cache.
+    if (filesRef.current && filesRef.current.length > 0) return;
+
+    void wcCacheGetFiles(project.id, generationId).then((cached) => {
+      if (!cached || cached.length === 0) return;
+      if (filesRef.current && filesRef.current.length > 0) return; // files arrived in meantime
+      const inst = instanceRef.current;
+      if (!inst) return;
+      console.log("[wc-cache] Mounting source files from IndexedDB (post-boot)");
+      void startVite(inst, cached as StudioFile[], project);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generationId, project?.id]);
 
   // ── React to files arriving / changing ───────────────────────────────────
   useEffect(() => {

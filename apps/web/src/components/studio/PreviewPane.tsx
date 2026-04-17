@@ -186,6 +186,8 @@ export function PreviewPane({
     files,
     project,
     onFilesWritten,
+    undefined, // dbEnv is injected separately via ProjectPage
+    generationId,
   );
 
   // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──
