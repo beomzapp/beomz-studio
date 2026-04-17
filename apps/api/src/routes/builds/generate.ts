@@ -2020,7 +2020,9 @@ async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
 ): Promise<void> {
-  const { buildId, projectId, orgId, userEmail, prompt, templateId, model, requestedAt, userId } = input;
+  const { buildId, projectId, orgId, userEmail, templateId, model, requestedAt, userId } = input;
+  // BEO-372: use let so we can override with a combined prompt for clarification answers.
+  let prompt = input.prompt;
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
@@ -2029,6 +2031,32 @@ async function _runBuildInBackground(
   // BEO-368: record wall-clock start for duration footer in build_summary.
   const buildStartTime = Date.now();
 
+  // ── BEO-372: clarifying answer detection ────────────────────────────────
+  // If the previous completed generation for this project ended with a
+  // clarifying_question, the current message is the user's answer.
+  // Combine original prompt + answer and skip detectIntent entirely.
+  let forcedIntent: BuildIntent | null = null;
+  if (!input.phaseOverride && !input.confirmedScope) {
+    try {
+      const prevGen = await db.findLatestCompletedGenerationForProject(buildId);
+      if (prevGen && prevGen.id !== buildId) {
+        const prevEvents = Array.isArray(prevGen.session_events)
+          ? (prevGen.session_events as Record<string, unknown>[])
+          : [];
+        const lastEvent = prevEvents[prevEvents.length - 1];
+        if (lastEvent?.type === "clarifying_question") {
+          const origUserEvent = [...prevEvents].reverse().find((e) => e.type === "user");
+          const originalPrompt = (origUserEvent?.content as string) || prevGen.prompt;
+          prompt = `${originalPrompt}. Clarification: ${input.sourcePrompt}`;
+          forcedIntent = input.isIteration ? "edit" : "build";
+          console.log("[generate] clarification answer detected — combined prompt, forced intent:", forcedIntent, { buildId });
+        }
+      }
+    } catch (err) {
+      console.warn("[generate] clarification check failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // ── BEO-362: 4-way intent detection ─────────────────────────────────────
   // Run for all builds except confirmed-scope resumes and phase continuations.
   // Stores the intent so pre_build_ack and build_summary can reference it later.
@@ -2036,10 +2064,15 @@ async function _runBuildInBackground(
 
   if (!input.phaseOverride && !input.confirmedScope) {
     const hasExistingProject = input.isIteration || input.existingFiles.length > 0;
-    // BEO-371: pass project context so Haiku classifies recommendation/suggestion
-    // messages as "question" rather than "build" when a project is already open.
-    detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
-    console.log("[generate] intent detected:", detectedIntent, { buildId });
+    if (forcedIntent) {
+      // BEO-372: skip Haiku classification — we know this is a clarification answer.
+      detectedIntent = forcedIntent;
+    } else {
+      // BEO-371: pass project context so Haiku classifies recommendation/suggestion
+      // messages as "question" rather than "build" when a project is already open.
+      detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
+    }
+    console.log("[generate] intent detected:", detectedIntent, { buildId, forced: Boolean(forcedIntent) });
 
     // Emit intent_detected so the frontend can show a visual cue
     await appendEventToDb(db, buildId, {
@@ -2078,7 +2111,7 @@ async function _runBuildInBackground(
       }
 
       // BEO-370: persist user prompt before answering
-      await appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+      await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
 
       const answer = await generateConversationalAnswer(prompt, input.existingFiles, input.projectName, input.sourcePrompt);
 
@@ -2122,7 +2155,7 @@ async function _runBuildInBackground(
 
     if (detectedIntent === "ambiguous") {
       // BEO-370: persist user prompt before asking clarifying question
-      await appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+      await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
       const clarifyingQuestion = await generateClarifyingQuestion(prompt);
       await appendEventToDb(db, buildId, {
         type: "clarifying_question" as const,
@@ -2423,7 +2456,7 @@ async function _runBuildInBackground(
             message: ackMessage,
           } as unknown as BuilderV3StatusEvent);
           // BEO-370: persist pre_build_ack + user prompt
-          void appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+          void appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
           void appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
         } catch {
           // non-fatal
@@ -2721,7 +2754,7 @@ async function _runBuildInBackground(
           message: ackMessage,
         } as unknown as BuilderV3StatusEvent);
         // BEO-370: persist pre_build_ack + user prompt
-        void appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+        void appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
         void appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
       } catch {
         // non-fatal
