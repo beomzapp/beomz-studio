@@ -1,8 +1,9 @@
 /**
- * ChatMessage — BEO-364 / BEO-373 / BEO-378.
+ * ChatMessage — BEO-364 / BEO-373 / BEO-378 / BEO-379.
  * One component per message type in the discriminated union.
  * Building state: cycling text status (no shimmer bars).
- * BEO-378: hover copy button, FileChangeBadge, bubble tail, thinking dots.
+ * BEO-378: copy button, FileChangeBadge, bubble tail, thinking dots.
+ * BEO-379: copy button moved inline — no absolute positioning.
  */
 import { useEffect, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
@@ -16,6 +17,30 @@ function BAvatar() {
     <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900">
       <span className="text-[9px] font-bold leading-none text-[#F97316]">B</span>
     </div>
+  );
+}
+
+// ─── Copy button ──────────────────────────────────────────────────────────────
+// BEO-379: self-contained, inline — no absolute positioning.
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <button onClick={handleCopy} title="Copy">
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-zinc-300" />
+      ) : (
+        <Copy className="h-3.5 w-3.5 cursor-pointer text-zinc-300 hover:text-zinc-500" />
+      )}
+    </button>
   );
 }
 
@@ -155,36 +180,12 @@ function MarkdownText({ text }: { text: string }) {
 
 // ─── AI message wrapper ───────────────────────────────────────────────────────
 // B avatar top-left, text flows freely — no bubble, no container.
-// BEO-378: optional `content` prop wires up the hover copy button.
 
-function AIMessage({ children, content }: { children: React.ReactNode; content?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (!content) return;
-    void navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
+function AIMessage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="group relative flex items-start gap-2">
+    <div className="flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 break-words">{children}</div>
-      {content && (
-        <button
-          onClick={handleCopy}
-          className="absolute -right-6 top-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-          title="Copy"
-        >
-          {copied ? (
-            <Check className="h-3.5 w-3.5 text-zinc-400" />
-          ) : (
-            <Copy className="h-3.5 w-3.5 text-zinc-400 hover:text-zinc-600" />
-          )}
-        </button>
-      )}
     </div>
   );
 }
@@ -234,15 +235,19 @@ export function ChatMessageView({
         <BuildingShimmer filesWritten={message.filesWritten} totalFiles={message.totalFiles} />
       );
 
-    // Conversational AI response — B avatar, text flows freely, hover copy button.
+    // Conversational AI response — B avatar + text + copy row below.
     case "question_answer":
       return (
-        <AIMessage content={message.content}>
+        <AIMessage>
           <MarkdownText text={message.content} />
+          {/* BEO-379: inline copy row, right-aligned */}
+          <div className="mt-1.5 flex justify-end">
+            <CopyButton content={message.content} />
+          </div>
         </AIMessage>
       );
 
-    // Post-build summary — same style as question_answer, with files badge + footer.
+    // Post-build summary — text + single footer row: files badge · duration · copy.
     case "build_summary": {
       const { durationMs, creditsUsed } = message;
       const showFooter =
@@ -257,29 +262,36 @@ export function ChatMessageView({
         return `${Math.floor(ms / 1000)}s`;
       };
       return (
-        <AIMessage content={message.content}>
+        <AIMessage>
           <MarkdownText text={message.content} />
-          {/* BEO-378: file change badge */}
-          {message.filesChanged.length > 0 && (
-            <span className="mt-1.5 flex items-center gap-1 text-xs text-zinc-400">
-              <FileCode className="h-2.5 w-2.5" />
-              {message.filesChanged.length} files changed
+          {/* BEO-379: single footer row — files badge + duration/credits + copy right-aligned */}
+          <div className="mt-1.5 flex items-center gap-2 text-xs text-zinc-400">
+            {message.filesChanged.length > 0 && (
+              <span className="flex items-center gap-1">
+                <FileCode className="h-2.5 w-2.5" />
+                {message.filesChanged.length} files changed
+              </span>
+            )}
+            {showFooter && (
+              <span>{formatDuration(durationMs!)} · {creditsUsed} credits used</span>
+            )}
+            <span className="ml-auto">
+              <CopyButton content={message.content} />
             </span>
-          )}
-          {showFooter && (
-            <span className="mt-1 block text-xs text-zinc-400">
-              {formatDuration(durationMs!)} · {creditsUsed} credits used
-            </span>
-          )}
+          </div>
         </AIMessage>
       );
     }
 
-    // AI asking a clarifying question — same style as question_answer, hover copy button.
+    // AI asking a clarifying question — same layout as question_answer.
     case "clarifying_question":
       return (
-        <AIMessage content={message.content}>
+        <AIMessage>
           <MarkdownText text={message.content} />
+          {/* BEO-379: inline copy row, right-aligned */}
+          <div className="mt-1.5 flex justify-end">
+            <CopyButton content={message.content} />
+          </div>
         </AIMessage>
       );
 
