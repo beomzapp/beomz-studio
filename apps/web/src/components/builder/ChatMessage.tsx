@@ -157,13 +157,31 @@ export function ChatMessageView({
         </AIMessage>
       );
 
-    // Post-build summary — same style as question_answer.
-    case "build_summary":
+    // Post-build summary — same style as question_answer, with duration + credits footer.
+    case "build_summary": {
+      const { durationMs, creditsUsed } = message;
+      const showFooter =
+        typeof durationMs === "number" && durationMs > 0 &&
+        typeof creditsUsed === "number" && creditsUsed > 0;
+      const formatDuration = (ms: number) => {
+        if (ms >= 60000) {
+          const m = Math.floor(ms / 60000);
+          const s = Math.floor((ms % 60000) / 1000);
+          return `${m}m ${s}s`;
+        }
+        return `${Math.floor(ms / 1000)}s`;
+      };
       return (
         <AIMessage>
           <MarkdownText text={message.content} />
+          {showFooter && (
+            <span className="text-xs text-zinc-400 mt-2 block">
+              {formatDuration(durationMs!)} · {creditsUsed} credits used
+            </span>
+          )}
         </AIMessage>
       );
+    }
 
     // AI asking a clarifying question — same style as question_answer.
     case "clarifying_question":

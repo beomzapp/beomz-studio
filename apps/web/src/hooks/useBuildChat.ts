@@ -132,6 +132,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             type: "build_summary",
             content: event.message,
             filesChanged: event.filesChanged,
+            durationMs: event.durationMs,
+            creditsUsed: event.creditsUsed,
           },
         ]);
         break;
