@@ -233,7 +233,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                     setMessages(prev => {
                       if (prev.some(m => m.type === "build_summary")) return prev;
                       return [
-                        ...prev,
+                        ...prev.filter(m => m.type !== "building"),
                         {
                           id: makeId(),
                           type: "build_summary" as const,

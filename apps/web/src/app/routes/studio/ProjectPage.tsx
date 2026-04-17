@@ -120,6 +120,13 @@ export function ProjectPage() {
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [isAiCustomising, setIsAiCustomising] = useState(false);
   const aiCustomisingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BEO-374 Bug 4: stable ref tracking the current previewGenerationId so
+  // handleSendMessage can capture the pre-build value without adding the state
+  // to its dependency array. Restored when done.conversational === true.
+  const previewGenerationIdRef = useRef<string | null>(null);
+  const savedPreviewGenerationIdRef = useRef<string | null>(null);
+  // Keep the ref in sync with state on every render (before any callbacks run).
+  previewGenerationIdRef.current = previewGenerationId;
   const activeBuildIdRef = useRef<string | null>(null);
   const resumingBuildRef = useRef(false);
 
@@ -174,6 +181,17 @@ export function ProjectPage() {
       activeBuildIdRef.current = event.buildId;
     }
 
+    // Conversational response — clear the building overlay immediately so the
+    // preview doesn't flash behind "Building your app…" for question answers.
+    // BEO-374 Bug 4.
+    if (event.type === "conversational_response") {
+      if (aiCustomisingTimeoutRef.current) {
+        clearTimeout(aiCustomisingTimeoutRef.current);
+        aiCustomisingTimeoutRef.current = null;
+      }
+      setIsAiCustomising(false);
+    }
+
     // Preview ready — trigger WebContainer file write
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
@@ -192,12 +210,14 @@ export function ProjectPage() {
     if (event.type === "done") {
       if (!event.fallbackUsed) {
         if (event.conversational) {
-          // Conversational response — clear overlay immediately, do not clobber files
+          // Conversational response — clear overlay and restore the preview to its
+          // pre-build state so no iframe remount occurs. BEO-374 Bug 4.
           if (aiCustomisingTimeoutRef.current) {
             clearTimeout(aiCustomisingTimeoutRef.current);
             aiCustomisingTimeoutRef.current = null;
           }
           setIsAiCustomising(false);
+          setPreviewGenerationId(savedPreviewGenerationIdRef.current);
         } else {
           // Real build done — 8s overlay timer then lift
           if (aiCustomisingTimeoutRef.current) clearTimeout(aiCustomisingTimeoutRef.current);
@@ -284,6 +304,9 @@ export function ProjectPage() {
       }
       setBuildFailed(false);
       buildDoneRef.current = false;
+      // BEO-374 Bug 4: snapshot the current preview ID so conversational done
+      // can restore it and avoid reloading the preview for question answers.
+      savedPreviewGenerationIdRef.current = previewGenerationIdRef.current;
       setIsAiCustomising(true);
       if (aiCustomisingTimeoutRef.current) {
         clearTimeout(aiCustomisingTimeoutRef.current);

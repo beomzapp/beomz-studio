@@ -98,19 +98,28 @@ function MarkdownText({ text }: { text: string }) {
 
   const flushList = () => {
     if (!listBuffer) return;
-    const Tag = listBuffer.type === "ol" ? "ol" : "ul";
-    const cls =
-      listBuffer.type === "ol"
-        ? "list-decimal list-inside space-y-1 my-1.5"
-        : "list-disc list-inside space-y-1 my-1.5";
+    const isOrdered = listBuffer.type === "ol";
+    const items = listBuffer.items;
     elements.push(
-      <Tag key={`list-${elements.length}`} className={cls}>
-        {listBuffer.items.map((item, i) => (
-          <li key={i} className="text-sm leading-relaxed text-[#374151]">
-            {renderInline(item)}
-          </li>
-        ))}
-      </Tag>,
+      isOrdered ? (
+        <ol key={`list-${elements.length}`} className="space-y-1 my-1.5">
+          {items.map((item, i) => (
+            <li key={i} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
+              <span className="flex-shrink-0 select-none text-zinc-400">{i + 1}.</span>
+              <span className="min-w-0">{renderInline(item)}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <ul key={`list-${elements.length}`} className="space-y-1 my-1.5">
+          {items.map((item, i) => (
+            <li key={i} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
+              <span className="flex-shrink-0 select-none text-zinc-400">•</span>
+              <span className="min-w-0">{renderInline(item)}</span>
+            </li>
+          ))}
+        </ul>
+      ),
     );
     listBuffer = null;
   };
