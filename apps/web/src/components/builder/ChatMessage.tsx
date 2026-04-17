@@ -1,8 +1,9 @@
 /**
- * ChatMessage — BEO-364.
+ * ChatMessage — BEO-364 / BEO-373.
  * One component per message type in the discriminated union.
- * No legacy code, no icons in building state.
+ * Building state: cycling text status (no shimmer bars).
  */
+import { useEffect, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 
@@ -16,14 +17,61 @@ function BAvatar() {
   );
 }
 
-// ─── Shimmer ──────────────────────────────────────────────────────────────────
-// Two transparent bars, flush left. Keyframe defined in index.css.
+// ─── Cycling status ───────────────────────────────────────────────────────────
+// BEO-373: replaces the two grey shimmer bars with a cycling text status.
+// Shows "Writing file N of M..." when filesWritten/totalFiles are present.
 
-export function BuildingShimmer() {
+const CYCLING_PHRASES = [
+  "Thinking...",
+  "Planning the structure...",
+  "Writing components...",
+  "Building your app...",
+  "Almost done...",
+];
+
+interface BuildingShimmerProps {
+  filesWritten?: number;
+  totalFiles?: number;
+}
+
+export function BuildingShimmer({ filesWritten, totalFiles }: BuildingShimmerProps = {}) {
+  const showFileCount =
+    typeof filesWritten === "number" && typeof totalFiles === "number" && totalFiles > 0;
+
+  const [phraseIdx, setPhraseIdx] = useState(
+    () => Math.floor(Math.random() * CYCLING_PHRASES.length),
+  );
+  const [fading, setFading] = useState(false);
+
+  useEffect(() => {
+    if (showFileCount) return;
+    let fadeTimeout: ReturnType<typeof setTimeout> | null = null;
+    const id = setInterval(() => {
+      setFading(true);
+      fadeTimeout = setTimeout(() => {
+        setPhraseIdx(i => (i + 1) % CYCLING_PHRASES.length);
+        setFading(false);
+      }, 300);
+    }, 2500);
+    return () => {
+      clearInterval(id);
+      if (fadeTimeout) clearTimeout(fadeTimeout);
+    };
+  }, [showFileCount]);
+
+  const text = showFileCount
+    ? `Writing file ${filesWritten} of ${totalFiles}...`
+    : CYCLING_PHRASES[phraseIdx];
+
   return (
-    <div className="space-y-1.5">
-      <div className="h-3 w-[60%] animate-[beomz-shimmer_1.8s_ease-in-out_infinite] rounded-sm bg-zinc-200" />
-      <div className="h-3 w-[40%] animate-[beomz-shimmer_1.8s_ease-in-out_infinite] rounded-sm bg-zinc-200" />
+    <div className="flex items-center gap-1.5">
+      <span className="animate-pulse text-[#F97316]">◌</span>
+      <span
+        className="text-sm text-zinc-500 transition-opacity duration-300"
+        style={{ opacity: fading ? 0 : 1 }}
+      >
+        {text}
+      </span>
     </div>
   );
 }
@@ -134,19 +182,10 @@ export function ChatMessageView({
         </p>
       );
 
-    // Building — shimmer bars + optional file counter. No avatar, no icon.
+    // Building — cycling text status. No avatar, no bubble.
     case "building":
       return (
-        <div className="space-y-2">
-          <BuildingShimmer />
-          {typeof message.filesWritten === "number" &&
-            typeof message.totalFiles === "number" &&
-            message.totalFiles > 0 && (
-              <p className="text-xs text-zinc-400">
-                Writing {message.filesWritten} of {message.totalFiles} files&hellip;
-              </p>
-            )}
-        </div>
+        <BuildingShimmer filesWritten={message.filesWritten} totalFiles={message.totalFiles} />
       );
 
     // Conversational AI response — B avatar, text flows freely.

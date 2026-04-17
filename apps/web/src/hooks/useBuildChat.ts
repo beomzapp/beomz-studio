@@ -187,8 +187,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       }
 
       case "build_summary":
+        // BEO-373: remove any lingering building message so the cycling status
+        // disappears when the summary card arrives.
         setMessages(prev => [
-          ...prev,
+          ...prev.filter(m => m.type !== "building"),
           {
             id: makeId(),
             type: "build_summary",
