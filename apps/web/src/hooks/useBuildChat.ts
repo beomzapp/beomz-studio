@@ -150,12 +150,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           ]);
         } else {
           buildDoneRef.current = true;
-          void getBuildStatus(event.buildId)
-            .then(status => {
-              existingFilesRef.current = status.result?.files ?? [];
-              optionsRef.current.onBuildStatus?.(status);
-            })
-            .catch(() => {});
+          // Conversational done (question_answer / clarifying_question) — skip file fetch
+          // to avoid clobbering existingFilesRef with empty/stale data.
+          if (!event.conversational) {
+            void getBuildStatus(event.buildId)
+              .then(status => {
+                existingFilesRef.current = status.result?.files ?? [];
+                optionsRef.current.onBuildStatus?.(status);
+              })
+              .catch(() => {});
+          }
         }
         setIsBuilding(false);
         activeBuildingMsgIdRef.current = null;

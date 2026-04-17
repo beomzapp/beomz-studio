@@ -4,7 +4,7 @@
  * Light mode — cream #faf9f6 throughout.
  *
  * BEO-363: All build logic + SSE event handling lives in useBuildChat.
- * This component only orchestrates layout + calls the hook.
+ * BEO-367: Phase UI, scope confirmation, and InsufficientCreditsCard removed.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -18,24 +18,15 @@ import {
   DatabasePanel,
   IntegrationsPanel,
   PublishModal,
-  PhasePlanCard,
   type ActiveView,
 } from "../../../components/builder";
-import type { Phase } from "../../../components/builder/PhasePlanCard";
-import { FeatureScopeCard } from "../../../components/builder/FeatureScopeCard";
-import { InsufficientCreditsCard } from "../../../components/builder/InsufficientCreditsCard";
 import { HistoryPanel, PreviewPane } from "../../../components/studio";
-import { usePricingModal } from "../../../contexts/PricingModalContext";
 import {
   getBuildStatus,
   getLatestBuildForProject,
-  getProject,
   getProjectDbState,
   exportProjectZip,
   listProjectsWithMeta,
-  startNextPhase,
-  confirmScope,
-  forceSimpleBuild,
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
@@ -47,6 +38,7 @@ import { useBuildChat } from "../../../hooks/useBuildChat";
 import { cn } from "../../../lib/cn";
 import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
+
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
 // ─────────────────────────────────────────────
@@ -135,28 +127,6 @@ export function ProjectPage() {
 
   const [suggestionChips, setSuggestionChips] = useState<string[]>([]);
 
-  // ─── Phase mode state ─────────────────────────────────────────────────────
-
-  const [phases, setPhases] = useState<Phase[]>([]);
-  const [currentPhase, setCurrentPhase] = useState(0);
-  const [phaseMode, setPhaseMode] = useState(false);
-  const [isPhaseBuilding, setIsPhaseBuilding] = useState(false);
-  const phasePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ─── Feature scope card ───────────────────────────────────────────────────
-
-  const [scopeFeatures, setScopeFeatures] = useState<string[]>([]);
-  const [scopeBuildId, setScopeBuildId] = useState<string | null>(null);
-  const [scopeMessage, setScopeMessage] = useState("");
-
-  // ─── Insufficient credits card ────────────────────────────────────────────
-
-  const [insufficientAvailable, setInsufficientAvailable] = useState(0);
-  const [insufficientRequired, setInsufficientRequired] = useState(0);
-  const [insufficientFeatures, setInsufficientFeatures] = useState<string[]>([]);
-  const [insufficientBuildId, setInsufficientBuildId] = useState<string | null>(null);
-
-  const { openPricingModal } = usePricingModal();
   const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
 
@@ -193,52 +163,18 @@ export function ProjectPage() {
   const [dbProvider, setDbProvider] = useState<string | null>(null);
   const [dbWired, setDbWired] = useState(false);
 
-  // ─── Legacy SSE event handler ─────────────────────────────────────────────
-  // Handles side-effects that have not yet been migrated to useBuildChat:
-  // phase mode, scope confirmation, insufficient credits, preview overlay,
-  // thinking-label animation, project-name updates, and suggestion chips.
+  // ─── SSE event handler ─────────────────────────────────────────────────────
+  // Handles preview overlay, project-name updates, and suggestion chips.
+  // Phase / scope / insufficient-credits events are ignored (BEO-367).
 
   function handleLegacyEvent(event: BuilderV3Event) {
-    const buildId = "buildId" in event ? event.buildId : activeBuildIdRef.current;
-
     setLastEventId(event.id);
 
     if ("buildId" in event && event.buildId) {
       activeBuildIdRef.current = event.buildId;
     }
 
-    // Phases planned — phase mode card
-    if ((event as unknown as Record<string, unknown>).type === "phases_planned") {
-      const phaseEvent = event as unknown as { phases: Phase[]; currentPhase: number };
-      setPhases(phaseEvent.phases);
-      setCurrentPhase(phaseEvent.currentPhase);
-      setPhaseMode(true);
-      setIsPhaseBuilding(true);
-    }
-
-    // Scope confirmation — pause build, show FeatureScopeCard
-    if ((event as unknown as Record<string, unknown>).type === "scope_confirmation") {
-      const scopeEvent = event as unknown as { features: string[]; buildId: string; message: string };
-      setScopeFeatures(scopeEvent.features);
-      setScopeBuildId(scopeEvent.buildId);
-      setScopeMessage(scopeEvent.message);
-    }
-
-    // Insufficient credits — show InsufficientCreditsCard
-    if ((event as unknown as Record<string, unknown>).type === "insufficient_credits") {
-      const icEvent = event as unknown as {
-        available: number;
-        required: number;
-        features: string[];
-        buildId?: string;
-      };
-      setInsufficientAvailable(icEvent.available ?? 0);
-      setInsufficientRequired(icEvent.required ?? 0);
-      setInsufficientFeatures(icEvent.features ?? []);
-      setInsufficientBuildId(icEvent.buildId ?? buildId);
-    }
-
-    // Preview ready — begin writing AI files to WebContainer
+    // Preview ready — trigger WebContainer file write
     if (event.type === "preview_ready") {
       setProjectId(event.projectId);
       setIsAiCustomising(true);
@@ -255,33 +191,41 @@ export function ProjectPage() {
     // Done — manage overlay timer, update project meta, generate suggestion chips
     if (event.type === "done") {
       if (!event.fallbackUsed) {
-        if (aiCustomisingTimeoutRef.current) clearTimeout(aiCustomisingTimeoutRef.current);
-        aiCustomisingTimeoutRef.current = setTimeout(() => {
-          aiCustomisingTimeoutRef.current = null;
+        if (event.conversational) {
+          // Conversational response — clear overlay immediately, do not clobber files
+          if (aiCustomisingTimeoutRef.current) {
+            clearTimeout(aiCustomisingTimeoutRef.current);
+            aiCustomisingTimeoutRef.current = null;
+          }
           setIsAiCustomising(false);
-        }, 8000);
+        } else {
+          // Real build done — 8s overlay timer then lift
+          if (aiCustomisingTimeoutRef.current) clearTimeout(aiCustomisingTimeoutRef.current);
+          aiCustomisingTimeoutRef.current = setTimeout(() => {
+            aiCustomisingTimeoutRef.current = null;
+            setIsAiCustomising(false);
+          }, 8000);
 
-        void getBuildStatus(event.buildId)
-          .then(status => {
-            if (status.project.name && status.project.name !== "Untitled project") {
-              setProjectName(status.project.name);
-            }
-            // Suggestion chips from last user prompt
-            const lastUserMsg = messages
-              .slice()
-              .reverse()
-              .find(m => m.type === "user");
-            const prompt = lastUserMsg?.type === "user" ? lastUserMsg.content : projectName;
-            if (prompt) {
-              void getSuggestionChips(prompt).then(chips => {
-                if (chips.length > 0) setSuggestionChips(chips);
-              });
-            }
-            // Optimistic credit deduction
-            deductOptimistic(5);
-            void refreshCredits();
-          })
-          .catch(() => {});
+          void getBuildStatus(event.buildId)
+            .then(status => {
+              if (status.project.name && status.project.name !== "Untitled project") {
+                setProjectName(status.project.name);
+              }
+              const lastUserMsg = messages
+                .slice()
+                .reverse()
+                .find(m => m.type === "user");
+              const prompt = lastUserMsg?.type === "user" ? lastUserMsg.content : projectName;
+              if (prompt) {
+                void getSuggestionChips(prompt).then(chips => {
+                  if (chips.length > 0) setSuggestionChips(chips);
+                });
+              }
+              deductOptimistic(5);
+              void refreshCredits();
+            })
+            .catch(() => {});
+        }
       } else {
         if (aiCustomisingTimeoutRef.current) {
           clearTimeout(aiCustomisingTimeoutRef.current);
@@ -290,11 +234,9 @@ export function ProjectPage() {
         setIsAiCustomising(false);
         setBuildFailed(true);
       }
-
-      setIsPhaseBuilding(false);
     }
 
-    // Error — manage overlay
+    // Error — clear overlay
     if (event.type === "error") {
       if (event.code !== "server_restarting") {
         if (aiCustomisingTimeoutRef.current) {
@@ -333,7 +275,6 @@ export function ProjectPage() {
   }, [buildDoneRef]);
 
   // ─── Send message ─────────────────────────────────────────────────────────
-  // Thin wrapper that handles credits check and raises the preview overlay.
 
   const handleSendMessage = useCallback(
     (text: string) => {
@@ -348,7 +289,6 @@ export function ProjectPage() {
         clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = null;
       }
-
       sendMessage(text);
     },
     [credits, sendMessage, buildDoneRef],
@@ -416,22 +356,6 @@ export function ProjectPage() {
   }, [projectId, id]);
 
   useEffect(() => {
-    if (!projectId || id === "new" || phaseMode) return;
-    void getProject(projectId).then(proj => {
-      if (proj.phaseMode) {
-        const bp = proj.buildPhases as Phase[] | null | undefined;
-        if (bp && Array.isArray(bp) && bp.length > 0) {
-          setPhases(bp);
-          setCurrentPhase(proj.currentPhase ?? 1);
-          setPhaseMode(true);
-          setIsPhaseBuilding(false);
-          setTimeout(() => setPreviewRefreshKey(c => c + 1), 500);
-        }
-      }
-    }).catch(() => {});
-  }, [projectId, id, phaseMode]);
-
-  useEffect(() => {
     if (!projectId) return;
     saveState({
       buildId: build?.id ?? null,
@@ -466,20 +390,6 @@ export function ProjectPage() {
       );
       setLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
 
-      // Restore phase state
-      const proj = status.project as unknown as Record<string, unknown>;
-      if (proj.phase_mode || proj.phaseMode) {
-        const buildPhases = (proj.build_phases ?? proj.buildPhases) as Phase[] | undefined;
-        const curPhase = (proj.current_phase ?? proj.currentPhase) as number | undefined;
-        if (buildPhases && Array.isArray(buildPhases) && buildPhases.length > 0) {
-          setPhases(buildPhases);
-          setCurrentPhase(curPhase ?? 1);
-          setPhaseMode(true);
-          const isRunning = status.build.status === "queued" || status.build.status === "running";
-          setIsPhaseBuilding(isRunning);
-        }
-      }
-
       if (status.build.status === "queued" || status.build.status === "running") {
         buildDoneRef.current = false;
         setIsAiCustomising(true);
@@ -487,22 +397,7 @@ export function ProjectPage() {
         buildDoneRef.current = true;
       }
 
-      if (
-        status.build.status === "queued" ||
-        status.build.status === "running" ||
-        status.build.status === "awaiting_scope_confirmation"
-      ) {
-        if (status.build.status === "awaiting_scope_confirmation") {
-          const pending = (status.build as unknown as {
-            metadata?: { pendingScope?: { featureCandidates?: string[]; message?: string } };
-          }).metadata?.pendingScope;
-          if (pending) {
-            setScopeFeatures(pending.featureCandidates ?? []);
-            setScopeBuildId(status.build.id);
-            setScopeMessage(pending.message ?? "Here's what I'm planning to build:");
-          }
-        }
-
+      if (status.build.status === "queued" || status.build.status === "running") {
         await subscribeToExistingBuild(
           status.build.id,
           restoredState?.lastEventId ?? status.trace.lastEventId,
@@ -532,151 +427,6 @@ export function ProjectPage() {
   useEffect(() => {
     if (build?.status === "completed" || build?.status === "failed") clearState();
   }, [build?.status, clearState]);
-
-  // Cleanup phase poll on unmount
-  useEffect(() => {
-    return () => {
-      if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-    };
-  }, []);
-
-  // ─── Phase: continue to next phase ────────────────────────────────────────
-
-  const handleNextPhase = useCallback(async () => {
-    if (!projectId) return;
-    const expectedPhase = currentPhase + 1;
-    setIsPhaseBuilding(true);
-    setCurrentPhase(expectedPhase);
-
-    buildDoneRef.current = false;
-    setIsAiCustomising(true);
-    if (aiCustomisingTimeoutRef.current) {
-      clearTimeout(aiCustomisingTimeoutRef.current);
-      aiCustomisingTimeoutRef.current = null;
-    }
-
-    if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-
-    let phaseCompleted = false;
-
-    const startPhasePoll = () => {
-      if (phasePollRef.current) return;
-      const pollStart = Date.now();
-      const POLL_TIMEOUT = 5 * 60 * 1000;
-
-      phasePollRef.current = setInterval(async () => {
-        if (phaseCompleted) {
-          if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-          return;
-        }
-        if (Date.now() - pollStart > POLL_TIMEOUT) {
-          if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-          setIsPhaseBuilding(false);
-          return;
-        }
-        try {
-          const proj = await getProject(projectId);
-          const serverPhase = proj.currentPhase ?? 0;
-          if (serverPhase > expectedPhase || (serverPhase === expectedPhase && !proj.phaseMode)) {
-            phaseCompleted = true;
-            if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-            setCurrentPhase(serverPhase);
-            setIsPhaseBuilding(false);
-            const latestBuild = await getLatestBuildForProject(projectId);
-            if (latestBuild) {
-              setBuild(latestBuild.build);
-              if (latestBuild.result) setBuildResult(latestBuild.result);
-              if (latestBuild.trace.previewReady || latestBuild.build.status === "completed") {
-                setPreviewGenerationId(latestBuild.build.id);
-              }
-              setPreviewRefreshKey(c => c + 1);
-            }
-          }
-        } catch (pollErr) {
-          console.warn("[NextPhase] Poll error:", pollErr);
-        }
-      }, 3000);
-    };
-
-    const controller = new AbortController();
-
-    try {
-      const response = await startNextPhase(projectId);
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No stream body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let dataLines: string[] = [];
-
-      const flushEvent = () => {
-        if (dataLines.length === 0) return;
-        const payload = dataLines.join("\n");
-        dataLines = [];
-        try {
-          const event = JSON.parse(payload) as BuilderV3Event;
-          if ("buildId" in event && event.buildId) activeBuildIdRef.current = event.buildId;
-          if (event.type === "done" || event.type === "error") {
-            phaseCompleted = true;
-            if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-          }
-          handleLegacyEvent(event);
-        } catch { /* ignore parse errors */ }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) { flushEvent(); break; }
-        buffer += decoder.decode(value, { stream: true });
-        while (true) {
-          const lineBreakIndex = buffer.indexOf("\n");
-          if (lineBreakIndex === -1) break;
-          const rawLine = buffer.slice(0, lineBreakIndex);
-          buffer = buffer.slice(lineBreakIndex + 1);
-          const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-          if (line.length === 0) { flushEvent(); continue; }
-          if (line.startsWith("id:") || line.startsWith("event:")) continue;
-          if (line.startsWith("data:")) { dataLines.push(line.slice(5).trim()); }
-        }
-      }
-
-      if (!phaseCompleted) startPhasePoll();
-    } catch (err) {
-      if (!controller.signal.aborted && !phaseCompleted) startPhasePoll();
-    }
-  }, [projectId, currentPhase, buildDoneRef]);
-
-  const handleSkipPhases = useCallback(() => {
-    if (phasePollRef.current) { clearInterval(phasePollRef.current); phasePollRef.current = null; }
-    setPhaseMode(false);
-  }, []);
-
-  // ─── Scope confirmation ───────────────────────────────────────────────────
-
-  const handleScopeConfirm = useCallback(async (features: string[], extras: string) => {
-    if (!scopeBuildId) return;
-    try {
-      await confirmScope(scopeBuildId, features, extras);
-    } catch (err) {
-      console.error("[ScopeConfirm] Failed:", err);
-    }
-  }, [scopeBuildId]);
-
-  // ─── Insufficient credits actions ─────────────────────────────────────────
-
-  const handleInsufficientCreditsUpgrade = useCallback(() => {
-    openPricingModal();
-  }, [openPricingModal]);
-
-  const handleForceSimple = useCallback(async () => {
-    if (!insufficientBuildId) return;
-    try {
-      await forceSimpleBuild(insufficientBuildId);
-    } catch (err) {
-      console.error("[ForceSimple] Failed:", err);
-      throw err;
-    }
-  }, [insufficientBuildId]);
 
   // ─── Preview refresh ──────────────────────────────────────────────────────
 
@@ -905,9 +655,6 @@ export function ProjectPage() {
         onExportZip={handleExportZip}
         isExporting={isExporting}
         beomzAppUrl={beomzAppUrl}
-        phaseMode={phaseMode}
-        currentPhase={currentPhase}
-        phasesTotal={phases.length}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -938,39 +685,6 @@ export function ProjectPage() {
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
               creditsBalance={credits?.balance}
-              phaseCard={
-                phaseMode && phases.length > 0 ? (
-                  <PhasePlanCard
-                    phases={phases}
-                    currentPhase={currentPhase}
-                    isBuilding={isPhaseBuilding}
-                    onContinue={handleNextPhase}
-                    onSkip={handleSkipPhases}
-                  />
-                ) : undefined
-              }
-              scopeCard={
-                scopeBuildId && scopeFeatures.length > 0 ? (
-                  <FeatureScopeCard
-                    features={scopeFeatures}
-                    buildId={scopeBuildId}
-                    message={scopeMessage}
-                    onConfirm={handleScopeConfirm}
-                  />
-                ) : undefined
-              }
-              insufficientCreditsCard={
-                insufficientBuildId ? (
-                  <InsufficientCreditsCard
-                    available={insufficientAvailable}
-                    required={insufficientRequired}
-                    features={insufficientFeatures}
-                    buildId={insufficientBuildId}
-                    onUpgrade={handleInsufficientCreditsUpgrade}
-                    onSimpleBuild={handleForceSimple}
-                  />
-                ) : undefined
-              }
             />
           </div>
         </div>

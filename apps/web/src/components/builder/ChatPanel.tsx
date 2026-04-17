@@ -5,7 +5,6 @@
  * Message rendering delegated to ChatMessageView (ChatMessage.tsx).
  * Input bar kept exactly as before.
  */
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { ArrowDown, ListChecks, Paperclip, Send, Sparkles, Square } from "lucide-react";
@@ -25,12 +24,6 @@ interface ChatPanelProps {
   onDismissChips?: () => void;
   /** Current credits balance — 0 disables send */
   creditsBalance?: number;
-  /** PhasePlanCard rendered after messages when phaseMode is active */
-  phaseCard?: ReactNode;
-  /** FeatureScopeCard rendered after messages during scope confirmation */
-  scopeCard?: ReactNode;
-  /** InsufficientCreditsCard rendered after messages when credits are low */
-  insufficientCreditsCard?: ReactNode;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -45,9 +38,6 @@ export function ChatPanel({
   suggestionChips,
   onDismissChips,
   creditsBalance,
-  phaseCard,
-  scopeCard,
-  insufficientCreditsCard,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [planMode, setPlanMode] = useState(false);
@@ -167,11 +157,6 @@ export function ChatPanel({
 
             {/* Pending shimmer — covers the gap before first building message arrives */}
             {showPendingShimmer && <BuildingShimmer />}
-
-            {/* Cards positioned at bottom of message list */}
-            {insufficientCreditsCard}
-            {scopeCard}
-            {phaseCard}
           </div>
         )}
 
