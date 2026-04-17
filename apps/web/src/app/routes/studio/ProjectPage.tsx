@@ -63,7 +63,6 @@ export function ProjectPage() {
   );
   const [projectName, setProjectName] = useState("Untitled project");
   const [projectIcon, setProjectIcon] = useState<string | null>(null);
-  const [userMode, setUserMode] = useState<"simple" | "pro">("simple");
   const [activeView, setActiveView] = useState<ActiveView>("preview");
 
   const { setLastError, setTransport } = useBuilderSessionHealth();
@@ -667,8 +666,6 @@ export function ProjectPage() {
         projectIcon={projectIcon}
         onProjectNameChange={setProjectName}
         onRefreshPreview={handleRefreshPreview}
-        userMode={userMode}
-        onUserModeChange={setUserMode}
         activeView={activeView}
         onActiveViewChange={setActiveView}
         showSidebar={showChat}

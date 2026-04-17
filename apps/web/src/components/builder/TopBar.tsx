@@ -1,7 +1,7 @@
 /**
  * TopBar — V2 builder top bar.
  * White bg, center tab switcher (Preview | Code | Database | Integrations),
- * editable project name, publish states, Simple/Pro toggle.
+ * editable project name, publish states, plan badge.
  */
 import type React from "react";
 import { useState, useRef, useCallback } from "react";
@@ -32,6 +32,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
 import { GlobalNav } from "../layout/GlobalNav";
+import { useCredits } from "../../lib/CreditsContext";
 
 export type ActiveView = "preview" | "code" | "database" | "integrations";
 
@@ -60,8 +61,6 @@ interface TopBarProps {
   projectIcon?: string | null;
   onProjectNameChange?: (name: string) => void;
   onRefreshPreview?: () => void;
-  userMode: "simple" | "pro";
-  onUserModeChange: (mode: "simple" | "pro") => void;
   activeView: ActiveView;
   onActiveViewChange: (view: ActiveView) => void;
   showSidebar?: boolean;
@@ -91,6 +90,41 @@ function toast(msg: string) {
   }, 2000);
 }
 
+const PLAN_LABELS: Record<string, string> = {
+  free: "Free",
+  pro_starter: "Starter",
+  pro_builder: "Pro",
+  business: "Business",
+};
+
+function PlanBadge({ plan }: { plan: string | null }) {
+  if (!plan) return null;
+  const isFree = plan === "free";
+  const label = PLAN_LABELS[plan] ?? plan;
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={cn(
+          "rounded-full px-2.5 py-0.5 text-[11px] font-semibold",
+          isFree
+            ? "bg-[#fff7ed] text-[#F97316]"
+            : "bg-[#f3f4f6] text-[#6b7280]",
+        )}
+      >
+        {label}
+      </span>
+      {isFree && (
+        <button
+          onClick={() => { window.location.href = "/plan"; }}
+          className="text-[11px] font-medium text-[#F97316] underline-offset-2 hover:underline"
+        >
+          Upgrade
+        </button>
+      )}
+    </div>
+  );
+}
+
 const VIEW_TABS: { key: ActiveView; icon: typeof Smartphone; label: string }[] = [
   { key: "preview", icon: Smartphone, label: "Preview" },
   { key: "code", icon: Code2, label: "Code" },
@@ -103,8 +137,6 @@ export function TopBar({
   projectIcon,
   onProjectNameChange,
   onRefreshPreview,
-  userMode,
-  onUserModeChange,
   activeView,
   onActiveViewChange,
   showSidebar = true,
@@ -121,6 +153,7 @@ export function TopBar({
   phasesTotal = 0,
 }: TopBarProps) {
   const navigate = useNavigate();
+  const { credits } = useCredits();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -228,31 +261,8 @@ export function TopBar({
 
       {/* Right group */}
       <div className="flex flex-1 items-center justify-end gap-1.5">
-        {/* Simple / Pro toggle */}
-        <div className="flex rounded-full border border-[#e5e5e5] bg-white p-0.5">
-          <button
-            onClick={() => onUserModeChange("simple")}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-all",
-              userMode === "simple"
-                ? "bg-[#F97316] text-white"
-                : "text-[#6b7280] hover:text-[#1a1a1a]",
-            )}
-          >
-            Simple
-          </button>
-          <button
-            onClick={() => onUserModeChange("pro")}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-all",
-              userMode === "pro"
-                ? "bg-[#F97316] text-white"
-                : "text-[#6b7280] hover:text-[#1a1a1a]",
-            )}
-          >
-            Pro
-          </button>
-        </div>
+        {/* Plan badge */}
+        <PlanBadge plan={credits?.plan ?? null} />
 
         <div className="h-4 w-px bg-[#e5e5e5]" />
 
