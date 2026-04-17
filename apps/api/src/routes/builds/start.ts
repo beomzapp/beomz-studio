@@ -365,6 +365,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       model: effectiveModel,
       requestedAt, operationId,
       isIteration, existingFiles,
+      projectName,
     },
     orgContext.db,
   ).catch((err: unknown) => {

@@ -78,6 +78,7 @@ export const CREDIT_PACKS: CreditPack[] = [
 
 export const CREDIT_THRESHOLD = 8; // complex_build minimum (BEO-345 rescale)
 export const SIMPLE_BUILD_MIN = 3; // simple_build minimum
+export const CONVERSATIONAL_COST = 1; // BEO-371: question/conversational answer via Sonnet
 
 // ─── Cost formula ─────────────────────────────────────────────────────────────
 // BEO-345: divide by 8 to bring to human scale.

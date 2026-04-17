@@ -300,5 +300,7 @@ export function mapGenerationRowToBuild(row: GenerationRow) {
     templateId: row.template_id,
     templateReason: metadata.templateReason ?? null,
     workflowId: metadata.workflowId ?? null,
+    // BEO-370: chat history for session restore on hard refresh.
+    sessionEvents: Array.isArray(row.session_events) ? row.session_events : [],
   };
 }

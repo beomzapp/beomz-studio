@@ -41,7 +41,7 @@ import {
 
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
-import { CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
+import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { extractFeatures } from "../../lib/extractFeatures.js";
 import { planPhases } from "../../lib/planPhases.js";
@@ -70,6 +70,8 @@ export interface BuildGenerateInput {
   operationId: string;
   isIteration: boolean;
   existingFiles: readonly StudioFile[];
+  // BEO-371: project name + original prompt for context-aware intent detection.
+  projectName?: string;
   // BEO-197: phased build context (supplied when continuing a phase)
   phaseOverride?: {
     phases: Phase[];
@@ -362,6 +364,25 @@ async function appendEventToDb(
     metadata: { ...meta, builderTrace: newTrace },
     ...extraPatch,
   });
+}
+
+// BEO-370: append a chat message to session_events on the generation row.
+// Non-fatal — build continues if this fails.
+async function appendSessionEventToDb(
+  db: StudioDbClient,
+  buildId: string,
+  event: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const row = await db.findGenerationById(buildId);
+    if (!row) return;
+    const current = Array.isArray(row.session_events) ? (row.session_events as Record<string, unknown>[]) : [];
+    await db.updateGeneration(buildId, {
+      session_events: [...current, { ...event, timestamp: new Date().toISOString() }],
+    });
+  } catch (err) {
+    console.warn("[generate] appendSessionEventToDb failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
 }
 
 // ─── Design system detection + spec injection ─────────────────────────────────
@@ -1781,26 +1802,34 @@ const DETECT_INTENT_TIMEOUT_MS = 4_000;
 
 const DETECT_INTENT_SYSTEM_PROMPT = `You classify a user message into exactly one of four intent categories.
 
-question — user is asking for information, explanation, or advice. No code change intended.
-Keywords: what, how, why, explain, does, is, can you tell me, what if.
-Examples: "What does this component do?" "How do I add auth?" "Why is the sidebar dark?"
+question — user is asking for information, ideas, recommendations, or advice. No code change intended.
+Keywords: what, how, why, explain, does, is, can you tell me, what if, what else, give me, recommend, suggestions, ideas.
+Examples: "What does this component do?" "How do I add auth?" "What features should I add?" "Give me recommendations" "What's missing?" "What else can we add?"
 
 edit — user wants a specific change to the existing app. Refers to something that already exists.
 Keywords: change, update, make, add, remove, fix, adjust, rename, move, replace, switch, darker, lighter, bigger, smaller.
 Examples: "Make the sidebar darker" "Add a delete button" "Fix the navigation" "Change the font size"
 
-build — user wants a new app or major feature from scratch. No existing context referenced.
+build — user wants a brand NEW app from scratch. ONLY when there is NO existing project and the user explicitly requests a new build.
 Keywords: build, create, generate, make me, I want, I need a.
 Examples: "Build me a CRM" "Create a todo app" "Generate a restaurant POS"
+IMPORTANT: When an existing project is open, build intent should almost NEVER fire. Everything is edit or question.
 
 ambiguous — intent unclear. Could be edit or question. Unclear what action to take.
 Examples: "I don't like the layout" "Can you improve this?" "This doesn't look right"
+
+CRITICAL RULES for existing projects (hasExistingProject = true):
+- "what else can we add", "give recommendations", "give me recommendations", "what should I add", "any suggestions", "what's missing", "what can I improve", "what features are missing" → ALWAYS question
+- build intent → almost NEVER (only if user says "build a completely new app" with explicit replacement intent)
+- edit vs question: if user wants a change → edit; if user wants ideas/info → question
 
 Reply with ONLY one word: question, edit, build, or ambiguous.`;
 
 export async function detectIntent(
   prompt: string,
   hasExistingProject: boolean,
+  projectName?: string,
+  originalPrompt?: string,
 ): Promise<BuildIntent> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) return hasExistingProject ? "edit" : "build";
@@ -1810,15 +1839,15 @@ export async function detectIntent(
 
   try {
     const client = new Anthropic({ apiKey });
-    const context = hasExistingProject
-      ? "Context: The user has an existing project open."
-      : "Context: No existing project — this is a new build request.";
+    const projectCtx = hasExistingProject
+      ? `Context: The user has an existing project open${projectName ? ` ("${projectName}"${originalPrompt ? `, originally: "${originalPrompt}"` : ""})` : ""}. hasExistingProject = true.`
+      : "Context: No existing project — this is a new build request. hasExistingProject = false.";
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 10,
         system: DETECT_INTENT_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: `${context}\n\nUser message: ${prompt}` }],
+        messages: [{ role: "user", content: `${projectCtx}\n\nUser message: ${prompt}` }],
       },
       { signal: controller.signal },
     );
@@ -1873,6 +1902,8 @@ Examples: "Building your restaurant POS system." "Building your task management 
 async function generateConversationalAnswer(
   prompt: string,
   existingFiles: readonly StudioFile[],
+  projectName?: string,
+  originalPrompt?: string,
 ): Promise<string> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) return "I'm not sure — could you give me more details?";
@@ -1881,15 +1912,19 @@ async function generateConversationalAnswer(
     ? `\n\nThe user has an existing project with these files: ${existingFiles.map((f) => f.path.replace(/^.*\//, "")).join(", ")}.`
     : "";
 
+  const projectContext = projectName
+    ? `The user is working on: ${projectName}${originalPrompt ? ` (originally: "${originalPrompt}")` : ""}.`
+    : "You are a helpful assistant for Beomz Studio.";
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8_000);
+  const timeoutId = setTimeout(() => controller.abort(), 12_000);
   try {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create(
       {
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 300,
-        system: `You are Beomz, an AI app builder assistant. Answer the user's question concisely and helpfully.${fileContext}Keep responses under 3 sentences. Be direct and friendly. No filler phrases.`,
+        model: "claude-sonnet-4-6",
+        max_tokens: 600,
+        system: `${projectContext} Answer the user's question helpfully and concisely.${fileContext} If they ask what to add or for recommendations, give 3-5 specific, concrete feature suggestions relevant to their app. Be direct and friendly. No filler phrases.`,
         messages: [{ role: "user", content: prompt }],
       },
       { signal: controller.signal },
@@ -2001,7 +2036,9 @@ async function _runBuildInBackground(
 
   if (!input.phaseOverride && !input.confirmedScope) {
     const hasExistingProject = input.isIteration || input.existingFiles.length > 0;
-    detectedIntent = await detectIntent(prompt, hasExistingProject);
+    // BEO-371: pass project context so Haiku classifies recommendation/suggestion
+    // messages as "question" rather than "build" when a project is already open.
+    detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
     console.log("[generate] intent detected:", detectedIntent, { buildId });
 
     // Emit intent_detected so the frontend can show a visual cue
@@ -2014,7 +2051,44 @@ async function _runBuildInBackground(
     } as unknown as BuilderV3StatusEvent);
 
     if (detectedIntent === "question") {
-      const answer = await generateConversationalAnswer(prompt, input.existingFiles);
+      // BEO-371: deduct 1 credit for conversational Sonnet answers; gate on balance.
+      if (!isAdminEmail(userEmail ?? "")) {
+        let orgBalance = 0;
+        try {
+          const orgRow = await db.getOrgWithBalance(orgId);
+          orgBalance = (orgRow?.credits ?? 0) + (orgRow?.topup_credits ?? 0);
+        } catch {
+          // non-fatal — skip the guard if balance check fails
+        }
+        if (orgBalance < CONVERSATIONAL_COST) {
+          await appendEventToDb(db, buildId, {
+            type: "insufficient_credits" as const,
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            available: orgBalance,
+            required: CONVERSATIONAL_COST,
+            features: [],
+          } as unknown as BuilderV3StatusEvent, {
+            status: "insufficient_credits",
+          });
+          console.log("[generate] question intent — insufficient credits for conversational answer.", { buildId, orgBalance });
+          return;
+        }
+      }
+
+      // BEO-370: persist user prompt before answering
+      await appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+
+      const answer = await generateConversationalAnswer(prompt, input.existingFiles, input.projectName, input.sourcePrompt);
+
+      // BEO-371: deduct 1 credit (non-fatal)
+      if (!isAdminEmail(userEmail ?? "")) {
+        db.applyOrgUsageDeduction(orgId, CONVERSATIONAL_COST, buildId, "Conversational answer").catch((err: unknown) => {
+          console.error("[generate] conversational credit deduction failed (non-fatal):", err instanceof Error ? err.message : String(err));
+        });
+      }
+
       await appendEventToDb(db, buildId, {
         type: "conversational_response" as const,
         id: nextId(),
@@ -2022,6 +2096,8 @@ async function _runBuildInBackground(
         operation: op,
         message: answer,
       } as unknown as BuilderV3StatusEvent);
+      // BEO-370: persist the answer
+      await appendSessionEventToDb(db, buildId, { type: "question_answer", content: answer });
       // BEO-366: emit terminal done so the SSE relay closes cleanly and
       // buildDoneRef resets to true on the frontend (no overlay stuck).
       await appendEventToDb(db, buildId, {
@@ -2045,6 +2121,8 @@ async function _runBuildInBackground(
     }
 
     if (detectedIntent === "ambiguous") {
+      // BEO-370: persist user prompt before asking clarifying question
+      await appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
       const clarifyingQuestion = await generateClarifyingQuestion(prompt);
       await appendEventToDb(db, buildId, {
         type: "clarifying_question" as const,
@@ -2053,6 +2131,8 @@ async function _runBuildInBackground(
         operation: op,
         message: clarifyingQuestion,
       } as unknown as BuilderV3StatusEvent);
+      // BEO-370: persist clarifying question
+      await appendSessionEventToDb(db, buildId, { type: "clarifying_question", content: clarifyingQuestion });
       // BEO-366: emit terminal done so the SSE relay closes cleanly.
       await appendEventToDb(db, buildId, {
         type: "done",
@@ -2342,6 +2422,9 @@ async function _runBuildInBackground(
             operation: op,
             message: ackMessage,
           } as unknown as BuilderV3StatusEvent);
+          // BEO-370: persist pre_build_ack + user prompt
+          void appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+          void appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
         } catch {
           // non-fatal
         }
@@ -2511,6 +2594,7 @@ async function _runBuildInBackground(
         try {
           const changedPaths = iterResult.files.map((f) => f.path.replace(/^.*\//, ""));
           const summaryMessage = await generateBuildSummary(prompt, changedPaths);
+          const iterDurationMs = Date.now() - buildStartTime;
           await appendEventToDb(db, buildId, {
             type: "build_summary",
             id: nextId(),
@@ -2518,9 +2602,17 @@ async function _runBuildInBackground(
             operation: op,
             message: summaryMessage,
             filesChanged: changedPaths,
-            durationMs: Date.now() - buildStartTime,
+            durationMs: iterDurationMs,
             creditsUsed: iterCreditsUsed,
           } as unknown as BuilderV3StatusEvent);
+          // BEO-370: persist build summary
+          void appendSessionEventToDb(db, buildId, {
+            type: "build_summary",
+            content: summaryMessage,
+            filesChanged: changedPaths,
+            durationMs: iterDurationMs,
+            creditsUsed: iterCreditsUsed,
+          });
         } catch {
           // non-fatal
         }
@@ -2628,6 +2720,9 @@ async function _runBuildInBackground(
           operation: op,
           message: ackMessage,
         } as unknown as BuilderV3StatusEvent);
+        // BEO-370: persist pre_build_ack + user prompt
+        void appendSessionEventToDb(db, buildId, { type: "user", content: prompt });
+        void appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
       } catch {
         // non-fatal
       }
@@ -2785,6 +2880,7 @@ async function _runBuildInBackground(
       try {
         const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
         const summaryMessage = await generateBuildSummary(prompt, changedPaths);
+        const finalDurationMs = Date.now() - buildStartTime;
         await appendEventToDb(db, buildId, {
           type: "build_summary",
           id: nextId(),
@@ -2792,9 +2888,17 @@ async function _runBuildInBackground(
           operation: op,
           message: summaryMessage,
           filesChanged: changedPaths,
-          durationMs: Date.now() - buildStartTime,
+          durationMs: finalDurationMs,
           creditsUsed,
         } as unknown as BuilderV3StatusEvent);
+        // BEO-370: persist build summary
+        void appendSessionEventToDb(db, buildId, {
+          type: "build_summary",
+          content: summaryMessage,
+          filesChanged: changedPaths,
+          durationMs: finalDurationMs,
+          creditsUsed,
+        });
       } catch {
         // non-fatal
       }

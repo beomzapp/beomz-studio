@@ -107,6 +107,8 @@ export interface GenerationRow extends Record<string, unknown> {
   warnings: readonly string[];
   files: readonly StudioFile[];
   metadata: Record<string, unknown>;
+  // BEO-370: chat message history for session restore on hard refresh.
+  session_events: readonly Record<string, unknown>[];
 }
 
 export interface PreviewRow extends Record<string, unknown> {
@@ -273,6 +275,7 @@ export interface GenerationInsert extends Record<string, unknown> {
   warnings?: readonly string[];
   files?: readonly StudioFile[];
   metadata?: Record<string, unknown>;
+  session_events?: readonly Record<string, unknown>[];
 }
 
 export interface GenerationUpdate extends Record<string, unknown> {
@@ -290,6 +293,7 @@ export interface GenerationUpdate extends Record<string, unknown> {
   warnings?: readonly string[];
   files?: readonly StudioFile[];
   metadata?: Record<string, unknown>;
+  session_events?: readonly Record<string, unknown>[];
 }
 
 export interface PreviewInsert extends Record<string, unknown> {
