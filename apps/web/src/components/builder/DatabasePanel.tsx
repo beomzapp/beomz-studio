@@ -38,19 +38,14 @@ import {
   getDbRows,
   runDbMigration,
   getDbUsage,
+  getStorageAddons,
   createStorageAddonCheckout,
   type DbTable,
+  type StorageAddonInfo,
 } from "../../lib/api";
 
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 type ModeTab = "shared" | "dedicated" | "byo";
-
-// BEO-329: Storage add-on Stripe price IDs (confirm with backend)
-const STORAGE_PACKS: Array<{ label: string; price: string; priceId: string }> = [
-  { label: "+500MB", price: "$5", priceId: "price_1TMttV8PEPiIN5kItiXhAFp8" },
-  { label: "+2GB", price: "$12", priceId: "price_1TMttY8PEPiIN5kIJxQy3mO5" },
-  { label: "+10GB", price: "$29", priceId: "price_1TMttb8PEPiIN5kI7SusoitU" },
-];
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
@@ -124,6 +119,10 @@ export function DatabasePanel({
   const [dbUsageLoading, setDbUsageLoading] = useState(false);
   const [dbUsageError, setDbUsageError] = useState(false);
 
+  // BEO-407: Storage add-on tiers fetched from API
+  const [addons, setAddons] = useState<StorageAddonInfo[] | null>(null);
+  const [addonsLoading, setAddonsLoading] = useState(true);
+
   // BEO-400: Storage limit reached (402 from migrate)
   const [storageLimitReached, setStorageLimitReached] = useState(false);
 
@@ -176,6 +175,18 @@ export function DatabasePanel({
       setDbUsageLoading(false);
     }
   }, [projectId]);
+
+  const fetchAddons = useCallback(async () => {
+    setAddonsLoading(true);
+    try {
+      const data = await getStorageAddons();
+      setAddons(data.filter((a) => a.price_id));
+    } catch {
+      setAddons([]);
+    } finally {
+      setAddonsLoading(false);
+    }
+  }, []);
 
   const handleEnable = useCallback(async () => {
     if (!projectId) return;
@@ -234,15 +245,12 @@ export function DatabasePanel({
     try {
       const data = await getDbSchema(projectId);
       setSchemaTables(data.tables ?? []);
-      if (!dataTable && data.tables?.length > 0) {
-        setDataTable(data.tables[0].table_name);
-      }
     } catch (err) {
       setSchemaError(err instanceof Error ? err.message : "Failed to load schema.");
     } finally {
       setSchemaLoading(false);
     }
-  }, [projectId, dataTable]);
+  }, [projectId]);
 
   const fetchRows = useCallback(async (table: string) => {
     if (!projectId || !table) return;
@@ -325,13 +333,14 @@ export function DatabasePanel({
   }, [projectId, dataTable, dataRows, fetchRows, runMigrationSafe]);
 
   const handleStorageAddon = useCallback(async (priceId: string) => {
+    if (!projectId) return;
     try {
-      const { url } = await createStorageAddonCheckout(priceId);
+      const { url } = await createStorageAddonCheckout(priceId, projectId);
       window.location.href = url;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to open checkout.");
     }
-  }, [showToast]);
+  }, [projectId, showToast]);
 
   // Auto-fetch schema when entering wired state
   useEffect(() => {
@@ -347,12 +356,13 @@ export function DatabasePanel({
     }
   }, [dbWired, modeTab, activeTab, dataTable, fetchRows]);
 
-  // Fetch storage usage on mount and when entering shared mode
+  // Fetch storage usage + addons on mount and when entering shared mode
   useEffect(() => {
     if (dbWired && modeTab === "shared") {
       void fetchDbUsage();
+      void fetchAddons();
     }
-  }, [dbWired, modeTab, fetchDbUsage]);
+  }, [dbWired, modeTab, fetchDbUsage, fetchAddons]);
 
   const editableCols = useMemo(
     () => (selectedTableSchema?.columns ?? []).filter(
@@ -705,16 +715,31 @@ export function DatabasePanel({
                 Need more storage? Add to this project.
               </p>
               <div className="flex items-center gap-2">
-                {STORAGE_PACKS.map(({ label, price, priceId }) => (
-                  <button
-                    key={priceId}
-                    onClick={() => void handleStorageAddon(priceId)}
-                    className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
-                  >
-                    <span className="font-semibold">{label}</span>
-                    <span className="text-[#9ca3af]">{price}</span>
-                  </button>
-                ))}
+                {addonsLoading || addons === null ? (
+                  /* Loading state — three placeholder disabled buttons */
+                  ["+500MB", "+2GB", "+10GB"].map((label) => (
+                    <div
+                      key={label}
+                      className="group relative flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2"
+                    >
+                      <span className="text-[11px] font-semibold text-[#d1d5db]">{label}</span>
+                      <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-[#1a1a1a] px-2 py-1 text-[10px] text-white opacity-0 group-hover:opacity-100">
+                        Loading...
+                      </div>
+                    </div>
+                  ))
+                ) : addons.length === 0 ? null : (
+                  addons.map((addon) => (
+                    <button
+                      key={addon.price_id}
+                      onClick={() => void handleStorageAddon(addon.price_id!)}
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
+                    >
+                      <span className="font-semibold">{addon.label}</span>
+                      <span className="text-[#9ca3af]">${addon.price_usd}</span>
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -726,13 +751,13 @@ export function DatabasePanel({
                 Storage limit reached — {formatStorageMb(limitMb)} used of {formatStorageMb(limitMb)}
               </p>
               <div className="flex flex-wrap gap-2">
-                {STORAGE_PACKS.map(({ label, price, priceId }) => (
+                {(addons ?? []).filter((a) => a.price_id).map((addon) => (
                   <button
-                    key={priceId}
-                    onClick={() => void handleStorageAddon(priceId)}
+                    key={addon.price_id}
+                    onClick={() => void handleStorageAddon(addon.price_id!)}
                     className="rounded-lg bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#374151] shadow-sm ring-1 ring-[#e5e7eb] transition-colors hover:ring-[#F97316]/50"
                   >
-                    {label} {price}
+                    {addon.label} ${addon.price_usd}
                   </button>
                 ))}
                 <button
@@ -857,7 +882,7 @@ export function DatabasePanel({
                     onChange={(e) => setDataTable(e.target.value)}
                     className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#F97316]/50"
                   >
-                    <option value="">Select table</option>
+                    <option value="">Select a table...</option>
                     {schemaTables.map((t) => (
                       <option key={t.table_name} value={t.table_name}>
                         {t.table_name}

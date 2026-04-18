@@ -483,12 +483,26 @@ export async function getDbUsage(projectId: string): Promise<DbUsageResponse> {
   });
 }
 
+export interface StorageAddonInfo {
+  label: string;
+  price_usd: number;
+  extra_storage_mb: number;
+  price_id: string | undefined;
+}
+
+export async function getStorageAddons(): Promise<StorageAddonInfo[]> {
+  return requestJson<StorageAddonInfo[]>("/payments/storage-addons", {
+    method: "GET",
+  });
+}
+
 export async function createStorageAddonCheckout(
   priceId: string,
+  projectId: string,
 ): Promise<{ url: string }> {
   return requestJson<{ url: string }>("/payments/storage-addon/checkout", {
     method: "POST",
-    body: JSON.stringify({ priceId }),
+    body: JSON.stringify({ priceId, projectId }),
   });
 }
 

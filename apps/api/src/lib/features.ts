@@ -84,13 +84,15 @@ export interface PublicStorageAddon {
   label: string;
   price_usd: number;
   extra_storage_mb: number;
+  price_id: string | undefined;
 }
 
 export function getPublicStorageAddons(): PublicStorageAddon[] {
-  return STORAGE_ADDONS.map(({ label, price_usd, extra_storage_mb }) => ({
+  return STORAGE_ADDONS.map(({ label, price_usd, extra_storage_mb, price_id }) => ({
     label,
     price_usd,
     extra_storage_mb,
+    price_id,
   }));
 }
 
