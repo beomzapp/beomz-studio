@@ -21,9 +21,11 @@ import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   BuildIntent,
+  BuilderImageIntent,
   BuilderV3Event,
   BuilderV3DoneEvent,
   BuilderV3ErrorEvent,
+  BuilderV3ImageIntentEvent,
   BuilderV3NextStepsEvent,
   BuilderV3PreambleEvent,
   BuilderV3PreviewReadyEvent,
@@ -46,6 +48,7 @@ import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { generateNextSteps, generateStagePreamble } from "../../lib/buildNarration.js";
 import { createBuildStageEmitter } from "../../lib/buildStageEvents.js";
+import { classifyImageIntent } from "../../lib/classifyImageIntent.js";
 import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { planPhases } from "../../lib/planPhases.js";
@@ -62,10 +65,12 @@ import {
 
 export interface BuildGenerateInput {
   buildId: string;
+  confirmedIntent?: BuilderImageIntent;
   projectId: string;
   orgId: string;
   userId: string | null;
   userEmail: string | null;
+  imageUrl?: string;
   prompt: string;
   sourcePrompt: string;
   templateId: string;
@@ -388,6 +393,50 @@ async function appendSessionEventToDb(
   } catch (err) {
     console.warn("[generate] appendSessionEventToDb failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
+}
+
+const IMAGE_INTENT_PROMPT_CONTEXT: Record<BuilderImageIntent, string> = {
+  logo: "The user has attached a logo image. Use it in the app header and favicon, and preserve its branding cues.",
+  reference: "The user has attached a design reference image. Match the layout, visual hierarchy, and color direction where it fits the request.",
+  error: "The user has attached an error screenshot. Diagnose the likely issue shown and prioritize fixing that problem in the code.",
+  theme: "The user has attached a theme or brand guide image. Apply its colors, typography cues, and overall style consistently across the app.",
+  general: "The user has attached an image as supporting context. Use it only where it clearly helps fulfill the request.",
+};
+
+function buildImageIntentContext(intent: BuilderImageIntent): string {
+  return IMAGE_INTENT_PROMPT_CONTEXT[intent];
+}
+
+function buildPromptWithImageIntent(
+  prompt: string,
+  confirmedIntent?: BuilderImageIntent,
+): string {
+  if (!confirmedIntent) {
+    return prompt;
+  }
+
+  const imageContext = buildImageIntentContext(confirmedIntent);
+  const basePrompt = prompt.trim();
+
+  if (!basePrompt) {
+    return imageContext;
+  }
+
+  return `${basePrompt}\n\nAttached image context: ${imageContext}`;
+}
+
+function buildAnthropicUserContent(
+  userMessage: string,
+  imageUrl?: string,
+): Anthropic.MessageParam["content"] {
+  if (!imageUrl) {
+    return userMessage;
+  }
+
+  return [
+    { type: "image", source: { type: "url", url: imageUrl } },
+    { type: "text", text: userMessage },
+  ];
 }
 
 // ─── Design system detection + spec injection ─────────────────────────────────
@@ -1168,15 +1217,21 @@ function buildPhaseContextBlock(
 
 // ─── Shared prompt builders ───────────────────────────────────────────────────
 
-function buildSystemPrompt(paletteId: string, designSystemSpec?: string, phaseContextBlock?: string): string {
+function buildSystemPrompt(
+  paletteId: string,
+  designSystemSpec?: string,
+  phaseContextBlock?: string,
+  imageContextBlock?: string,
+): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
     : "";
   const phaseBlock = phaseContextBlock ? `${phaseContextBlock}\n\n` : "";
+  const imageBlock = imageContextBlock ? `${imageContextBlock}\n\n` : "";
   const themeTsContent = buildThemeTs(paletteId);
   const variationSeed = Math.floor(Math.random() * 9000) + 1000;
   return [
-    designBlock + phaseBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
+    designBlock + phaseBlock + imageBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
     "",
     `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
@@ -1337,7 +1392,7 @@ const ANTHROPIC_HAIKU_FALLBACK = "claude-haiku-4-5-20251001";
 async function callAnthropicWithMessages(
   model: string,
   systemPrompt: string,
-  userMessage: string,
+  userMessage: Anthropic.MessageParam["content"],
   prompt: string,
   maxTokens = 64000,
   instrumentation?: { buildId: string; isIteration: boolean },
@@ -1431,13 +1486,15 @@ async function callAnthropicCustomise(
   instrumentation?: { buildId: string; isIteration: boolean },
   designSystemSpec?: string,
   phaseContextBlock?: string,
+  imageContextBlock?: string,
+  imageUrl?: string,
   phaseScope?: PhaseScope,
   maxTokens?: number,
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
-    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock),
-    buildUserMessage(prompt, phaseScope),
+    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock),
+    buildAnthropicUserContent(buildUserMessage(prompt, phaseScope), imageUrl),
     prompt,
     maxTokens,
     instrumentation,
@@ -1492,11 +1549,12 @@ async function callOpenAICompatibleCustomise(
   baseURL?: string,
   designSystemSpec?: string,
   phaseContextBlock?: string,
+  imageContextBlock?: string,
   phaseScope?: PhaseScope,
 ): Promise<CustomiseResult> {
   return callOpenAICompatibleWithMessages(
     model, apiKey,
-    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock),
+    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock),
     buildUserMessage(prompt, phaseScope),
     prompt, baseURL,
   );
@@ -1510,6 +1568,8 @@ async function callModelCustomise(
   paletteId: string,
   instrumentation?: { buildId: string; isIteration: boolean },
   phaseContextBlock?: string,
+  imageContextBlock?: string,
+  imageUrl?: string,
   phaseScope?: PhaseScope,
   maxTokens?: number,
 ): Promise<CustomiseResult> {
@@ -1529,6 +1589,8 @@ async function callModelCustomise(
       instrumentation,
       designSystemSpec,
       phaseContextBlock,
+      imageContextBlock,
+      imageUrl,
       phaseScope,
       maxTokens,
     );
@@ -1537,7 +1599,17 @@ async function callModelCustomise(
   if (model.startsWith("gpt-")) {
     const apiKey = apiConfig.OPENAI_API_KEY;
     if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
-    return callOpenAICompatibleCustomise(prompt, model, apiKey, paletteId, undefined, designSystemSpec, phaseContextBlock, phaseScope);
+    return callOpenAICompatibleCustomise(
+      prompt,
+      model,
+      apiKey,
+      paletteId,
+      undefined,
+      designSystemSpec,
+      phaseContextBlock,
+      imageContextBlock,
+      phaseScope,
+    );
   }
 
   if (model.startsWith("gemini-")) {
@@ -1546,7 +1618,7 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
-      designSystemSpec, phaseContextBlock, phaseScope,
+      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope,
     );
   }
 
@@ -1559,6 +1631,8 @@ async function callModelCustomise(
     instrumentation,
     designSystemSpec,
     phaseContextBlock,
+    imageContextBlock,
+    imageUrl,
     phaseScope,
     maxTokens,
   );
@@ -1566,7 +1640,7 @@ async function callModelCustomise(
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
 
-function buildIterationSystemPrompt(schemaSummary?: string): string {
+function buildIterationSystemPrompt(schemaSummary?: string, imageContextBlock?: string): string {
   const dbBlock = schemaSummary
     ? [
         "",
@@ -1579,8 +1653,12 @@ function buildIterationSystemPrompt(schemaSummary?: string): string {
         "If no schema changes are needed, return an empty migrations array.",
       ].join("\n")
     : "";
+  const imageBlock = imageContextBlock
+    ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
+    : "";
   return [
     "You are modifying an existing React application. Apply ONLY the specific change the user requests.",
+    imageBlock,
     "",
     "RULES:",
     "1. Return ONLY files that actually need to change. Do NOT return unchanged files.",
@@ -1659,14 +1737,23 @@ async function callModelIterate(
   existingFiles: readonly StudioFile[],
   instrumentation?: { buildId: string; isIteration: boolean },
   schemaSummary?: string,
+  imageContextBlock?: string,
+  imageUrl?: string,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
 
-  const systemPrompt = buildIterationSystemPrompt(schemaSummary);
+  const systemPrompt = buildIterationSystemPrompt(schemaSummary, imageContextBlock);
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {
-    return callAnthropicWithMessages(model, systemPrompt, userMessage, prompt, 64000, instrumentation);
+    return callAnthropicWithMessages(
+      model,
+      systemPrompt,
+      buildAnthropicUserContent(userMessage, imageUrl),
+      prompt,
+      64000,
+      instrumentation,
+    );
   }
 
   if (model.startsWith("gpt-")) {
@@ -1686,7 +1773,12 @@ async function callModelIterate(
 
   // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
   console.warn("[generate] Unknown model for iteration, falling back to claude-sonnet-4-6:", model);
-  return callAnthropicWithMessages("claude-sonnet-4-6", systemPrompt, userMessage, prompt);
+  return callAnthropicWithMessages(
+    "claude-sonnet-4-6",
+    systemPrompt,
+    buildAnthropicUserContent(userMessage, imageUrl),
+    prompt,
+  );
 }
 
 const LEGACY_TEMPLATE_TAGS: Record<string, readonly string[]> = {
@@ -2061,13 +2153,16 @@ Example: "Done — I've darkened the sidebar to a deeper grey and improved the i
 export async function runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
+  deps: {
+    classifyImageIntent?: typeof classifyImageIntent;
+  } = {},
 ): Promise<void> {
   const { buildId, projectId, prompt, templateId, model, requestedAt, userId } = input;
 
   activeBuilds.add(buildId);
 
   try {
-    await _runBuildInBackground(input, db);
+    await _runBuildInBackground(input, db, deps);
   } finally {
     activeBuilds.delete(buildId);
   }
@@ -2076,10 +2171,14 @@ export async function runBuildInBackground(
 async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
+  deps: {
+    classifyImageIntent?: typeof classifyImageIntent;
+  } = {},
 ): Promise<void> {
   const { buildId, projectId, orgId, userEmail, templateId, model, requestedAt, userId } = input;
   // BEO-372: use let so we can override with a combined prompt for clarification answers.
   let prompt = input.prompt;
+  const imageIntentClassifier = deps.classifyImageIntent ?? classifyImageIntent;
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
@@ -2092,6 +2191,67 @@ async function _runBuildInBackground(
     nextId,
     emit: (event) => appendEventToDb(db, buildId, event as unknown as BuilderV3StatusEvent),
   });
+  const imageConfirmationPending = Boolean(input.imageUrl && !input.confirmedIntent);
+  const imageConfirmed = Boolean(input.imageUrl && input.confirmedIntent);
+
+  if (!input.phaseOverride && !input.confirmedScope && imageConfirmationPending && input.imageUrl) {
+    await appendSessionEventToDb(db, buildId, {
+      type: "user",
+      content: input.sourcePrompt,
+      imageUrl: input.imageUrl,
+    });
+
+    const imageIntent = await imageIntentClassifier({
+      imageUrl: input.imageUrl,
+      userText: input.sourcePrompt,
+    });
+
+    const imageIntentEvent: BuilderV3ImageIntentEvent = {
+      type: "image_intent",
+      id: nextId(),
+      timestamp: ts(),
+      operation: op,
+      intent: imageIntent.intent,
+      description: imageIntent.description,
+      imageUrl: input.imageUrl,
+    };
+
+    await appendEventToDb(db, buildId, imageIntentEvent);
+    await appendSessionEventToDb(db, buildId, {
+      type: "image_intent",
+      intent: imageIntent.intent,
+      confidence: imageIntent.confidence,
+      description: imageIntent.description,
+      imageUrl: input.imageUrl,
+    });
+    await appendEventToDb(
+      db,
+      buildId,
+      {
+        type: "done",
+        id: nextId(),
+        timestamp: ts(),
+        operation: op,
+        buildId,
+        projectId,
+        code: "awaiting_image_confirmation",
+        message: "Image intent detected — awaiting confirmation.",
+        fallbackUsed: false,
+        conversational: true,
+      },
+      {
+        completed_at: ts(),
+        status: "completed",
+        summary: "Image intent detected — awaiting confirmation.",
+      },
+    );
+    console.log("[generate] image intent detected — awaiting confirmation.", {
+      buildId,
+      intent: imageIntent.intent,
+      confidence: imageIntent.confidence,
+    });
+    return;
+  }
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
   // If the previous completed generation for this project ended with a
@@ -2119,6 +2279,11 @@ async function _runBuildInBackground(
     }
   }
 
+  if (imageConfirmed) {
+    prompt = buildPromptWithImageIntent(prompt, input.confirmedIntent);
+    forcedIntent = input.isIteration ? "edit" : "build";
+  }
+
   // ── BEO-362: 4-way intent detection ─────────────────────────────────────
   // Run for all builds except confirmed-scope resumes and phase continuations.
   // Stores the intent so pre_build_ack and build_summary can reference it later.
@@ -2134,7 +2299,11 @@ async function _runBuildInBackground(
       // messages as "question" rather than "build" when a project is already open.
       detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
     }
-    console.log("[generate] intent detected:", detectedIntent, { buildId, forced: Boolean(forcedIntent) });
+    console.log("[generate] intent detected:", detectedIntent, {
+      buildId,
+      forced: Boolean(forcedIntent),
+      imageConfirmed,
+    });
 
     // Emit intent_detected so the frontend can show a visual cue
     await appendEventToDb(db, buildId, {
@@ -2301,6 +2470,9 @@ async function _runBuildInBackground(
   } else {
     workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);
   }
+  const imageContextBlock = input.confirmedIntent
+    ? buildImageIntentContext(input.confirmedIntent)
+    : undefined;
 
   // ── Phase planning (initial builds only, non-iteration) ───────────────────
   // If the enriched prompt is complex and no phase override is supplied,
@@ -2484,6 +2656,8 @@ async function _runBuildInBackground(
           existingFiles,
           { buildId, isIteration: true },
           iterSchemaSummary,
+          imageContextBlock,
+          input.imageUrl,
         );
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
@@ -2827,6 +3001,8 @@ async function _runBuildInBackground(
         paletteId,
         { buildId, isIteration: input.isIteration },
         phaseContextBlock,
+        imageContextBlock,
+        input.imageUrl,
         phaseScope,
         input.forcedSimple ? 32000 : undefined,
       );

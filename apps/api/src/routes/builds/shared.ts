@@ -1,5 +1,6 @@
 import type {
   BuildPlanContext,
+  BuilderImageIntent,
   BuilderV3Event,
   BuilderV3TraceMetadata,
   InitialBuildOutput,
@@ -50,6 +51,8 @@ const studioFileSchema = z.object({
 });
 
 export interface StartBuildRequest extends BuildPlanContext {
+  confirmedIntent?: BuilderImageIntent;
+  imageUrl?: string;
   prompt: string;
   projectId?: string;
   projectName?: string;
@@ -57,13 +60,34 @@ export interface StartBuildRequest extends BuildPlanContext {
   model?: string;
 }
 
+const imageIntentSchema = z.enum(["logo", "reference", "error", "theme", "general"]);
+
 export const startBuildRequestSchema = z.object({
+  confirmedIntent: imageIntentSchema.optional(),
   existingFiles: z.array(studioFileSchema).optional(),
+  imageUrl: z.string().trim().url().optional(),
   model: z.string().trim().min(1).optional(),
-  prompt: z.string().trim().min(1).max(50000),
+  prompt: z.string().max(50000),
   projectId: z.string().trim().uuid().optional(),
   projectName: z.string().trim().min(1).max(120).optional(),
-}).merge(buildPlanContextSchema) satisfies z.ZodType<StartBuildRequest>;
+}).merge(buildPlanContextSchema)
+  .superRefine((value, ctx) => {
+    if (value.prompt.trim().length === 0 && !value.imageUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Prompt is required when no image is attached.",
+        path: ["prompt"],
+      });
+    }
+
+    if (value.confirmedIntent && !value.imageUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "confirmedIntent requires imageUrl.",
+        path: ["confirmedIntent"],
+      });
+    }
+  }) satisfies z.ZodType<StartBuildRequest>;
 
 const builderTraceSchema = z.object({
   events: z.array(z.record(z.string(), z.unknown())).optional(),

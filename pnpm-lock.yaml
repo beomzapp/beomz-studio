@@ -32,6 +32,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.8
         version: 1.19.12(hono@4.12.10)
+      '@supabase/supabase-js':
+        specifier: ^2.101.1
+        version: 2.101.1
       '@types/archiver':
         specifier: ^7.0.0
         version: 7.0.0

@@ -144,6 +144,8 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   const prompt = parsedBody.data.prompt.trim();
   const sourcePrompt = prompt;
+  const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
+  const confirmedIntent = parsedBody.data.confirmedIntent;
   let planSessionId = parsedBody.data.planSessionId;
   let planSummary = parsedBody.data.summary;
   let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
@@ -244,7 +246,9 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   const initialMetadata = {
     builderTrace: initialBuilderTrace,
+    confirmedIntent,
     creditsUsed: 0,
+    imageUrl,
     phase: "queued",
     planKeywords: derivePlanKeywords(planSteps),
     planSessionId,
@@ -295,7 +299,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   // Only fires when balance is below CREDIT_THRESHOLD (8) to skip the Haiku
   // call for well-funded orgs. Question/ambiguous intent needs no credits.
   // Iterations are excluded — they already have a project and prior credits spent.
-  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable < CREDIT_THRESHOLD) {
+  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable < CREDIT_THRESHOLD && !(imageUrl && !confirmedIntent)) {
     const intent = await detectIntent(prompt, false);
     const minRequired =
       intent === "build" ? CREDIT_THRESHOLD :
@@ -367,6 +371,8 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       model: effectiveModel,
       requestedAt, operationId,
       isIteration, existingFiles,
+      imageUrl,
+      confirmedIntent,
       projectName,
     },
     orgContext.db,

@@ -117,6 +117,15 @@ export interface BuilderV3InsufficientCreditsEvent extends BuilderV3BaseEvent {
   features: string[];
 }
 
+export type BuilderImageIntent = "logo" | "reference" | "error" | "theme" | "general";
+
+export interface BuilderV3ImageIntentEvent extends BuilderV3BaseEvent {
+  type: "image_intent";
+  intent: BuilderImageIntent;
+  description: string;
+  imageUrl: string;
+}
+
 // BEO-387: stage boundary events emitted by the backend at real pipeline transitions.
 export type BuildStageEventType =
   | "stage_classifying"
@@ -200,6 +209,7 @@ export type BuilderV3Event =
   | BuilderV3ScopeConfirmationEvent
   | BuilderV3ConversationalResponseEvent
   | BuilderV3InsufficientCreditsEvent
+  | BuilderV3ImageIntentEvent
   | BuilderV3IntentDetectedEvent
   | BuilderV3PreBuildAckEvent
   | BuilderV3ChatResponseEvent
