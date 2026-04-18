@@ -2509,6 +2509,8 @@ async function _runBuildInBackground(
       });
       const iterCompletedAt = ts();
 
+      await stageEvents.emit("persisting");
+      await stageEvents.emit("deploying");
       const iterDoneEvent: BuilderV3DoneEvent = {
         type: "done",
         id: nextId(),
@@ -2521,9 +2523,6 @@ async function _runBuildInBackground(
         fallbackUsed: iterResult.files.length === 0,
         fallbackReason: iterErrorReason ?? null,
       };
-
-      await stageEvents.emit("persisting");
-      await stageEvents.emit("deploying");
       await appendEventToDb(db, buildId, iterDoneEvent, {
         completed_at: iterCompletedAt,
         files: iterFinalFiles,
@@ -2814,10 +2813,11 @@ async function _runBuildInBackground(
     }
 
     // ── 4. done ─────────────────────────────────────────────────────────────
-    const doneEventId = nextId();
+    await stageEvents.emit("persisting");
+    await stageEvents.emit("deploying");
     const doneEvent: BuilderV3DoneEvent = {
       type: "done",
-      id: doneEventId,
+      id: nextId(),
       timestamp: completedAt,
       operation: op,
       code: "build_completed",
@@ -2827,9 +2827,6 @@ async function _runBuildInBackground(
       fallbackUsed,
       fallbackReason: fallbackUsed ? "anthropic_error" : null,
     };
-
-    await stageEvents.emit("persisting");
-    await stageEvents.emit("deploying");
     await appendEventToDb(db, buildId, doneEvent, {
       completed_at: completedAt,
       files: finalFiles,
