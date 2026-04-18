@@ -148,6 +148,16 @@ export interface BuilderV3PreBuildAckEvent extends BuilderV3BaseEvent {
   message: string;
 }
 
+export interface BuilderV3ChatResponseEvent extends BuilderV3BaseEvent {
+  type: "chat_response";
+  delta: string;
+}
+
+export interface BuilderV3ImplementSuggestionEvent extends BuilderV3BaseEvent {
+  type: "implement_suggestion";
+  summary: string;
+}
+
 // BEO-362: focused clarifying question emitted for ambiguous intent.
 // Build is paused; next user message re-runs detectIntent.
 export interface BuilderV3ClarifyingQuestionEvent extends BuilderV3BaseEvent {
@@ -192,6 +202,8 @@ export type BuilderV3Event =
   | BuilderV3InsufficientCreditsEvent
   | BuilderV3IntentDetectedEvent
   | BuilderV3PreBuildAckEvent
+  | BuilderV3ChatResponseEvent
+  | BuilderV3ImplementSuggestionEvent
   | BuilderV3ClarifyingQuestionEvent
   | BuilderV3BuildSummaryEvent
   | BuilderV3PreambleEvent
