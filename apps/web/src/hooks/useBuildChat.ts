@@ -359,6 +359,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     optionsRef.current = options;
   });
 
+  // BEO-410: keep chatModeRef in sync with chatModeActive state so stale
+  // closures can never route a chat-mode message into the build pipeline.
+  useEffect(() => {
+    chatModeRef.current = chatModeActive;
+  }, [chatModeActive]);
+
   const clearPreambleAndStageTimers = useCallback(() => {
     if (preambleFallbackTimerRef.current) {
       clearTimeout(preambleFallbackTimerRef.current);
@@ -1262,11 +1268,18 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   const sendMessage = useCallback(
     (text: string, imageUrl?: string) => {
-      // BEO-396: route to chat conversation when chat mode is active
-      if (chatModeRef.current) {
+      // BEO-410: hard double-guard — if either ref OR state says chat mode,
+      // always route to chat. Prevents stale-closure fallthrough to build.
+      if (chatModeRef.current || chatModeActive) {
         sendChatMessage(text);
         return;
       }
+
+      // BEO-410: dev assert — build must never fire while chat mode is active
+      console.assert(
+        !(isBuilding && chatModeActive),
+        "BEO-410: Build fired while chat mode active",
+      );
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -1331,7 +1344,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         buildDoneRef.current = false;
       });
     },
-    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers, sendChatMessage],
+    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers, sendChatMessage, chatModeActive],
   );
 
   // BEO-396: expose the raw build sender to implementCard
