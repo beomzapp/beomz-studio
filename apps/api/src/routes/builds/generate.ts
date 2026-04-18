@@ -2592,8 +2592,9 @@ async function _runBuildInBackground(
       // Load DB schema for this project if database is enabled (BEO-288)
       let iterSchemaSummary: string | undefined;
       let hasWiredSupabaseClient = false;
+      let iterProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
       try {
-        const iterProject = await db.findProjectById(projectId);
+        iterProject = await db.findProjectById(projectId);
         hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
         if (iterProject?.database_enabled && iterProject.db_schema) {
           const tables = await getSchemaTableList(iterProject.db_schema);
@@ -2704,6 +2705,14 @@ async function _runBuildInBackground(
         // Remap ALL returned files (new and updated alike) → flat generated directory,
         // then apply ESM-import + relative-import fixes.
         await stageEvents.emit("sanitising");
+        if (input.isIteration) {
+          console.log("[BEO-413]", JSON.stringify({
+            db_wired: iterProject?.db_wired,
+            db_wired_type: typeof iterProject?.db_wired,
+            files: iterResult.files?.map((f) => f.path),
+            prompt: input.sourcePrompt?.slice(0, 80),
+          }));
+        }
         iterResult = {
           ...iterResult,
           files: sanitiseFiles(
