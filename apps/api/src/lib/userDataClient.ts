@@ -5,10 +5,10 @@
  * here. Requires SUPABASE_MANAGEMENT_API_KEY, USER_DATA_SUPABASE_URL,
  * USER_DATA_SUPABASE_SERVICE_ROLE_KEY in env.
  *
- * Project ref (beomz-user-data): snmocsydvcvqerlommek
+ * Project ref (beomz-user-data): egnkylrnmblvfpccnjps
  */
 
-const USER_DATA_PROJECT_REF = "snmocsydvcvqerlommek";
+const USER_DATA_PROJECT_REF = "egnkylrnmblvfpccnjps";
 const MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
 
 function getMgmtKey(): string {
