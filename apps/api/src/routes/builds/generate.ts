@@ -17,6 +17,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 
 import Anthropic from "@anthropic-ai/sdk";
 import type {
@@ -284,12 +285,35 @@ function mergeFiles(
   return Array.from(byPath.values());
 }
 
+const STUB_BLOCKLIST = new Set([
+  "supabase",
+  "supabase-js",
+  "supabase-client",
+  "supabase-helper",
+  "createclient",
+]);
+
+const BLOCKED_FILENAMES = new Set([
+  "supabase.tsx",
+  "supabase.ts",
+  "supabase-js.tsx",
+  "supabase-js.ts",
+  "supabase-client.tsx",
+  "supabase-client.ts",
+  "supabase-helper.tsx",
+  "supabase-helper.ts",
+]);
+
+export function filterBlockedGeneratedFiles<T extends { path: string }>(files: T[]): T[] {
+  return files.filter((file) => !BLOCKED_FILENAMES.has(basename(file.path).toLowerCase()));
+}
+
 // ─── BEO-309: Post-generation import validator ────────────────────────────────
 // After sanitiseFiles() + mergeFiles(), scan every .tsx?/.jsx? file for
 // relative imports and check every referenced module exists in the file list.
 // Any missing module gets a minimal stub injected so Vite never throws
 // "Failed to resolve import" errors after phase builds.
-function validateAndInjectStubs(
+export function validateAndInjectStubs(
   files: StudioFile[],
   templateId: string,
 ): { files: StudioFile[]; missing: string[] } {
@@ -318,6 +342,10 @@ function validateAndInjectStubs(
       const label = `${stem} (imported in ${importingFile})`;
       if (!missing.includes(label)) {
         missing.push(label);
+        if (STUB_BLOCKLIST.has(stem.toLowerCase())) {
+          console.warn("[validateAndInjectStubs] skipping blocked stub:", stem);
+          continue;
+        }
         fileStems.add(stem); // prevent duplicate stubs for the same component
         stubs.push({
           path: `apps/web/src/app/generated/${templateId}/${stem}.tsx`,
@@ -1664,13 +1692,10 @@ export function buildIterationSystemPrompt(
   const existingSupabaseClientBlock = hasWiredSupabaseClient
     ? [
         "",
-        "This project already has a Supabase client file.",
-        "Do NOT create a new Supabase client file.",
-        "Do NOT generate any file named supabase-js, supabase-client, supabase-helper, or any variant.",
-        "To use Supabase in new code, import the existing client:",
-        "  import { supabase } from './supabase'",
-        "  or import { supabase } from '../lib/supabase'",
-        "The client already exists — importing is all that is needed.",
+        "This project already has Supabase wired. The existing code uses inline createClient() calls — do NOT create or import from a shared supabase.ts or supabase.tsx file.",
+        "Do NOT generate any file named supabase.ts, supabase.tsx, supabase-js, or supabase-client.",
+        "Continue the same inline createClient() pattern already present in the existing project files.",
+        "Use the Supabase URL and anon key already present in the codebase.",
       ].join("\n")
     : "";
   return [
@@ -2587,7 +2612,7 @@ async function _runBuildInBackground(
     // For iteration (user modifying an existing project), skip template loading.
     // Pass current files as context; AI returns only changed files.
     if (input.isIteration && input.existingFiles.length > 0) {
-      const existingFiles = input.existingFiles;
+      const existingFiles = filterBlockedGeneratedFiles([...input.existingFiles]);
 
       // Load DB schema for this project if database is enabled (BEO-288)
       let iterSchemaSummary: string | undefined;
@@ -2705,22 +2730,14 @@ async function _runBuildInBackground(
         // Remap ALL returned files (new and updated alike) → flat generated directory,
         // then apply ESM-import + relative-import fixes.
         await stageEvents.emit("sanitising");
-        if (input.isIteration) {
-          console.log("[BEO-413]", JSON.stringify({
-            db_wired: iterProject?.db_wired,
-            db_wired_type: typeof iterProject?.db_wired,
-            files: iterResult.files?.map((f) => f.path),
-            prompt: input.sourcePrompt?.slice(0, 80),
-          }));
-        }
         iterResult = {
           ...iterResult,
-          files: sanitiseFiles(
+          files: filterBlockedGeneratedFiles(sanitiseFiles(
             iterResult.files.map((f) => ({
               path: remapPrebuiltPath(f.path, templateId),
               content: f.content,
             })),
-          ),
+          )),
         };
 
         // If the AI added new page files but didn't update App.tsx, warn loudly.

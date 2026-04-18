@@ -7,27 +7,79 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 process.env.PORT ??= "3001";
 
 const {
+  filterBlockedGeneratedFiles,
   buildIterationSystemPrompt,
   buildSystemPrompt,
+  validateAndInjectStubs,
 } = await import("./generate.js");
 
-const EXISTING_SUPABASE_RULE = "Do NOT create a new Supabase client file.";
+const INLINE_SUPABASE_RULE = "Continue the same inline createClient() pattern already present in the existing project files.";
 
-test("iteration system prompt injects the existing Supabase client rule when db_wired=true", () => {
+test("iteration system prompt injects the inline Supabase rule when db_wired=true", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, true);
 
-  assert.match(prompt, /Do NOT create a new Supabase client file\./);
-  assert.match(prompt, /Do NOT generate any file named supabase-js, supabase-client, supabase-helper/);
+  assert.match(prompt, /inline createClient\(\)/);
+  assert.equal(prompt.includes("import { supabase } from"), false);
+  assert.match(prompt, /Do NOT generate any file named supabase\.ts, supabase\.tsx, supabase-js, or supabase-client\./);
 });
 
-test("iteration system prompt does not inject the existing Supabase client rule when db_wired=false", () => {
+test("iteration system prompt does not inject the inline Supabase rule when db_wired=false", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, false);
 
-  assert.equal(prompt.includes(EXISTING_SUPABASE_RULE), false);
+  assert.equal(prompt.includes(INLINE_SUPABASE_RULE), false);
 });
 
-test("initial build system prompt does not inject the existing Supabase client rule", () => {
+test("initial build system prompt does not inject the inline Supabase rule", () => {
   const prompt = buildSystemPrompt("professional-blue");
 
-  assert.equal(prompt.includes(EXISTING_SUPABASE_RULE), false);
+  assert.equal(prompt.includes(INLINE_SUPABASE_RULE), false);
+  assert.equal(prompt.includes("import { supabase } from"), false);
+});
+
+test("validateAndInjectStubs does not create supabase.tsx when a supabase import is missing", () => {
+  const result = validateAndInjectStubs(
+    [
+      {
+        path: "apps/web/src/app/generated/workspace-task/TopupsPage.tsx",
+        kind: "route",
+        language: "tsx",
+        content: "import { supabase } from './supabase'\nexport default function TopupsPage() { return null; }\n",
+        source: "ai",
+        locked: false,
+      },
+    ],
+    "workspace-task",
+  );
+
+  assert.deepEqual(
+    result.files.map((file) => file.path),
+    ["apps/web/src/app/generated/workspace-task/TopupsPage.tsx"],
+  );
+  assert.deepEqual(result.missing, ["supabase (imported in TopupsPage.tsx)"]);
+});
+
+test("filterBlockedGeneratedFiles removes blocked supabase placeholder files", () => {
+  const result = filterBlockedGeneratedFiles([
+    {
+      path: "apps/web/src/app/generated/workspace-task/App.tsx",
+      kind: "entry",
+      language: "tsx",
+      content: "export default function App() { return null; }\n",
+      source: "ai",
+      locked: false,
+    },
+    {
+      path: "apps/web/src/app/generated/workspace-task/supabase.tsx",
+      kind: "component",
+      language: "tsx",
+      content: "export default function supabase() { return null; }\n",
+      source: "platform",
+      locked: false,
+    },
+  ]);
+
+  assert.deepEqual(
+    result.map((file) => file.path),
+    ["apps/web/src/app/generated/workspace-task/App.tsx"],
+  );
 });
