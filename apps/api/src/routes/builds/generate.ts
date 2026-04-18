@@ -21,8 +21,11 @@ import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   BuildIntent,
+  BuilderV3Event,
   BuilderV3DoneEvent,
   BuilderV3ErrorEvent,
+  BuilderV3NextStepsEvent,
+  BuilderV3PreambleEvent,
   BuilderV3PreviewReadyEvent,
   BuilderV3StatusEvent,
   BuilderV3TraceMetadata,
@@ -41,6 +44,7 @@ import {
 
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
+import { generateNextSteps, generateStagePreamble } from "../../lib/buildNarration.js";
 import { createBuildStageEmitter } from "../../lib/buildStageEvents.js";
 import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
@@ -343,7 +347,7 @@ function readTrace(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
 async function appendEventToDb(
   db: StudioDbClient,
   buildId: string,
-  event: BuilderV3StatusEvent | BuilderV3PreviewReadyEvent | BuilderV3DoneEvent | BuilderV3ErrorEvent,
+  event: BuilderV3Event,
   extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
 ): Promise<void> {
   const row = await db.findGenerationById(buildId);
@@ -2126,9 +2130,6 @@ async function _runBuildInBackground(
       // BEO-372: skip Haiku classification — we know this is a clarification answer.
       detectedIntent = forcedIntent;
     } else {
-      if (!input.isIteration) {
-        await stageEvents.emit("classifying");
-      }
       // BEO-371: pass project context so Haiku classifies recommendation/suggestion
       // messages as "question" rather than "build" when a project is already open.
       detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
@@ -2298,7 +2299,6 @@ async function _runBuildInBackground(
       : input.confirmedScope.enrichedPrompt;
     console.log("[generate] resuming with confirmedScope:", input.confirmedScope.features.length, "features");
   } else {
-    await stageEvents.emit("enriching");
     workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);
   }
 
@@ -2349,6 +2349,24 @@ async function _runBuildInBackground(
     phase,
     message,
   });
+
+  const emitStagePreamble = async (rawPrompt: string, isIteration: boolean): Promise<void> => {
+    const preamble = await generateStagePreamble({
+      prompt: rawPrompt,
+      isIteration,
+    });
+
+    const event: BuilderV3PreambleEvent = {
+      type: "stage_preamble",
+      id: nextId(),
+      timestamp: ts(),
+      operation: op,
+      restatement: preamble.restatement,
+      bullets: preamble.bullets,
+    };
+
+    await appendEventToDb(db, buildId, event);
+  };
 
   // ── Best-matching prebuilt template ──────────────────────────────────────
   const prebuilt = pickBestPrebuilt(templateId, workingPrompt);
@@ -2450,6 +2468,12 @@ async function _runBuildInBackground(
           // non-fatal
         }
       }
+      try {
+        await emitStagePreamble(input.sourcePrompt, true);
+      } catch {
+        // non-fatal
+      }
+      await stageEvents.emit("enriching");
       let iterResult: CustomiseResult;
       let iterErrorReason: string | null = null;
       try {
@@ -2568,24 +2592,6 @@ async function _runBuildInBackground(
 
       await stageEvents.emit("persisting");
       await stageEvents.emit("deploying");
-      const iterDoneEvent: BuilderV3DoneEvent = {
-        type: "done",
-        id: nextId(),
-        timestamp: iterCompletedAt,
-        operation: op,
-        code: "build_completed",
-        message: iterResult.summary,
-        buildId,
-        projectId,
-        fallbackUsed: iterResult.files.length === 0,
-        fallbackReason: iterErrorReason ?? null,
-      };
-      await appendEventToDb(db, buildId, iterDoneEvent, {
-        completed_at: iterCompletedAt,
-        files: iterFinalFiles,
-        status: "completed",
-        summary: iterResult.summary,
-      });
 
       // BEO-368: credit deduction runs first so iterCreditsUsed is available for the summary footer.
       // Post-deduction for successful iteration (no charge on failure)
@@ -2647,6 +2653,25 @@ async function _runBuildInBackground(
           // non-fatal
         }
       }
+
+      const iterDoneEvent: BuilderV3DoneEvent = {
+        type: "done",
+        id: nextId(),
+        timestamp: iterCompletedAt,
+        operation: op,
+        code: "build_completed",
+        message: iterResult.summary,
+        buildId,
+        projectId,
+        fallbackUsed: iterResult.files.length === 0,
+        fallbackReason: iterErrorReason ?? null,
+      };
+      await appendEventToDb(db, buildId, iterDoneEvent, {
+        completed_at: iterCompletedAt,
+        files: iterFinalFiles,
+        status: "completed",
+        summary: iterResult.summary,
+      });
 
       console.log("[generate] iteration complete.", {
         buildId,
@@ -2758,6 +2783,13 @@ async function _runBuildInBackground(
         // non-fatal
       }
     }
+    try {
+      await emitStagePreamble(input.sourcePrompt, false);
+    } catch {
+      // non-fatal
+    }
+    await stageEvents.emit("classifying");
+    await stageEvents.emit("enriching");
 
     let customised: CustomiseResult;
     let fallbackUsed = false;
@@ -2877,27 +2909,8 @@ async function _runBuildInBackground(
       });
     }
 
-    // ── 4. done ─────────────────────────────────────────────────────────────
     await stageEvents.emit("persisting");
     await stageEvents.emit("deploying");
-    const doneEvent: BuilderV3DoneEvent = {
-      type: "done",
-      id: nextId(),
-      timestamp: completedAt,
-      operation: op,
-      code: "build_completed",
-      message: customised.summary,
-      buildId,
-      projectId,
-      fallbackUsed,
-      fallbackReason: fallbackUsed ? "anthropic_error" : null,
-    };
-    await appendEventToDb(db, buildId, doneEvent, {
-      completed_at: completedAt,
-      files: finalFiles,
-      status: "completed",
-      summary: customised.summary,
-    });
 
     // BEO-362: post-build summary via Haiku
     // BEO-368: credit deduction runs first so creditsUsed is available for the summary footer.
@@ -2945,6 +2958,52 @@ async function _runBuildInBackground(
         // non-fatal
       }
     }
+
+    if (!fallbackUsed) {
+      try {
+        const nextSteps = await generateNextSteps({
+          appDescriptor: workingPrompt,
+          fileList: finalFiles
+            .map((file) => file.path.replace(/^.*\//, ""))
+            .filter((path) => path !== "app.manifest.json"),
+          isIteration: input.isIteration,
+          prompt: input.sourcePrompt,
+        });
+
+        if (nextSteps) {
+          const nextStepsEvent: BuilderV3NextStepsEvent = {
+            type: "next_steps",
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            suggestions: nextSteps.suggestions,
+          };
+          await appendEventToDb(db, buildId, nextStepsEvent);
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
+    // ── 4. done ─────────────────────────────────────────────────────────────
+    const doneEvent: BuilderV3DoneEvent = {
+      type: "done",
+      id: nextId(),
+      timestamp: completedAt,
+      operation: op,
+      code: "build_completed",
+      message: customised.summary,
+      buildId,
+      projectId,
+      fallbackUsed,
+      fallbackReason: fallbackUsed ? "anthropic_error" : null,
+    };
+    await appendEventToDb(db, buildId, doneEvent, {
+      completed_at: completedAt,
+      files: finalFiles,
+      status: "completed",
+      summary: customised.summary,
+    });
 
     console.log("[generate] Build complete.", {
       buildId,
