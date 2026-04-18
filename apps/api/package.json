@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "test:unit": "tsx --test src/**/*.test.ts",
     "start": "node dist/bootstrap.js"
   },
   "dependencies": {

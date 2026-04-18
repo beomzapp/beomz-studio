@@ -114,7 +114,36 @@ const jsxQuotes: Fixer = {
     ),
 };
 
-// ── Fixer 5: externalUrls ────────────────────────────────────────────────────
+// ── Fixer 5: tailwindCdnScript ───────────────────────────────────────────────
+// Generated apps sometimes include <script src="https://cdn.tailwindcss.com">,
+// version-pinned/query-string variants, or a stylesheet <link> to the same
+// CDN. Tailwind v4 is already wired in the scaffold via @tailwindcss/vite, so
+// these tags are redundant and COEP-blocked inside WebContainer.
+//
+// Use a cheap substring guard first so the regex never runs on the common case.
+
+const tailwindCdnScript: Fixer = {
+  name: "tailwindCdnScript",
+  fix: (content) => {
+    if (!content.includes("tailwindcss.com")) return content;
+
+    return content
+      .replace(
+        /<script\b[^>]*\bsrc=['"](?:(?:https?:)?\/\/)cdn\.tailwindcss\.com[^'" >]*['"][^>]*>\s*<\/script>\s*/gi,
+        "",
+      )
+      .replace(
+        /<script\b[^>]*\bsrc=['"](?:(?:https?:)?\/\/)cdn\.tailwindcss\.com[^'" >]*['"][^>]*\/>\s*/gi,
+        "",
+      )
+      .replace(
+        /<link\b[^>]*\bhref=['"](?:(?:https?:)?\/\/)cdn\.tailwindcss\.com[^'" >]*['"][^>]*\/?>\s*/gi,
+        "",
+      );
+  },
+};
+
+// ── Fixer 6: externalUrls ────────────────────────────────────────────────────
 // WebContainer enforces COEP require-corp. External resources without CORP
 // headers (Google Fonts, CDN scripts, remote images) trigger
 // ERR_BLOCKED_BY_RESPONSE.NotSameOriginAfterDefaultedToSameOriginByCoep.
@@ -138,7 +167,7 @@ const externalUrls: Fixer = {
       .replace(/<script[^>]+src=['"]https?:\/\/[^'"]*['"][^>]*\/>/gi, ""),
 };
 
-// ── Fixer 6: apostropheStrings ───────────────────────────────────────────────
+// ── Fixer 7: apostropheStrings ───────────────────────────────────────────────
 // Sonnet sometimes writes JSX strings with unescaped word-apostrophes inside
 // single-quoted delimiters, e.g.:
 //   'Here's what's happening today.'  →  "Here's what's happening today."
@@ -172,7 +201,9 @@ const apostropheStrings: Fixer = {
 //   reactGlobals      — before flatImports (avoid flattening react import we just added)
 //   flatImports       — flatten all remaining deep relative/alias paths
 //   jsxQuotes         — fix backslash-escaped double quotes in JSX attributes
-//   externalUrls      — strip CDN URLs
+//   tailwindCdnScript — strip Tailwind CDN tags first, including protocol-relative
+//                       variants the generic external URL fixer does not catch
+//   externalUrls      — strip remaining CDN URLs
 //   apostropheStrings — convert single-quoted strings with word apostrophes to double-quoted
 
 const PIPELINE: readonly Fixer[] = [
@@ -180,6 +211,7 @@ const PIPELINE: readonly Fixer[] = [
   reactGlobals,
   flatImports,
   jsxQuotes,
+  tailwindCdnScript,
   externalUrls,
   apostropheStrings,
 ];
