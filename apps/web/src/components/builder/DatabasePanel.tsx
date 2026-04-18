@@ -7,6 +7,7 @@
  *   3. Fully wired (db_wired = true) → three-mode layout (Shared / Dedicated / BYO)
  *
  * BEO-400: Three-mode layout with upsell surface, storage usage bar, plan badge.
+ * BEO-403: Storage bar always visible; Data tab 404 fix; Shared tab cleanup.
  * BEO-289: Schema tab renders table.table_name; Data tab select populated from table_name.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +25,6 @@ import {
   Table2,
   Layers,
   ScrollText,
-  ChevronRight,
   HardDrive,
   PlugZap,
   ArrowUpRight,
@@ -57,17 +57,27 @@ function formatStorageMb(mb: number): string {
   return `${Math.round(mb)}MB`;
 }
 
-function getPlanBadgeStyle(plan: string): { className: string; label: string } {
+function getPlanBadgeStyle(plan: string): { className: string; dotClass: string; label: string } {
   const normalized = (plan ?? "free").toLowerCase().replace(/[\s-]+/g, "_");
   switch (normalized) {
     case "pro_starter":
-      return { className: "bg-blue-100 text-blue-700", label: "Pro Starter" };
+      return { className: "bg-blue-100 text-blue-700", dotClass: "bg-blue-500", label: "Pro Starter" };
     case "pro_builder":
-      return { className: "bg-purple-100 text-purple-700", label: "Pro Builder" };
+      return { className: "bg-purple-100 text-purple-700", dotClass: "bg-purple-500", label: "Pro Builder" };
     case "business":
-      return { className: "bg-[#F97316]/10 text-[#F97316]", label: "Business" };
+      return { className: "bg-[#F97316]/10 text-[#F97316]", dotClass: "bg-[#F97316]", label: "Business" };
     default:
-      return { className: "bg-[#f3f4f6] text-[#6b7280]", label: "Free" };
+      return { className: "bg-[#f3f4f6] text-[#6b7280]", dotClass: "bg-[#9ca3af]", label: "Free" };
+  }
+}
+
+function getPlanStorageLimitMb(plan: string): number {
+  const normalized = (plan ?? "free").toLowerCase().replace(/[\s-]+/g, "_");
+  switch (normalized) {
+    case "pro_starter": return 1024;
+    case "pro_builder": return 5120;
+    case "business": return 15360;
+    default: return 200;
   }
 }
 
@@ -112,6 +122,7 @@ export function DatabasePanel({
   // ── Storage usage (BEO-400) ──────────────────────────────
   const [dbUsage, setDbUsage] = useState<{ used_mb: number; limits: { storage_mb: number } } | null>(null);
   const [dbUsageLoading, setDbUsageLoading] = useState(false);
+  const [dbUsageError, setDbUsageError] = useState(false);
 
   // BEO-400: Storage limit reached (402 from migrate)
   const [storageLimitReached, setStorageLimitReached] = useState(false);
@@ -155,11 +166,12 @@ export function DatabasePanel({
   const fetchDbUsage = useCallback(async () => {
     if (!projectId) return;
     setDbUsageLoading(true);
+    setDbUsageError(false);
     try {
       const data = await getDbUsage(projectId);
       setDbUsage(data);
     } catch {
-      // silently fail — storage bar won't show
+      setDbUsageError(true);
     } finally {
       setDbUsageLoading(false);
     }
@@ -350,10 +362,15 @@ export function DatabasePanel({
   );
 
   // ── Derived storage values ────────────────────────────────
+  const planLimitMb = getPlanStorageLimitMb(plan);
   const usedMb = dbUsage?.used_mb ?? 0;
-  const limitMb = dbUsage?.limits.storage_mb ?? 0;
+  const limitMb = dbUsage?.limits.storage_mb ?? planLimitMb;
   const fillPct = limitMb > 0 ? Math.min((usedMb / limitMb) * 100, 100) : 0;
-  const isStorageRed = fillPct > 90;
+  const barColorClass = fillPct > 90
+    ? "bg-red-500"
+    : fillPct > 80
+      ? "bg-amber-500"
+      : "bg-[#F97316]";
 
   const planBadge = getPlanBadgeStyle(plan);
 
@@ -621,100 +638,84 @@ export function DatabasePanel({
       {modeTab === "shared" && (
         <div className="flex flex-1 flex-col overflow-hidden">
 
-          {/* Plan badge + storage bar + upsell cards */}
+          {/* Storage info card + add-on row */}
           <div className="space-y-3 border-b border-[#e5e7eb] px-4 py-3">
 
-            {/* Plan badge + Shared badge */}
-            <div className="flex items-center gap-2">
-              <span className={cn("rounded-md px-2 py-0.5 text-[11px] font-semibold", planBadge.className)}>
-                {planBadge.label}
-              </span>
-              <span className="rounded-md bg-[#f3f4f6] px-2 py-0.5 text-[11px] font-semibold text-[#6b7280]">
-                Shared
-              </span>
-            </div>
+            {/* Info card: plan badge + storage bar */}
+            <div className="rounded-xl border border-[#e5e7eb] bg-[#faf9f6] p-3.5">
 
-            {/* Storage usage bar */}
-            <div>
-              <div className="mb-1.5 flex items-center justify-between text-[11px]">
-                <span className="font-medium text-[#6b7280]">Storage</span>
-                {dbUsageLoading ? (
-                  <span className="h-3 w-20 animate-pulse rounded bg-[#f3f4f6]" />
-                ) : dbUsage ? (
-                  <span className="text-[#9ca3af]">
-                    {formatStorageMb(usedMb)} / {formatStorageMb(limitMb)}
-                  </span>
-                ) : null}
+              {/* Plan badge + Shared badge */}
+              <div className="mb-3 flex items-center gap-2">
+                <span className={cn("flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold", planBadge.className)}>
+                  <span className={cn("h-1.5 w-1.5 rounded-full", planBadge.dotClass)} />
+                  {planBadge.label}
+                </span>
+                <span className="rounded-md bg-[#ebebeb] px-2 py-0.5 text-[11px] font-semibold text-[#6b7280]">
+                  Shared
+                </span>
               </div>
+
+              {/* Storage label */}
+              <p className="mb-2 text-[11px] font-medium text-[#6b7280]">Storage</p>
+
+              {/* Bar — always rendered */}
               {dbUsageLoading ? (
-                <div className="h-2 w-full animate-pulse rounded-full bg-[#f3f4f6]" />
-              ) : dbUsage ? (
-                <div className="h-2 w-full overflow-hidden rounded-full bg-[#f3f4f6]">
+                <div className="h-2 w-full animate-pulse rounded-full bg-[#e5e7eb]" />
+              ) : (
+                <div className="h-2 w-full overflow-hidden rounded-full bg-[#e5e7eb]">
                   <div
-                    className={cn(
-                      "h-full rounded-full transition-all duration-500",
-                      isStorageRed ? "bg-red-500" : "bg-[#F97316]",
-                    )}
+                    className={cn("h-full rounded-full transition-all duration-500", barColorClass)}
                     style={{ width: `${fillPct}%` }}
                   />
                 </div>
-              ) : null}
+              )}
+
+              {/* Usage label below bar */}
+              <div className="mt-1.5 flex items-center justify-between">
+                {dbUsageLoading ? (
+                  <span className="h-3 w-28 animate-pulse rounded bg-[#e5e7eb]" />
+                ) : dbUsageError ? (
+                  <span className="flex items-center gap-1 text-[11px] text-[#9ca3af]">
+                    <AlertCircle size={11} />
+                    Couldn't load usage —{" "}
+                    <button
+                      onClick={() => void fetchDbUsage()}
+                      className="underline underline-offset-2 hover:text-[#6b7280]"
+                    >
+                      retry
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-[#9ca3af]">
+                    {formatStorageMb(usedMb)} / {formatStorageMb(limitMb)}
+                    {limitMb > 0 && (
+                      <span className="ml-1.5 text-[#d1d5db]">·</span>
+                    )}
+                    {limitMb > 0 && (
+                      <span className="ml-1.5">{Math.round(fillPct)}% used</span>
+                    )}
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Upsell card A — storage packs */}
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-3">
-              <p className="mb-2 text-xs font-semibold text-[#1a1a1a]">Need more storage?</p>
+            {/* Storage add-on row */}
+            <div>
+              <p className="mb-2 text-[11px] text-[#9ca3af]">
+                Need more storage? Add to this project.
+              </p>
               <div className="flex items-center gap-2">
                 {STORAGE_PACKS.map(({ label, price, priceId }) => (
                   <button
                     key={priceId}
                     onClick={() => void handleStorageAddon(priceId)}
-                    className="flex-1 rounded-lg border border-[#e5e7eb] px-2.5 py-1.5 text-center text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
+                    className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
                   >
-                    <span className="block font-semibold">{label}</span>
-                    <span className="text-[10px] text-[#9ca3af]">{price}</span>
+                    <span className="font-semibold">{label}</span>
+                    <span className="text-[#9ca3af]">{price}</span>
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Upsell card B — dedicated DB */}
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-semibold text-[#1a1a1a]">
-                    Dedicated database{" "}
-                    <span className="font-normal text-[#9ca3af]">$39/month</span>
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-[#9ca3af]">
-                    Your own Postgres. No shared limits.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => showToast("Coming soon — dedicated database provisioning")}
-                className="mt-2.5 flex w-full items-center justify-between rounded-lg bg-[#1a1a1a] px-3 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-[#333]"
-              >
-                Add dedicated database
-                <ChevronRight size={12} />
-              </button>
-            </div>
-
-            {/* Upsell card C — BYO Supabase */}
-            <div className="rounded-xl border border-[#e5e7eb] bg-white p-3">
-              <div>
-                <p className="text-xs font-semibold text-[#1a1a1a]">Connect your own Supabase</p>
-                <p className="mt-0.5 text-[11px] text-[#9ca3af]">
-                  Already have a project? Wire it in.
-                </p>
-              </div>
-              <button
-                onClick={() => showToast("Coming soon — BYO Supabase OAuth flow")}
-                className="mt-2.5 flex w-full items-center justify-between rounded-lg border border-[#e5e7eb] px-3 py-2 text-[11px] font-semibold text-[#374151] transition-colors hover:border-[#F97316]/40 hover:text-[#F97316]"
-              >
-                Connect via Supabase
-                <ChevronRight size={12} />
-              </button>
             </div>
           </div>
 
@@ -885,7 +886,15 @@ export function DatabasePanel({
                   )}
                 </div>
 
-                {dataLoading && dataRows.length === 0 && (
+                {/* No table selected — BEO-403 */}
+                {!dataTable && (
+                  <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+                    <Table2 size={24} className="mx-auto mb-3 text-[#d1d5db]" />
+                    <p className="text-sm font-medium text-[#6b7280]">Select a table to view its data.</p>
+                  </div>
+                )}
+
+                {dataTable && dataLoading && dataRows.length === 0 && (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
                   </div>
@@ -1091,24 +1100,31 @@ export function DatabasePanel({
 
       {/* ── DEDICATED MODE ────────────────────────────────── */}
       {modeTab === "dedicated" && (
-        <div className="flex flex-1 items-center justify-center p-6">
-          <div className="w-full max-w-sm space-y-4 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1a1a1a]/5">
-              <HardDrive size={28} className="text-[#1a1a1a]" />
+        <div className="flex flex-1 items-center justify-center px-8 py-12">
+          <div className="w-full max-w-xs text-center">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1a1a1a]/6">
+              <HardDrive size={32} className="text-[#1a1a1a]" />
             </div>
-            <div>
-              <p className="text-sm font-semibold text-[#1a1a1a]">No dedicated database yet.</p>
-              <p className="mt-1.5 text-xs text-[#9ca3af]">
-                Your own Postgres instance, provisioned by Beomz.
-                Daily backups. Direct connection.
-              </p>
+
+            <h2 className="text-base font-semibold text-[#1a1a1a]">
+              Your own Postgres instance
+            </h2>
+
+            <div className="mt-3 space-y-1 text-sm text-[#9ca3af]">
+              <p>Dedicated compute · Daily backups · Direct connection</p>
+              <p>No shared limits — your data, isolated.</p>
             </div>
+
+            <p className="mt-4 text-sm font-medium text-[#6b7280]">
+              $39 <span className="text-[#9ca3af] font-normal">/ month per project</span>
+            </p>
+
             <button
               onClick={() => showToast("Coming soon — dedicated database provisioning")}
-              className="flex w-full items-center justify-between rounded-xl bg-[#1a1a1a] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#333]"
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
             >
-              <span>Add dedicated database <span className="font-normal text-[#9ca3af]">$39/month</span></span>
-              <ArrowUpRight size={14} />
+              Add dedicated database
+              <ArrowUpRight size={15} />
             </button>
           </div>
         </div>
@@ -1116,23 +1132,28 @@ export function DatabasePanel({
 
       {/* ── BYO MODE ─────────────────────────────────────── */}
       {modeTab === "byo" && (
-        <div className="flex flex-1 items-center justify-center p-6">
-          <div className="w-full max-w-sm space-y-4 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#F97316]/10">
-              <PlugZap size={28} className="text-[#F97316]" />
+        <div className="flex flex-1 items-center justify-center px-8 py-12">
+          <div className="w-full max-w-xs text-center">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#F97316]/10">
+              <PlugZap size={32} className="text-[#F97316]" />
             </div>
-            <div>
-              <p className="text-sm font-semibold text-[#1a1a1a]">Connect your Supabase project.</p>
-              <p className="mt-1.5 text-xs text-[#9ca3af]">
-                Full control — your account, your billing, your data.
-              </p>
+
+            <h2 className="text-base font-semibold text-[#1a1a1a]">
+              Connect your Supabase project
+            </h2>
+
+            <div className="mt-3 space-y-1 text-sm text-[#9ca3af]">
+              <p>Already have a Supabase account?</p>
+              <p>Wire your existing project directly to this app.</p>
+              <p>Your account · Your billing · Your data.</p>
             </div>
+
             <button
               onClick={() => showToast("Coming soon — BYO Supabase OAuth flow")}
-              className="flex w-full items-center justify-between rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-semibold text-[#374151] transition-colors hover:border-[#F97316]/40 hover:text-[#F97316]"
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-5 py-3 text-sm font-semibold text-[#374151] transition-colors hover:border-[#F97316]/40 hover:text-[#F97316]"
             >
               Connect via Supabase
-              <ArrowUpRight size={14} />
+              <ArrowUpRight size={15} />
             </button>
           </div>
         </div>
