@@ -31,6 +31,17 @@ function runFixer(fixer: Fixer, content: string, filename: string): string {
   return out;
 }
 
+function kebabToPascal(name: string): string {
+  return name
+    .split("-")
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join("");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // ── Fixer 1: supabaseImport ──────────────────────────────────────────────────
 // AI hallucinates './supabase-js' or 'supabase-js' instead of the correct
 // '@supabase/supabase-js' package name.
@@ -195,6 +206,38 @@ const apostropheStrings: Fixer = {
     ),
 };
 
+// ── Fixer 8: hyphenatedFunctionName ──────────────────────────────────────────
+// Sonnet sometimes uses a hyphenated filename as the exported function name,
+// e.g. export default function supabase-js() { ... }
+// Hyphens are invalid in JS/TS identifiers, so rename the function to
+// PascalCase and do a best-effort JSX tag rename within the same file.
+
+const hyphenatedFunctionName: Fixer = {
+  name: "hyphenatedFunctionName",
+  fix: (content) => {
+    const replacements: Array<{ from: string; to: string }> = [];
+    let updated = content.replace(
+      /export default function ([a-zA-Z][a-zA-Z0-9]*(?:-[a-zA-Z0-9]+)+)\s*\(/g,
+      (_match, originalName: string) => {
+        const fixedName = kebabToPascal(originalName);
+        replacements.push({ from: originalName, to: fixedName });
+        return `export default function ${fixedName}(`;
+      },
+    );
+
+    for (const { from, to } of replacements) {
+      if (from === to) continue;
+      const escapedFrom = escapeRegExp(from);
+      updated = updated.replace(
+        new RegExp(`(<\\/?\\s*)${escapedFrom}(?=[\\s>/])`, "g"),
+        `$1${to}`,
+      );
+    }
+
+    return updated;
+  },
+};
+
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 // Order matters:
 //   supabaseImport    — before flatImports (don't re-flatten the corrected path)
@@ -205,6 +248,7 @@ const apostropheStrings: Fixer = {
 //                       variants the generic external URL fixer does not catch
 //   externalUrls      — strip remaining CDN URLs
 //   apostropheStrings — convert single-quoted strings with word apostrophes to double-quoted
+//   hyphenatedFunctionName — convert invalid kebab-case function exports to PascalCase
 
 const PIPELINE: readonly Fixer[] = [
   supabaseImport,
@@ -214,6 +258,7 @@ const PIPELINE: readonly Fixer[] = [
   tailwindCdnScript,
   externalUrls,
   apostropheStrings,
+  hyphenatedFunctionName,
 ];
 
 // ── Public API ────────────────────────────────────────────────────────────────

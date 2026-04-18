@@ -99,3 +99,44 @@ test("sanitiseContent logs the dedicated tailwindCdnScript fixer when it fires",
     true,
   );
 });
+
+test("sanitiseContent fixes export default function supabase-js()", () => {
+  const input = "export default function supabase-js() {\n  return null;\n}\n";
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(
+    output,
+    "export default function SupabaseJs() {\n  return null;\n}\n",
+  );
+});
+
+test("sanitiseContent fixes multi-word hyphenated component names", () => {
+  const input = "export default function my-cool-component() {\n  return <div />;\n}\n";
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(
+    output,
+    "export default function MyCoolComponent() {\n  return <div />;\n}\n",
+  );
+});
+
+test("sanitiseContent leaves valid export default function names unchanged", () => {
+  const input = "export default function validName() {\n  return null;\n}\n";
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(output, input);
+});
+
+test("sanitiseContent converts a-b-c-d to ABCD", () => {
+  const input = "export default function a-b-c-d() {\n  return null;\n}\n";
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(
+    output,
+    "export default function ABCD() {\n  return null;\n}\n",
+  );
+});
