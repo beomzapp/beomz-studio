@@ -41,6 +41,7 @@ import {
 
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
+import { createBuildStageEmitter } from "../../lib/buildStageEvents.js";
 import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { planPhases } from "../../lib/planPhases.js";
@@ -2031,6 +2032,11 @@ async function _runBuildInBackground(
   let preBuildAckEmitted = false;
   // BEO-368: record wall-clock start for duration footer in build_summary.
   const buildStartTime = Date.now();
+  const stageEvents = createBuildStageEmitter({
+    operation: op,
+    nextId,
+    emit: (event) => appendEventToDb(db, buildId, event as unknown as BuilderV3StatusEvent),
+  });
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
   // If the previous completed generation for this project ended with a
@@ -2069,6 +2075,9 @@ async function _runBuildInBackground(
       // BEO-372: skip Haiku classification — we know this is a clarification answer.
       detectedIntent = forcedIntent;
     } else {
+      if (!input.isIteration) {
+        await stageEvents.emit("classifying");
+      }
       // BEO-371: pass project context so Haiku classifies recommendation/suggestion
       // messages as "question" rather than "build" when a project is already open.
       detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
@@ -2238,6 +2247,7 @@ async function _runBuildInBackground(
       : input.confirmedScope.enrichedPrompt;
     console.log("[generate] resuming with confirmedScope:", input.confirmedScope.features.length, "features");
   } else {
+    await stageEvents.emit("enriching");
     workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);
   }
 
@@ -2381,6 +2391,7 @@ async function _runBuildInBackground(
             operation: op,
             message: ackMessage,
           } as unknown as BuilderV3StatusEvent);
+          stageEvents.markPreBuildAck();
           // BEO-374: await sequentially to prevent race condition (both reads getting [])
           await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
           await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
@@ -2391,6 +2402,7 @@ async function _runBuildInBackground(
       let iterResult: CustomiseResult;
       let iterErrorReason: string | null = null;
       try {
+        await stageEvents.emit("generating");
         iterResult = await callModelIterate(prompt, model, existingFiles, iterSchemaSummary);
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
@@ -2410,6 +2422,7 @@ async function _runBuildInBackground(
 
         // Remap ALL returned files (new and updated alike) → flat generated directory,
         // then apply ESM-import + relative-import fixes.
+        await stageEvents.emit("sanitising");
         iterResult = {
           ...iterResult,
           files: sanitiseFiles(
@@ -2509,6 +2522,8 @@ async function _runBuildInBackground(
         fallbackReason: iterErrorReason ?? null,
       };
 
+      await stageEvents.emit("persisting");
+      await stageEvents.emit("deploying");
       await appendEventToDb(db, buildId, iterDoneEvent, {
         completed_at: iterCompletedAt,
         files: iterFinalFiles,
@@ -2679,6 +2694,7 @@ async function _runBuildInBackground(
           operation: op,
           message: ackMessage,
         } as unknown as BuilderV3StatusEvent);
+        stageEvents.markPreBuildAck();
         // BEO-374: await sequentially to prevent race condition (both reads getting [])
         await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
         await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
@@ -2716,6 +2732,7 @@ async function _runBuildInBackground(
     }
 
     try {
+      await stageEvents.emit("generating");
       customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope, input.forcedSimple ? 32000 : undefined);
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
@@ -2727,6 +2744,7 @@ async function _runBuildInBackground(
       }
       // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
       // we flatten into the generated directory. Patch any residual CJS React globals.
+      await stageEvents.emit("sanitising");
       customised = {
         ...customised,
         files: sanitiseFiles(
@@ -2745,6 +2763,7 @@ async function _runBuildInBackground(
         error: aiError instanceof Error ? aiError.message : String(aiError),
         stack: aiError instanceof Error ? aiError.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
       });
+      await stageEvents.emit("sanitising");
       customised = {
         files: sanitiseFiles(
           prebuilt.files.map((f) => ({
@@ -2809,6 +2828,8 @@ async function _runBuildInBackground(
       fallbackReason: fallbackUsed ? "anthropic_error" : null,
     };
 
+    await stageEvents.emit("persisting");
+    await stageEvents.emit("deploying");
     await appendEventToDb(db, buildId, doneEvent, {
       completed_at: completedAt,
       files: finalFiles,
