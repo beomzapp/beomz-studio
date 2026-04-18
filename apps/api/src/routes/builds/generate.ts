@@ -1546,11 +1546,11 @@ async function callModelCustomise(
     );
   }
 
-  // Unknown model — fall back to haiku
-  console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
+  // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
+  console.warn("[generate] Unknown model, falling back to claude-sonnet-4-6:", model);
   return callAnthropicCustomise(
     prompt,
-    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-6",
     paletteId,
     instrumentation,
     designSystemSpec,
@@ -1680,9 +1680,9 @@ async function callModelIterate(
     );
   }
 
-  // Unknown model — fall back to haiku
-  console.warn("[generate] Unknown model for iteration, falling back to claude-haiku-4-5-20251001:", model);
-  return callAnthropicWithMessages("claude-haiku-4-5-20251001", systemPrompt, userMessage, prompt);
+  // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
+  console.warn("[generate] Unknown model for iteration, falling back to claude-sonnet-4-6:", model);
+  return callAnthropicWithMessages("claude-sonnet-4-6", systemPrompt, userMessage, prompt);
 }
 
 const LEGACY_TEMPLATE_TAGS: Record<string, readonly string[]> = {

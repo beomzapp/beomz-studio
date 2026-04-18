@@ -27,6 +27,8 @@ import { detectIntent } from "./generate.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
+export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6";
+
 const PROMPT_STOP_WORDS = new Set([
   "a", "an", "and", "app", "build", "create", "for", "from",
   "in", "make", "of", "the", "to", "with",
@@ -231,7 +233,7 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     }
   }
 
-  const effectiveModel = parsedBody.data.model ?? "claude-haiku-4-5-20251001";
+  const effectiveModel = parsedBody.data.model ?? DEFAULT_BUILD_MODEL;
 
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
