@@ -95,6 +95,7 @@ interface CustomiseResult {
   appName?: string;
   migrations?: string[];
   outputTokens: number;
+  inputTokens?: number;
 }
 
 // ─── Anthropic tool definition ────────────────────────────────────────────────
@@ -1335,6 +1336,7 @@ async function callAnthropicWithMessages(
   userMessage: string,
   prompt: string,
   maxTokens = 64000,
+  instrumentation?: { buildId: string; isIteration: boolean },
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
     console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
@@ -1348,6 +1350,7 @@ async function callAnthropicWithMessages(
       messages: [{ role: "user", content: userMessage }],
     });
     const message = await stream.finalMessage();
+    const inputTokens = message.usage?.input_tokens ?? 0;
     const outputTokens = message.usage?.output_tokens ?? 0;
     console.log("[generate] Anthropic response:", { model: modelId, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
     // BEO-319: warn when approaching the 64k ceiling so we can monitor token pressure
@@ -1358,7 +1361,7 @@ async function callAnthropicWithMessages(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
     if (!toolBlock) throw new Error("Anthropic did not call the deliver_customised_files tool.");
-    return { ...parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt), outputTokens };
+    return { ...parseRawToolOutput(toolBlock.input as { files?: unknown; summary?: unknown; appName?: unknown }, prompt), outputTokens, inputTokens };
   };
 
   const runWithRetry = async (modelId: string): Promise<CustomiseResult> => {
@@ -1372,11 +1375,37 @@ async function callAnthropicWithMessages(
         model: modelId,
       });
       const retry = await executeCall(modelId);
+      console.log(JSON.stringify({
+        event: "generate.outcome",
+        buildId: instrumentation?.buildId ?? null,
+        model: modelId,
+        initialFiles: result.files.length,
+        initialOutputTokens: result.outputTokens,
+        retryTriggered: true,
+        retryFiles: retry.files.length,
+        retryOutputTokens: retry.outputTokens,
+        finalOutcome: retry.files.length === 0 ? "fallback_scaffold" : "retry_succeeded",
+        isIteration: instrumentation?.isIteration ?? null,
+        inputTokens: result.inputTokens ?? 0,
+      }));
       if (retry.files.length === 0) {
         throw new Error(`Model returned 0 files on retry (outputTokens: ${retry.outputTokens})`);
       }
       return retry;
     }
+    console.log(JSON.stringify({
+      event: "generate.outcome",
+      buildId: instrumentation?.buildId ?? null,
+      model: modelId,
+      initialFiles: result.files.length,
+      initialOutputTokens: result.outputTokens,
+      retryTriggered: false,
+      retryFiles: null,
+      retryOutputTokens: null,
+      finalOutcome: "real_build",
+      isIteration: instrumentation?.isIteration ?? null,
+      inputTokens: result.inputTokens ?? 0,
+    }));
     return result;
   };
 
@@ -1395,6 +1424,7 @@ async function callAnthropicCustomise(
   prompt: string,
   model: string,
   paletteId: string,
+  instrumentation?: { buildId: string; isIteration: boolean },
   designSystemSpec?: string,
   phaseContextBlock?: string,
   phaseScope?: PhaseScope,
@@ -1406,6 +1436,7 @@ async function callAnthropicCustomise(
     buildUserMessage(prompt, phaseScope),
     prompt,
     maxTokens,
+    instrumentation,
   );
 }
 
@@ -1473,6 +1504,7 @@ async function callModelCustomise(
   prompt: string,
   model: string,
   paletteId: string,
+  instrumentation?: { buildId: string; isIteration: boolean },
   phaseContextBlock?: string,
   phaseScope?: PhaseScope,
   maxTokens?: number,
@@ -1486,7 +1518,16 @@ async function callModelCustomise(
   }
 
   if (model.startsWith("claude-")) {
-    return callAnthropicCustomise(prompt, model, paletteId, designSystemSpec, phaseContextBlock, phaseScope, maxTokens);
+    return callAnthropicCustomise(
+      prompt,
+      model,
+      paletteId,
+      instrumentation,
+      designSystemSpec,
+      phaseContextBlock,
+      phaseScope,
+      maxTokens,
+    );
   }
 
   if (model.startsWith("gpt-")) {
@@ -1507,7 +1548,16 @@ async function callModelCustomise(
 
   // Unknown model — fall back to haiku
   console.warn("[generate] Unknown model, falling back to claude-haiku-4-5-20251001:", model);
-  return callAnthropicCustomise(prompt, "claude-haiku-4-5-20251001", paletteId, designSystemSpec, phaseContextBlock, phaseScope, maxTokens);
+  return callAnthropicCustomise(
+    prompt,
+    "claude-haiku-4-5-20251001",
+    paletteId,
+    instrumentation,
+    designSystemSpec,
+    phaseContextBlock,
+    phaseScope,
+    maxTokens,
+  );
 }
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
@@ -1603,6 +1653,7 @@ async function callModelIterate(
   prompt: string,
   model: string,
   existingFiles: readonly StudioFile[],
+  instrumentation?: { buildId: string; isIteration: boolean },
   schemaSummary?: string,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
@@ -1611,7 +1662,7 @@ async function callModelIterate(
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {
-    return callAnthropicWithMessages(model, systemPrompt, userMessage, prompt);
+    return callAnthropicWithMessages(model, systemPrompt, userMessage, prompt, 64000, instrumentation);
   }
 
   if (model.startsWith("gpt-")) {
@@ -2403,7 +2454,13 @@ async function _runBuildInBackground(
       let iterErrorReason: string | null = null;
       try {
         await stageEvents.emit("generating");
-        iterResult = await callModelIterate(prompt, model, existingFiles, iterSchemaSummary);
+        iterResult = await callModelIterate(
+          prompt,
+          model,
+          existingFiles,
+          { buildId, isIteration: true },
+          iterSchemaSummary,
+        );
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
         // Classify returned files as "new" (not in current build) vs "updated" (overwrite existing).
@@ -2732,7 +2789,15 @@ async function _runBuildInBackground(
 
     try {
       await stageEvents.emit("generating");
-      customised = await callModelCustomise(workingPrompt, model, paletteId, phaseContextBlock, phaseScope, input.forcedSimple ? 32000 : undefined);
+      customised = await callModelCustomise(
+        workingPrompt,
+        model,
+        paletteId,
+        { buildId, isIteration: input.isIteration },
+        phaseContextBlock,
+        phaseScope,
+        input.forcedSimple ? 32000 : undefined,
+      );
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
       // tool JSON → input={}) and any case where Sonnet returns files:[]. Throwing
