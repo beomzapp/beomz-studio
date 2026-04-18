@@ -22,9 +22,9 @@ import { useBuilderEngineStream } from "./useBuilderEngineStream";
 import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
 
 /** BEO-393: minimum time a checklist row stays ◌ before advancing to ✓ */
-const CHECKLIST_MIN_DWELL_MS = 800;
+const CHECKLIST_MIN_DWELL_MS = 2000;
 /** BEO-393: cap artificial checklist drain before showing build_summary */
-const SUMMARY_MAX_CHECKLIST_DRAIN_MS = 3200;
+const SUMMARY_MAX_CHECKLIST_DRAIN_MS = 6000;
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -332,6 +332,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           break;
 
         case "pre_build_ack": {
+          // BEO-392: record internal state only — NO message pushed to chat.
+          // BuildingShimmer will display (isBuilding && !hasBuildingMessage).
+          // The first real message card is created when stage_preamble arrives.
           const now = Date.now();
           buildStartedAtRef.current = now;
           try {
@@ -343,56 +346,38 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           latestStageChecklistRef.current = null;
           latestStagePhaseRef.current = undefined;
 
-          const ackBuildingId = makeId();
-          activeBuildingMsgIdRef.current = ackBuildingId;
-          const checklist = makeInitialChecklist();
-          const ackBuildStartedAt = buildStartedAtRef.current ?? undefined;
+          // Pre-allocate ID so stage_preamble can use it without racing
+          const pendingBuildId = makeId();
+          activeBuildingMsgIdRef.current = pendingBuildId;
 
-          // BEO-392: one card — ack + checklist + preamble live on the same `building` message.
-          setMessages(prev => [
-            ...prev.filter(m => m.type !== "thinking"),
-            {
-              id: ackBuildingId,
-              type: "building",
-              phase: "acknowledged",
-              ackMessage: event.message,
-              checklist,
-              buildStartedAt: ackBuildStartedAt,
-            },
-          ]);
+          // Drop the thinking indicator — BuildingShimmer takes over
+          setMessages(prev => prev.filter(m => m.type !== "thinking"));
 
+          // Safety net: if stage_preamble never fires in 5s, create the card ourselves
           preambleFallbackTimerRef.current = setTimeout(() => {
-            setMessages(prev =>
-              patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
-                if (b.preamble) return b;
-                return {
-                  ...b,
+            preambleFallbackTimerRef.current = null;
+            setMessages(prev => {
+              if (findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current) !== -1) return prev;
+              const id = activeBuildingMsgIdRef.current ?? makeId();
+              activeBuildingMsgIdRef.current = id;
+              const cl = applyStageToChecklist(makeInitialChecklist(), "stage_classifying");
+              checklistDwellRef.current.activeSince = activeChecklistIndex(cl) >= 0 ? Date.now() : null;
+              return [
+                ...prev,
+                {
+                  id,
+                  type: "building" as const,
+                  phase: "classifying",
                   preamble: {
                     restatement: PREAMBLE_FALLBACK.restatement,
                     bullets: [...PREAMBLE_FALLBACK.bullets],
                   },
                   preambleIsFallback: true,
-                };
-              }),
-            );
-          }, 5_000);
-
-          stageKickoffTimerRef.current = setTimeout(() => {
-            setMessages(prev =>
-              patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
-                if (!b.checklist) return b;
-                const stuck = b.checklist.every(i => i.status === "pending");
-                if (!stuck) return b;
-                const checklist = applyStageToChecklist(b.checklist, "stage_classifying");
-                checklistDwellRef.current.activeSince =
-                  activeChecklistIndex(checklist) >= 0 ? Date.now() : null;
-                return {
-                  ...b,
-                  checklist,
-                  phase: "classifying",
-                };
-              }),
-            );
+                  checklist: cl,
+                  buildStartedAt: buildStartedAtRef.current ?? undefined,
+                },
+              ];
+            });
           }, 5_000);
           break;
         }
@@ -403,14 +388,37 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             preambleFallbackTimerRef.current = null;
           }
           setMessages(prev => {
-            const next = patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => ({
-              ...b,
-              preamble: { restatement: event.restatement, bullets: [...event.bullets] },
-              preambleIsFallback: false,
-            }));
-            const li = findLiveBuildingIndex(next, null);
-            if (li !== -1) activeBuildingMsgIdRef.current = next[li].id;
-            return next;
+            const idx = findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current);
+            if (idx !== -1) {
+              // Card already exists (e.g. restored from session or race): patch in-place
+              const next = [...prev];
+              next[idx] = {
+                ...(next[idx] as BuildingMsg),
+                preamble: { restatement: event.restatement, bullets: [...event.bullets] },
+                preambleIsFallback: false,
+              };
+              activeBuildingMsgIdRef.current = (next[idx] as BuildingMsg).id;
+              return next;
+            }
+            // BEO-392: CREATE the one-and-only building message here
+            const id = activeBuildingMsgIdRef.current ?? makeId();
+            activeBuildingMsgIdRef.current = id;
+            console.assert(
+              prev.filter(m => m.type === "building").length === 0,
+              "BEO-392: building message already in state when stage_preamble fires",
+            );
+            return [
+              ...prev.filter(m => m.type !== "thinking"),
+              {
+                id,
+                type: "building" as const,
+                phase: "acknowledged",
+                preamble: { restatement: event.restatement, bullets: [...event.bullets] },
+                preambleIsFallback: false,
+                checklist: makeInitialChecklist(),
+                buildStartedAt: buildStartedAtRef.current ?? undefined,
+              },
+            ];
           });
           break;
         }
@@ -859,6 +867,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               activeChecklistIndex(initialTarget) >= 0 ? Date.now() : null;
             latestStageChecklistRef.current = initialTarget;
             latestStagePhaseRef.current = phase;
+            console.assert(
+              prev.filter(m => m.type === "building").length === 0,
+              `BEO-392: creating 2nd building msg on ${event.type}`,
+            );
             return [
               ...prev,
               {

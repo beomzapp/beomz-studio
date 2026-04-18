@@ -79,11 +79,23 @@ body {
   animation: thinking-shimmer 2s linear infinite;
 }
 
+/* BEO-393: Active checklist item — solid orange orb with radiating pulse */
+@keyframes orb-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(249,115,22,0.5); }
+  50%  { box-shadow: 0 0 0 10px rgba(249,115,22,0); }
+  100% { box-shadow: 0 0 0 0 rgba(249,115,22,0); }
+}
+
+.checklist-orb-active {
+  animation: orb-pulse 1.5s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .streaming-shimmer,
   .thinking-shimmer,
   .plan-step-icon-spin,
-  .plan-step-icon-pop {
+  .plan-step-icon-pop,
+  .checklist-orb-active {
     animation: none !important;
   }
 

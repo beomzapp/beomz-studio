@@ -80,30 +80,15 @@ function ElapsedTimer({
   );
 }
 
-// ─── Preamble placeholder (BEO-392) ───────────────────────────────────────────
-
-function PreambleDots() {
-  return (
-    <p className="text-sm text-zinc-400/90" aria-hidden>
-      <span className="inline-flex gap-0.5 tabular-nums">
-        <span className="animate-pulse">·</span>
-        <span className="animate-pulse [animation-delay:150ms]">·</span>
-        <span className="animate-pulse [animation-delay:300ms]">·</span>
-      </span>
-    </p>
-  );
-}
-
-// ─── Pending card (before first building message arrives) — mirrors live layout ─
+// ─── Pending card (before stage_preamble arrives) ────────────────────────────
 
 export function BuildingShimmer() {
   return (
     <div className="flex items-start gap-2 py-1">
       <BAvatar />
-      <div className="min-w-0 flex-1 space-y-3">
-        <PreambleDots />
-        <div className="rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2.5 pr-16 opacity-70">
-          <ul className="space-y-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-1 pr-16 opacity-60">
+          <ul className="space-y-0">
             {(
               [
                 ["planning", CHECKLIST_LABELS.planning],
@@ -112,13 +97,15 @@ export function BuildingShimmer() {
                 ["deploying", CHECKLIST_LABELS.deploying],
               ] as const
             ).map(([id, label]) => (
-              <li key={id} className="flex items-start gap-2 text-sm text-zinc-400">
-                <span className="mt-0.5 w-4 flex-shrink-0 text-center">○</span>
-                <span>{label}</span>
+              <li key={id} className="flex min-h-[40px] items-center gap-3">
+                <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+                  <span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" />
+                </span>
+                <span className="text-[15px] text-zinc-400">{label}</span>
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-xs text-zinc-400">Starting…</p>
+          <p className="pb-1 text-xs text-zinc-400">Starting…</p>
         </div>
       </div>
     </div>
@@ -130,15 +117,35 @@ export function BuildingShimmer() {
 function ChecklistGlyph({ status }: { status: ChatChecklistStatus }) {
   switch (status) {
     case "pending":
-      return <span className="text-zinc-300">○</span>;
+      return (
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+          <span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" />
+        </span>
+      );
     case "active":
-      return <span className="animate-pulse text-[#F97316]">◌</span>;
+      return (
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+          <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+        </span>
+      );
     case "done":
-      return <span className="text-emerald-600/70">✓</span>;
+      return (
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-[15px] text-emerald-600/70">
+          ✓
+        </span>
+      );
     case "failed":
-      return <span className="text-red-500">✕</span>;
+      return (
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-[15px] text-red-500">
+          ✕
+        </span>
+      );
     default:
-      return <span className="text-zinc-300">○</span>;
+      return (
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+          <span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" />
+        </span>
+      );
   }
 }
 
@@ -156,7 +163,6 @@ function BuildingLiveCard({
     checklist,
     summary,
     nextSteps,
-    ackMessage,
     filesWritten,
     totalFiles,
     buildStartedAt,
@@ -167,43 +173,28 @@ function BuildingLiveCard({
     typeof filesWritten === "number" && typeof totalFiles === "number" && totalFiles > 0;
   const fileLine = showFileCount ? `Writing file ${filesWritten} of ${totalFiles}…` : null;
 
-  const showPreambleBody =
+  const showPreamble =
     !!preamble &&
     (preamble.restatement.trim().length > 0 || preamble.bullets.length > 0);
-
-  const ackTrimmed = typeof ackMessage === "string" ? ackMessage.trim() : "";
-  const showAck = !summary && ackTrimmed.length > 0;
 
   return (
     <div className="flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 space-y-3 break-words">
-        {!summary && (
-          <div className="space-y-2">
-            {showAck && (
-              <p className="text-sm leading-relaxed text-zinc-500">{ackTrimmed}</p>
+        {!summary && showPreamble && (
+          <div className="origin-top transition-[opacity,transform] duration-300 ease-out">
+            {preamble!.restatement.trim().length > 0 && (
+              <p className="text-sm leading-relaxed text-[#374151]">{preamble!.restatement}</p>
             )}
-            {showPreambleBody ? (
-              <div className="origin-top transition-[opacity,transform] duration-300 ease-out">
-                {preamble!.restatement.trim().length > 0 && (
-                  <p className="text-sm leading-relaxed text-[#374151]">{preamble!.restatement}</p>
-                )}
-                {preamble!.bullets.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {preamble!.bullets.map((line, i) => (
-                      <li
-                        key={i}
-                        className="flex gap-2 text-sm leading-relaxed text-zinc-600"
-                      >
-                        <span className="flex-shrink-0 select-none text-zinc-400">•</span>
-                        <span className="min-w-0">{line}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : (
-              <PreambleDots />
+            {preamble!.bullets.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {preamble!.bullets.map((line, i) => (
+                  <li key={i} className="flex gap-2 text-sm leading-relaxed text-zinc-600">
+                    <span className="flex-shrink-0 select-none text-zinc-400">•</span>
+                    <span className="min-w-0">{line}</span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         )}
@@ -214,21 +205,19 @@ function BuildingLiveCard({
               summary ? "opacity-90" : ""
             }`}
           >
-            <ul className="space-y-1.5">
+            <ul className="space-y-0">
               {checklist.map(item => (
-                <li key={item.id} className="flex items-start gap-2 text-sm">
-                  <span className="mt-0.5 w-4 flex-shrink-0 text-center">
-                    <ChecklistGlyph status={item.status} />
-                  </span>
+                <li key={item.id} className="flex min-h-[40px] items-center gap-3">
+                  <ChecklistGlyph status={item.status} />
                   <span
                     className={
                       item.status === "pending"
-                        ? "text-zinc-400"
+                        ? "text-[15px] text-zinc-400"
                         : item.status === "active"
-                          ? "font-medium text-[#374151]"
+                          ? "text-[15px] font-medium text-[#374151]"
                           : item.status === "failed"
-                            ? "text-red-600/90"
-                            : "text-zinc-600"
+                            ? "text-[15px] text-red-600/90"
+                            : "text-[15px] text-zinc-600"
                     }
                   >
                     {item.label}
