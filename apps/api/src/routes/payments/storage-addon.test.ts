@@ -97,7 +97,7 @@ function createApp(
   orgContext: OrgContext,
   deps: Parameters<typeof createStorageAddonRoute>[0] = {},
 ): Hono {
-  const route = createStorageAddonRoute({
+  const sharedDeps = {
     authMiddleware: async (_c, next) => {
       await next();
     },
@@ -106,11 +106,11 @@ function createApp(
       await next();
     },
     ...deps,
-  });
+  };
 
   const app = new Hono();
-  app.route("/payments/storage-addon", route);
-  app.route("/payments/storage-addons", route);
+  app.route("/payments/storage-addon", createStorageAddonRoute(sharedDeps));
+  app.route("/payments/storage-addons", createStorageAddonRoute(sharedDeps));
   return app;
 }
 

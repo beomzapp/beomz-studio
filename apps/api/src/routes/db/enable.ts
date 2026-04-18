@@ -32,6 +32,21 @@ import {
 } from "../../lib/userDataClient.js";
 import { getFeatureLimits } from "../../lib/features.js";
 
+export function countActiveDbEnabledProjects(
+  projects: ReadonlyArray<Record<string, unknown>>,
+): number {
+  return projects.filter((project) => {
+    const deletedAt = project.deleted_at;
+    const isDeleted = typeof deletedAt === "string" ? deletedAt.length > 0 : deletedAt != null;
+    return project.database_enabled === true && !isDeleted;
+  }).length;
+}
+
+function isRemovedResourceError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("Resource has been removed");
+}
+
 interface EnableDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
   loadOrgContextMiddleware?: MiddlewareHandler;
@@ -73,7 +88,10 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
     // Gate before provisioning starts: every plan includes 1 shared DB-enabled project.
     const plan = org.plan ?? "free";
     const limits = getFeatureLimits(plan);
-    const dbCount = await db.countDbEnabledProjectsByOrgId(org.id);
+    const dbProjects = await db.findProjectsByOrgId(org.id);
+    const dbCount = countActiveDbEnabledProjects(
+      dbProjects as unknown as ReadonlyArray<Record<string, unknown>>,
+    );
     if (dbCount >= limits.db_projects) {
       return c.json(
         {
@@ -134,6 +152,15 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
         await runSqlFn(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
       } catch {
         // ignore
+      }
+      if (isRemovedResourceError(err)) {
+        return c.json(
+          {
+            error: "db_setup_failed",
+            message: "Something went wrong setting up your database. Please try again.",
+          },
+          400,
+        );
       }
       return c.json(
         { error: err instanceof Error ? err.message : "Failed to provision database" },

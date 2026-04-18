@@ -1217,7 +1217,7 @@ function buildPhaseContextBlock(
 
 // ─── Shared prompt builders ───────────────────────────────────────────────────
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
   paletteId: string,
   designSystemSpec?: string,
   phaseContextBlock?: string,
@@ -1641,7 +1641,11 @@ async function callModelCustomise(
 
 // ─── Iteration prompts ────────────────────────────────────────────────────────
 
-function buildIterationSystemPrompt(schemaSummary?: string, imageContextBlock?: string): string {
+export function buildIterationSystemPrompt(
+  schemaSummary?: string,
+  imageContextBlock?: string,
+  hasWiredSupabaseClient = false,
+): string {
   const dbBlock = schemaSummary
     ? [
         "",
@@ -1656,6 +1660,18 @@ function buildIterationSystemPrompt(schemaSummary?: string, imageContextBlock?: 
     : "";
   const imageBlock = imageContextBlock
     ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
+    : "";
+  const existingSupabaseClientBlock = hasWiredSupabaseClient
+    ? [
+        "",
+        "This project already has a Supabase client file.",
+        "Do NOT create a new Supabase client file.",
+        "Do NOT generate any file named supabase-js, supabase-client, supabase-helper, or any variant.",
+        "To use Supabase in new code, import the existing client:",
+        "  import { supabase } from './supabase'",
+        "  or import { supabase } from '../lib/supabase'",
+        "The client already exists — importing is all that is needed.",
+      ].join("\n")
     : "";
   return [
     "You are modifying an existing React application. Apply ONLY the specific change the user requests.",
@@ -1695,7 +1711,7 @@ function buildIterationSystemPrompt(schemaSummary?: string, imageContextBlock?: 
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
     "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock,
+    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock,
   ].join("\n");
 }
 
@@ -1741,10 +1757,15 @@ async function callModelIterate(
   schemaSummary?: string,
   imageContextBlock?: string,
   imageUrl?: string,
+  hasWiredSupabaseClient = false,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
 
-  const systemPrompt = buildIterationSystemPrompt(schemaSummary, imageContextBlock);
+  const systemPrompt = buildIterationSystemPrompt(
+    schemaSummary,
+    imageContextBlock,
+    hasWiredSupabaseClient,
+  );
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {
@@ -2570,8 +2591,10 @@ async function _runBuildInBackground(
 
       // Load DB schema for this project if database is enabled (BEO-288)
       let iterSchemaSummary: string | undefined;
+      let hasWiredSupabaseClient = false;
       try {
         const iterProject = await db.findProjectById(projectId);
+        hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
         if (iterProject?.database_enabled && iterProject.db_schema) {
           const tables = await getSchemaTableList(iterProject.db_schema);
           if (tables.length > 0) {
@@ -2660,6 +2683,7 @@ async function _runBuildInBackground(
           iterSchemaSummary,
           imageContextBlock,
           input.imageUrl,
+          hasWiredSupabaseClient,
         );
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 

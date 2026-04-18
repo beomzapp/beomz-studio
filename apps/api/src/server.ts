@@ -35,7 +35,9 @@ import confirmTopupRoute from "./routes/payments/confirm-topup.js";
 import portalRoute from "./routes/payments/portal.js";
 import topupCheckoutRoute from "./routes/payments/topup.js";
 import webhookRoute from "./routes/payments/webhook.js";
-import storageAddonRoute from "./routes/payments/storage-addon.js";
+import {
+  createStorageAddonRoute,
+} from "./routes/payments/storage-addon.js";
 import dbRouter from "./routes/db/index.js";
 import {
   checkSlugRoute,
@@ -100,8 +102,8 @@ app.route("/payments/portal", portalRoute);
 app.route("/payments/topup/checkout", topupCheckoutRoute);
 app.route("/payments/webhook", webhookRoute);
 // BEO-329 / BEO-404: Storage add-on checkout + public add-on list
-app.route("/payments/storage-addon", storageAddonRoute);
-app.route("/payments/storage-addons", storageAddonRoute);
+app.route("/payments/storage-addon", createStorageAddonRoute());
+app.route("/payments/storage-addons", createStorageAddonRoute());
 // BEO-130: Built-in DB + BYO Supabase
 app.route("/projects/:id/db", dbRouter);
 // BEO-262: Publish

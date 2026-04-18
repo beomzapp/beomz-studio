@@ -11,7 +11,10 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { getFeatureLimits } = await import("../../lib/features.js");
-const { createEnableDbRoute } = await import("./enable.js");
+const {
+  countActiveDbEnabledProjects,
+  createEnableDbRoute,
+} = await import("./enable.js");
 const { createMigrateDbRoute } = await import("./migrate.js");
 
 function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
@@ -57,6 +60,7 @@ function createTestOrgContext(
     db: {
       findProjectById: async (id: string) => (id === project.id ? project : null),
       countDbEnabledProjectsByOrgId: async () => 0,
+      findProjectsByOrgId: async () => [project],
       updateProject: async (_id: string, patch: Record<string, unknown>) => ({
         ...project,
         ...patch,
@@ -157,11 +161,25 @@ test("getFeatureLimits returns the Apr 18 storage and db project caps", () => {
   assert.equal(getFeatureLimits("business").storage_mb, 15360);
 });
 
+test("countActiveDbEnabledProjects excludes deleted projects", () => {
+  const count = countActiveDbEnabledProjects([
+    createProject({ id: "active-1", database_enabled: true }),
+    createProject({
+      id: "deleted-1",
+      database_enabled: true,
+      deleted_at: "2026-04-18T12:00:00.000Z",
+    }),
+    createProject({ id: "inactive-1", database_enabled: false }),
+  ]);
+
+  assert.equal(count, 1);
+});
+
 test("db enable succeeds when the org has 0 DB-enabled projects", async () => {
   const project = createProject();
   const insertCalls: Array<{ storageMb: number; rows: number; tables: number }> = [];
   const orgContext = createTestOrgContext(project, {
-    countDbEnabledProjectsByOrgId: async () => 0,
+    findProjectsByOrgId: async () => [],
     insertProjectDbLimits: async (_projectId: string, storageMb: number, rows: number, tables: number) => {
       insertCalls.push({ storageMb, rows, tables });
       return {
@@ -199,7 +217,7 @@ test("db enable returns the spec 402 when the org already has 1 DB-enabled proje
   const project = createProject();
   let provisioningCalls = 0;
   const orgContext = createTestOrgContext(project, {
-    countDbEnabledProjectsByOrgId: async () => 1,
+    findProjectsByOrgId: async () => [createProject({ id: "active-1", database_enabled: true })],
   });
 
   const app = createEnableApp(orgContext, {
@@ -242,9 +260,9 @@ test("db enable keeps existing enabled projects untouched even when the org alre
   });
   let countCalls = 0;
   const orgContext = createTestOrgContext(project, {
-    countDbEnabledProjectsByOrgId: async () => {
+    findProjectsByOrgId: async () => {
       countCalls += 1;
-      return 1;
+      return [createProject({ id: "active-1", database_enabled: true })];
     },
   });
 
@@ -303,6 +321,30 @@ test("db migrate still returns 402 storage_limit_reached when storage is exhaust
 
   assert.equal(response.status, 402);
   assert.equal(payload.error, "storage_limit_reached");
+});
+
+test('db enable maps "Resource has been removed" to a friendly 400 response', async () => {
+  const project = createProject();
+  const orgContext = createTestOrgContext(project, {
+    findProjectsByOrgId: async () => [],
+  });
+
+  const app = createEnableApp(orgContext, {
+    isUserDataConfigured: () => true,
+    runSql: async () => {
+      throw new Error('SQL execution failed (400): {"message":"Resource has been removed"}');
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}/db/enable`, {
+    method: "POST",
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "db_setup_failed",
+    message: "Something went wrong setting up your database. Please try again.",
+  });
 });
 
 test("db migrate no longer returns 402 for row or table limits", async () => {
