@@ -26,7 +26,7 @@ import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
 // ─── BEO-396: Chat mode flag ───────────────────────────────────────────────────
 // Set to `true` to use the local mock (Codex backend not yet live).
 // Flip to `false` once /api/builds/chat and /api/builds/summarise-chat are deployed.
-const MOCK_CHAT_MODE = true;
+const MOCK_CHAT_MODE = false;
 
 type ChatApiMessage = { role: "user" | "assistant"; content: string };
 
