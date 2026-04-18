@@ -117,6 +117,23 @@ export interface BuilderV3InsufficientCreditsEvent extends BuilderV3BaseEvent {
   features: string[];
 }
 
+// BEO-387: stage boundary events emitted by the backend at real pipeline transitions.
+export type BuildStageEventType =
+  | "stage_classifying"
+  | "stage_enriching"
+  | "stage_generating"
+  | "stage_sanitising"
+  | "stage_persisting"
+  | "stage_deploying";
+
+export interface BuilderV3BuildStageEvent extends Omit<BuilderV3BaseEvent, "operation"> {
+  type: BuildStageEventType;
+  /** From BuilderV3BaseEvent — always present on these events. */
+  operation: BuilderV3Operation;
+  stage: string;
+  elapsedMs: number;
+}
+
 // BEO-362: 4-way intent classifier result emitted before any build action.
 export type BuildIntent = "question" | "edit" | "build" | "ambiguous";
 
@@ -163,7 +180,8 @@ export type BuilderV3Event =
   | BuilderV3IntentDetectedEvent
   | BuilderV3PreBuildAckEvent
   | BuilderV3ClarifyingQuestionEvent
-  | BuilderV3BuildSummaryEvent;
+  | BuilderV3BuildSummaryEvent
+  | BuilderV3BuildStageEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;

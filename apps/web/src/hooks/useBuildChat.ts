@@ -15,6 +15,37 @@ import {
   type StartBuildResponse,
 } from "../lib/api";
 import { useBuilderEngineStream } from "./useBuilderEngineStream";
+import { STAGE_COPY, type BuildStage } from "../lib/buildStatusCopy";
+
+// Maps stage SSE event type → BuildStage key
+const STAGE_EVENT_TO_STAGE: Record<string, BuildStage> = {
+  stage_classifying: "classifying",
+  stage_enriching:   "enriching",
+  stage_generating:  "generating",
+  stage_sanitising:  "sanitising",
+  stage_persisting:  "persisting",
+  stage_deploying:   "deploying",
+};
+
+/**
+ * Resolve the {app_type} token from the user's last prompt.
+ * Falls back to "your app" — the real descriptor comes from enrichPrompt
+ * server-side but isn't yet surfaced in SSE events.
+ */
+function resolveAppType(prompt: string): string {
+  const trimmed = prompt.trim().replace(/[.!?]+$/, "");
+  if (!trimmed || trimmed.length < 4) return "your app";
+  const match = trimmed.match(/(?:build|make|create|write)\s+(?:me\s+)?(?:a\s+|an\s+)?(.{3,30})/i);
+  if (match?.[1]) return match[1].trim();
+  return "your app";
+}
+
+/** Pick a variant from a stage's copy pool, substituting {app_type}. */
+function pickCopy(stage: BuildStage, index: number, appType: string): string {
+  const pool = STAGE_COPY[stage];
+  const raw = pool[index % pool.length] ?? pool[0];
+  return raw.replace("{app_type}", appType);
+}
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -92,6 +123,14 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     projectId && projectId !== "new" ? projectId : "",
   );
 
+  // BEO-387: phase / copy tracking refs
+  const currentPhaseRef = useRef<BuildStage | null>(null);
+  const phaseVariantIndexRef = useRef(0);
+  const phaseHasSwappedRef = useRef(false);
+  const phaseRotationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preBuildFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appTypeRef = useRef("your app");
+
   // Keep options in a ref so handleEvent never needs them in its dep array.
   // This prevents stale-closure issues when options callbacks are redefined.
   const optionsRef = useRef(options);
@@ -143,11 +182,49 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           const ssKey = `beomz:buildStartedAt:${resolvedProjectIdRef.current}`;
           sessionStorage.setItem(ssKey, String(now));
         } catch { /* sessionStorage may be unavailable */ }
+
+        // BEO-387: reset phase tracking for the new build.
+        if (phaseRotationTimerRef.current) {
+          clearTimeout(phaseRotationTimerRef.current);
+          phaseRotationTimerRef.current = null;
+        }
+        if (preBuildFallbackTimerRef.current) {
+          clearTimeout(preBuildFallbackTimerRef.current);
+          preBuildFallbackTimerRef.current = null;
+        }
+        currentPhaseRef.current = null;
+        phaseHasSwappedRef.current = false;
+
+        // Pick an "acknowledged" copy variant to show immediately in the
+        // building message while we wait for the first stage event.
+        const ackIndex = Math.floor(Math.random() * STAGE_COPY.acknowledged.length);
+        const ackCopy = pickCopy("acknowledged", ackIndex, appTypeRef.current);
+
         // BEO-378: replace the thinking dots with the real ack message.
+        const ackBuildingId = makeId();
+        activeBuildingMsgIdRef.current = ackBuildingId;
+        const ackBuildStartedAt = buildStartedAtRef.current ?? undefined;
         setMessages(prev => [
           ...prev.filter(m => m.type !== "thinking"),
           { id: makeId(), type: "pre_build_ack", content: event.message },
+          { id: ackBuildingId, type: "building", phase: "acknowledged", phaseCopy: ackCopy, buildStartedAt: ackBuildStartedAt },
         ]);
+
+        // BEO-387: if no stage event arrives within 5s, show a safe fallback.
+        preBuildFallbackTimerRef.current = setTimeout(() => {
+          if (currentPhaseRef.current !== null) return; // stage already arrived
+          setMessages(prev => {
+            const bid = activeBuildingMsgIdRef.current;
+            if (!bid) return prev;
+            const idx = prev.findIndex(m => m.id === bid);
+            if (idx === -1) return prev;
+            const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
+            if (existing.phaseCopy && existing.phaseCopy !== ackCopy) return prev;
+            const next = [...prev];
+            next[idx] = { ...existing, phaseCopy: "Getting started…" };
+            return next;
+          });
+        }, 5_000);
         break;
       }
 
@@ -190,7 +267,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             const idx = prev.findIndex(m => m.id === buildingId);
             if (idx !== -1) {
               const next = [...prev];
-              next[idx] = { id: buildingId, type: "building", phase, filesWritten, totalFiles, buildStartedAt };
+              const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
+              // BEO-387: preserve phaseCopy if a stage event already set it.
+              const phaseCopy = existing.phaseCopy;
+              next[idx] = { id: buildingId, type: "building", phase: existing.phase ?? phase, phaseCopy, filesWritten, totalFiles, buildStartedAt };
               return next;
             }
           }
@@ -340,6 +420,81 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         activeBuildingMsgIdRef.current = null;
         break;
 
+      // BEO-387: stage boundary events — update building message with honest copy
+      case "stage_classifying":
+      case "stage_enriching":
+      case "stage_generating":
+      case "stage_sanitising":
+      case "stage_persisting":
+      case "stage_deploying": {
+        const stage = STAGE_EVENT_TO_STAGE[event.type]!;
+        const pool = STAGE_COPY[stage];
+
+        // Cancel any pending rotation timer from the previous stage.
+        if (phaseRotationTimerRef.current) {
+          clearTimeout(phaseRotationTimerRef.current);
+          phaseRotationTimerRef.current = null;
+        }
+        // Cancel the pre_build_ack fallback — a real stage arrived.
+        if (preBuildFallbackTimerRef.current) {
+          clearTimeout(preBuildFallbackTimerRef.current);
+          preBuildFallbackTimerRef.current = null;
+        }
+
+        currentPhaseRef.current = stage;
+        phaseHasSwappedRef.current = false;
+
+        // Pick copy variant once at stage entry; keep it locked until rotation.
+        // If elapsedMs already >= 60000, jump straight to variant 1 (one-time swap).
+        const alreadyLong = typeof event.elapsedMs === "number" && event.elapsedMs >= 60_000;
+        const variantIndex = alreadyLong && pool.length > 1 ? 1 : Math.floor(Math.random() * pool.length);
+        if (alreadyLong) phaseHasSwappedRef.current = true;
+        phaseVariantIndexRef.current = variantIndex;
+
+        const phaseCopy = pickCopy(stage, variantIndex, appTypeRef.current);
+        const buildStartedAt = buildStartedAtRef.current ?? undefined;
+
+        setMessages(prev => {
+          const buildingId = activeBuildingMsgIdRef.current;
+          if (buildingId) {
+            const idx = prev.findIndex(m => m.id === buildingId);
+            if (idx !== -1) {
+              const next = [...prev];
+              const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
+              next[idx] = { ...existing, phase: stage, phaseCopy, buildStartedAt };
+              return next;
+            }
+          }
+          // No building message yet — create one.
+          const id = makeId();
+          activeBuildingMsgIdRef.current = id;
+          return [...prev, { id, type: "building", phase: stage, phaseCopy, buildStartedAt }];
+        });
+
+        // Schedule a 60s variant rotation for long stages (most useful for "generating").
+        if (!alreadyLong && pool.length > 1) {
+          const capturedStage = stage;
+          const nextIndex = (variantIndex + 1) % pool.length;
+          phaseRotationTimerRef.current = setTimeout(() => {
+            if (currentPhaseRef.current !== capturedStage) return;
+            if (phaseHasSwappedRef.current) return;
+            phaseHasSwappedRef.current = true;
+            const rotatedCopy = pickCopy(capturedStage, nextIndex, appTypeRef.current);
+            setMessages(prev => {
+              const bid = activeBuildingMsgIdRef.current;
+              if (!bid) return prev;
+              const idx = prev.findIndex(m => m.id === bid);
+              if (idx === -1) return prev;
+              const next = [...prev];
+              const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
+              next[idx] = { ...existing, phaseCopy: rotatedCopy };
+              return next;
+            });
+          }, 60_000);
+        }
+        break;
+      }
+
       // Events handled exclusively by ProjectPage via onEvent callback
       default:
         break;
@@ -362,6 +517,19 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       try {
         sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
       } catch { /* ignore */ }
+
+      // BEO-387: reset phase tracking for the new build.
+      if (phaseRotationTimerRef.current) {
+        clearTimeout(phaseRotationTimerRef.current);
+        phaseRotationTimerRef.current = null;
+      }
+      if (preBuildFallbackTimerRef.current) {
+        clearTimeout(preBuildFallbackTimerRef.current);
+        preBuildFallbackTimerRef.current = null;
+      }
+      currentPhaseRef.current = null;
+      phaseHasSwappedRef.current = false;
+      appTypeRef.current = resolveAppType(text);
 
       setIsBuilding(true);
       // BEO-378: show thinking dots immediately while the network round-trip completes.

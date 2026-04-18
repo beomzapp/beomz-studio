@@ -304,11 +304,11 @@ export function ChatMessageView({
         </p>
       );
 
-    // Building — cycling text status. No avatar, no bubble.
+    // Building — staged copy text + elapsed timer. No avatar, no bubble.
     case "building":
       return (
         <BuildingShimmer
-          phase={message.phase}
+          phase={message.phaseCopy ?? message.phase}
           filesWritten={message.filesWritten}
           totalFiles={message.totalFiles}
           buildStartedAt={message.buildStartedAt}
