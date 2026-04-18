@@ -94,6 +94,17 @@ export function ChatPanel({
     userScrolledUp.current = false;
   }, []);
 
+  const populateInputWithoutSend = useCallback((text: string) => {
+    setInput(text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    });
+  }, []);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text || isBuilding) return;
@@ -151,7 +162,11 @@ export function ChatPanel({
           <div className="min-w-0 space-y-4">
             {messages.map(msg => (
               <div key={msg.id}>
-                <ChatMessageView message={msg} onRetry={onRetry} />
+                <ChatMessageView
+                  message={msg}
+                  onRetry={onRetry}
+                  onPopulateInput={populateInputWithoutSend}
+                />
               </div>
             ))}
 

@@ -77,6 +77,7 @@ export function ProjectPage() {
     retryLastBuild,
     buildDoneRef,
     subscribeToExistingBuild,
+    notifyPreviewServerReady,
   } = useBuildChat(id, {
     onEvent: handleLegacyEvent,
     onProjectIdResolved: (newId, name, icon) => {
@@ -633,6 +634,7 @@ export function ProjectPage() {
             }
             refreshToken={previewRefreshKey}
             onFilesWritten={handleFilesWrittenToWC}
+            onPreviewServerReady={notifyPreviewServerReady}
             buildFailed={buildFailed}
           />
         );

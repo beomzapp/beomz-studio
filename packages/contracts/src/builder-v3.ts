@@ -165,6 +165,19 @@ export interface BuilderV3BuildSummaryEvent extends BuilderV3BaseEvent {
   creditsUsed: number;
 }
 
+// BEO-391: Haiku preamble after pre_build_ack — personalized restatement + bullets.
+export interface BuilderV3PreambleEvent extends BuilderV3BaseEvent {
+  type: "stage_preamble";
+  restatement: string;
+  bullets: string[];
+}
+
+// BEO-391: contextual follow-up chips after build_summary.
+export interface BuilderV3NextStepsEvent extends BuilderV3BaseEvent {
+  type: "next_steps";
+  suggestions: readonly { label: string; prompt: string }[];
+}
+
 export type BuilderV3Event =
   | BuilderV3AssistantDeltaEvent
   | BuilderV3StatusEvent
@@ -181,6 +194,8 @@ export type BuilderV3Event =
   | BuilderV3PreBuildAckEvent
   | BuilderV3ClarifyingQuestionEvent
   | BuilderV3BuildSummaryEvent
+  | BuilderV3PreambleEvent
+  | BuilderV3NextStepsEvent
   | BuilderV3BuildStageEvent;
 
 export interface BuilderV3TranscriptEntry {

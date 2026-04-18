@@ -37,6 +37,8 @@ export function useWebContainerPreview(
   onFilesWritten?: () => void,
   dbEnv?: DbEnv | null,
   generationId?: string | null,
+  /** BEO-391: fired only when Vite binds the dev port (not on every HMR write). */
+  onServerReady?: () => void,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -73,6 +75,9 @@ export function useWebContainerPreview(
   // stable [] deps) can always call the current version without re-creating.
   const onFilesWrittenRef = useRef(onFilesWritten);
   onFilesWrittenRef.current = onFilesWritten;
+
+  const onServerReadyRef = useRef(onServerReady);
+  onServerReadyRef.current = onServerReady;
 
   // Keep the latest dbEnv in a ref so startVite can always use the current value.
   const dbEnvRef = useRef(dbEnv);
@@ -191,6 +196,7 @@ export function useWebContainerPreview(
           // Without this, isAiCustomising never clears on new builds
           // and the iframe flashes errors while Vite is still compiling.
           onFilesWrittenRef.current?.();
+          onServerReadyRef.current?.();
         });
       } else {
         // Subsequent file write: Vite is already running; wc.mount has landed

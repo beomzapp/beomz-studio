@@ -1,12 +1,16 @@
 /**
- * useBuildChat — BEO-363
+ * useBuildChat — BEO-363 / BEO-391
  *
  * Owns all chat state + SSE event handling for the builder.
  * ProjectPage calls this hook and renders the returned messages.
- * No build logic lives in ProjectPage itself.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BuilderV3Event, ChatMessage, StudioFile } from "@beomz-studio/contracts";
+import type {
+  BuilderV3Event,
+  ChatChecklistStatus,
+  ChatMessage,
+  StudioFile,
+} from "@beomz-studio/contracts";
 import {
   getBuildStatus,
   getLatestBuildForProject,
@@ -15,48 +19,83 @@ import {
   type StartBuildResponse,
 } from "../lib/api";
 import { useBuilderEngineStream } from "./useBuilderEngineStream";
-import { STAGE_COPY, type BuildStage } from "../lib/buildStatusCopy";
-
-// Maps stage SSE event type → BuildStage key
-const STAGE_EVENT_TO_STAGE: Record<string, BuildStage> = {
-  stage_classifying: "classifying",
-  stage_enriching:   "enriching",
-  stage_generating:  "generating",
-  stage_sanitising:  "sanitising",
-  stage_persisting:  "persisting",
-  stage_deploying:   "deploying",
-};
-
-/**
- * Resolve the {app_type} token from the user's last prompt.
- * Falls back to "your app" — the real descriptor comes from enrichPrompt
- * server-side but isn't yet surfaced in SSE events.
- */
-function resolveAppType(prompt: string): string {
-  const trimmed = prompt.trim().replace(/[.!?]+$/, "");
-  if (!trimmed || trimmed.length < 4) return "your app";
-  const match = trimmed.match(/(?:build|make|create|write)\s+(?:me\s+)?(?:a\s+|an\s+)?(.{3,30})/i);
-  if (match?.[1]) return match[1].trim();
-  return "your app";
-}
-
-/** Pick a variant from a stage's copy pool, substituting {app_type}. */
-function pickCopy(stage: BuildStage, index: number, appType: string): string {
-  const pool = STAGE_COPY[stage];
-  const raw = pool[index % pool.length] ?? pool[0];
-  return raw.replace("{app_type}", appType);
-}
+import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-// ─── Session-events → ChatMessage mapper ──────────────────────────────────────
-// Maps the session_events persisted by the backend into the ChatMessage
-// discriminated union so chat history survives a hard refresh (BEO-370).
-// Only completed-build events are persisted (user, pre_build_ack,
-// question_answer, clarifying_question, build_summary). In-flight types
-// (building, error, server_restarting) are never stored and are skipped here.
+function makeInitialChecklist(): { id: string; label: string; status: ChatChecklistStatus }[] {
+  return [
+    { id: "planning", label: CHECKLIST_LABELS.planning, status: "pending" },
+    { id: "writing", label: CHECKLIST_LABELS.writing, status: "pending" },
+    { id: "polishing", label: CHECKLIST_LABELS.polishing, status: "pending" },
+    { id: "deploying", label: CHECKLIST_LABELS.deploying, status: "pending" },
+  ];
+}
+
+function applyStageToChecklist(
+  items: { id: string; label: string; status: ChatChecklistStatus }[],
+  stageType: string,
+): { id: string; label: string; status: ChatChecklistStatus }[] {
+  const activeIdx: Record<string, number> = {
+    stage_classifying: 0,
+    stage_enriching: 0,
+    stage_generating: 1,
+    stage_sanitising: 2,
+    stage_persisting: 2,
+    stage_deploying: 3,
+  };
+  const idx = activeIdx[stageType];
+  if (idx === undefined) return items;
+  return items.map((item, i) => {
+    if (i < idx) return { ...item, status: "done" as const };
+    if (i === idx) return { ...item, status: "active" as const };
+    return { ...item, status: "pending" as const };
+  });
+}
+
+function markAllChecklistDone(
+  items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
+): { id: string; label: string; status: ChatChecklistStatus }[] {
+  const base = items ?? makeInitialChecklist();
+  return base.map(i => ({ ...i, status: "done" as const }));
+}
+
+function markDeployingDone(
+  items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
+): { id: string; label: string; status: ChatChecklistStatus }[] | undefined {
+  if (!items) return items;
+  return items.map(i =>
+    i.id === "deploying" ? { ...i, status: "done" as const } : i,
+  );
+}
+
+function markActiveFailed(
+  items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
+): { id: string; label: string; status: ChatChecklistStatus }[] | undefined {
+  if (!items) return items;
+  return items.map(i =>
+    i.status === "active" ? { ...i, status: "failed" as const } : i,
+  );
+}
+
+type BuildingMsg = Extract<ChatMessage, { type: "building" }>;
+
+function patchBuildingMessage(
+  prev: ChatMessage[],
+  buildingId: string | null,
+  patch: (m: BuildingMsg) => BuildingMsg,
+): ChatMessage[] {
+  if (!buildingId) return prev;
+  const idx = prev.findIndex(m => m.id === buildingId && m.type === "building");
+  if (idx === -1) return prev;
+  const next = [...prev];
+  next[idx] = patch(next[idx] as BuildingMsg);
+  return next;
+}
+
+// ─── Session-events → ChatMessage mapper (BEO-370) ───────────────────────────
 
 function mapSessionEventsToMessages(
   events: readonly Record<string, unknown>[],
@@ -76,6 +115,21 @@ function mapSessionEventsToMessages(
     } else if (type === "clarifying_question") {
       result.push({ id: makeId(), type: "clarifying_question", content });
     } else if (type === "build_summary") {
+      const rawNext = ev.nextSteps;
+      let nextSteps: { label: string; prompt: string }[] | undefined;
+      if (Array.isArray(rawNext)) {
+        nextSteps = rawNext
+          .map((row: unknown) => {
+            if (!row || typeof row !== "object") return null;
+            const r = row as Record<string, unknown>;
+            const label = typeof r.label === "string" ? r.label : "";
+            const prompt = typeof r.prompt === "string" ? r.prompt : "";
+            if (!label || !prompt) return null;
+            return { label, prompt };
+          })
+          .filter((x): x is { label: string; prompt: string } => x !== null);
+        if (nextSteps.length === 0) nextSteps = undefined;
+      }
       result.push({
         id: makeId(),
         type: "build_summary",
@@ -83,28 +137,17 @@ function mapSessionEventsToMessages(
         filesChanged: Array.isArray(ev.filesChanged) ? ev.filesChanged.map(String) : [],
         durationMs: typeof ev.durationMs === "number" ? ev.durationMs : undefined,
         creditsUsed: typeof ev.creditsUsed === "number" ? ev.creditsUsed : undefined,
+        nextSteps,
       });
     }
-    // building / error / server_restarting — not persisted, skip
   }
   return result;
 }
 
 export interface UseBuildChatOptions {
-  /**
-   * Receives every raw SSE event. Use this for legacy side-effects in ProjectPage
-   * (phase mode, scope confirmation, insufficient credits, preview overlay, etc.)
-   * that have not yet been migrated into the hook.
-   */
   onEvent?: (event: BuilderV3Event) => void;
-  /**
-   * Called once the real project ID is resolved after a new project is created
-   * or once the hook identifies the project from an API response.
-   */
   onProjectIdResolved?: (projectId: string, projectName: string, projectIcon: string | null) => void;
-  /** Called when fresh build status is fetched (e.g. after done event). */
   onBuildStatus?: (status: BuildStatusResponse) => void;
-  /** Called immediately after the build API responds (before streaming begins). */
   onBuildStarted?: (response: StartBuildResponse) => void;
 }
 
@@ -116,32 +159,57 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const lastUserPromptRef = useRef("");
   const activeBuildingMsgIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // BEO-386: tracks when the current build started (set on pre_build_ack).
   const buildStartedAtRef = useRef<number | null>(null);
   const existingFilesRef = useRef<readonly StudioFile[]>([]);
   const resolvedProjectIdRef = useRef(
     projectId && projectId !== "new" ? projectId : "",
   );
+  const lastEventBuildIdRef = useRef<string | null>(null);
 
-  // BEO-387: phase / copy tracking refs
-  const currentPhaseRef = useRef<BuildStage | null>(null);
-  const phaseVariantIndexRef = useRef(0);
-  const phaseHasSwappedRef = useRef(false);
-  const phaseRotationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const preBuildFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const appTypeRef = useRef("your app");
+  const preambleFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stageKickoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Keep options in a ref so handleEvent never needs them in its dep array.
-  // This prevents stale-closure issues when options callbacks are redefined.
   const optionsRef = useRef(options);
   useEffect(() => {
     optionsRef.current = options;
   });
 
-  // ─── Seed chat history from session_events on mount (BEO-370) ────────────
-  // Fetches the latest completed build and restores chat history so a hard
-  // refresh shows the previous conversation. Only runs for existing projects
-  // (not "new") and only seeds when the messages array is still empty.
+  const clearPreambleAndStageTimers = useCallback(() => {
+    if (preambleFallbackTimerRef.current) {
+      clearTimeout(preambleFallbackTimerRef.current);
+      preambleFallbackTimerRef.current = null;
+    }
+    if (stageKickoffTimerRef.current) {
+      clearTimeout(stageKickoffTimerRef.current);
+      stageKickoffTimerRef.current = null;
+    }
+  }, []);
+
+  // ─── Persist in-flight building UI (BEO-391) ───────────────────────────────
+  useEffect(() => {
+    const pid = resolvedProjectIdRef.current;
+    if (!pid) return;
+    const bid = activeBuildingMsgIdRef.current;
+    const building = messages.find(m => m.id === bid && m.type === "building") as BuildingMsg | undefined;
+    if (!building || building.summary) {
+      try {
+        sessionStorage.removeItem(`beomz:buildingUi:${pid}`);
+      } catch { /* ignore */ }
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        `beomz:buildingUi:${pid}`,
+        JSON.stringify({
+          buildId: lastEventBuildIdRef.current,
+          lastUserPrompt: lastUserPromptRef.current,
+          building,
+        }),
+      );
+    } catch { /* ignore */ }
+  }, [messages]);
+
+  // ─── Seed chat history from session_events on mount (BEO-370) ─────────────
   const historySeededRef = useRef(false);
   useEffect(() => {
     const pid = resolvedProjectIdRef.current;
@@ -150,7 +218,6 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     void getLatestBuildForProject(pid)
       .then(status => {
         if (!status) return;
-        // Only restore from terminal builds — in-progress builds stream live events.
         if (status.build.status !== "completed" && status.build.status !== "failed") return;
         const events = status.build.sessionEvents;
         if (!events?.length) return;
@@ -162,346 +229,451 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   const { startAndStreamBuild, subscribeToBuild } = useBuilderEngineStream();
 
-  // ─── SSE event handler ────────────────────────────────────────────────────
+  const notifyPreviewServerReady = useCallback(() => {
+    setMessages(prev =>
+      patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
+        if (b.summary) return b;
+        return {
+          ...b,
+          checklist: markDeployingDone(b.checklist),
+          phase: "preview_ready",
+        };
+      }),
+    );
+  }, []);
 
-  const handleEvent = useCallback((event: BuilderV3Event) => {
-    // Forward every event to ProjectPage for legacy side-effects
-    optionsRef.current.onEvent?.(event);
-
-    switch (event.type) {
-      case "intent_detected":
-        // Internal classifier result — no chat message
-        break;
-
-      case "pre_build_ack": {
-        // BEO-386: record when this build started so the elapsed timer has a
-        // stable anchor that survives navigation (stored in sessionStorage too).
-        const now = Date.now();
-        buildStartedAtRef.current = now;
-        try {
-          const ssKey = `beomz:buildStartedAt:${resolvedProjectIdRef.current}`;
-          sessionStorage.setItem(ssKey, String(now));
-        } catch { /* sessionStorage may be unavailable */ }
-
-        // BEO-387: reset phase tracking for the new build.
-        if (phaseRotationTimerRef.current) {
-          clearTimeout(phaseRotationTimerRef.current);
-          phaseRotationTimerRef.current = null;
-        }
-        if (preBuildFallbackTimerRef.current) {
-          clearTimeout(preBuildFallbackTimerRef.current);
-          preBuildFallbackTimerRef.current = null;
-        }
-        currentPhaseRef.current = null;
-        phaseHasSwappedRef.current = false;
-
-        // Pick an "acknowledged" copy variant to show immediately in the
-        // building message while we wait for the first stage event.
-        const ackIndex = Math.floor(Math.random() * STAGE_COPY.acknowledged.length);
-        const ackCopy = pickCopy("acknowledged", ackIndex, appTypeRef.current);
-
-        // BEO-378: replace the thinking dots with the real ack message.
-        const ackBuildingId = makeId();
-        activeBuildingMsgIdRef.current = ackBuildingId;
-        const ackBuildStartedAt = buildStartedAtRef.current ?? undefined;
-        setMessages(prev => [
-          ...prev.filter(m => m.type !== "thinking"),
-          { id: makeId(), type: "pre_build_ack", content: event.message },
-          { id: ackBuildingId, type: "building", phase: "acknowledged", phaseCopy: ackCopy, buildStartedAt: ackBuildStartedAt },
-        ]);
-
-        // BEO-387: if no stage event arrives within 5s, show a safe fallback.
-        preBuildFallbackTimerRef.current = setTimeout(() => {
-          if (currentPhaseRef.current !== null) return; // stage already arrived
-          setMessages(prev => {
-            const bid = activeBuildingMsgIdRef.current;
-            if (!bid) return prev;
-            const idx = prev.findIndex(m => m.id === bid);
-            if (idx === -1) return prev;
-            const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
-            if (existing.phaseCopy && existing.phaseCopy !== ackCopy) return prev;
-            const next = [...prev];
-            next[idx] = { ...existing, phaseCopy: "Getting started…" };
-            return next;
-          });
-        }, 5_000);
-        break;
+  const handleEvent = useCallback(
+    (event: BuilderV3Event) => {
+      if ("buildId" in event && typeof event.buildId === "string" && event.buildId) {
+        lastEventBuildIdRef.current = event.buildId;
       }
 
-      case "conversational_response":
-        // BEO-378: filter thinking dots (no pre_build_ack fires for conversational).
-        setMessages(prev => [
-          ...prev.filter(m => m.type !== "thinking"),
-          { id: makeId(), type: "question_answer", content: event.message, streaming: false },
-        ]);
-        setIsBuilding(false);
-        break;
+      optionsRef.current.onEvent?.(event);
 
-      case "clarifying_question":
-        // BEO-378: filter thinking dots.
-        setMessages(prev => [
-          ...prev.filter(m => m.type !== "thinking"),
-          { id: makeId(), type: "clarifying_question", content: event.message },
-        ]);
-        break;
+      switch (event.type) {
+        case "intent_detected":
+          break;
 
-      // Progress events → upsert a single "building" message
-      case "tool_use_started":
-      case "tool_use_progress":
-      case "status": {
-        setMessages(prev => {
-          const buildingId = activeBuildingMsgIdRef.current;
-          const phase =
-            event.type === "status"
-              ? (event.phase || event.message)
-              : event.message;
-          const payload = "payload" in event ? (event.payload ?? {}) : {};
-          const filesWritten =
-            typeof payload.filesWritten === "number" ? payload.filesWritten : undefined;
-          const totalFiles =
-            typeof payload.totalFiles === "number" ? payload.totalFiles : undefined;
-          // BEO-386: attach the stable start timestamp to every building message.
-          const buildStartedAt = buildStartedAtRef.current ?? undefined;
-
-          if (buildingId) {
-            const idx = prev.findIndex(m => m.id === buildingId);
-            if (idx !== -1) {
-              const next = [...prev];
-              const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
-              // BEO-387: preserve phaseCopy if a stage event already set it.
-              const phaseCopy = existing.phaseCopy;
-              next[idx] = { id: buildingId, type: "building", phase: existing.phase ?? phase, phaseCopy, filesWritten, totalFiles, buildStartedAt };
-              return next;
-            }
-          }
-
-          const id = makeId();
-          activeBuildingMsgIdRef.current = id;
-          return [...prev, { id, type: "building", phase, filesWritten, totalFiles, buildStartedAt }];
-        });
-        break;
-      }
-
-      case "build_summary":
-        // BEO-373: remove any lingering building message so the cycling status
-        // disappears when the summary card arrives.
-        // BEO-386: clear the stored build start time on successful completion.
-        try {
-          sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
-        } catch { /* ignore */ }
-        buildStartedAtRef.current = null;
-        setMessages(prev => [
-          ...prev.filter(m => m.type !== "building"),
-          {
-            id: makeId(),
-            type: "build_summary",
-            content: event.message,
-            filesChanged: event.filesChanged,
-            durationMs: event.durationMs,
-            creditsUsed: event.creditsUsed,
-          },
-        ]);
-        break;
-
-      case "done":
-        if (event.fallbackUsed) {
-          buildDoneRef.current = false;
-          // BEO-386: freeze the timer and clear the stored start time.
+        case "pre_build_ack": {
+          const now = Date.now();
+          buildStartedAtRef.current = now;
           try {
-            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+            sessionStorage.setItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`, String(now));
           } catch { /* ignore */ }
-          const frozenAtFallback = Date.now();
-          const frozenBuildIdFallback = activeBuildingMsgIdRef.current;
-          // BEO-378: clear thinking dots on failed builds; also freeze building message.
+
+          clearPreambleAndStageTimers();
+
+          const ackBuildingId = makeId();
+          activeBuildingMsgIdRef.current = ackBuildingId;
+          const checklist = makeInitialChecklist();
+          const ackBuildStartedAt = buildStartedAtRef.current ?? undefined;
+
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "pre_build_ack", content: event.message },
+            {
+              id: ackBuildingId,
+              type: "building",
+              phase: "acknowledged",
+              checklist,
+              buildStartedAt: ackBuildStartedAt,
+            },
+          ]);
+
+          preambleFallbackTimerRef.current = setTimeout(() => {
+            setMessages(prev =>
+              patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
+                if (b.preamble) return b;
+                return {
+                  ...b,
+                  preamble: {
+                    restatement: PREAMBLE_FALLBACK.restatement,
+                    bullets: [...PREAMBLE_FALLBACK.bullets],
+                  },
+                  preambleIsFallback: true,
+                };
+              }),
+            );
+          }, 5_000);
+
+          stageKickoffTimerRef.current = setTimeout(() => {
+            setMessages(prev =>
+              patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
+                if (!b.checklist) return b;
+                const stuck = b.checklist.every(i => i.status === "pending");
+                if (!stuck) return b;
+                return {
+                  ...b,
+                  checklist: applyStageToChecklist(b.checklist, "stage_classifying"),
+                  phase: "classifying",
+                };
+              }),
+            );
+          }, 5_000);
+          break;
+        }
+
+        case "stage_preamble": {
+          if (preambleFallbackTimerRef.current) {
+            clearTimeout(preambleFallbackTimerRef.current);
+            preambleFallbackTimerRef.current = null;
+          }
+          setMessages(prev =>
+            patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => ({
+              ...b,
+              preamble: { restatement: event.restatement, bullets: [...event.bullets] },
+              preambleIsFallback: false,
+            })),
+          );
+          break;
+        }
+
+        case "conversational_response":
+          clearPreambleAndStageTimers();
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "question_answer", content: event.message, streaming: false },
+          ]);
+          setIsBuilding(false);
+          break;
+
+        case "clarifying_question":
+          clearPreambleAndStageTimers();
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "clarifying_question", content: event.message },
+          ]);
+          break;
+
+        case "tool_use_started":
+        case "tool_use_progress":
+        case "status": {
           setMessages(prev => {
-            const mapped = frozenBuildIdFallback
-              ? prev.map(m =>
-                  m.id === frozenBuildIdFallback && m.type === "building"
-                    ? { ...m, buildFrozenAt: frozenAtFallback }
-                    : m,
-                )
-              : prev;
+            const buildingId = activeBuildingMsgIdRef.current;
+            const phase =
+              event.type === "status"
+                ? (event.phase || event.message)
+                : event.message;
+            const payload = "payload" in event ? (event.payload ?? {}) : {};
+            const filesWritten =
+              typeof payload.filesWritten === "number" ? payload.filesWritten : undefined;
+            const totalFiles =
+              typeof payload.totalFiles === "number" ? payload.totalFiles : undefined;
+            const buildStartedAt = buildStartedAtRef.current ?? undefined;
+
+            if (buildingId) {
+              const idx = prev.findIndex(m => m.id === buildingId);
+              if (idx !== -1) {
+                const existing = prev[idx] as BuildingMsg;
+                if (existing.summary) return prev;
+                const next = [...prev];
+                next[idx] = {
+                  ...existing,
+                  phase: existing.phase ?? phase,
+                  filesWritten,
+                  totalFiles,
+                  buildStartedAt,
+                };
+                return next;
+              }
+            }
+
+            const id = makeId();
+            activeBuildingMsgIdRef.current = id;
             return [
-              ...mapped.filter(m => m.type !== "thinking"),
+              ...prev,
               {
-                id: makeId(),
-                type: "error",
-                content:
-                  "The build didn't generate any files — this sometimes happens with complex prompts. Your credits have not been charged.",
+                id,
+                type: "building",
+                phase,
+                checklist: makeInitialChecklist(),
+                filesWritten,
+                totalFiles,
+                buildStartedAt,
               },
             ];
           });
-        } else {
-          buildDoneRef.current = true;
-          // BEO-386: clear the stored start time on successful completion.
-          try {
-            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
-          } catch { /* ignore */ }
-          buildStartedAtRef.current = null;
-          // Conversational done (question_answer / clarifying_question) — skip file fetch
-          // to avoid clobbering existingFilesRef with empty/stale data.
-          if (!event.conversational) {
-            void getBuildStatus(event.buildId)
-              .then(status => {
-                existingFilesRef.current = status.result?.files ?? [];
-                optionsRef.current.onBuildStatus?.(status);
-                // BEO-372: recover build_summary from sessionEvents if the SSE event was
-                // missed because the server closed the stream before it was flushed.
-                // Dedup guard prevents doubling when the SSE event did arrive normally.
-                const se = status.build.sessionEvents;
-                if (Array.isArray(se)) {
-                  const summaryEv = se.find(e => e.type === "build_summary");
-                  if (summaryEv) {
-                    setMessages(prev => {
-                      if (prev.some(m => m.type === "build_summary")) return prev;
-                      return [
-                        ...prev.filter(m => m.type !== "building"),
-                        {
-                          id: makeId(),
-                          type: "build_summary" as const,
-                          content: typeof summaryEv.content === "string" ? summaryEv.content : "",
-                          filesChanged: Array.isArray(summaryEv.filesChanged)
-                            ? summaryEv.filesChanged.map(String)
-                            : [],
-                          durationMs: typeof summaryEv.durationMs === "number" ? summaryEv.durationMs : undefined,
-                          creditsUsed: typeof summaryEv.creditsUsed === "number" ? summaryEv.creditsUsed : undefined,
-                        },
-                      ];
-                    });
-                  }
-                }
-              })
-              .catch(() => {});
-          }
+          break;
         }
-        setIsBuilding(false);
-        activeBuildingMsgIdRef.current = null;
-        break;
 
-      case "error":
-        if (event.code === "server_restarting") {
-          buildDoneRef.current = false;
-          // BEO-386: freeze the timer on server restart.
-          try {
-            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
-          } catch { /* ignore */ }
-          const frozenAtRestart = Date.now();
-          const frozenBuildIdRestart = activeBuildingMsgIdRef.current;
+        case "next_steps": {
+          const raw = event.suggestions ?? [];
+          const nextSteps = raw.map(s => ({ label: s.label, prompt: s.prompt }));
           setMessages(prev => {
-            const mapped = frozenBuildIdRestart
-              ? prev.map(m =>
-                  m.id === frozenBuildIdRestart && m.type === "building"
-                    ? { ...m, buildFrozenAt: frozenAtRestart }
-                    : m,
-                )
-              : prev;
-            if (mapped.some(m => m.type === "server_restarting")) return mapped;
-            return [...mapped, { id: makeId(), type: "server_restarting" }];
-          });
-        } else {
-          // BEO-386: freeze the timer on build error.
-          try {
-            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
-          } catch { /* ignore */ }
-          const frozenAtErr = Date.now();
-          const frozenBuildIdErr = activeBuildingMsgIdRef.current;
-          setMessages(prev => {
-            const mapped = frozenBuildIdErr
-              ? prev.map(m =>
-                  m.id === frozenBuildIdErr && m.type === "building"
-                    ? { ...m, buildFrozenAt: frozenAtErr }
-                    : m,
-                )
-              : prev;
-            return [...mapped, { id: makeId(), type: "error", content: event.message, code: event.code }];
-          });
-        }
-        setIsBuilding(false);
-        activeBuildingMsgIdRef.current = null;
-        break;
-
-      // BEO-387: stage boundary events — update building message with honest copy
-      case "stage_classifying":
-      case "stage_enriching":
-      case "stage_generating":
-      case "stage_sanitising":
-      case "stage_persisting":
-      case "stage_deploying": {
-        const stage = STAGE_EVENT_TO_STAGE[event.type]!;
-        const pool = STAGE_COPY[stage];
-
-        // Cancel any pending rotation timer from the previous stage.
-        if (phaseRotationTimerRef.current) {
-          clearTimeout(phaseRotationTimerRef.current);
-          phaseRotationTimerRef.current = null;
-        }
-        // Cancel the pre_build_ack fallback — a real stage arrived.
-        if (preBuildFallbackTimerRef.current) {
-          clearTimeout(preBuildFallbackTimerRef.current);
-          preBuildFallbackTimerRef.current = null;
-        }
-
-        currentPhaseRef.current = stage;
-        phaseHasSwappedRef.current = false;
-
-        // Pick copy variant once at stage entry; keep it locked until rotation.
-        // If elapsedMs already >= 60000, jump straight to variant 1 (one-time swap).
-        const alreadyLong = typeof event.elapsedMs === "number" && event.elapsedMs >= 60_000;
-        const variantIndex = alreadyLong && pool.length > 1 ? 1 : Math.floor(Math.random() * pool.length);
-        if (alreadyLong) phaseHasSwappedRef.current = true;
-        phaseVariantIndexRef.current = variantIndex;
-
-        const phaseCopy = pickCopy(stage, variantIndex, appTypeRef.current);
-        const buildStartedAt = buildStartedAtRef.current ?? undefined;
-
-        setMessages(prev => {
-          const buildingId = activeBuildingMsgIdRef.current;
-          if (buildingId) {
-            const idx = prev.findIndex(m => m.id === buildingId);
-            if (idx !== -1) {
+            const bid = activeBuildingMsgIdRef.current;
+            const byActiveId = patchBuildingMessage(prev, bid, b => ({ ...b, nextSteps }));
+            if (byActiveId !== prev) return byActiveId;
+            const liveIdx = prev.findIndex(m => m.type === "building" && (m as BuildingMsg).summary);
+            if (liveIdx !== -1) {
               const next = [...prev];
-              const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
-              next[idx] = { ...existing, phase: stage, phaseCopy, buildStartedAt };
+              next[liveIdx] = { ...(next[liveIdx] as BuildingMsg), nextSteps };
               return next;
             }
-          }
-          // No building message yet — create one.
-          const id = makeId();
-          activeBuildingMsgIdRef.current = id;
-          return [...prev, { id, type: "building", phase: stage, phaseCopy, buildStartedAt }];
-        });
-
-        // Schedule a 60s variant rotation for long stages (most useful for "generating").
-        if (!alreadyLong && pool.length > 1) {
-          const capturedStage = stage;
-          const nextIndex = (variantIndex + 1) % pool.length;
-          phaseRotationTimerRef.current = setTimeout(() => {
-            if (currentPhaseRef.current !== capturedStage) return;
-            if (phaseHasSwappedRef.current) return;
-            phaseHasSwappedRef.current = true;
-            const rotatedCopy = pickCopy(capturedStage, nextIndex, appTypeRef.current);
-            setMessages(prev => {
-              const bid = activeBuildingMsgIdRef.current;
-              if (!bid) return prev;
-              const idx = prev.findIndex(m => m.id === bid);
-              if (idx === -1) return prev;
-              const next = [...prev];
-              const existing = prev[idx] as Extract<ChatMessage, { type: "building" }>;
-              next[idx] = { ...existing, phaseCopy: rotatedCopy };
-              return next;
+            return prev.map(m => {
+              if (m.type !== "build_summary") return m;
+              return { ...m, nextSteps };
             });
-          }, 60_000);
+          });
+          break;
         }
-        break;
+
+        case "build_summary": {
+          clearPreambleAndStageTimers();
+          try {
+            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+            sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+          } catch { /* ignore */ }
+          buildStartedAtRef.current = null;
+
+          const frozenAt = Date.now();
+          const bid = activeBuildingMsgIdRef.current;
+
+          setMessages(prev => {
+            if (bid) {
+              const idx = prev.findIndex(m => m.id === bid && m.type === "building");
+              if (idx !== -1) {
+                const next = [...prev];
+                const existing = next[idx] as BuildingMsg;
+                next[idx] = {
+                  ...existing,
+                  checklist: markAllChecklistDone(existing.checklist),
+                  summary: {
+                    content: event.message,
+                    filesChanged: event.filesChanged,
+                    durationMs: event.durationMs,
+                    creditsUsed: event.creditsUsed,
+                  },
+                  buildFrozenAt: frozenAt,
+                  phase: "completed",
+                };
+                return next;
+              }
+            }
+            return [
+              ...prev.filter(m => m.type !== "building"),
+              {
+                id: makeId(),
+                type: "build_summary",
+                content: event.message,
+                filesChanged: event.filesChanged,
+                durationMs: event.durationMs,
+                creditsUsed: event.creditsUsed,
+              },
+            ];
+          });
+          break;
+        }
+
+        case "done":
+          if (event.fallbackUsed) {
+            buildDoneRef.current = false;
+            clearPreambleAndStageTimers();
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+              sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            const frozenAtFallback = Date.now();
+            const frozenBuildIdFallback = activeBuildingMsgIdRef.current;
+            setMessages(prev => {
+              const mapped = frozenBuildIdFallback
+                ? patchBuildingMessage(prev, frozenBuildIdFallback, b => ({
+                    ...b,
+                    checklist: markActiveFailed(b.checklist),
+                    buildFrozenAt: frozenAtFallback,
+                  }))
+                : prev;
+              return [
+                ...mapped.filter(m => m.type !== "thinking"),
+                {
+                  id: makeId(),
+                  type: "error",
+                  content:
+                    "The build didn't generate any files — this sometimes happens with complex prompts. Your credits have not been charged.",
+                },
+              ];
+            });
+          } else {
+            buildDoneRef.current = true;
+            clearPreambleAndStageTimers();
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            buildStartedAtRef.current = null;
+            if (!event.conversational) {
+              void getBuildStatus(event.buildId)
+                .then(status => {
+                  existingFilesRef.current = status.result?.files ?? [];
+                  optionsRef.current.onBuildStatus?.(status);
+                  const se = status.build.sessionEvents;
+                  if (Array.isArray(se)) {
+                    const summaryEv = se.find(e => e.type === "build_summary");
+                    if (summaryEv) {
+                      setMessages(prev => {
+                        if (prev.some(m => m.type === "build_summary")) return prev;
+                        if (prev.some(m => m.type === "building" && (m as BuildingMsg).summary))
+                          return prev;
+                        const frozenAt = Date.now();
+                        const liveBuildingIdx = prev.findIndex(
+                          m => m.type === "building" && !(m as BuildingMsg).summary,
+                        );
+                        if (liveBuildingIdx !== -1) {
+                          const next = [...prev];
+                          const existing = next[liveBuildingIdx] as BuildingMsg;
+                          next[liveBuildingIdx] = {
+                            ...existing,
+                            checklist: markAllChecklistDone(existing.checklist),
+                            summary: {
+                              content:
+                                typeof summaryEv.content === "string" ? summaryEv.content : "",
+                              filesChanged: Array.isArray(summaryEv.filesChanged)
+                                ? summaryEv.filesChanged.map(String)
+                                : [],
+                              durationMs:
+                                typeof summaryEv.durationMs === "number"
+                                  ? summaryEv.durationMs
+                                  : undefined,
+                              creditsUsed:
+                                typeof summaryEv.creditsUsed === "number"
+                                  ? summaryEv.creditsUsed
+                                  : undefined,
+                            },
+                            buildFrozenAt: frozenAt,
+                            phase: "completed",
+                          };
+                          return next;
+                        }
+                        return [
+                          ...prev.filter(m => m.type !== "building"),
+                          {
+                            id: makeId(),
+                            type: "build_summary" as const,
+                            content: typeof summaryEv.content === "string" ? summaryEv.content : "",
+                            filesChanged: Array.isArray(summaryEv.filesChanged)
+                              ? summaryEv.filesChanged.map(String)
+                              : [],
+                            durationMs:
+                              typeof summaryEv.durationMs === "number" ? summaryEv.durationMs : undefined,
+                            creditsUsed:
+                              typeof summaryEv.creditsUsed === "number"
+                                ? summaryEv.creditsUsed
+                                : undefined,
+                          },
+                        ];
+                      });
+                    }
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+          setIsBuilding(false);
+          activeBuildingMsgIdRef.current = null;
+          break;
+
+        case "error":
+          if (preambleFallbackTimerRef.current) {
+            clearTimeout(preambleFallbackTimerRef.current);
+            preambleFallbackTimerRef.current = null;
+          }
+          if (stageKickoffTimerRef.current) {
+            clearTimeout(stageKickoffTimerRef.current);
+            stageKickoffTimerRef.current = null;
+          }
+          if (event.code === "server_restarting") {
+            buildDoneRef.current = false;
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+              sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            const frozenAtRestart = Date.now();
+            const frozenBuildIdRestart = activeBuildingMsgIdRef.current;
+            setMessages(prev => {
+              const mapped = frozenBuildIdRestart
+                ? patchBuildingMessage(prev, frozenBuildIdRestart, b => ({
+                    ...b,
+                    checklist: markActiveFailed(b.checklist),
+                    buildFrozenAt: frozenAtRestart,
+                  }))
+                : prev;
+              if (mapped.some(m => m.type === "server_restarting")) return mapped;
+              return [...mapped, { id: makeId(), type: "server_restarting" }];
+            });
+          } else {
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+              sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            const frozenAtErr = Date.now();
+            const frozenBuildIdErr = activeBuildingMsgIdRef.current;
+            setMessages(prev => {
+              const mapped = frozenBuildIdErr
+                ? patchBuildingMessage(prev, frozenBuildIdErr, b => ({
+                    ...b,
+                    checklist: markActiveFailed(b.checklist),
+                    buildFrozenAt: frozenAtErr,
+                  }))
+                : prev;
+              return [...mapped, { id: makeId(), type: "error", content: event.message, code: event.code }];
+            });
+          }
+          setIsBuilding(false);
+          activeBuildingMsgIdRef.current = null;
+          break;
+
+        case "stage_classifying":
+        case "stage_enriching":
+        case "stage_generating":
+        case "stage_sanitising":
+        case "stage_persisting":
+        case "stage_deploying": {
+          if (stageKickoffTimerRef.current) {
+            clearTimeout(stageKickoffTimerRef.current);
+            stageKickoffTimerRef.current = null;
+          }
+          const buildStartedAt = buildStartedAtRef.current ?? undefined;
+          setMessages(prev => {
+            const buildingId = activeBuildingMsgIdRef.current;
+            if (buildingId) {
+              const idx = prev.findIndex(m => m.id === buildingId);
+              if (idx !== -1) {
+                const next = [...prev];
+                const existing = prev[idx] as BuildingMsg;
+                if (existing.summary) return prev;
+                const checklist = applyStageToChecklist(
+                  existing.checklist ?? makeInitialChecklist(),
+                  event.type,
+                );
+                next[idx] = {
+                  ...existing,
+                  phase: event.stage,
+                  checklist,
+                  buildStartedAt,
+                };
+                return next;
+              }
+            }
+            const id = makeId();
+            activeBuildingMsgIdRef.current = id;
+            return [
+              ...prev,
+              {
+                id,
+                type: "building",
+                phase: event.stage,
+                checklist: applyStageToChecklist(makeInitialChecklist(), event.type),
+                buildStartedAt,
+              },
+            ];
+          });
+          break;
+        }
+
+        default:
+          break;
       }
-
-      // Events handled exclusively by ProjectPage via onEvent callback
-      default:
-        break;
-    }
-  }, []);
-
-  // ─── sendMessage ─────────────────────────────────────────────────────────
+    },
+    [clearPreambleAndStageTimers],
+  );
 
   const sendMessage = useCallback(
     (text: string) => {
@@ -512,29 +684,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       lastUserPromptRef.current = text;
       buildDoneRef.current = false;
       activeBuildingMsgIdRef.current = null;
-      // BEO-386: reset the timer for the new build; clear any stale sessionStorage value.
       buildStartedAtRef.current = null;
       try {
         sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
       } catch { /* ignore */ }
 
-      // BEO-387: reset phase tracking for the new build.
-      if (phaseRotationTimerRef.current) {
-        clearTimeout(phaseRotationTimerRef.current);
-        phaseRotationTimerRef.current = null;
-      }
-      if (preBuildFallbackTimerRef.current) {
-        clearTimeout(preBuildFallbackTimerRef.current);
-        preBuildFallbackTimerRef.current = null;
-      }
-      currentPhaseRef.current = null;
-      phaseHasSwappedRef.current = false;
-      appTypeRef.current = resolveAppType(text);
+      clearPreambleAndStageTimers();
 
       setIsBuilding(true);
-      // BEO-378: show thinking dots immediately while the network round-trip completes.
       setMessages(prev => [
-        // Drop any stale server_restarting card from the previous session
         ...prev.filter(m => m.type !== "server_restarting"),
         { id: makeId(), type: "user", content: text, timestamp: new Date() },
         { id: `thinking-${makeId()}`, type: "thinking" },
@@ -553,6 +712,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         signal: controller.signal,
         onBuildStarted: response => {
           resolvedProjectIdRef.current = response.project.id;
+          lastEventBuildIdRef.current = response.build.id;
           optionsRef.current.onProjectIdResolved?.(
             response.project.id,
             response.project.name,
@@ -579,10 +739,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         buildDoneRef.current = false;
       });
     },
-    [startAndStreamBuild, handleEvent],
+    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers],
   );
-
-  // ─── retryLastBuild ───────────────────────────────────────────────────────
 
   const retryLastBuild = useCallback(() => {
     const prompt = lastUserPromptRef.current;
@@ -593,16 +751,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     sendMessage(prompt);
   }, [sendMessage]);
 
-  // ─── subscribeToExistingBuild ─────────────────────────────────────────────
-  // Called by ProjectPage's resume-on-mount effect to re-attach to an
-  // in-progress build (e.g. after a page refresh).
-
   const subscribeToExistingBuild = useCallback(
     async (buildId: string, lastEventId: string | null, signal: AbortSignal) => {
       buildDoneRef.current = false;
       setIsBuilding(true);
-      // BEO-386: restore the build start time from sessionStorage so the elapsed
-      // timer shows the correct value even after a navigation / remount.
+      lastEventBuildIdRef.current = buildId;
+
       try {
         const ssKey = `beomz:buildStartedAt:${resolvedProjectIdRef.current}`;
         const stored = sessionStorage.getItem(ssKey);
@@ -610,6 +764,34 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           buildStartedAtRef.current = parseInt(stored, 10);
         }
       } catch { /* ignore */ }
+
+      try {
+        const raw = sessionStorage.getItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+        if (raw) {
+          const snap = JSON.parse(raw) as {
+            buildId?: string;
+            lastUserPrompt?: string;
+            building?: BuildingMsg;
+          };
+          const restored = snap.building;
+          if (
+            snap.buildId === buildId &&
+            restored?.type === "building" &&
+            !restored.summary
+          ) {
+            activeBuildingMsgIdRef.current = restored.id;
+            setMessages(prev => {
+              if (prev.length > 0) return prev;
+              const prompt = snap.lastUserPrompt ?? "";
+              return [
+                { id: makeId(), type: "user", content: prompt, timestamp: new Date() },
+                restored,
+              ];
+            });
+          }
+        }
+      } catch { /* ignore */ }
+
       await subscribeToBuild({
         buildId,
         lastEventId,
@@ -619,8 +801,6 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         },
         signal,
       });
-      // If subscription ended without a terminal SSE event (e.g. aborted by the
-      // resume effect's cleanup), reset isBuilding so the user can still type.
       if (!signal.aborted) {
         setIsBuilding(false);
       }
@@ -634,7 +814,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     sendMessage,
     retryLastBuild,
     buildDoneRef,
-    /** Re-attach to an in-progress build after page reload. */
     subscribeToExistingBuild,
+    notifyPreviewServerReady,
   };
 }

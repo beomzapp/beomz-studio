@@ -151,6 +151,8 @@ interface PreviewPaneProps {
   refreshToken?: number;
   publishedSlug?: string | null;
   onFilesWritten?: () => void;
+  /** BEO-391: WebContainer dev server bound — checklist "deploying" can complete. */
+  onPreviewServerReady?: () => void;
   /** BEO-340: Build ended in fallback (no AI files) — show error state instead of preview. */
   buildFailed?: boolean;
 }
@@ -164,6 +166,7 @@ export function PreviewPane({
   refreshToken = 0,
   publishedSlug,
   onFilesWritten,
+  onPreviewServerReady,
   buildFailed = false,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
@@ -188,6 +191,7 @@ export function PreviewPane({
     onFilesWritten,
     undefined, // dbEnv is injected separately via ProjectPage
     generationId,
+    onPreviewServerReady,
   );
 
   // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──
