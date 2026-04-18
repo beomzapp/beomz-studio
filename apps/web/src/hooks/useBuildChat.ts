@@ -1,5 +1,5 @@
 /**
- * useBuildChat — BEO-363 / BEO-391
+ * useBuildChat — BEO-363 / BEO-391 / BEO-392 / BEO-393
  *
  * Owns all chat state + SSE event handling for the builder.
  * ProjectPage calls this hook and renders the returned messages.
@@ -20,6 +20,11 @@ import {
 } from "../lib/api";
 import { useBuilderEngineStream } from "./useBuilderEngineStream";
 import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
+
+/** BEO-393: minimum time a checklist row stays ◌ before advancing to ✓ */
+const CHECKLIST_MIN_DWELL_MS = 800;
+/** BEO-393: cap artificial checklist drain before showing build_summary */
+const SUMMARY_MAX_CHECKLIST_DRAIN_MS = 3200;
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -80,15 +85,71 @@ function markActiveFailed(
   );
 }
 
+function activeChecklistIndex(items: { status: ChatChecklistStatus }[]): number {
+  return items.findIndex(i => i.status === "active");
+}
+
+function stepChecklistOnceTowardAllDone(
+  items: { id: string; label: string; status: ChatChecklistStatus }[],
+): { id: string; label: string; status: ChatChecklistStatus }[] {
+  const activeIdx = activeChecklistIndex(items);
+  if (activeIdx !== -1) {
+    if (activeIdx < items.length - 1) {
+      return items.map((item, i) => {
+        if (i === activeIdx) return { ...item, status: "done" as const };
+        if (i === activeIdx + 1) return { ...item, status: "active" as const };
+        return item;
+      });
+    }
+    return items.map((item, i) =>
+      i === activeIdx ? { ...item, status: "done" as const } : item,
+    );
+  }
+  const firstPending = items.findIndex(i => i.status === "pending");
+  if (firstPending !== -1) {
+    return items.map((item, i) =>
+      i === firstPending ? { ...item, status: "active" as const } : item,
+    );
+  }
+  return items;
+}
+
+function countNonDone(items: { status: ChatChecklistStatus }[]): number {
+  return items.filter(i => i.status !== "done").length;
+}
+
 type BuildingMsg = Extract<ChatMessage, { type: "building" }>;
+
+function findLiveBuildingIndex(prev: ChatMessage[], preferredId: string | null): number {
+  if (preferredId) {
+    const byId = prev.findIndex(
+      m => m.id === preferredId && m.type === "building" && !(m as BuildingMsg).summary,
+    );
+    if (byId !== -1) return byId;
+  }
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const m = prev[i];
+    if (m.type === "building" && !(m as BuildingMsg).summary) return i;
+  }
+  return -1;
+}
+
+function hasActiveToDoneTransition(
+  visual: { status: ChatChecklistStatus }[],
+  target: { status: ChatChecklistStatus }[],
+): boolean {
+  for (let i = 0; i < visual.length; i++) {
+    if (visual[i]?.status === "active" && target[i]?.status === "done") return true;
+  }
+  return false;
+}
 
 function patchBuildingMessage(
   prev: ChatMessage[],
   buildingId: string | null,
   patch: (m: BuildingMsg) => BuildingMsg,
 ): ChatMessage[] {
-  if (!buildingId) return prev;
-  const idx = prev.findIndex(m => m.id === buildingId && m.type === "building");
+  const idx = findLiveBuildingIndex(prev, buildingId);
   if (idx === -1) return prev;
   const next = [...prev];
   next[idx] = patch(next[idx] as BuildingMsg);
@@ -168,6 +229,13 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   const preambleFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stageKickoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checklistDwellRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    activeSince: number | null;
+  }>({ timer: null, activeSince: null });
+  const latestStageChecklistRef = useRef<ReturnType<typeof makeInitialChecklist> | null>(null);
+  const latestStagePhaseRef = useRef<string | undefined>(undefined);
+  const summaryDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -182,6 +250,15 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     if (stageKickoffTimerRef.current) {
       clearTimeout(stageKickoffTimerRef.current);
       stageKickoffTimerRef.current = null;
+    }
+    if (checklistDwellRef.current.timer) {
+      clearTimeout(checklistDwellRef.current.timer);
+      checklistDwellRef.current.timer = null;
+    }
+    checklistDwellRef.current.activeSince = null;
+    if (summaryDrainTimerRef.current) {
+      clearTimeout(summaryDrainTimerRef.current);
+      summaryDrainTimerRef.current = null;
     }
   }, []);
 
@@ -262,19 +339,23 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           } catch { /* ignore */ }
 
           clearPreambleAndStageTimers();
+          checklistDwellRef.current.activeSince = null;
+          latestStageChecklistRef.current = null;
+          latestStagePhaseRef.current = undefined;
 
           const ackBuildingId = makeId();
           activeBuildingMsgIdRef.current = ackBuildingId;
           const checklist = makeInitialChecklist();
           const ackBuildStartedAt = buildStartedAtRef.current ?? undefined;
 
+          // BEO-392: one card — ack + checklist + preamble live on the same `building` message.
           setMessages(prev => [
             ...prev.filter(m => m.type !== "thinking"),
-            { id: makeId(), type: "pre_build_ack", content: event.message },
             {
               id: ackBuildingId,
               type: "building",
               phase: "acknowledged",
+              ackMessage: event.message,
               checklist,
               buildStartedAt: ackBuildStartedAt,
             },
@@ -302,9 +383,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                 if (!b.checklist) return b;
                 const stuck = b.checklist.every(i => i.status === "pending");
                 if (!stuck) return b;
+                const checklist = applyStageToChecklist(b.checklist, "stage_classifying");
+                checklistDwellRef.current.activeSince =
+                  activeChecklistIndex(checklist) >= 0 ? Date.now() : null;
                 return {
                   ...b,
-                  checklist: applyStageToChecklist(b.checklist, "stage_classifying"),
+                  checklist,
                   phase: "classifying",
                 };
               }),
@@ -318,13 +402,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             clearTimeout(preambleFallbackTimerRef.current);
             preambleFallbackTimerRef.current = null;
           }
-          setMessages(prev =>
-            patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => ({
+          setMessages(prev => {
+            const next = patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => ({
               ...b,
               preamble: { restatement: event.restatement, bullets: [...event.bullets] },
               preambleIsFallback: false,
-            })),
-          );
+            }));
+            const li = findLiveBuildingIndex(next, null);
+            if (li !== -1) activeBuildingMsgIdRef.current = next[li].id;
+            return next;
+          });
           break;
         }
 
@@ -361,21 +448,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               typeof payload.totalFiles === "number" ? payload.totalFiles : undefined;
             const buildStartedAt = buildStartedAtRef.current ?? undefined;
 
-            if (buildingId) {
-              const idx = prev.findIndex(m => m.id === buildingId);
-              if (idx !== -1) {
-                const existing = prev[idx] as BuildingMsg;
-                if (existing.summary) return prev;
-                const next = [...prev];
-                next[idx] = {
-                  ...existing,
-                  phase: existing.phase ?? phase,
-                  filesWritten,
-                  totalFiles,
-                  buildStartedAt,
-                };
-                return next;
-              }
+            const idx = findLiveBuildingIndex(prev, buildingId);
+            if (idx !== -1) {
+              const existing = prev[idx] as BuildingMsg;
+              if (existing.summary) return prev;
+              activeBuildingMsgIdRef.current = existing.id;
+              const next = [...prev];
+              next[idx] = {
+                ...existing,
+                phase: existing.phase ?? phase,
+                filesWritten,
+                totalFiles,
+                buildStartedAt,
+              };
+              return next;
             }
 
             const id = makeId();
@@ -427,39 +513,96 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
           const frozenAt = Date.now();
           const bid = activeBuildingMsgIdRef.current;
+          latestStageChecklistRef.current = null;
+          latestStagePhaseRef.current = undefined;
 
-          setMessages(prev => {
-            if (bid) {
-              const idx = prev.findIndex(m => m.id === bid && m.type === "building");
-              if (idx !== -1) {
-                const next = [...prev];
-                const existing = next[idx] as BuildingMsg;
-                next[idx] = {
-                  ...existing,
-                  checklist: markAllChecklistDone(existing.checklist),
-                  summary: {
-                    content: event.message,
-                    filesChanged: event.filesChanged,
-                    durationMs: event.durationMs,
-                    creditsUsed: event.creditsUsed,
-                  },
-                  buildFrozenAt: frozenAt,
-                  phase: "completed",
-                };
-                return next;
-              }
-            }
-            return [
-              ...prev.filter(m => m.type !== "building"),
-              {
-                id: makeId(),
-                type: "build_summary",
+          const pushOrphanSummary = (prev: ChatMessage[]): ChatMessage[] => [
+            ...prev.filter(m => m.type !== "building"),
+            {
+              id: makeId(),
+              type: "build_summary",
+              content: event.message,
+              filesChanged: event.filesChanged,
+              durationMs: event.durationMs,
+              creditsUsed: event.creditsUsed,
+            },
+          ];
+
+          const finalizeBuilding = (prev: ChatMessage[], idx: number): ChatMessage[] => {
+            const next = [...prev];
+            const existing = next[idx] as BuildingMsg;
+            next[idx] = {
+              ...existing,
+              checklist: markAllChecklistDone(existing.checklist),
+              summary: {
                 content: event.message,
                 filesChanged: event.filesChanged,
                 durationMs: event.durationMs,
                 creditsUsed: event.creditsUsed,
               },
-            ];
+              buildFrozenAt: frozenAt,
+              phase: "completed",
+            };
+            return next;
+          };
+
+          const drainStartedAt = Date.now();
+
+          const runDrainStep = () => {
+            summaryDrainTimerRef.current = null;
+            setMessages(prev => {
+              const j = findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current);
+              if (j === -1) return pushOrphanSummary(prev);
+              const b = prev[j] as BuildingMsg;
+              if (b.summary) return prev;
+              const checklist = b.checklist ?? makeInitialChecklist();
+              if (checklist.every(i => i.status === "done")) {
+                return finalizeBuilding(prev, j);
+              }
+              const stepped = stepChecklistOnceTowardAllDone(checklist);
+              const next = [...prev];
+              next[j] = { ...b, checklist: stepped };
+              if (stepped.every(i => i.status === "done")) {
+                return finalizeBuilding(next, j);
+              }
+              const elapsed = Date.now() - drainStartedAt;
+              const budget = SUMMARY_MAX_CHECKLIST_DRAIN_MS - elapsed;
+              const remaining = countNonDone(stepped);
+              const delay = Math.min(
+                CHECKLIST_MIN_DWELL_MS,
+                Math.max(16, remaining > 0 ? budget / remaining : 16),
+              );
+              summaryDrainTimerRef.current = setTimeout(runDrainStep, delay);
+              return next;
+            });
+          };
+
+          setMessages(prev => {
+            if (!bid) return pushOrphanSummary(prev);
+            const idx = findLiveBuildingIndex(prev, bid);
+            if (idx === -1) return pushOrphanSummary(prev);
+
+            const existing = prev[idx] as BuildingMsg;
+            const cl = existing.checklist ?? makeInitialChecklist();
+            if (cl.every(i => i.status === "done")) {
+              return finalizeBuilding(prev, idx);
+            }
+
+            const stepped = stepChecklistOnceTowardAllDone(cl);
+            const first = [...prev];
+            first[idx] = { ...existing, checklist: stepped };
+            if (stepped.every(i => i.status === "done")) {
+              return finalizeBuilding(first, idx);
+            }
+            const elapsed = Date.now() - drainStartedAt;
+            const budget = SUMMARY_MAX_CHECKLIST_DRAIN_MS - elapsed;
+            const remaining = countNonDone(stepped);
+            const delay = Math.min(
+              CHECKLIST_MIN_DWELL_MS,
+              Math.max(16, remaining > 0 ? budget / remaining : 16),
+            );
+            summaryDrainTimerRef.current = setTimeout(runDrainStep, delay);
+            return first;
           });
           break;
         }
@@ -571,14 +714,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           break;
 
         case "error":
-          if (preambleFallbackTimerRef.current) {
-            clearTimeout(preambleFallbackTimerRef.current);
-            preambleFallbackTimerRef.current = null;
-          }
-          if (stageKickoffTimerRef.current) {
-            clearTimeout(stageKickoffTimerRef.current);
-            stageKickoffTimerRef.current = null;
-          }
+          clearPreambleAndStageTimers();
           if (event.code === "server_restarting") {
             buildDoneRef.current = false;
             try {
@@ -631,36 +767,99 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             stageKickoffTimerRef.current = null;
           }
           const buildStartedAt = buildStartedAtRef.current ?? undefined;
+          const phase = event.stage;
           setMessages(prev => {
             const buildingId = activeBuildingMsgIdRef.current;
-            if (buildingId) {
-              const idx = prev.findIndex(m => m.id === buildingId);
-              if (idx !== -1) {
+            const idx = findLiveBuildingIndex(prev, buildingId);
+            if (idx !== -1) {
+              activeBuildingMsgIdRef.current = (prev[idx] as BuildingMsg).id;
+              const existing = prev[idx] as BuildingMsg;
+              if (existing.summary) return prev;
+
+              const visual = existing.checklist ?? makeInitialChecklist();
+              const target = applyStageToChecklist(visual, event.type);
+              latestStageChecklistRef.current = target;
+              latestStagePhaseRef.current = phase;
+
+              const needDwell =
+                hasActiveToDoneTransition(visual, target) &&
+                checklistDwellRef.current.activeSince != null &&
+                Date.now() - checklistDwellRef.current.activeSince < CHECKLIST_MIN_DWELL_MS;
+
+              if (needDwell) {
+                const wait =
+                  CHECKLIST_MIN_DWELL_MS -
+                  (Date.now() - (checklistDwellRef.current.activeSince as number));
+                if (checklistDwellRef.current.timer) {
+                  clearTimeout(checklistDwellRef.current.timer);
+                }
+                checklistDwellRef.current.timer = setTimeout(() => {
+                  checklistDwellRef.current.timer = null;
+                  setMessages(p2 => {
+                    const j = findLiveBuildingIndex(p2, activeBuildingMsgIdRef.current);
+                    if (j === -1) return p2;
+                    const ex = p2[j] as BuildingMsg;
+                    if (ex.summary) return p2;
+                    const latest =
+                      latestStageChecklistRef.current ??
+                      ex.checklist ??
+                      makeInitialChecklist();
+                    const ph = latestStagePhaseRef.current ?? ex.phase;
+                    const next = [...p2];
+                    const oldA = activeChecklistIndex(ex.checklist ?? makeInitialChecklist());
+                    const newA = activeChecklistIndex(latest);
+                    if (oldA !== newA || (oldA === -1 && newA !== -1)) {
+                      checklistDwellRef.current.activeSince = newA >= 0 ? Date.now() : null;
+                    }
+                    next[j] = {
+                      ...ex,
+                      checklist: latest,
+                      phase: ph,
+                      buildStartedAt: buildStartedAtRef.current ?? ex.buildStartedAt,
+                    };
+                    return next;
+                  });
+                }, wait);
+
                 const next = [...prev];
-                const existing = prev[idx] as BuildingMsg;
-                if (existing.summary) return prev;
-                const checklist = applyStageToChecklist(
-                  existing.checklist ?? makeInitialChecklist(),
-                  event.type,
-                );
                 next[idx] = {
                   ...existing,
-                  phase: event.stage,
-                  checklist,
+                  phase,
                   buildStartedAt,
+                  checklist: visual,
                 };
                 return next;
               }
+
+              const next = [...prev];
+              const oldA = activeChecklistIndex(visual);
+              const newA = activeChecklistIndex(target);
+              if (oldA !== newA || (oldA === -1 && newA !== -1)) {
+                checklistDwellRef.current.activeSince = newA >= 0 ? Date.now() : null;
+              }
+              next[idx] = {
+                ...existing,
+                phase,
+                checklist: target,
+                buildStartedAt,
+              };
+              return next;
             }
+
             const id = makeId();
             activeBuildingMsgIdRef.current = id;
+            const initialTarget = applyStageToChecklist(makeInitialChecklist(), event.type);
+            checklistDwellRef.current.activeSince =
+              activeChecklistIndex(initialTarget) >= 0 ? Date.now() : null;
+            latestStageChecklistRef.current = initialTarget;
+            latestStagePhaseRef.current = phase;
             return [
               ...prev,
               {
                 id,
                 type: "building",
-                phase: event.stage,
-                checklist: applyStageToChecklist(makeInitialChecklist(), event.type),
+                phase,
+                checklist: initialTarget,
                 buildStartedAt,
               },
             ];

@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
 import { Check, ChevronDown, ChevronRight, Copy, FileCode } from "lucide-react";
+import { CHECKLIST_LABELS } from "../../lib/buildStatusCopy";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
 
@@ -79,13 +80,47 @@ function ElapsedTimer({
   );
 }
 
-// ─── Pending row (before first building message arrives) ─────────────────────
+// ─── Preamble placeholder (BEO-392) ───────────────────────────────────────────
+
+function PreambleDots() {
+  return (
+    <p className="text-sm text-zinc-400/90" aria-hidden>
+      <span className="inline-flex gap-0.5 tabular-nums">
+        <span className="animate-pulse">·</span>
+        <span className="animate-pulse [animation-delay:150ms]">·</span>
+        <span className="animate-pulse [animation-delay:300ms]">·</span>
+      </span>
+    </p>
+  );
+}
+
+// ─── Pending card (before first building message arrives) — mirrors live layout ─
 
 export function BuildingShimmer() {
   return (
-    <div className="flex items-center gap-1.5 py-1">
-      <span className="animate-pulse text-[#F97316]">◌</span>
-      <span className="text-sm text-zinc-500">Starting…</span>
+    <div className="flex items-start gap-2 py-1">
+      <BAvatar />
+      <div className="min-w-0 flex-1 space-y-3">
+        <PreambleDots />
+        <div className="rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2.5 pr-16 opacity-70">
+          <ul className="space-y-1.5">
+            {(
+              [
+                ["planning", CHECKLIST_LABELS.planning],
+                ["writing", CHECKLIST_LABELS.writing],
+                ["polishing", CHECKLIST_LABELS.polishing],
+                ["deploying", CHECKLIST_LABELS.deploying],
+              ] as const
+            ).map(([id, label]) => (
+              <li key={id} className="flex items-start gap-2 text-sm text-zinc-400">
+                <span className="mt-0.5 w-4 flex-shrink-0 text-center">○</span>
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-zinc-400">Starting…</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -121,6 +156,7 @@ function BuildingLiveCard({
     checklist,
     summary,
     nextSteps,
+    ackMessage,
     filesWritten,
     totalFiles,
     buildStartedAt,
@@ -131,31 +167,43 @@ function BuildingLiveCard({
     typeof filesWritten === "number" && typeof totalFiles === "number" && totalFiles > 0;
   const fileLine = showFileCount ? `Writing file ${filesWritten} of ${totalFiles}…` : null;
 
-  const showPreamble =
+  const showPreambleBody =
     !!preamble &&
     (preamble.restatement.trim().length > 0 || preamble.bullets.length > 0);
+
+  const ackTrimmed = typeof ackMessage === "string" ? ackMessage.trim() : "";
+  const showAck = !summary && ackTrimmed.length > 0;
 
   return (
     <div className="flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 space-y-3 break-words">
-        {showPreamble && (
-          <div className="origin-top transition-[opacity,transform] duration-300 ease-out">
-            {preamble!.restatement.trim().length > 0 && (
-              <p className="text-sm leading-relaxed text-[#374151]">{preamble!.restatement}</p>
+        {!summary && (
+          <div className="space-y-2">
+            {showAck && (
+              <p className="text-sm leading-relaxed text-zinc-500">{ackTrimmed}</p>
             )}
-            {preamble!.bullets.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {preamble!.bullets.map((line, i) => (
-                  <li
-                    key={i}
-                    className="flex gap-2 text-sm leading-relaxed text-zinc-600"
-                  >
-                    <span className="flex-shrink-0 select-none text-zinc-400">•</span>
-                    <span className="min-w-0">{line}</span>
-                  </li>
-                ))}
-              </ul>
+            {showPreambleBody ? (
+              <div className="origin-top transition-[opacity,transform] duration-300 ease-out">
+                {preamble!.restatement.trim().length > 0 && (
+                  <p className="text-sm leading-relaxed text-[#374151]">{preamble!.restatement}</p>
+                )}
+                {preamble!.bullets.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {preamble!.bullets.map((line, i) => (
+                      <li
+                        key={i}
+                        className="flex gap-2 text-sm leading-relaxed text-zinc-600"
+                      >
+                        <span className="flex-shrink-0 select-none text-zinc-400">•</span>
+                        <span className="min-w-0">{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              <PreambleDots />
             )}
           </div>
         )}

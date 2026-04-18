@@ -14,6 +14,8 @@ export type ChatMessage =
       id: string;
       type: "building";
       phase?: string;
+      /** Immediate copy from pre_build_ack SSE — lives in the same card as the checklist (BEO-392). */
+      ackMessage?: string;
       preamble?: { restatement: string; bullets: string[] };
       /** True when preamble text is the static fallback (not from Haiku). */
       preambleIsFallback?: boolean;
