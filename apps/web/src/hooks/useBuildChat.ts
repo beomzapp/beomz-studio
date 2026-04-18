@@ -792,6 +792,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   (Date.now() - (checklistDwellRef.current.activeSince as number));
                 if (checklistDwellRef.current.timer) {
                   clearTimeout(checklistDwellRef.current.timer);
+                  checklistDwellRef.current.timer = null;
                 }
                 checklistDwellRef.current.timer = setTimeout(() => {
                   checklistDwellRef.current.timer = null;
@@ -829,6 +830,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   checklist: visual,
                 };
                 return next;
+              }
+
+              if (checklistDwellRef.current.timer) {
+                clearTimeout(checklistDwellRef.current.timer);
+                checklistDwellRef.current.timer = null;
               }
 
               const next = [...prev];
