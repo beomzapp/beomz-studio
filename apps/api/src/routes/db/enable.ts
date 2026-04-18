@@ -2,10 +2,10 @@
  * POST /api/projects/:id/db/enable
  *
  * Provisions a built-in database schema for the project on beomz-user-data.
- * Plan-gated: free users can only have 1 DB-enabled project.
+ * Plan-gated: every plan includes 1 DB-enabled project.
  *
  * Provisioning flow:
- *  1. Check plan — free users: count db-enabled projects, reject if >= 1
+ *  1. Check org DB-enabled project count, reject if the plan cap is reached
  *  2. Generate random schema name (app_ + 32 hex chars) + nonce (64 hex chars)
  *  3. CREATE SCHEMA on beomz-user-data via Management API
  *  4. CREATE/REPLACE beomz_db RPC (with nonce verification)
@@ -18,6 +18,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -31,96 +32,119 @@ import {
 } from "../../lib/userDataClient.js";
 import { getFeatureLimits } from "../../lib/features.js";
 
-const enableDbRoute = new Hono();
+interface EnableDbRouteDeps {
+  authMiddleware?: MiddlewareHandler;
+  loadOrgContextMiddleware?: MiddlewareHandler;
+  isUserDataConfigured?: typeof isUserDataConfigured;
+  runSql?: typeof runSql;
+  createBeomzDbFunction?: typeof createBeomzDbFunction;
+  insertSchemaRegistry?: typeof insertSchemaRegistry;
+  exposeSchemaInPostgREST?: typeof exposeSchemaInPostgREST;
+}
 
-enableDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
-  if (!isUserDataConfigured()) {
-    return c.json({ error: "Database service not configured" }, 503);
-  }
+export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
+  const enableDbRoute = new Hono();
+  const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
+  const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
+  const isUserDataConfiguredFn = deps.isUserDataConfigured ?? isUserDataConfigured;
+  const runSqlFn = deps.runSql ?? runSql;
+  const createBeomzDbFunctionFn = deps.createBeomzDbFunction ?? createBeomzDbFunction;
+  const insertSchemaRegistryFn = deps.insertSchemaRegistry ?? insertSchemaRegistry;
+  const exposeSchemaInPostgRESTFn = deps.exposeSchemaInPostgREST ?? exposeSchemaInPostgREST;
 
-  const projectId = c.req.param("id") as string;
-  const orgContext = c.get("orgContext") as OrgContext;
-  const { db, org } = orgContext;
-
-  const project = await db.findProjectById(projectId);
-  if (!project || project.org_id !== org.id) {
-    return c.json({ error: "Project not found" }, 404);
-  }
-
-  if (project.database_enabled) {
-    return c.json({ status: "already_connected", provider: project.db_provider });
-  }
-
-  // Plan gate: free users may only have 1 DB-enabled project
-  const plan = org.plan ?? "free";
-  if (plan === "free") {
-    const dbCount = await db.countDbEnabledProjectsByOrgId(org.id);
-    if (dbCount >= 1) {
-      return c.json(
-        {
-          error: "plan_limit",
-          message: "Free plan allows 1 database-enabled project. Upgrade to enable more.",
-        },
-        403,
-      );
+  enableDbRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    if (!isUserDataConfiguredFn()) {
+      return c.json({ error: "Database service not configured" }, 503);
     }
-  }
 
-  const schema = `app_${randomBytes(16).toString("hex")}`;
-  const nonce = randomBytes(32).toString("hex");
+    const projectId = c.req.param("id") as string;
+    const orgContext = c.get("orgContext") as OrgContext;
+    const { db, org } = orgContext;
 
-  try {
-    // 1. Create the schema
-    await runSql(`CREATE SCHEMA IF NOT EXISTS "${schema}";`);
+    const project = await db.findProjectById(projectId);
+    if (!project || project.org_id !== org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
 
-    // 2. Create/replace beomz_db RPC (V2 with nonce verification)
-    await createBeomzDbFunction();
+    if (project.database_enabled) {
+      return c.json({ status: "already_connected", provider: project.db_provider });
+    }
 
-    // 3. Register nonce in beomz_schema_registry (before exposing to PostgREST)
-    await insertSchemaRegistry(schema, nonce, projectId);
-
-    // 4. Expose schema to PostgREST with retry loop (fixes V1 PGRST106 race)
-    await exposeSchemaInPostgREST(schema);
-
-    // 5. Persist to project — db_nonce stored server-side only, never returned to client
-    await db.updateProject(projectId, {
-      database_enabled: true,
-      db_schema: schema,
-      db_nonce: nonce,
-      db_provider: "beomz",
-      db_config: null,
-      db_wired: false,
-    });
-
-    // 6. Insert plan-based DB limits for this project (idempotent ON CONFLICT via UNIQUE)
+    // Gate before provisioning starts: every plan includes 1 shared DB-enabled project.
     const plan = org.plan ?? "free";
     const limits = getFeatureLimits(plan);
-    try {
-      await db.insertProjectDbLimits(
-        projectId,
-        limits.storage_mb,
-        limits.rows ?? 0,
-        limits.tables ?? 0,
+    const dbCount = await db.countDbEnabledProjectsByOrgId(org.id);
+    if (dbCount >= limits.db_projects) {
+      return c.json(
+        {
+          status: 402,
+          error: "db_project_limit_reached",
+          current: dbCount,
+          limit: limits.db_projects,
+          plan: org.plan,
+        },
+        402,
       );
-    } catch (limitsErr) {
-      // Non-fatal — log but don't fail provisioning
-      console.warn("[db/enable] insertProjectDbLimits failed (non-fatal):", limitsErr);
     }
 
-    return c.json({ status: "connected" });
-  } catch (err) {
-    console.error("[db/enable] provisioning failed:", err);
-    // Best-effort cleanup
+    const schema = `app_${randomBytes(16).toString("hex")}`;
+    const nonce = randomBytes(32).toString("hex");
+
     try {
-      await runSql(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
-    } catch {
-      // ignore
+      // 1. Create the schema
+      await runSqlFn(`CREATE SCHEMA IF NOT EXISTS "${schema}";`);
+
+      // 2. Create/replace beomz_db RPC (V2 with nonce verification)
+      await createBeomzDbFunctionFn();
+
+      // 3. Register nonce in beomz_schema_registry (before exposing to PostgREST)
+      await insertSchemaRegistryFn(schema, nonce, projectId);
+
+      // 4. Expose schema to PostgREST with retry loop (fixes V1 PGRST106 race)
+      await exposeSchemaInPostgRESTFn(schema);
+
+      // 5. Persist to project — db_nonce stored server-side only, never returned to client
+      await db.updateProject(projectId, {
+        database_enabled: true,
+        db_schema: schema,
+        db_nonce: nonce,
+        db_provider: "beomz",
+        db_config: null,
+        db_wired: false,
+      });
+
+      // 6. Insert plan-based DB limits for this project (idempotent ON CONFLICT via UNIQUE)
+      try {
+        await db.insertProjectDbLimits(
+          projectId,
+          limits.storage_mb,
+          limits.rows ?? 0,
+          limits.tables ?? 0,
+        );
+      } catch (limitsErr) {
+        // Non-fatal — log but don't fail provisioning
+        console.warn("[db/enable] insertProjectDbLimits failed (non-fatal):", limitsErr);
+      }
+
+      return c.json({ status: "connected" });
+    } catch (err) {
+      console.error("[db/enable] provisioning failed:", err);
+      // Best-effort cleanup
+      try {
+        await runSqlFn(`DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
+      } catch {
+        // ignore
+      }
+      return c.json(
+        { error: err instanceof Error ? err.message : "Failed to provision database" },
+        500,
+      );
     }
-    return c.json(
-      { error: err instanceof Error ? err.message : "Failed to provision database" },
-      500,
-    );
-  }
-});
+  });
+
+  return enableDbRoute;
+}
+
+const enableDbRoute = createEnableDbRoute();
 
 export default enableDbRoute;

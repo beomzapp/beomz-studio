@@ -7,28 +7,33 @@
 
 export interface DbFeatureLimits {
   storage_mb: number;
-  rows: number | null;   // null = unlimited
-  tables: number | null; // null = unlimited
+  db_projects: number;
+  rows: null;
+  tables: null;
 }
 
 export const DB_PLAN_LIMITS: Record<string, DbFeatureLimits> = {
   free: {
-    storage_mb: 1024,
-    rows: 100000,
-    tables: 20,
+    storage_mb: 200,
+    db_projects: 1,
+    rows: null,
+    tables: null,
   },
   pro_starter: {
-    storage_mb: 5120,
-    rows: 500000,
-    tables: 50,
+    storage_mb: 1024,
+    db_projects: 1,
+    rows: null,
+    tables: null,
   },
   pro_builder: {
-    storage_mb: 15360,
-    rows: 2000000,
-    tables: 100,
+    storage_mb: 5120,
+    db_projects: 1,
+    rows: null,
+    tables: null,
   },
   business: {
-    storage_mb: 51200,
+    storage_mb: 15360,
+    db_projects: 1,
     rows: null,
     tables: null,
   },
