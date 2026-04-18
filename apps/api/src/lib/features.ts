@@ -7,28 +7,33 @@
 
 export interface DbFeatureLimits {
   storage_mb: number;
-  rows: number | null;   // null = unlimited
-  tables: number | null; // null = unlimited
+  db_projects: number;
+  rows: null;
+  tables: null;
 }
 
 export const DB_PLAN_LIMITS: Record<string, DbFeatureLimits> = {
   free: {
-    storage_mb: 1024,
-    rows: 100000,
-    tables: 20,
+    storage_mb: 200,
+    db_projects: 1,
+    rows: null,
+    tables: null,
   },
   pro_starter: {
-    storage_mb: 5120,
-    rows: 500000,
-    tables: 50,
+    storage_mb: 1024,
+    db_projects: 1,
+    rows: null,
+    tables: null,
   },
   pro_builder: {
-    storage_mb: 15360,
-    rows: 2000000,
-    tables: 100,
+    storage_mb: 5120,
+    db_projects: 1,
+    rows: null,
+    tables: null,
   },
   business: {
-    storage_mb: 51200,
+    storage_mb: 15360,
+    db_projects: 1,
     rows: null,
     tables: null,
   },
@@ -42,34 +47,56 @@ export function getFeatureLimits(plan: string): DbFeatureLimits {
 // ── Storage add-on price map ──────────────────────────────────────────────────
 
 export interface StorageAddon {
-  priceId: string;
-  extra_storage_mb: number;
-  extra_rows: number;
   label: string;
+  price_usd: number;
+  extra_storage_mb: number;
+  price_id: string | undefined;
 }
 
 export const STORAGE_ADDONS: StorageAddon[] = [
   {
-    priceId: "price_1TMttV8PEPiIN5kItiXhAFp8",
-    extra_storage_mb: 2048,   // +2 GB
-    extra_rows: 200000,
-    label: "+2 GB / +200k rows ($5)",
+    label: "+500MB",
+    price_usd: 5,
+    extra_storage_mb: 512,
+    price_id: process.env.STRIPE_STORAGE_500MB,
   },
   {
-    priceId: "price_1TMttY8PEPiIN5kIJxQy3mO5",
-    extra_storage_mb: 10240,  // +10 GB
-    extra_rows: 1000000,
-    label: "+10 GB / +1M rows ($19)",
+    label: "+2GB",
+    price_usd: 12,
+    extra_storage_mb: 2048,
+    price_id: process.env.STRIPE_STORAGE_2GB,
   },
   {
-    priceId: "price_1TMttb8PEPiIN5kI7SusoitU",
-    extra_storage_mb: 51200,  // +50 GB
-    extra_rows: 5000000,
-    label: "+50 GB / +5M rows ($69)",
+    label: "+10GB",
+    price_usd: 29,
+    extra_storage_mb: 10240,
+    price_id: process.env.STRIPE_STORAGE_10GB,
   },
 ];
 
+export const DEDICATED_DB_ADDON = {
+  label: "Dedicated Database",
+  price_usd: 39,
+  price_id: process.env.STRIPE_DEDICATED_DB_MONTHLY,
+};
+
+export interface PublicStorageAddon {
+  label: string;
+  price_usd: number;
+  extra_storage_mb: number;
+  price_id: string | undefined;
+}
+
+export function getPublicStorageAddons(): PublicStorageAddon[] {
+  return STORAGE_ADDONS.map(({ label, price_usd, extra_storage_mb, price_id }) => ({
+    label,
+    price_usd,
+    extra_storage_mb,
+    price_id,
+  }));
+}
+
 /** Look up a storage add-on by Stripe price ID. */
 export function getStorageAddonByPriceId(priceId: string): StorageAddon | undefined {
-  return STORAGE_ADDONS.find((a) => a.priceId === priceId);
+  return STORAGE_ADDONS.find((a) => a.price_id === priceId);
 }

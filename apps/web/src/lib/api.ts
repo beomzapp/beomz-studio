@@ -354,12 +354,21 @@ export interface DbColumn {
 }
 
 export interface DbTable {
+  /** Normalized from table_name for backward compat */
   name: string;
+  table_name: string;
   columns: DbColumn[];
 }
 
 export interface DbSchemaResponse {
   tables: DbTable[];
+}
+
+export interface DbUsageResponse {
+  used_mb: number;
+  limits: {
+    storage_mb: number;
+  };
 }
 
 export interface DbRowsResponse {
@@ -429,9 +438,23 @@ export async function connectDatabase(
 }
 
 export async function getDbSchema(projectId: string): Promise<DbSchemaResponse> {
-  return requestJson<DbSchemaResponse>(`/projects/${projectId}/db/schema`, {
-    method: "GET",
-  });
+  const raw = await requestJson<{
+    tables: Array<{
+      name?: string;
+      table_name?: string;
+      columns?: DbColumn[];
+    }>;
+  }>(`/projects/${projectId}/db/schema`, { method: "GET" });
+  return {
+    tables: (raw.tables ?? []).map((t) => {
+      const resolvedName = t.table_name ?? t.name ?? "";
+      return {
+        name: resolvedName,
+        table_name: resolvedName,
+        columns: t.columns ?? [],
+      };
+    }),
+  };
 }
 
 export async function getDbRows(
@@ -451,6 +474,35 @@ export async function runDbMigration(
   await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/migrate`, {
     method: "POST",
     body: JSON.stringify({ sql }),
+  });
+}
+
+export async function getDbUsage(projectId: string): Promise<DbUsageResponse> {
+  return requestJson<DbUsageResponse>(`/projects/${projectId}/db/usage`, {
+    method: "GET",
+  });
+}
+
+export interface StorageAddonInfo {
+  label: string;
+  price_usd: number;
+  extra_storage_mb: number;
+  price_id: string | undefined;
+}
+
+export async function getStorageAddons(): Promise<StorageAddonInfo[]> {
+  return requestJson<StorageAddonInfo[]>("/payments/storage-addons", {
+    method: "GET",
+  });
+}
+
+export async function createStorageAddonCheckout(
+  priceId: string,
+  projectId: string,
+): Promise<{ url: string }> {
+  return requestJson<{ url: string }>("/payments/storage-addon/checkout", {
+    method: "POST",
+    body: JSON.stringify({ priceId, projectId }),
   });
 }
 
