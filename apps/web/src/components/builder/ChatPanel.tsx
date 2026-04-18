@@ -1,22 +1,22 @@
 /**
  * ChatPanel — BEO-364 clean rewrite.
- *
- * Accepts ChatMessage[] directly from @beomz-studio/contracts (no legacy adapter).
- * Message rendering delegated to ChatMessageView (ChatMessage.tsx).
- * Input bar kept exactly as before.
+ * BEO-398: ImplementBar sticky zone (replaces implement_card message).
+ * BEO-182: Image upload — paperclip, paste, thumbnail strip, upload-image API.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
-import { ArrowDown, MessageSquare, Paperclip, Send, Sparkles, Square } from "lucide-react";
+import { ArrowDown, MessageSquare, Paperclip, Send, Sparkles, Square, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { BuildingShimmer, ChatMessageView } from "./ChatMessage";
+import { ImplementBar } from "./ImplementBar";
+import { uploadImage } from "../../lib/api";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   isBuilding: boolean;
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, imageUrl?: string) => void;
   onStopStreaming?: () => void;
   onRetry?: () => void;
   width?: number;
@@ -28,8 +28,12 @@ interface ChatPanelProps {
   chatModeActive?: boolean;
   /** BEO-396: Toggle chat mode on/off */
   onToggleChatMode?: () => void;
-  /** BEO-396: Fire when user clicks "Implement this" */
-  onImplementCard?: () => void;
+  /** BEO-398: Sticky implement zone state */
+  implementSuggestion?: { summary: string } | null;
+  /** BEO-398: Fires when user clicks "Implement this" */
+  onImplement?: () => void;
+  /** BEO-398: Fires when user clicks ✕ on the implement zone */
+  onDismissImplement?: () => void;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -46,7 +50,9 @@ export function ChatPanel({
   creditsBalance,
   chatModeActive = false,
   onToggleChatMode,
-  onImplementCard,
+  implementSuggestion,
+  onImplement,
+  onDismissImplement,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
@@ -56,6 +62,71 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const userScrolledUp = useRef(false);
+
+  // ─── BEO-182: Image state ─────────────────────────────────────────────────
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
+  const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
+  const handleImageFile = useCallback(async (file: File) => {
+    setImageError(null);
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageError("Image must be under 10MB.");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setImageError("Only image files are supported.");
+      return;
+    }
+    // Preview
+    const objectUrl = URL.createObjectURL(file);
+    setPendingImageFile(file);
+    setPendingImagePreview(objectUrl);
+    setPendingImageUrl(null);
+
+    // Upload
+    setImageUploading(true);
+    try {
+      const { imageUrl } = await uploadImage(file);
+      setPendingImageUrl(imageUrl);
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Upload failed.");
+      setPendingImageFile(null);
+      setPendingImagePreview(null);
+    } finally {
+      setImageUploading(false);
+    }
+  }, []);
+
+  const clearPendingImage = useCallback(() => {
+    if (pendingImagePreview) URL.revokeObjectURL(pendingImagePreview);
+    setPendingImageFile(null);
+    setPendingImagePreview(null);
+    setPendingImageUrl(null);
+    setImageError(null);
+    setImageUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [pendingImagePreview]);
+
+  // Paste handler
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files;
+      if (!files || files.length === 0) return;
+      const file = files[0];
+      if (file && file.type.startsWith("image/")) {
+        e.preventDefault();
+        void handleImageFile(file);
+      }
+    };
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [handleImageFile]);
 
   // Reset chipsDismissed when new chips arrive
   const prevChipsRef = useRef(suggestionChips);
@@ -115,11 +186,13 @@ export function ChatPanel({
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if (!text || isBuilding) return;
-    onSendMessage(text);
+    // Need text OR image (not both empty)
+    if ((!text && !pendingImageUrl) || isBuilding) return;
+    onSendMessage(text, pendingImageUrl ?? undefined);
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [input, isBuilding, onSendMessage]);
+    clearPendingImage();
+  }, [input, isBuilding, pendingImageUrl, onSendMessage, clearPendingImage]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -146,6 +219,11 @@ export function ChatPanel({
   // Show pending shimmer when building hasn't emitted a building message yet
   const hasBuildingMessage = messages.some(m => m.type === "building");
   const showPendingShimmer = isBuilding && !hasBuildingMessage;
+
+  // Enhance disabled when image attached but no text
+  const enhanceDisabled = !!pendingImageFile && !input.trim();
+  // Send disabled when no text and no image, or out of credits
+  const sendDisabled = (!input.trim() && !pendingImageUrl) || outOfCredits || imageUploading;
 
   return (
     <div
@@ -174,7 +252,7 @@ export function ChatPanel({
                   message={msg}
                   onRetry={onRetry}
                   onPopulateInput={populateInputWithoutSend}
-                  onImplementCard={onImplementCard}
+                  onConfirmImageIntent={(prompt, imageUrl) => onSendMessage(prompt, imageUrl)}
                 />
               </div>
             ))}
@@ -212,7 +290,16 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Input bar — DO NOT CHANGE */}
+      {/* BEO-398: Sticky ImplementBar — between messages and input */}
+      {implementSuggestion && (
+        <ImplementBar
+          summary={implementSuggestion.summary}
+          onImplement={() => onImplement?.()}
+          onDismiss={() => onDismissImplement?.()}
+        />
+      )}
+
+      {/* Input bar */}
       <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
         {/* BEO-396: Chat mode active indicator */}
         {chatModeActive && (
@@ -224,10 +311,40 @@ export function ChatPanel({
             <span className="text-xs text-[#9ca3af]">— thinking it through, no build yet</span>
           </div>
         )}
+
+        {/* BEO-182: Image error */}
+        {imageError && (
+          <p className="mb-1.5 text-xs text-red-500">{imageError}</p>
+        )}
+
         <div className={cn(
           "rounded-xl border bg-white focus-within:border-[#F97316]/50",
           chatModeActive ? "border-[#F97316]/30" : "border-[#e5e5e5]",
         )}>
+          {/* BEO-182: Image thumbnail strip */}
+          {pendingImagePreview && (
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <div className="relative inline-flex">
+                <img
+                  src={pendingImagePreview}
+                  alt="Attached"
+                  className="h-[60px] max-w-[80px] rounded-lg object-cover"
+                />
+                {imageUploading && (
+                  <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  </div>
+                )}
+                <button
+                  onClick={clearPendingImage}
+                  className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#1a1a1a] text-white shadow"
+                >
+                  <X size={9} />
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="px-3 pt-2">
             <textarea
               ref={textareaRef}
@@ -242,15 +359,24 @@ export function ChatPanel({
 
           <div className="flex items-center justify-between px-2 pb-1.5">
             <div className="flex items-center gap-0.5">
+              {/* BEO-182: Paperclip — opens file picker */}
               <button
+                onClick={() => fileInputRef.current?.click()}
                 className="rounded p-1.5 text-[#9ca3af] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]"
-                title="Attach file"
+                title="Attach image"
               >
                 <Paperclip size={15} />
               </button>
+              {/* BEO-182: Enhance disabled when only image attached */}
               <button
-                className="rounded p-1.5 text-[#9ca3af] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]"
-                title="Enhance with AI"
+                disabled={enhanceDisabled}
+                className={cn(
+                  "rounded p-1.5 transition-colors",
+                  enhanceDisabled
+                    ? "cursor-not-allowed text-[#d1d5db]"
+                    : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
+                )}
+                title={enhanceDisabled ? "Enhance works on text — add a description" : "Enhance with AI"}
               >
                 <Sparkles size={15} />
               </button>
@@ -279,7 +405,7 @@ export function ChatPanel({
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim() || outOfCredits}
+                disabled={sendDisabled}
                 className="rounded-lg bg-[#F97316] p-1.5 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
                 title={outOfCredits ? "Out of credits — upgrade to continue" : "Send"}
               >
@@ -288,6 +414,18 @@ export function ChatPanel({
             )}
           </div>
         </div>
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => {
+            const file = e.target.files?.[0];
+            if (file) void handleImageFile(file);
+          }}
+        />
       </div>
     </div>
   );

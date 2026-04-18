@@ -206,11 +206,29 @@ export function startBuild(body: {
   prompt: string;
   projectId?: string;
   projectName?: string;
+  imageUrl?: string;
 } & BuildPlanContext): Promise<StartBuildResponse> {
   return requestJson<StartBuildResponse>("/builds/start", {
     body: JSON.stringify(body),
     method: "POST",
   });
+}
+
+export async function uploadImage(file: File): Promise<{ imageUrl: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = session?.access_token ?? "";
+  const form = new FormData();
+  form.append("image", file);
+  const resp = await fetch(`${getApiBaseUrl()}/builds/upload-image`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "Upload failed");
+    throw new Error(text || `Upload failed with ${resp.status}`);
+  }
+  return resp.json() as Promise<{ imageUrl: string }>;
 }
 
 export function createPlanSession(

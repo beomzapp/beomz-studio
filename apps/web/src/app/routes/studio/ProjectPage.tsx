@@ -81,6 +81,8 @@ export function ProjectPage() {
     chatModeActive,
     toggleChatMode,
     implementCard,
+    implementSuggestion,
+    dismissImplementSuggestion,
   } = useBuildChat(id, {
     onEvent: handleLegacyEvent,
     onProjectIdResolved: (newId, name, icon) => {
@@ -300,7 +302,7 @@ export function ProjectPage() {
   // ─── Send message ─────────────────────────────────────────────────────────
 
   const handleSendMessage = useCallback(
-    (text: string) => {
+    (text: string, imageUrl?: string) => {
       if (credits && credits.balance <= 0) {
         setShowOutOfCreditsModal(true);
         return;
@@ -315,7 +317,7 @@ export function ProjectPage() {
         clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = null;
       }
-      sendMessage(text);
+      sendMessage(text, imageUrl);
     },
     [credits, sendMessage, buildDoneRef],
   );
@@ -712,7 +714,9 @@ export function ProjectPage() {
               creditsBalance={credits?.balance}
               chatModeActive={chatModeActive}
               onToggleChatMode={toggleChatMode}
-              onImplementCard={() => { void implementCard(); }}
+              implementSuggestion={implementSuggestion}
+              onImplement={() => { void implementCard(); }}
+              onDismissImplement={dismissImplementSuggestion}
             />
           </div>
         </div>

@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
-import { Check, ChevronDown, ChevronRight, Copy, FileCode, Rocket } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileCode, Send } from "lucide-react";
 import { CHECKLIST_LABELS } from "../../lib/buildStatusCopy";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
@@ -444,18 +444,117 @@ function BuildSummaryMessage({
   );
 }
 
+// ─── Image Intent Confirmation Card (BEO-182) ─────────────────────────────────
+
+type ImageIntentMsg = Extract<ChatMessage, { type: "image_intent" }>;
+
+const INTENT_PRIMARY_LABEL: Record<ImageIntentMsg["intent"], string | null> = {
+  logo: "Yes, use it in the header and favicon",
+  reference: "Yes, match this layout and style",
+  error: "Yes, diagnose and fix this",
+  theme: "Yes, apply these colors and fonts",
+  general: null, // shows text input instead
+};
+
+function ImageIntentCard({
+  message,
+  onConfirm,
+}: {
+  message: ImageIntentMsg;
+  onConfirm?: (prompt: string, imageUrl: string) => void;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  const [generalInput, setGeneralInput] = useState("");
+
+  if (dismissed) {
+    return (
+      <AIMessage>
+        <p className="text-sm text-zinc-400 italic">Image attached for context.</p>
+      </AIMessage>
+    );
+  }
+
+  const primaryLabel = INTENT_PRIMARY_LABEL[message.intent];
+
+  const handlePrimary = (prompt: string) => {
+    setDismissed(true);
+    onConfirm?.(prompt, message.imageUrl);
+  };
+
+  const handleDismiss = () => setDismissed(true);
+
+  return (
+    <AIMessage>
+      <div className="space-y-2.5">
+        {/* Thumbnail */}
+        <img
+          src={message.imageUrl}
+          alt="Uploaded"
+          className="h-20 w-auto max-w-[160px] rounded-lg object-cover"
+        />
+
+        {/* Description */}
+        <p className="text-sm leading-relaxed text-[#374151]">{message.description}</p>
+
+        <div className="flex flex-col gap-2">
+          {/* Primary action */}
+          {primaryLabel ? (
+            <button
+              onClick={() => handlePrimary(primaryLabel)}
+              className="w-full rounded-lg bg-[#F97316] px-3 py-2 text-left text-sm font-medium text-white transition-colors hover:bg-[#ea6c10]"
+            >
+              {primaryLabel}
+            </button>
+          ) : (
+            /* General: free-text input */
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={generalInput}
+                onChange={e => setGeneralInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && generalInput.trim()) {
+                    handlePrimary(generalInput.trim());
+                  }
+                }}
+                placeholder="What would you like me to do with this image?"
+                className="min-w-0 flex-1 rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#F97316]/50"
+              />
+              <button
+                onClick={() => generalInput.trim() && handlePrimary(generalInput.trim())}
+                disabled={!generalInput.trim()}
+                className="rounded-lg bg-[#F97316] p-2 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
+              >
+                <Send size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* Secondary: dismiss */}
+          <button
+            onClick={handleDismiss}
+            className="w-full rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm text-[#6b7280] transition-colors hover:bg-[rgba(0,0,0,0.02)]"
+          >
+            No, just attach it
+          </button>
+        </div>
+      </div>
+    </AIMessage>
+  );
+}
+
 // ─── ChatMessageView ──────────────────────────────────────────────────────────
 
 export function ChatMessageView({
   message,
   onRetry,
   onPopulateInput,
-  onImplementCard,
+  onConfirmImageIntent,
 }: {
   message: ChatMessage;
   onRetry?: () => void;
   onPopulateInput?: (text: string) => void;
-  onImplementCard?: () => void;
+  onConfirmImageIntent?: (prompt: string, imageUrl: string) => void;
 }) {
   switch (message.type) {
     case "thinking":
@@ -545,22 +644,12 @@ export function ChatMessageView({
         </AIMessage>
       );
 
-    case "implement_card":
+    case "image_intent":
       return (
-        <AIMessage>
-          <div className="space-y-2.5">
-            {message.summary && (
-              <p className="text-sm leading-relaxed text-zinc-400">{message.summary}</p>
-            )}
-            <button
-              onClick={onImplementCard}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#ea6c10] active:scale-[0.98]"
-            >
-              <Rocket size={15} />
-              Implement this
-            </button>
-          </div>
-        </AIMessage>
+        <ImageIntentCard
+          message={message}
+          onConfirm={onConfirmImageIntent}
+        />
       );
 
     default:

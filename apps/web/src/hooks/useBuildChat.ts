@@ -314,10 +314,21 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const activeChatMsgIdRef = useRef<string | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
 
+  // ─── BEO-398: Sticky implement suggestion zone ────────────────────────────
+  const [implementSuggestion, setImplementSuggestion] = useState<{ summary: string } | null>(null);
+
+  const dismissImplementSuggestion = useCallback(() => {
+    setImplementSuggestion(null);
+  }, []);
+
   const toggleChatMode = useCallback(() => {
     setChatModeActive(prev => {
       const next = !prev;
       chatModeRef.current = next;
+      if (!next) {
+        // Deactivating chat mode → clear the implement zone
+        setImplementSuggestion(null);
+      }
       return next;
     });
   }, []);
@@ -545,6 +556,22 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             { id: makeId(), type: "clarifying_question", content: event.message },
           ]);
           break;
+
+        case "image_intent": {
+          // BEO-182: classification result — show confirmation card in chat
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            {
+              id: makeId(),
+              type: "image_intent",
+              intent: event.intent as "logo" | "reference" | "error" | "theme" | "general",
+              description: event.description as string,
+              imageUrl: event.imageUrl as string,
+            },
+          ]);
+          setIsBuilding(false);
+          break;
+        }
 
         case "tool_use_started":
         case "tool_use_progress":
@@ -1047,15 +1074,15 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             },
             summary => {
               if (controller.signal.aborted) return;
-              // Finalize the streaming message
-              setMessages(prev => [
-                ...prev.map(m =>
+              // Finalize the streaming message + show sticky implement zone
+              setMessages(prev =>
+                prev.map(m =>
                   m.id === chatMsgId && m.type === "chat_response"
                     ? { ...m, streaming: false }
                     : m,
                 ),
-                { id: makeId(), type: "implement_card", summary },
-              ]);
+              );
+              setImplementSuggestion({ summary });
               activeChatMsgIdRef.current = null;
             },
           );
@@ -1125,14 +1152,14 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                     ),
                   );
                 } else if (ev.type === "implement_suggestion" && ev.summary) {
-                  setMessages(prev => [
-                    ...prev.map(m =>
+                  setMessages(prev =>
+                    prev.map(m =>
                       m.id === chatMsgId && m.type === "chat_response"
                         ? { ...m, streaming: false }
                         : m,
                     ),
-                    { id: makeId(), type: "implement_card", summary: ev.summary! },
-                  ]);
+                  );
+                  setImplementSuggestion({ summary: ev.summary! });
                   activeChatMsgIdRef.current = null;
                 }
               } catch { /* ignore parse errors */ }
@@ -1185,6 +1212,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   // ─── BEO-396: "Implement this" — summarise thread + trigger build ──────────
 
   const implementCard = useCallback(async () => {
+    // BEO-398: clear sticky zone immediately
+    setImplementSuggestion(null);
+
     let prompt: string;
 
     if (MOCK_CHAT_MODE) {
@@ -1231,7 +1261,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const sendMessageInternalRef = useRef<((text: string) => void) | null>(null);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, imageUrl?: string) => {
       // BEO-396: route to chat conversation when chat mode is active
       if (chatModeRef.current) {
         sendChatMessage(text);
@@ -1269,6 +1299,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             existingFilesRef.current.length > 0
               ? existingFilesRef.current
               : undefined,
+          ...(imageUrl ? { imageUrl } : {}),
         },
         signal: controller.signal,
         onBuildStarted: response => {
@@ -1442,5 +1473,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     chatModeActive,
     toggleChatMode,
     implementCard,
+    // BEO-398: Sticky implement zone
+    implementSuggestion,
+    dismissImplementSuggestion,
   };
 }
