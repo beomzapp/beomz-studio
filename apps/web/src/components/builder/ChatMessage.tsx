@@ -1,11 +1,12 @@
 /**
- * ChatMessage — BEO-364 / BEO-373 / BEO-378 / BEO-379.
+ * ChatMessage — BEO-364 / BEO-373 / BEO-378 / BEO-379 / BEO-386.
  * One component per message type in the discriminated union.
  * Building state: static orange dot only (no cycling text).
  * BEO-378: copy button, FileChangeBadge, bubble tail, thinking dots.
  * BEO-379: copy button moved inline — no absolute positioning.
+ * BEO-386: elapsed m:ss timer next to building text.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { Check, ChevronDown, ChevronRight, Copy, FileCode } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
@@ -44,25 +45,76 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
+// ─── Elapsed timer (BEO-386) ──────────────────────────────────────────────────
+// Ticks every second while the build is live; freezes when buildFrozenAt is set.
+
+function useElapsedSeconds(buildStartedAt: number, buildFrozenAt?: number): number {
+  const [elapsed, setElapsed] = useState(() =>
+    Math.floor(((buildFrozenAt ?? Date.now()) - buildStartedAt) / 1000),
+  );
+
+  useEffect(() => {
+    if (buildFrozenAt !== undefined) {
+      setElapsed(Math.floor((buildFrozenAt - buildStartedAt) / 1000));
+      return;
+    }
+    const tick = () => setElapsed(Math.floor((Date.now() - buildStartedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [buildStartedAt, buildFrozenAt]);
+
+  return elapsed;
+}
+
+function ElapsedTimer({
+  buildStartedAt,
+  buildFrozenAt,
+}: {
+  buildStartedAt: number;
+  buildFrozenAt?: number;
+}) {
+  const elapsed = useElapsedSeconds(buildStartedAt, buildFrozenAt);
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  return (
+    <span className="tabular-nums font-mono text-sm text-zinc-400">
+      {m}:{String(s).padStart(2, "0")}
+    </span>
+  );
+}
+
 // ─── Building indicator ───────────────────────────────────────────────────────
 
 interface BuildingShimmerProps {
+  phase?: string;
   filesWritten?: number;
   totalFiles?: number;
+  buildStartedAt?: number;
+  buildFrozenAt?: number;
 }
 
-export function BuildingShimmer({ filesWritten, totalFiles }: BuildingShimmerProps = {}) {
+export function BuildingShimmer({
+  phase,
+  filesWritten,
+  totalFiles,
+  buildStartedAt,
+  buildFrozenAt,
+}: BuildingShimmerProps = {}) {
   const showFileCount =
     typeof filesWritten === "number" && typeof totalFiles === "number" && totalFiles > 0;
 
   const text = showFileCount
     ? `Writing file ${filesWritten} of ${totalFiles}...`
-    : "Building your app...";
+    : (phase ?? "Building your app...");
 
   return (
     <div className="flex items-center gap-1.5">
       <span className="animate-pulse text-[#F97316]">◌</span>
       <span className="text-sm text-zinc-500">{text}</span>
+      {typeof buildStartedAt === "number" && (
+        <ElapsedTimer buildStartedAt={buildStartedAt} buildFrozenAt={buildFrozenAt} />
+      )}
     </div>
   );
 }
@@ -255,7 +307,13 @@ export function ChatMessageView({
     // Building — cycling text status. No avatar, no bubble.
     case "building":
       return (
-        <BuildingShimmer filesWritten={message.filesWritten} totalFiles={message.totalFiles} />
+        <BuildingShimmer
+          phase={message.phase}
+          filesWritten={message.filesWritten}
+          totalFiles={message.totalFiles}
+          buildStartedAt={message.buildStartedAt}
+          buildFrozenAt={message.buildFrozenAt}
+        />
       );
 
     // Conversational AI response — B avatar + text + copy row below.

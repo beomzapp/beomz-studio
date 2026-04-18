@@ -85,6 +85,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const lastUserPromptRef = useRef("");
   const activeBuildingMsgIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // BEO-386: tracks when the current build started (set on pre_build_ack).
+  const buildStartedAtRef = useRef<number | null>(null);
   const existingFilesRef = useRef<readonly StudioFile[]>([]);
   const resolvedProjectIdRef = useRef(
     projectId && projectId !== "new" ? projectId : "",
@@ -132,13 +134,22 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         // Internal classifier result — no chat message
         break;
 
-      case "pre_build_ack":
+      case "pre_build_ack": {
+        // BEO-386: record when this build started so the elapsed timer has a
+        // stable anchor that survives navigation (stored in sessionStorage too).
+        const now = Date.now();
+        buildStartedAtRef.current = now;
+        try {
+          const ssKey = `beomz:buildStartedAt:${resolvedProjectIdRef.current}`;
+          sessionStorage.setItem(ssKey, String(now));
+        } catch { /* sessionStorage may be unavailable */ }
         // BEO-378: replace the thinking dots with the real ack message.
         setMessages(prev => [
           ...prev.filter(m => m.type !== "thinking"),
           { id: makeId(), type: "pre_build_ack", content: event.message },
         ]);
         break;
+      }
 
       case "conversational_response":
         // BEO-378: filter thinking dots (no pre_build_ack fires for conversational).
@@ -172,19 +183,21 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             typeof payload.filesWritten === "number" ? payload.filesWritten : undefined;
           const totalFiles =
             typeof payload.totalFiles === "number" ? payload.totalFiles : undefined;
+          // BEO-386: attach the stable start timestamp to every building message.
+          const buildStartedAt = buildStartedAtRef.current ?? undefined;
 
           if (buildingId) {
             const idx = prev.findIndex(m => m.id === buildingId);
             if (idx !== -1) {
               const next = [...prev];
-              next[idx] = { id: buildingId, type: "building", phase, filesWritten, totalFiles };
+              next[idx] = { id: buildingId, type: "building", phase, filesWritten, totalFiles, buildStartedAt };
               return next;
             }
           }
 
           const id = makeId();
           activeBuildingMsgIdRef.current = id;
-          return [...prev, { id, type: "building", phase, filesWritten, totalFiles }];
+          return [...prev, { id, type: "building", phase, filesWritten, totalFiles, buildStartedAt }];
         });
         break;
       }
@@ -192,6 +205,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       case "build_summary":
         // BEO-373: remove any lingering building message so the cycling status
         // disappears when the summary card arrives.
+        // BEO-386: clear the stored build start time on successful completion.
+        try {
+          sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        } catch { /* ignore */ }
+        buildStartedAtRef.current = null;
         setMessages(prev => [
           ...prev.filter(m => m.type !== "building"),
           {
@@ -208,18 +226,38 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       case "done":
         if (event.fallbackUsed) {
           buildDoneRef.current = false;
-          // BEO-378: clear thinking dots on failed builds.
-          setMessages(prev => [
-            ...prev.filter(m => m.type !== "thinking"),
-            {
-              id: makeId(),
-              type: "error",
-              content:
-                "The build didn't generate any files — this sometimes happens with complex prompts. Your credits have not been charged.",
-            },
-          ]);
+          // BEO-386: freeze the timer and clear the stored start time.
+          try {
+            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+          } catch { /* ignore */ }
+          const frozenAtFallback = Date.now();
+          const frozenBuildIdFallback = activeBuildingMsgIdRef.current;
+          // BEO-378: clear thinking dots on failed builds; also freeze building message.
+          setMessages(prev => {
+            const mapped = frozenBuildIdFallback
+              ? prev.map(m =>
+                  m.id === frozenBuildIdFallback && m.type === "building"
+                    ? { ...m, buildFrozenAt: frozenAtFallback }
+                    : m,
+                )
+              : prev;
+            return [
+              ...mapped.filter(m => m.type !== "thinking"),
+              {
+                id: makeId(),
+                type: "error",
+                content:
+                  "The build didn't generate any files — this sometimes happens with complex prompts. Your credits have not been charged.",
+              },
+            ];
+          });
         } else {
           buildDoneRef.current = true;
+          // BEO-386: clear the stored start time on successful completion.
+          try {
+            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+          } catch { /* ignore */ }
+          buildStartedAtRef.current = null;
           // Conversational done (question_answer / clarifying_question) — skip file fetch
           // to avoid clobbering existingFilesRef with empty/stale data.
           if (!event.conversational) {
@@ -263,15 +301,40 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       case "error":
         if (event.code === "server_restarting") {
           buildDoneRef.current = false;
+          // BEO-386: freeze the timer on server restart.
+          try {
+            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+          } catch { /* ignore */ }
+          const frozenAtRestart = Date.now();
+          const frozenBuildIdRestart = activeBuildingMsgIdRef.current;
           setMessages(prev => {
-            if (prev.some(m => m.type === "server_restarting")) return prev;
-            return [...prev, { id: makeId(), type: "server_restarting" }];
+            const mapped = frozenBuildIdRestart
+              ? prev.map(m =>
+                  m.id === frozenBuildIdRestart && m.type === "building"
+                    ? { ...m, buildFrozenAt: frozenAtRestart }
+                    : m,
+                )
+              : prev;
+            if (mapped.some(m => m.type === "server_restarting")) return mapped;
+            return [...mapped, { id: makeId(), type: "server_restarting" }];
           });
         } else {
-          setMessages(prev => [
-            ...prev,
-            { id: makeId(), type: "error", content: event.message, code: event.code },
-          ]);
+          // BEO-386: freeze the timer on build error.
+          try {
+            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+          } catch { /* ignore */ }
+          const frozenAtErr = Date.now();
+          const frozenBuildIdErr = activeBuildingMsgIdRef.current;
+          setMessages(prev => {
+            const mapped = frozenBuildIdErr
+              ? prev.map(m =>
+                  m.id === frozenBuildIdErr && m.type === "building"
+                    ? { ...m, buildFrozenAt: frozenAtErr }
+                    : m,
+                )
+              : prev;
+            return [...mapped, { id: makeId(), type: "error", content: event.message, code: event.code }];
+          });
         }
         setIsBuilding(false);
         activeBuildingMsgIdRef.current = null;
@@ -294,6 +357,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       lastUserPromptRef.current = text;
       buildDoneRef.current = false;
       activeBuildingMsgIdRef.current = null;
+      // BEO-386: reset the timer for the new build; clear any stale sessionStorage value.
+      buildStartedAtRef.current = null;
+      try {
+        sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+      } catch { /* ignore */ }
 
       setIsBuilding(true);
       // BEO-378: show thinking dots immediately while the network round-trip completes.
@@ -365,6 +433,15 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     async (buildId: string, lastEventId: string | null, signal: AbortSignal) => {
       buildDoneRef.current = false;
       setIsBuilding(true);
+      // BEO-386: restore the build start time from sessionStorage so the elapsed
+      // timer shows the correct value even after a navigation / remount.
+      try {
+        const ssKey = `beomz:buildStartedAt:${resolvedProjectIdRef.current}`;
+        const stored = sessionStorage.getItem(ssKey);
+        if (stored) {
+          buildStartedAtRef.current = parseInt(stored, 10);
+        }
+      } catch { /* ignore */ }
       await subscribeToBuild({
         buildId,
         lastEventId,
