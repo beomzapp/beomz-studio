@@ -78,6 +78,9 @@ export function ProjectPage() {
     buildDoneRef,
     subscribeToExistingBuild,
     notifyPreviewServerReady,
+    chatModeActive,
+    toggleChatMode,
+    implementCard,
   } = useBuildChat(id, {
     onEvent: handleLegacyEvent,
     onProjectIdResolved: (newId, name, icon) => {
@@ -707,6 +710,9 @@ export function ProjectPage() {
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}
               creditsBalance={credits?.balance}
+              chatModeActive={chatModeActive}
+              onToggleChatMode={toggleChatMode}
+              onImplementCard={() => { void implementCard(); }}
             />
           </div>
         </div>

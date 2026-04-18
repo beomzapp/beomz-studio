@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
-import { ArrowDown, ListChecks, Paperclip, Send, Sparkles, Square } from "lucide-react";
+import { ArrowDown, MessageSquare, Paperclip, Send, Sparkles, Square } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { BuildingShimmer, ChatMessageView } from "./ChatMessage";
 
@@ -24,6 +24,12 @@ interface ChatPanelProps {
   onDismissChips?: () => void;
   /** Current credits balance — 0 disables send */
   creditsBalance?: number;
+  /** BEO-396: Chat mode active state */
+  chatModeActive?: boolean;
+  /** BEO-396: Toggle chat mode on/off */
+  onToggleChatMode?: () => void;
+  /** BEO-396: Fire when user clicks "Implement this" */
+  onImplementCard?: () => void;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -38,9 +44,11 @@ export function ChatPanel({
   suggestionChips,
   onDismissChips,
   creditsBalance,
+  chatModeActive = false,
+  onToggleChatMode,
+  onImplementCard,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
-  const [planMode, setPlanMode] = useState(false);
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
   const [chipsDismissed, setChipsDismissed] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -166,6 +174,7 @@ export function ChatPanel({
                   message={msg}
                   onRetry={onRetry}
                   onPopulateInput={populateInputWithoutSend}
+                  onImplementCard={onImplementCard}
                 />
               </div>
             ))}
@@ -205,14 +214,27 @@ export function ChatPanel({
 
       {/* Input bar — DO NOT CHANGE */}
       <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
-        <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
+        {/* BEO-396: Chat mode active indicator */}
+        {chatModeActive && (
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#F97316]/10 px-2 py-0.5 text-xs font-medium text-[#F97316]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F97316]" />
+              Chat mode
+            </span>
+            <span className="text-xs text-[#9ca3af]">— thinking it through, no build yet</span>
+          </div>
+        )}
+        <div className={cn(
+          "rounded-xl border bg-white focus-within:border-[#F97316]/50",
+          chatModeActive ? "border-[#F97316]/30" : "border-[#e5e5e5]",
+        )}>
           <div className="px-3 pt-2">
             <textarea
               ref={textareaRef}
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder="Ask Beomz to build or change..."
+              placeholder={chatModeActive ? "Chat with Beomz…" : "Ask Beomz to build or change..."}
               rows={1}
               className="max-h-[120px] w-full resize-none bg-transparent text-sm text-[#1a1a1a] outline-none placeholder:text-[#9ca3af]"
             />
@@ -233,16 +255,16 @@ export function ChatPanel({
                 <Sparkles size={15} />
               </button>
               <button
-                onClick={() => setPlanMode(v => !v)}
+                onClick={onToggleChatMode}
                 className={cn(
                   "rounded p-1.5 transition-colors",
-                  planMode
+                  chatModeActive
                     ? "bg-[#F97316]/10 text-[#F97316]"
                     : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
                 )}
-                title="Plan mode"
+                title="Think it through first"
               >
-                <ListChecks size={15} />
+                <MessageSquare size={15} />
               </button>
             </div>
 

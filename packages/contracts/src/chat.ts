@@ -43,4 +43,8 @@ export type ChatMessage =
     }
   | { id: string; type: "clarifying_question"; content: string }
   | { id: string; type: "error"; content: string; code?: string }
-  | { id: string; type: "server_restarting" };
+  | { id: string; type: "server_restarting" }
+  /** BEO-396: Chat mode — Beomz conversational reply (B avatar, flowing text, no checklist). */
+  | { id: string; type: "chat_response"; content: string; streaming?: boolean }
+  /** BEO-396: Chat mode — "Implement this" CTA card, appears when Beomz judges conversation is ready. */
+  | { id: string; type: "implement_card"; summary: string };

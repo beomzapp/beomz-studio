@@ -1,5 +1,5 @@
 /**
- * useBuildChat — BEO-363 / BEO-391 / BEO-392 / BEO-393
+ * useBuildChat — BEO-363 / BEO-391 / BEO-392 / BEO-393 / BEO-396
  *
  * Owns all chat state + SSE event handling for the builder.
  * ProjectPage calls this hook and renders the returned messages.
@@ -12,6 +12,8 @@ import type {
   StudioFile,
 } from "@beomz-studio/contracts";
 import {
+  getAccessToken,
+  getApiBaseUrl,
   getBuildStatus,
   getLatestBuildForProject,
   NetworkDisconnectError,
@@ -20,6 +22,96 @@ import {
 } from "../lib/api";
 import { useBuilderEngineStream } from "./useBuilderEngineStream";
 import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
+
+// ─── BEO-396: Chat mode flag ───────────────────────────────────────────────────
+// Set to `true` to use the local mock (Codex backend not yet live).
+// Flip to `false` once /api/builds/chat and /api/builds/summarise-chat are deployed.
+const MOCK_CHAT_MODE = true;
+
+type ChatApiMessage = { role: "user" | "assistant"; content: string };
+
+function buildChatThread(messages: ChatMessage[]): ChatApiMessage[] {
+  const result: ChatApiMessage[] = [];
+  for (const m of messages) {
+    if (m.type === "user") result.push({ role: "user", content: m.content });
+    else if (m.type === "chat_response") result.push({ role: "assistant", content: m.content });
+  }
+  return result;
+}
+
+function countUserMessages(messages: ChatMessage[]): number {
+  return messages.filter(m => m.type === "user").length;
+}
+
+// ─── Mock chat responses ───────────────────────────────────────────────────────
+
+const MOCK_EARLY_RESPONSES = [
+  "Got it! What's the main problem this app needs to solve? And who's the primary user?",
+  "Makes sense. What's the single most important action a user should be able to take in this app?",
+  "Good. Any design preferences — minimal and clean, data-heavy, mobile-first?",
+];
+
+const MOCK_IMPLEMENT_SUMMARY_TEMPLATE = (thread: string) =>
+  `Based on our conversation: ${thread.slice(0, 120).trim()}... Build a clean, focused app with the features discussed.`;
+
+async function mockStreamChatResponse(
+  _text: string,
+  messages: ChatMessage[],
+  onDelta: (delta: string) => void,
+  onImplementSuggestion: (summary: string) => void,
+): Promise<void> {
+  const userCount = countUserMessages(messages);
+
+  if (userCount >= 2) {
+    // After 2 exchanges, suggest implementing
+    const thread = buildChatThread(messages)
+      .map(m => m.content)
+      .join(" ");
+    const summary = MOCK_IMPLEMENT_SUMMARY_TEMPLATE(thread);
+    const response = `I think I have enough to build this — want me to go ahead?\n\n${summary.replace("Based on our conversation: ", "I'll ")}`;
+
+    // Stream the response
+    await streamChars(response, onDelta);
+
+    // Then fire implement_suggestion
+    await delay(400);
+    onImplementSuggestion(summary);
+  } else {
+    const reply =
+      MOCK_EARLY_RESPONSES[userCount % MOCK_EARLY_RESPONSES.length] ??
+      "Tell me more about what you have in mind.";
+    await streamChars(reply, onDelta);
+  }
+}
+
+async function mockSummariseChatThread(thread: ChatApiMessage[]): Promise<string> {
+  await delay(600);
+  const userParts = thread.filter(m => m.role === "user").map(m => m.content);
+  return userParts.join(". ").slice(0, 300).trim() || "Build the app we discussed.";
+}
+
+function streamChars(text: string, onDelta: (delta: string) => void): Promise<void> {
+  return new Promise(resolve => {
+    const chars = text.split("");
+    let i = 0;
+    const tick = () => {
+      // Send 2-4 chars at a time for realistic feel
+      const chunk = chars.slice(i, i + 3).join("");
+      if (!chunk) {
+        resolve();
+        return;
+      }
+      onDelta(chunk);
+      i += 3;
+      setTimeout(tick, 18 + Math.random() * 12);
+    };
+    setTimeout(tick, 50);
+  });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /** BEO-393: minimum time a checklist row stays ◌ before advancing to ✓ */
 const CHECKLIST_MIN_DWELL_MS = 2000;
@@ -215,6 +307,20 @@ export interface UseBuildChatOptions {
 export function useBuildChat(projectId: string, options: UseBuildChatOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
+
+  // ─── BEO-396: Chat mode ───────────────────────────────────────────────────
+  const [chatModeActive, setChatModeActive] = useState(false);
+  const chatModeRef = useRef(false);
+  const activeChatMsgIdRef = useRef<string | null>(null);
+  const chatAbortRef = useRef<AbortController | null>(null);
+
+  const toggleChatMode = useCallback(() => {
+    setChatModeActive(prev => {
+      const next = !prev;
+      chatModeRef.current = next;
+      return next;
+    });
+  }, []);
 
   const buildDoneRef = useRef(false);
   const lastUserPromptRef = useRef("");
@@ -892,8 +998,246 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     [clearPreambleAndStageTimers],
   );
 
+  // ─── BEO-396: Chat mode — send a conversational message ──────────────────
+
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      chatAbortRef.current?.abort();
+      const controller = new AbortController();
+      chatAbortRef.current = controller;
+
+      const thinkingId = `thinking-chat-${makeId()}`;
+      setMessages(prev => [
+        ...prev,
+        { id: makeId(), type: "user", content: text, timestamp: new Date() },
+        { id: thinkingId, type: "thinking" },
+      ]);
+
+      const respond = async () => {
+        if (MOCK_CHAT_MODE) {
+          // Capture messages snapshot *before* this new message for thread building
+          const snapshot = await new Promise<ChatMessage[]>(resolve => {
+            setMessages(prev => {
+              resolve(prev);
+              return prev;
+            });
+          });
+
+          const chatMsgId = makeId();
+          activeChatMsgIdRef.current = chatMsgId;
+
+          // Replace thinking with empty streaming chat_response
+          setMessages(prev => [
+            ...prev.filter(m => m.id !== thinkingId),
+            { id: chatMsgId, type: "chat_response", content: "", streaming: true },
+          ]);
+
+          await mockStreamChatResponse(
+            text,
+            snapshot,
+            delta => {
+              if (controller.signal.aborted) return;
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === chatMsgId && m.type === "chat_response"
+                    ? { ...m, content: m.content + delta }
+                    : m,
+                ),
+              );
+            },
+            summary => {
+              if (controller.signal.aborted) return;
+              // Finalize the streaming message
+              setMessages(prev => [
+                ...prev.map(m =>
+                  m.id === chatMsgId && m.type === "chat_response"
+                    ? { ...m, streaming: false }
+                    : m,
+                ),
+                { id: makeId(), type: "implement_card", summary },
+              ]);
+              activeChatMsgIdRef.current = null;
+            },
+          );
+
+          if (!controller.signal.aborted) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === chatMsgId && m.type === "chat_response"
+                  ? { ...m, streaming: false }
+                  : m,
+              ),
+            );
+            activeChatMsgIdRef.current = null;
+          }
+        } else {
+          // Real API path — active once Codex ships /api/builds/chat
+          try {
+            const accessToken = await getAccessToken();
+            const url = `${getApiBaseUrl()}/builds/chat`;
+            const thread = buildChatThread(
+              await new Promise<ChatMessage[]>(resolve => {
+                setMessages(prev => { resolve(prev); return prev; });
+              }),
+            );
+            const resp = await fetch(url, {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${accessToken}`,
+                "content-type": "application/json",
+                accept: "text/event-stream",
+              },
+              body: JSON.stringify({
+                messages: [...thread, { role: "user", content: text }],
+                projectId: resolvedProjectIdRef.current || undefined,
+              }),
+              signal: controller.signal,
+            });
+
+            if (!resp.ok || !resp.body) {
+              throw new Error(`Chat request failed with ${resp.status}`);
+            }
+
+            const chatMsgId = makeId();
+            activeChatMsgIdRef.current = chatMsgId;
+            setMessages(prev => [
+              ...prev.filter(m => m.id !== thinkingId),
+              { id: chatMsgId, type: "chat_response", content: "", streaming: true },
+            ]);
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            let dataLines: string[] = [];
+
+            const flush = () => {
+              if (!dataLines.length) return;
+              const payload = dataLines.join("\n");
+              dataLines = [];
+              try {
+                const ev = JSON.parse(payload) as { type: string; delta?: string; summary?: string };
+                if (ev.type === "chat_response" && ev.delta) {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === chatMsgId && m.type === "chat_response"
+                        ? { ...m, content: m.content + ev.delta! }
+                        : m,
+                    ),
+                  );
+                } else if (ev.type === "implement_suggestion" && ev.summary) {
+                  setMessages(prev => [
+                    ...prev.map(m =>
+                      m.id === chatMsgId && m.type === "chat_response"
+                        ? { ...m, streaming: false }
+                        : m,
+                    ),
+                    { id: makeId(), type: "implement_card", summary: ev.summary! },
+                  ]);
+                  activeChatMsgIdRef.current = null;
+                }
+              } catch { /* ignore parse errors */ }
+            };
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) { flush(); break; }
+              buf += decoder.decode(value, { stream: true });
+              while (true) {
+                const nl = buf.indexOf("\n");
+                if (nl === -1) break;
+                const line = buf.slice(0, nl).replace(/\r$/, "");
+                buf = buf.slice(nl + 1);
+                if (!line) { flush(); continue; }
+                if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === chatMsgId && m.type === "chat_response"
+                  ? { ...m, streaming: false }
+                  : m,
+              ),
+            );
+            activeChatMsgIdRef.current = null;
+          } catch (err) {
+            if (controller.signal.aborted) return;
+            const content = err instanceof Error ? err.message : "Chat failed. Try again.";
+            setMessages(prev => [
+              ...prev.filter(m => m.id !== thinkingId),
+              { id: makeId(), type: "error", content },
+            ]);
+          }
+        }
+      };
+
+      void respond().catch(err => {
+        if (controller.signal.aborted) return;
+        setMessages(prev => [
+          ...prev.filter(m => m.id !== thinkingId),
+          { id: makeId(), type: "error", content: err instanceof Error ? err.message : "Chat failed." },
+        ]);
+      });
+    },
+    [],
+  );
+
+  // ─── BEO-396: "Implement this" — summarise thread + trigger build ──────────
+
+  const implementCard = useCallback(async () => {
+    let prompt: string;
+
+    if (MOCK_CHAT_MODE) {
+      const snapshot = await new Promise<ChatMessage[]>(resolve => {
+        setMessages(prev => { resolve(prev); return prev; });
+      });
+      const thread = buildChatThread(snapshot);
+      prompt = await mockSummariseChatThread(thread);
+    } else {
+      try {
+        const snapshot = await new Promise<ChatMessage[]>(resolve => {
+          setMessages(prev => { resolve(prev); return prev; });
+        });
+        const thread = buildChatThread(snapshot);
+        const accessToken = await getAccessToken();
+        const resp = await fetch(`${getApiBaseUrl()}/builds/summarise-chat`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ messages: thread }),
+        });
+        if (!resp.ok) throw new Error(`Summarise failed with ${resp.status}`);
+        const data = await resp.json() as { prompt: string };
+        prompt = data.prompt;
+      } catch (err) {
+        prompt = "Build the app we discussed.";
+        console.error("[BEO-396] summarise-chat failed:", err);
+      }
+    }
+
+    // Deactivate chat mode, then trigger the normal build flow
+    setChatModeActive(false);
+    chatModeRef.current = false;
+
+    // sendMessageInternal fires the build pipeline — called via sendMessage below
+    // We use a slight delay to let the state update settle
+    await delay(50);
+    sendMessageInternalRef.current?.(prompt);
+  }, []);
+
+  // Ref that points to the raw build sender (set after sendMessage is defined)
+  const sendMessageInternalRef = useRef<((text: string) => void) | null>(null);
+
   const sendMessage = useCallback(
     (text: string) => {
+      // BEO-396: route to chat conversation when chat mode is active
+      if (chatModeRef.current) {
+        sendChatMessage(text);
+        return;
+      }
+
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -956,8 +1300,69 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         buildDoneRef.current = false;
       });
     },
-    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers],
+    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers, sendChatMessage],
   );
+
+  // BEO-396: expose the raw build sender to implementCard
+  useEffect(() => {
+    sendMessageInternalRef.current = (text: string) => {
+      // Call without going through chatModeRef check — directly triggers build flow
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      lastUserPromptRef.current = text;
+      buildDoneRef.current = false;
+      activeBuildingMsgIdRef.current = null;
+      buildStartedAtRef.current = null;
+      try {
+        sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+      } catch { /* ignore */ }
+      clearPreambleAndStageTimers();
+      setIsBuilding(true);
+      setMessages(prev => [
+        ...prev.filter(m => m.type !== "server_restarting"),
+        { id: makeId(), type: "user", content: text, timestamp: new Date() },
+        { id: `thinking-${makeId()}`, type: "thinking" },
+      ]);
+      void startAndStreamBuild({
+        body: {
+          prompt: text,
+          projectId: resolvedProjectIdRef.current || undefined,
+          model: "claude-sonnet-4-6",
+          existingFiles:
+            existingFilesRef.current.length > 0 ? existingFilesRef.current : undefined,
+        },
+        signal: controller.signal,
+        onBuildStarted: response => {
+          resolvedProjectIdRef.current = response.project.id;
+          lastEventBuildIdRef.current = response.build.id;
+          optionsRef.current.onProjectIdResolved?.(
+            response.project.id,
+            response.project.name,
+            response.project.icon ?? null,
+          );
+          optionsRef.current.onBuildStarted?.(response);
+        },
+        onBuildStatus: status => { optionsRef.current.onBuildStatus?.(status); },
+        onEvent: handleEvent,
+      }).catch(err => {
+        if (controller.signal.aborted) return;
+        if (err instanceof NetworkDisconnectError) {
+          setMessages(prev =>
+            prev.some(m => m.type === "server_restarting")
+              ? prev
+              : [...prev, { id: makeId(), type: "server_restarting" }],
+          );
+        } else {
+          const content = err instanceof Error ? err.message : "Failed to start build.";
+          setMessages(prev => [...prev, { id: makeId(), type: "error", content }]);
+        }
+        setIsBuilding(false);
+        buildDoneRef.current = false;
+      });
+    };
+  }, [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers]);
 
   const retryLastBuild = useCallback(() => {
     const prompt = lastUserPromptRef.current;
@@ -1033,5 +1438,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     buildDoneRef,
     subscribeToExistingBuild,
     notifyPreviewServerReady,
+    // BEO-396: Chat mode
+    chatModeActive,
+    toggleChatMode,
+    implementCard,
   };
 }

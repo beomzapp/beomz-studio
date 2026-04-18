@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
-import { Check, ChevronDown, ChevronRight, Copy, FileCode } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileCode, Rocket } from "lucide-react";
 import { CHECKLIST_LABELS } from "../../lib/buildStatusCopy";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
@@ -450,10 +450,12 @@ export function ChatMessageView({
   message,
   onRetry,
   onPopulateInput,
+  onImplementCard,
 }: {
   message: ChatMessage;
   onRetry?: () => void;
   onPopulateInput?: (text: string) => void;
+  onImplementCard?: () => void;
 }) {
   switch (message.type) {
     case "thinking":
@@ -525,6 +527,41 @@ export function ChatMessageView({
 
     case "server_restarting":
       return <ServerRestartedCard onRetry={onRetry ?? (() => {})} />;
+
+    case "chat_response":
+      return (
+        <AIMessage>
+          <div className="text-sm leading-relaxed text-[#374151] break-words">
+            <MarkdownText text={message.content} />
+            {message.streaming && (
+              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#F97316] align-middle" />
+            )}
+          </div>
+          {!message.streaming && message.content && (
+            <div className="mt-1.5 flex justify-end">
+              <CopyButton content={message.content} />
+            </div>
+          )}
+        </AIMessage>
+      );
+
+    case "implement_card":
+      return (
+        <AIMessage>
+          <div className="space-y-2.5">
+            {message.summary && (
+              <p className="text-sm leading-relaxed text-zinc-400">{message.summary}</p>
+            )}
+            <button
+              onClick={onImplementCard}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#ea6c10] active:scale-[0.98]"
+            >
+              <Rocket size={15} />
+              Implement this
+            </button>
+          </div>
+        </AIMessage>
+      );
 
     default:
       return null;
