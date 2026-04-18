@@ -54,6 +54,9 @@ export function useWebContainerPreview(
   // cacheFallbackFnRef — the fallback fn; called on [FS] ERROR in output or timeout.
   const cacheTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cacheFallbackFnRef = useRef<(() => void) | null>(null);
+  // BEO-383: armCacheFallbackRef stores the armCacheFallback() function created
+  // inside boot() so the post-boot generationId effect can also arm it.
+  const armCacheFallbackRef = useRef<(() => void) | null>(null);
   // pendingNmExportRef — true after a fresh npm install; server-ready handler
   // exports + caches node_modules only after Vite confirms a healthy start,
   // preventing a bad binary from being written during a partially-settled FS.
@@ -298,11 +301,34 @@ export function useWebContainerPreview(
             setProgressMessage("Restoring packages from cache…");
             await instance.wc.mount(cachedNm, { mountPoint: "node_modules" });
             if (cancelled) return;
-            instance.installedAt = Date.now();
-            usedCachedNm = true;
-            console.log("[wc-cache] node_modules restored from IndexedDB");
-          } else {
-            // Cache miss: run npm install then export and store the snapshot.
+
+            // BEO-383: verify the mount actually worked. [FS] ERROR invalid mount
+            // point fires from the WebContainer filesystem worker directly into the
+            // browser console — it NEVER reaches devProcess.output, so the
+            // string-match detection on that stream can never catch it.
+            // A readdir check immediately after mount is the only reliable path.
+            let nmMountOk = false;
+            try {
+              const entries = await instance.wc.fs.readdir("node_modules");
+              nmMountOk = entries.length > 0;
+            } catch {
+              nmMountOk = false;
+            }
+
+            if (nmMountOk) {
+              instance.installedAt = Date.now();
+              usedCachedNm = true;
+              console.log("[wc-cache] node_modules restored from IndexedDB");
+            } else {
+              console.warn("[wc-cache] node_modules mount invalid — clearing cache for fresh install");
+              await wcCacheDeleteNodeModules();
+              // usedCachedNm stays false → falls through to fresh install below
+            }
+          }
+
+          if (!usedCachedNm) {
+            // Cache miss or mount verification failure — run npm install then
+            // export and store the snapshot.
             await instance.wc.mount({
               "package.json": {
                 file: {
@@ -409,6 +435,9 @@ export function useWebContainerPreview(
           cacheFallbackFnRef.current = runCacheFallback;
           cacheTimeoutIdRef.current = setTimeout(() => void runCacheFallback(), 15_000);
         }
+        // BEO-383: expose this to the post-boot generationId effect which
+        // can't call armCacheFallback() directly (defined inside boot()).
+        armCacheFallbackRef.current = armCacheFallback;
 
         if (currentFiles && currentFiles.length > 0 && currentProject?.id) {
           void startVite(instance, currentFiles, currentProject);
@@ -471,6 +500,10 @@ export function useWebContainerPreview(
       if (!inst) return;
       console.log("[wc-cache] Mounting source files from IndexedDB (post-boot)");
       void startVite(inst, cached as StudioFile[], project);
+      // BEO-383: arm the stale-cache fallback — armCacheFallback() was only
+      // called inside boot() for paths with live/cached files; this post-boot
+      // path bypassed it, leaving the 15s backstop unarmed.
+      armCacheFallbackRef.current?.();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generationId, project?.id]);
