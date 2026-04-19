@@ -1223,6 +1223,16 @@ function buildThemeTs(paletteId: string): string {
   ].join("\n");
 }
 
+const PREVIEW_SHELL_ICON_CONTEXT = [
+  "PREVIEW SHELL CONTEXT:",
+  "The generated app is rendered inside a Beomz preview shell.",
+  "The shell header shows an app icon: a colored square with a lucide-react icon inside it, plus the app name as text next to it.",
+  "When the user says 'logo', 'app icon', 'logo color', or 'icon color', they usually mean this preview-shell icon rather than a separate uploaded brand asset.",
+  "In generated apps, the most reliable source of truth for that icon color is theme.ts.",
+  "Use theme.accent as the primary icon/logo color token. For requests like 'make the logo orange', update theme.accent to '#F97316' and theme.accentHover to '#EA580C' when appropriate.",
+  "Do not invent a new logo image unless the user explicitly asks for a custom graphic asset.",
+].join("\n");
+
 // ─── Phased build helpers ─────────────────────────────────────────────────────
 
 const ROLE_INDICATORS = [
@@ -1350,6 +1360,8 @@ export function buildSystemPrompt(
     "   light → productivity apps, data/admin tools, business software, management systems, dashboards",
     "   dark  → creative tools, entertainment, gaming, developer tools, crypto, music apps",
     `   Palette accent: ${paletteId} — this palette's exact color tokens are in theme.ts (see STEP 4)`,
+    "",
+    PREVIEW_SHELL_ICON_CONTEXT,
     "",
     "3. PAGES/SECTIONS — list every distinct section the app needs.",
     "   Asset management system → Assets, Work Orders, Team, Calendar",
@@ -1843,11 +1855,15 @@ export function buildIterationSystemPrompt(
     "10. When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
     "11. Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
     "",
+    PREVIEW_SHELL_ICON_CONTEXT,
+    "",
     "COLOR CHANGES (highest priority rule):",
-    "If the user asks to change colors, theme, accent, or visual style — ONLY return theme.ts.",
+    "If the user asks to change colors, theme, accent, logo color, icon color, or visual style — ONLY return theme.ts.",
+    "Treat short requests like 'change the logo color to orange' as a theme.ts change targeting theme.accent (and accentHover if needed).",
     "Update the relevant token values in the theme object (e.g. primary, accent, background, sidebar).",
     "Do NOT touch App.tsx or any page files — they all import from ./theme so HMR propagates automatically.",
     "Example: 'change to red' → set primary: '#dc2626', primaryHover: '#b91c1c', accent: '#ef4444'",
+    "Example: 'change logo color to orange' → set accent: '#F97316', accentHover: '#EA580C'",
     "Example: 'dark mode' → set background: '#0f172a', surface: '#1e293b', sidebar: '#0f172a', textPrimary: '#f1f5f9'",
     "",
     "ADDING NEW PAGES OR COMPONENTS:",

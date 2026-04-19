@@ -82,6 +82,20 @@ test("system prompts include lucide safe icon guidance and banned icon list", ()
   assert.match(iterationPrompt, /Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard/);
 });
 
+test("system prompts describe the preview shell icon and logo color mapping", () => {
+  const initialPrompt = buildSystemPrompt("professional-blue");
+  const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);
+
+  assert.match(initialPrompt, /PREVIEW SHELL CONTEXT:/);
+  assert.match(initialPrompt, /The shell header shows an app icon: a colored square with a lucide-react icon inside it/);
+  assert.match(initialPrompt, /When the user says 'logo', 'app icon', 'logo color', or 'icon color'/);
+  assert.match(initialPrompt, /Use theme\.accent as the primary icon\/logo color token/);
+
+  assert.match(iterationPrompt, /PREVIEW SHELL CONTEXT:/);
+  assert.match(iterationPrompt, /Treat short requests like 'change the logo color to orange' as a theme\.ts change targeting theme\.accent/);
+  assert.match(iterationPrompt, /Example: 'change logo color to orange' → set accent: '#F97316', accentHover: '#EA580C'/);
+});
+
 test("isNpmPackage classifies npm and local import paths correctly", () => {
   assert.equal(isNpmPackage("@neondatabase/serverless"), true);
   assert.equal(isNpmPackage("@supabase/supabase-js"), true);
