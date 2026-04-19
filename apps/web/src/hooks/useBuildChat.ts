@@ -353,6 +353,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const latestStageChecklistRef = useRef<ReturnType<typeof makeInitialChecklist> | null>(null);
   const latestStagePhaseRef = useRef<string | undefined>(undefined);
   const summaryDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BEO-399: set true when server-ready fires before prior checklist items finish dwell
+  const serverReadyPendingRef = useRef(false);
 
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -383,6 +385,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       clearTimeout(summaryDrainTimerRef.current);
       summaryDrainTimerRef.current = null;
     }
+    serverReadyPendingRef.current = false;
   }, []);
 
   // ─── Persist in-flight building UI (BEO-391) ───────────────────────────────
@@ -433,6 +436,17 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     setMessages(prev =>
       patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
         if (b.summary) return b;
+        // BEO-399: defer if any prior checklist item is still active/pending
+        const checklist = b.checklist;
+        const deployingIdx = checklist ? checklist.findIndex(i => i.id === "deploying") : -1;
+        const priorAllDone =
+          deployingIdx <= 0 ||
+          !checklist ||
+          checklist.slice(0, deployingIdx).every(i => i.status === "done");
+        if (!priorAllDone) {
+          serverReadyPendingRef.current = true;
+          return b;
+        }
         return {
           ...b,
           checklist: markDeployingDone(b.checklist),
@@ -965,6 +979,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                       phase: ph,
                       buildStartedAt: buildStartedAtRef.current ?? ex.buildStartedAt,
                     };
+                    // BEO-399: if server-ready was deferred, flush it now that prior items drained
+                    if (serverReadyPendingRef.current) {
+                      const depIdx = latest.findIndex(i => i.id === "deploying");
+                      const priorDone =
+                        depIdx <= 0 || latest.slice(0, depIdx).every(i => i.status === "done");
+                      if (priorDone) {
+                        serverReadyPendingRef.current = false;
+                        next[j] = {
+                          ...(next[j] as BuildingMsg),
+                          checklist: markDeployingDone(latest),
+                          phase: "preview_ready",
+                        };
+                      }
+                    }
                     return next;
                   });
                 }, wait);
