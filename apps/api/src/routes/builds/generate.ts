@@ -285,14 +285,6 @@ function mergeFiles(
   return Array.from(byPath.values());
 }
 
-const STUB_BLOCKLIST = new Set([
-  "supabase",
-  "supabase-js",
-  "supabase-client",
-  "supabase-helper",
-  "createclient",
-]);
-
 const BLOCKED_FILENAMES = new Set([
   "supabase.tsx",
   "supabase.ts",
@@ -302,16 +294,30 @@ const BLOCKED_FILENAMES = new Set([
   "supabase-client.ts",
   "supabase-helper.tsx",
   "supabase-helper.ts",
+  "serverless.tsx",
+  "serverless.ts",
 ]);
 
 export function filterBlockedGeneratedFiles<T extends { path: string }>(files: T[]): T[] {
   return files.filter((file) => !BLOCKED_FILENAMES.has(basename(file.path).toLowerCase()));
 }
 
+export function isNpmPackage(importPath: string): boolean {
+  // Scoped npm package: @org/package, @org/package/subpath
+  if (importPath.startsWith("@")) return true;
+  // Bare npm specifier: react, lucide-react, neon, etc.
+  // Local imports MUST start with ./ or ../
+  if (!importPath.startsWith(".") && !importPath.startsWith("/")) {
+    return true;
+  }
+  return false;
+}
+
 // ─── BEO-309: Post-generation import validator ────────────────────────────────
-// After sanitiseFiles() + mergeFiles(), scan every .tsx?/.jsx? file for
-// relative imports and check every referenced module exists in the file list.
-// Any missing module gets a minimal stub injected so Vite never throws
+// After sanitiseFiles() + mergeFiles(), scan every .tsx?/.jsx? file for imports.
+// Stub injection is ONLY for local paths (./ or ../). NPM package specifiers
+// are never stubbed.
+// Any missing local module gets a minimal stub injected so Vite never throws
 // "Failed to resolve import" errors after phase builds.
 export function validateAndInjectStubs(
   files: StudioFile[],
@@ -328,11 +334,18 @@ export function validateAndInjectStubs(
   for (const file of files) {
     if (!/\.(tsx?|jsx?)$/.test(file.path)) continue;
 
-    const importMatches = [...file.content.matchAll(/from\s+['"](\.\/.+?)['"]/g)];
+    const importMatches = [...file.content.matchAll(/from\s+['"]([^'"]+)['"]/g)];
     for (const match of importMatches) {
+      const importPath = match[1];
+      if (isNpmPackage(importPath)) {
+        console.warn("[validateAndInjectStubs] skipping npm package import:", importPath);
+        continue;
+      }
+
       // Flatten any subdirectory prefix (./components/Foo → Foo) and strip extension
-      const stem = match[1]
+      const stem = importPath
         .replace(/^\.\//, "")
+        .replace(/^\.\.\//, "")
         .replace(/^.*\//, "")
         .replace(/\.(tsx?|jsx?)$/, "");
 
@@ -342,10 +355,6 @@ export function validateAndInjectStubs(
       const label = `${stem} (imported in ${importingFile})`;
       if (!missing.includes(label)) {
         missing.push(label);
-        if (STUB_BLOCKLIST.has(stem.toLowerCase())) {
-          console.warn("[validateAndInjectStubs] skipping blocked stub:", stem);
-          continue;
-        }
         fileStems.add(stem); // prevent duplicate stubs for the same component
         stubs.push({
           path: `apps/web/src/app/generated/${templateId}/${stem}.tsx`,

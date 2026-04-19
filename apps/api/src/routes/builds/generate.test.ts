@@ -10,6 +10,7 @@ const {
   filterBlockedGeneratedFiles,
   buildIterationSystemPrompt,
   buildSystemPrompt,
+  isNpmPackage,
   validateAndInjectStubs,
 } = await import("./generate.js");
 
@@ -79,14 +80,87 @@ test("system prompts include lucide safe icon guidance and banned icon list", ()
   assert.match(iterationPrompt, /Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard/);
 });
 
-test("validateAndInjectStubs does not create supabase.tsx when a supabase import is missing", () => {
+test("isNpmPackage classifies npm and local import paths correctly", () => {
+  assert.equal(isNpmPackage("@neondatabase/serverless"), true);
+  assert.equal(isNpmPackage("@supabase/supabase-js"), true);
+  assert.equal(isNpmPackage("@neondatabase/neon-js/auth"), true);
+  assert.equal(isNpmPackage("react"), true);
+  assert.equal(isNpmPackage("lucide-react"), true);
+  assert.equal(isNpmPackage("pg"), true);
+  assert.equal(isNpmPackage("./components/Button"), false);
+  assert.equal(isNpmPackage("../lib/utils"), false);
+  assert.equal(isNpmPackage("/absolute/path"), false);
+});
+
+test("validateAndInjectStubs skips npm package imports and logs a warning", () => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((value) => String(value)).join(" "));
+  };
+
+  try {
+    const result = validateAndInjectStubs(
+      [
+        {
+          path: "apps/web/src/app/generated/workspace-task/BoardPage.tsx",
+          kind: "route",
+          language: "tsx",
+          content: "import { neon } from '@neondatabase/serverless'\nexport default function BoardPage() { return null; }\n",
+          source: "ai",
+          locked: false,
+        },
+      ],
+      "workspace-task",
+    );
+
+    assert.deepEqual(
+      result.files.map((file) => file.path),
+      ["apps/web/src/app/generated/workspace-task/BoardPage.tsx"],
+    );
+    assert.deepEqual(result.missing, []);
+    assert.equal(
+      warnings.some((line) => line.includes("[validateAndInjectStubs] skipping npm package import: @neondatabase/serverless")),
+      true,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("validateAndInjectStubs still creates stubs for missing local relative imports", () => {
+  const result = validateAndInjectStubs(
+    [
+      {
+        path: "apps/web/src/app/generated/workspace-task/App.tsx",
+        kind: "entry",
+        language: "tsx",
+        content: "import MissingComponent from './MissingComponent'\nexport default function App() { return <MissingComponent />; }\n",
+        source: "ai",
+        locked: false,
+      },
+    ],
+    "workspace-task",
+  );
+
+  assert.deepEqual(
+    result.files.map((file) => file.path).sort(),
+    [
+      "apps/web/src/app/generated/workspace-task/App.tsx",
+      "apps/web/src/app/generated/workspace-task/MissingComponent.tsx",
+    ].sort(),
+  );
+  assert.deepEqual(result.missing, ["MissingComponent (imported in App.tsx)"]);
+});
+
+test("validateAndInjectStubs does not create supabase.tsx for npm supabase import", () => {
   const result = validateAndInjectStubs(
     [
       {
         path: "apps/web/src/app/generated/workspace-task/TopupsPage.tsx",
         kind: "route",
         language: "tsx",
-        content: "import { supabase } from './supabase'\nexport default function TopupsPage() { return null; }\n",
+        content: "import { createClient } from '@supabase/supabase-js'\nexport default function TopupsPage() { return null; }\n",
         source: "ai",
         locked: false,
       },
@@ -98,7 +172,7 @@ test("validateAndInjectStubs does not create supabase.tsx when a supabase import
     result.files.map((file) => file.path),
     ["apps/web/src/app/generated/workspace-task/TopupsPage.tsx"],
   );
-  assert.deepEqual(result.missing, ["supabase (imported in TopupsPage.tsx)"]);
+  assert.deepEqual(result.missing, []);
 });
 
 test("filterBlockedGeneratedFiles removes blocked supabase placeholder files", () => {
