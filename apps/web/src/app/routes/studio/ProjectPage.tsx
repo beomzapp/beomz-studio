@@ -125,6 +125,8 @@ export function ProjectPage() {
   const [build, setBuild] = useState<BuildPayload | null>(null);
   const [buildResult, setBuildResult] = useState<BuildStatusResponse["result"] | null>(null);
   const [buildFailed, setBuildFailed] = useState(false);
+  const [buildErrorMessage, setBuildErrorMessage] = useState<string | null>(null);
+  const [creditsUsed, setCreditsUsed] = useState<number | null>(null);
   const [previewGenerationId, setPreviewGenerationId] = useState<string | null>(null);
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [isAiCustomising, setIsAiCustomising] = useState(false);
@@ -252,6 +254,11 @@ export function ProjectPage() {
                   if (chips.length > 0) setSuggestionChips(chips);
                 });
               }
+              // BEO-454: Extract creditsUsed from latest build_summary message
+              const summaryMsg = messages.slice().reverse().find(m => m.type === "build_summary");
+              if (summaryMsg?.type === "build_summary" && typeof summaryMsg.creditsUsed === "number") {
+                setCreditsUsed(summaryMsg.creditsUsed);
+              }
               deductOptimistic(5);
               void refreshCredits();
             })
@@ -267,7 +274,7 @@ export function ProjectPage() {
       }
     }
 
-    // Error — clear overlay
+    // Error — clear overlay, set failed state
     if (event.type === "error") {
       if (event.code !== "server_restarting") {
         if (aiCustomisingTimeoutRef.current) {
@@ -275,6 +282,15 @@ export function ProjectPage() {
           aiCustomisingTimeoutRef.current = null;
         }
         setIsAiCustomising(false);
+        setBuildFailed(true);
+        if (event.message) setBuildErrorMessage(event.message);
+      }
+    }
+
+    // Build summary — capture actual credits used for PreviewPane overlay
+    if (event.type === "build_summary") {
+      if (typeof event.creditsUsed === "number") {
+        setCreditsUsed(event.creditsUsed);
       }
     }
   }
@@ -315,6 +331,8 @@ export function ProjectPage() {
         return;
       }
       setBuildFailed(false);
+      setBuildErrorMessage(null);
+      setCreditsUsed(null);
       buildDoneRef.current = false;
       // BEO-374 Bug 4: snapshot the current preview ID so conversational done
       // can restore it and avoid reloading the preview for question answers.
@@ -671,6 +689,9 @@ export function ProjectPage() {
             onPreviewServerReady={notifyPreviewServerReady}
             buildFailed={buildFailed}
             neonDbUrl={neonDbUrl}
+            buildErrorMessage={buildErrorMessage}
+            onRetry={retryLastBuild}
+            creditsUsed={creditsUsed}
           />
         );
       case "code":

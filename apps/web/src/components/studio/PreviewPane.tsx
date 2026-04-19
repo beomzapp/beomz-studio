@@ -6,7 +6,32 @@ import {
   Tablet,
   RefreshCw,
   Zap,
+  Check,
+  AlertTriangle,
 } from "lucide-react";
+
+// ─────────────────────────────────────────────
+// BEO-454: First-build shimmer checklist helpers
+// ─────────────────────────────────────────────
+
+const INITIAL_BUILD_STEPS = [
+  "Planning your app",
+  "Writing the code",
+  "Polishing details",
+  "Launching preview",
+] as const;
+
+/** Progress percentage at the START of each step (before it completes). */
+const STEP_PROGRESS_START = [5, 15, 75, 90] as const;
+
+/** Milliseconds each step lasts before advancing (initial build timings). */
+const STEP_DURATIONS_MS = [30_000, 180_000, 60_000, 30_000] as const;
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 import { cn } from "../../lib/cn";
 import { buildStudioPreviewHtml } from "../../lib/studio-preview";
@@ -156,6 +181,12 @@ interface PreviewPaneProps {
   buildFailed?: boolean;
   /** BEO-452: Neon connection string — re-injected into .env.local after every hot-swap. */
   neonDbUrl?: string | null;
+  /** BEO-454: Specific error reason from SSE for the polished error overlay. */
+  buildErrorMessage?: string | null;
+  /** BEO-454: Re-submit the last prompt when user clicks Retry. */
+  onRetry?: () => void;
+  /** BEO-454: Actual credits consumed — replaces estimate once build completes. */
+  creditsUsed?: number | null;
 }
 
 export function PreviewPane({
@@ -170,6 +201,9 @@ export function PreviewPane({
   onPreviewServerReady,
   buildFailed = false,
   neonDbUrl,
+  buildErrorMessage,
+  onRetry,
+  creditsUsed,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
   const wcIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -298,6 +332,73 @@ export function PreviewPane({
     !!(files && files.length > 0) &&
     (wcIsLoading || !wcReadyConfirmed);
 
+  // ── BEO-454: First-build shimmer checklist + progress bar ───────────────
+  const firstBuildActive = isBuilding && !wcReadyConfirmed;
+
+  const [activeStep, setActiveStep] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [progressPct, setProgressPct] = useState(5);
+  const [showProgressBar, setShowProgressBar] = useState(false);
+  const buildWasActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (!firstBuildActive) {
+      if (buildWasActiveRef.current) {
+        buildWasActiveRef.current = false;
+        setProgressPct(100);
+        const t = setTimeout(() => setShowProgressBar(false), 600);
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+    if (buildWasActiveRef.current) return;
+    buildWasActiveRef.current = true;
+
+    setActiveStep(0);
+    setElapsedSeconds(0);
+    setProgressPct(STEP_PROGRESS_START[0]);
+    setShowProgressBar(true);
+
+    const start = Date.now();
+    const intervalId = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+
+    let runningTotal = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < STEP_DURATIONS_MS.length - 1; i++) {
+      runningTotal += STEP_DURATIONS_MS[i];
+      const nextStep = i + 1;
+      const nextProgress = STEP_PROGRESS_START[nextStep];
+      const delay = runningTotal;
+      timers.push(
+        setTimeout(() => {
+          setActiveStep(nextStep);
+          setProgressPct(nextProgress);
+        }, delay),
+      );
+    }
+
+    return () => {
+      clearInterval(intervalId);
+      for (const t of timers) clearTimeout(t);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstBuildActive]);
+
+  // ── BEO-454: Preview iframe fade-in on first reveal ─────────────────────
+  const [iframeFadeIn, setIframeFadeIn] = useState(false);
+  const prevShowLoadingOverlayRef = useRef(showLoadingOverlay);
+  useEffect(() => {
+    const wasLoading = prevShowLoadingOverlayRef.current;
+    prevShowLoadingOverlayRef.current = showLoadingOverlay;
+    if (wasLoading && !showLoadingOverlay) {
+      setIframeFadeIn(true);
+      const t = setTimeout(() => setIframeFadeIn(false), 400);
+      return () => clearTimeout(t);
+    }
+  }, [showLoadingOverlay]);
+
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
     if (viewMode === "tablet") setTabletPortrait((prev) => !prev);
@@ -356,7 +457,10 @@ export function PreviewPane({
             ref={useWebContainer ? wcIframeRef : undefined}
             key={activeFrame.key}
             allow="clipboard-read; clipboard-write"
-            className="absolute inset-0 h-full w-full bg-white"
+            className={cn(
+              "absolute inset-0 h-full w-full bg-white",
+              iframeFadeIn && "preview-fade-in",
+            )}
             style={{ visibility: showLoadingOverlay ? "hidden" : "visible" }}
             referrerPolicy="no-referrer"
             sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
@@ -388,17 +492,33 @@ export function PreviewPane({
           </div>
         )}
 
-        {/* BEO-340: Build failed — show on top of any existing iframe */}
+        {/* BEO-454: Polished error state — reason + retry + no credits charged note */}
         {buildFailed && (
           <div className="absolute inset-0 flex items-center justify-center bg-white">
-            <div className="flex max-w-sm flex-col items-center gap-3 text-center px-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-red-200 bg-red-50">
-                <span className="text-lg text-red-500">!</span>
+            <div className="flex max-w-sm flex-col items-center gap-4 px-6 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-orange-200 bg-orange-50">
+                <AlertTriangle className="h-5 w-5 text-orange-500" />
               </div>
-              <p className="text-sm font-semibold text-[#1a1a1a]">Build failed</p>
-              <p className="text-xs leading-relaxed text-[#6b7280]">
-                Click "Try again" in the chat to rebuild. Your credits have not been charged.
-              </p>
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-semibold text-[#1a1a1a]">Build ran into an issue</p>
+                {buildErrorMessage && (
+                  <p className="text-xs leading-relaxed text-[#6b7280]">{buildErrorMessage}</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {onRetry && (
+                  <button
+                    onClick={onRetry}
+                    className="rounded-lg bg-[#F97316] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#EA580C]"
+                  >
+                    Retry
+                  </button>
+                )}
+                <button className="rounded-lg border border-[#e5e5e5] bg-white px-4 py-2 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[#f9f9f9]">
+                  Report issue
+                </button>
+              </div>
+              <p className="text-[11px] text-[#9ca3af]">No credits were charged</p>
             </div>
           </div>
         )}
@@ -519,6 +639,16 @@ export function PreviewPane({
 
   return (
     <div className="relative flex h-full min-h-[340px] flex-col overflow-hidden bg-white">
+      {/* BEO-454: 2px orange progress bar at very top of preview panel */}
+      {showProgressBar && (
+        <div
+          className="absolute left-0 top-0 z-30 h-[2px] bg-[#F97316]"
+          style={{
+            width: `${progressPct}%`,
+            transition: "width 0.6s ease-out",
+          }}
+        />
+      )}
       {/* Viewport toolbar */}
       <div className="flex flex-shrink-0 items-center justify-center gap-2 border-b border-[#e5e5e5] py-2">
         {/* Web / Tablet / Mobile switcher */}
@@ -589,22 +719,71 @@ export function PreviewPane({
         {viewMode === "web" ? renderWebView() : renderFramedView()}
       </div>
 
-      {/* Building overlay — shown only for first builds (no files yet, WC not started).
-          BEO-451: never show for iterations — isBuilding is false once files exist, so
-          the overlay cannot trigger even if wcReadyConfirmed briefly resets mid-HMR.
-          For iterations only the "Updating…" pill in the URL bar is shown (BEO-449). */}
+      {/* BEO-454: First-build shimmer overlay — shimmer checklist, elapsed timer, credit estimate.
+          BEO-451: never show for iterations — isBuilding is false once files exist. */}
       {(isBuilding && !wcReadyConfirmed) && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#faf9f6]">
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative flex h-16 w-16 items-center justify-center">
-              <div className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/20" />
-              <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
-              <span className="text-xl font-bold text-[#F97316]">B</span>
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#faf9f6]">
+          <div className="flex w-64 flex-col gap-5">
+            {/* B logo */}
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center">
+                <div className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/15" />
+                <div className="absolute inset-1.5 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
+                <span className="text-sm font-bold text-[#F97316]">B</span>
+              </div>
+              <span className="text-sm font-semibold text-[#1a1a1a]">Building your app…</span>
             </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-[#1a1a1a]">Building your app…</p>
-              <p className="mt-1 text-xs text-[#9ca3af]">This usually takes 15–30 seconds</p>
+
+            {/* Shimmer checklist */}
+            <div className="flex flex-col gap-2">
+              {INITIAL_BUILD_STEPS.map((label, idx) => {
+                const isDone = idx < activeStep;
+                const isActive = idx === activeStep;
+                const isFuture = idx > activeStep;
+                return (
+                  <div
+                    key={label}
+                    className="flex items-center gap-2.5"
+                    style={{ opacity: isFuture ? 0.3 : 1 }}
+                  >
+                    {/* Step icon */}
+                    <div className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
+                      {isDone ? (
+                        <Check className="h-3.5 w-3.5 text-[#9ca3af]" strokeWidth={2.5} />
+                      ) : isActive ? (
+                        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F97316]" />
+                      ) : null}
+                    </div>
+                    {/* Step label */}
+                    <span
+                      className={cn(
+                        "text-sm",
+                        isDone && "text-[#9ca3af]",
+                        isActive && "build-shimmer-text font-medium",
+                        isFuture && "text-[#6b7280]",
+                      )}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
+
+            {/* Time estimate + elapsed */}
+            <p className="text-[11px] text-[#9ca3af]">
+              Usually takes 3–5 min
+              {elapsedSeconds > 0 && (
+                <> · {formatElapsed(elapsedSeconds)} elapsed</>
+              )}
+            </p>
+
+            {/* Credit estimate */}
+            <p className="text-[11px] text-[#9ca3af]">
+              {typeof creditsUsed === "number"
+                ? `${creditsUsed.toFixed(1)} credits used`
+                : "~40–55 credits"}
+            </p>
           </div>
         </div>
       )}

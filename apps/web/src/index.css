@@ -90,17 +90,42 @@ body {
   animation: orb-pulse 1.5s ease-in-out infinite;
 }
 
+/* BEO-454: First-build overlay shimmer sweep (cream background, light text) */
+@keyframes build-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.build-shimmer-text {
+  background: linear-gradient(90deg, #888 0%, #fff 40%, #fff 60%, #888 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: build-shimmer 1.8s linear infinite;
+}
+
+/* BEO-454: Preview iframe fade-in on first reveal */
+@keyframes fadeInPreview {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.preview-fade-in {
+  animation: fadeInPreview 0.3s ease-in forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .streaming-shimmer,
   .thinking-shimmer,
   .plan-step-icon-spin,
   .plan-step-icon-pop,
-  .checklist-orb-active {
+  .checklist-orb-active,
+  .build-shimmer-text {
     animation: none !important;
   }
 
   .streaming-shimmer,
-  .thinking-shimmer {
+  .thinking-shimmer,
+  .build-shimmer-text {
     -webkit-text-fill-color: unset;
     background: none;
     color: #71717a;
