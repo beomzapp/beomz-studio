@@ -589,13 +589,11 @@ export function PreviewPane({
         {viewMode === "web" ? renderWebView() : renderFramedView()}
       </div>
 
-      {/* Building overlay — shown until AI generation is complete.
-          isBuilding covers the pre-scaffold window (no files yet).
-          isAiCustomising covers scaffold→done (template mounted silently in background).
-          First thing the user sees is the finished AI-built app, not the raw template.
-          BEO-449: suppress for iterations when WC is already confirmed live —
-          the preview stays visible and Vite HMR updates it in place. */}
-      {(isBuilding || (isAiCustomising && !wcReadyConfirmed)) && (
+      {/* Building overlay — shown only for first builds (no files yet, WC not started).
+          BEO-451: never show for iterations — isBuilding is false once files exist, so
+          the overlay cannot trigger even if wcReadyConfirmed briefly resets mid-HMR.
+          For iterations only the "Updating…" pill in the URL bar is shown (BEO-449). */}
+      {(isBuilding && !wcReadyConfirmed) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#faf9f6]">
           <div className="flex flex-col items-center gap-4">
             <div className="relative flex h-16 w-16 items-center justify-center">
