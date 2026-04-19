@@ -350,6 +350,43 @@ function renderInline(text: string): React.ReactNode[] {
   });
 }
 
+// ─── Collapsible code block ───────────────────────────────────────────────────
+
+function CollapsibleCodeBlock({ lang, content }: { lang: string; content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="my-2 overflow-hidden rounded-lg border border-[#e5e5e5] bg-[#f5f5f3]">
+      {/* Header bar — always visible, click anywhere to toggle */}
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="flex w-full cursor-pointer items-center justify-between px-3 py-1.5 text-left transition-colors hover:bg-[rgba(0,0,0,0.03)]"
+      >
+        <span className="font-mono text-xs text-[#6b7280]">{lang}</span>
+        <div className="flex items-center gap-2">
+          <span onClick={e => e.stopPropagation()}>
+            <CopyButton content={content} />
+          </span>
+          {expanded ? (
+            <ChevronUp className="h-3.5 w-3.5 text-[#9ca3af]" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 text-[#9ca3af]" />
+          )}
+        </div>
+      </button>
+      {/* Code content — only visible when expanded */}
+      {expanded && (
+        <div className="border-t border-[#e5e5e5]">
+          <pre className="overflow-x-auto px-3 py-2.5">
+            <code className="whitespace-pre font-mono text-[13px] leading-relaxed text-[#374151]">
+              {content}
+            </code>
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MarkdownText({ text }: { text: string }) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
@@ -388,18 +425,9 @@ function MarkdownText({ text }: { text: string }) {
 
   const flushCodeBlock = () => {
     const codeContent = codeLines.join("\n");
+    const lang = codeLang || "code";
     elements.push(
-      <div key={`code-${elements.length}`} className="my-2 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
-        <div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
-          <span className="font-mono text-xs text-zinc-400">{codeLang || "code"}</span>
-          <CopyButton content={codeContent} />
-        </div>
-        <pre className="overflow-x-auto px-3 py-2.5">
-          <code className="whitespace-pre font-mono text-[13px] leading-relaxed text-zinc-100">
-            {codeContent}
-          </code>
-        </pre>
-      </div>,
+      <CollapsibleCodeBlock key={`code-${elements.length}`} lang={lang} content={codeContent} />,
     );
     inCodeBlock = false;
     codeLang = "";
