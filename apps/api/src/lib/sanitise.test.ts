@@ -84,6 +84,48 @@ test("sanitiseContent leaves unrelated local markup untouched", () => {
   assert.equal(output, input);
 });
 
+test("sanitiseContent replaces raw \\n and \\t escapes between JSX attributes with spaces", () => {
+  const input = [
+    "export default function App() {",
+    "  return <Widget active={tagMenuOpen}\\n\\tactiveColor={theme.accent} />;",
+    "}",
+  ].join("\n");
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(output.includes("\\n"), false);
+  assert.equal(output.includes("\\t"), false);
+  assert.match(output, /active=\{tagMenuOpen\}\s+activeColor=\{theme\.accent\}/);
+});
+
+test("sanitiseContent removes raw \\r escapes and generic \\[a-z] escapes between JSX attributes", () => {
+  const input = [
+    "export default function App() {",
+    "  return <Widget active={tagMenuOpen}\\r\\qactiveColor={theme.accent} />;",
+    "}",
+  ].join("\n");
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(output.includes("\\r"), false);
+  assert.equal(output.includes("\\q"), false);
+  assert.match(output, /active=\{tagMenuOpen\}\s+activeColor=\{theme\.accent\}/);
+});
+
+test("sanitiseContent leaves quoted JSX attribute strings untouched while fixing raw escapes between attributes", () => {
+  const input = [
+    "export default function App() {",
+    '  return <Widget title="Line\\nBreak" active={tagMenuOpen}\\factiveColor={theme.accent} />;',
+    "}",
+  ].join("\n");
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(output.includes('title="Line\\nBreak"'), true);
+  assert.equal(output.includes("\\f"), false);
+  assert.match(output, /active=\{tagMenuOpen\}\s+activeColor=\{theme\.accent\}/);
+});
+
 test("sanitiseContent logs the dedicated tailwindCdnScript fixer when it fires", () => {
   const input = '<script src="https://cdn.tailwindcss.com"></script>';
   const originalLog = console.log;

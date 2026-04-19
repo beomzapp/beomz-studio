@@ -178,16 +178,92 @@ const flatImports: Fixer = {
 // attribute values: placeholder="e.g. MacBook Pro 14\" (HW001)"
 // This is invalid JSX — Vite/oxc chokes on it. Replace \" with &quot;.
 
+function stripInvalidJsxAttributeEscapes(content: string): string {
+  let out = "";
+  let inTag = false;
+  let quote: '"' | "'" | "`" | null = null;
+  let braceDepth = 0;
+
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    const next = content[i + 1] ?? "";
+
+    if (!inTag) {
+      out += char;
+      if (char === "<" && /[A-Za-z/]/.test(next)) {
+        inTag = true;
+      }
+      continue;
+    }
+
+    if (quote !== null) {
+      out += char;
+      if (char === "\\") {
+        const escaped = content[i + 1];
+        if (escaped !== undefined) {
+          out += escaped;
+          i += 1;
+        }
+        continue;
+      }
+      if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      out += char;
+      continue;
+    }
+
+    if (char === "{") {
+      braceDepth += 1;
+      out += char;
+      continue;
+    }
+
+    if (char === "}" && braceDepth > 0) {
+      braceDepth -= 1;
+      out += char;
+      continue;
+    }
+
+    if (char === ">" && braceDepth === 0) {
+      inTag = false;
+      out += char;
+      continue;
+    }
+
+    if (braceDepth === 0 && char === "\\" && /[a-z]/.test(next)) {
+      const sequence = content.slice(i, i + 2);
+      out += sequence === "\\r" ? "" : " ";
+      i += 1;
+      continue;
+    }
+
+    out += char;
+  }
+
+  return out;
+}
+
+function sanitiseJsxAttributes(content: string): string {
+  const withEscapedQuotesFixed = content.replace(
+    /(<\w[^>]*?\s\w[\w-]*=)"((?:[^"\\]|\\.)*)"/g,
+    (_m, prefix: string, value: string) => {
+      if (!value.includes('\\"')) return _m;
+      return `${prefix}"${value.replace(/\\"/g, "&quot;")}"`;
+    },
+  );
+
+  return stripInvalidJsxAttributeEscapes(withEscapedQuotesFixed);
+}
+
 const jsxQuotes: Fixer = {
   name: "jsxQuotes",
-  fix: (content) =>
-    content.replace(
-      /(<\w[^>]*?\s\w[\w-]*=)"((?:[^"\\]|\\.)*)"/g,
-      (_m, prefix: string, value: string) => {
-        if (!value.includes('\\"')) return _m;
-        return `${prefix}"${value.replace(/\\"/g, "&quot;")}"`;
-      },
-    ),
+  fix: sanitiseJsxAttributes,
 };
 
 // ── Fixer 5: tailwindCdnScript ───────────────────────────────────────────────
