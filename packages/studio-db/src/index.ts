@@ -414,6 +414,8 @@ export interface ProjectDbLimitsRow extends Record<string, unknown> {
   tables_limit: number;
   extra_storage_mb: number;
   extra_rows: number;
+  neon_project_id: string | null;
+  db_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -426,6 +428,8 @@ export interface ProjectDbLimitsInsert extends Record<string, unknown> {
   tables_limit?: number;
   extra_storage_mb?: number;
   extra_rows?: number;
+  neon_project_id?: string | null;
+  db_url?: string | null;
 }
 
 export interface ProjectDbLimitsUpdate extends Record<string, unknown> {
@@ -434,6 +438,8 @@ export interface ProjectDbLimitsUpdate extends Record<string, unknown> {
   tables_limit?: number;
   extra_storage_mb?: number;
   extra_rows?: number;
+  neon_project_id?: string | null;
+  db_url?: string | null;
   updated_at?: string;
 }
 
@@ -1212,6 +1218,7 @@ export class StudioDbClient {
     storageMb: number,
     rows: number,
     tables: number,
+    options?: { neonProjectId?: string | null; dbUrl?: string | null },
   ): Promise<ProjectDbLimitsRow> {
     const response = await this.client
       .from("project_db_limits")
@@ -1222,6 +1229,8 @@ export class StudioDbClient {
         tables_limit: tables,
         extra_storage_mb: 0,
         extra_rows: 0,
+        neon_project_id: options?.neonProjectId ?? null,
+        db_url: options?.dbUrl ?? null,
       })
       .select("*")
       .single();
@@ -1266,6 +1275,17 @@ export class StudioDbClient {
         extra_rows: existing.extra_rows + extraRows,
         updated_at: new Date().toISOString(),
       })
+      .eq("project_id", projectId);
+    if (response.error) throw new Error(response.error.message);
+  }
+
+  async updateProjectDbConnection(
+    projectId: string,
+    patch: { neon_project_id?: string | null; db_url?: string | null },
+  ): Promise<void> {
+    const response = await this.client
+      .from("project_db_limits")
+      .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("project_id", projectId);
     if (response.error) throw new Error(response.error.message);
   }

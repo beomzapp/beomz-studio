@@ -9,6 +9,7 @@ import type { ProjectRow } from "@beomz-studio/studio-db";
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+delete process.env.NEON_API_KEY;
 
 const { getFeatureLimits } = await import("../../lib/features.js");
 const {
@@ -73,6 +74,8 @@ function createTestOrgContext(
         tables_limit: 0,
         extra_storage_mb: 0,
         extra_rows: 0,
+        neon_project_id: null,
+        db_url: null,
         created_at: now,
         updated_at: now,
       }),
@@ -190,6 +193,8 @@ test("db enable succeeds when the org has 0 DB-enabled projects", async () => {
         tables_limit: tables,
         extra_storage_mb: 0,
         extra_rows: 0,
+        neon_project_id: null,
+        db_url: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -297,6 +302,8 @@ test("db migrate still returns 402 storage_limit_reached when storage is exhaust
       tables_limit: 0,
       extra_storage_mb: 0,
       extra_rows: 0,
+      neon_project_id: null,
+      db_url: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }),
@@ -363,6 +370,8 @@ test("db migrate no longer returns 402 for row or table limits", async () => {
       tables_limit: 1,
       extra_storage_mb: 0,
       extra_rows: 0,
+      neon_project_id: null,
+      db_url: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }),
@@ -398,4 +407,160 @@ test("db migrate no longer returns 402 for row or table limits", async () => {
   assert.deepEqual(payload, { applied: 2 });
   assert.ok(executedStatements.some((sql) => sql.startsWith("CREATE TABLE widgets")));
   assert.ok(executedStatements.some((sql) => sql.startsWith("INSERT INTO widgets")));
+});
+
+test("db enable uses Neon path when NEON_API_KEY is set", async () => {
+  const originalNeonApiKey = process.env.NEON_API_KEY;
+  process.env.NEON_API_KEY = "test-neon-key";
+
+  try {
+    const project = createProject();
+    const insertCalls: Array<{
+      projectId: string;
+      storageMb: number;
+      rows: number;
+      tables: number;
+    }> = [];
+    const updateConnectionCalls: Array<{ projectId: string; patch: Record<string, unknown> }> = [];
+    const updateCalls: Array<Record<string, unknown>> = [];
+    const rewireCalls: Array<{ projectId: string; connectionUri: string }> = [];
+    const orgContext = createTestOrgContext(project, {
+      findProjectsByOrgId: async () => [],
+      updateProject: async (_id: string, patch: Record<string, unknown>) => {
+        updateCalls.push(patch);
+        return { ...project, ...patch } as ProjectRow;
+      },
+      insertProjectDbLimits: async (
+        projectId: string,
+        storageMb: number,
+        rows: number,
+        tables: number,
+      ) => {
+        insertCalls.push({ projectId, storageMb, rows, tables });
+        return {
+          id: "limits-1",
+          project_id: project.id,
+          plan_storage_mb: storageMb,
+          plan_rows: rows,
+          tables_limit: tables,
+          extra_storage_mb: 0,
+          extra_rows: 0,
+          neon_project_id: null,
+          db_url: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      },
+      updateProjectDbConnection: async (projectId: string, patch: Record<string, unknown>) => {
+        updateConnectionCalls.push({ projectId, patch });
+      },
+    });
+
+    const app = createEnableApp(orgContext, {
+      provisionNeonProject: async (name: string) => {
+        assert.match(name, /^beomz-project-1/);
+        return {
+          neonProjectId: "neon-proj-1",
+          connectionUri: "postgresql://user:pass@host/db",
+          pooledConnectionUri: "postgresql://user:pass@pool/db",
+        };
+      },
+      rewireNeonDb: async (projectId: string, connectionUri: string) => {
+        rewireCalls.push({ projectId, connectionUri });
+      },
+      isUserDataConfigured: () => false, // Neon path should bypass shared DB config gate
+    });
+
+    const response = await app.request(`http://localhost/projects/${project.id}/db/enable`, {
+      method: "POST",
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      success: true,
+      db_provider: "neon",
+      message: "Database provisioned successfully",
+    });
+    assert.deepEqual(updateCalls[0], {
+      database_enabled: true,
+      db_provider: "neon",
+      db_wired: false,
+      db_schema: null,
+      db_nonce: null,
+      db_config: null,
+    });
+    assert.equal(insertCalls.length, 1);
+    assert.deepEqual(updateConnectionCalls, [
+      {
+        projectId: project.id,
+        patch: {
+          neon_project_id: "neon-proj-1",
+          db_url: "postgresql://user:pass@host/db",
+        },
+      },
+    ]);
+    assert.deepEqual(rewireCalls, [
+      { projectId: project.id, connectionUri: "postgresql://user:pass@host/db" },
+    ]);
+  } finally {
+    if (originalNeonApiKey === undefined) {
+      delete process.env.NEON_API_KEY;
+    } else {
+      process.env.NEON_API_KEY = originalNeonApiKey;
+    }
+  }
+});
+
+test("db enable falls back to shared provisioning when NEON_API_KEY is not set", async () => {
+  const originalNeonApiKey = process.env.NEON_API_KEY;
+  delete process.env.NEON_API_KEY;
+
+  try {
+    const project = createProject();
+    let sharedProvisionCalls = 0;
+    let neonCalls = 0;
+    const orgContext = createTestOrgContext(project, {
+      findProjectsByOrgId: async () => [],
+    });
+
+    const app = createEnableApp(orgContext, {
+      isUserDataConfigured: () => true,
+      runSql: async () => {
+        sharedProvisionCalls += 1;
+        return [];
+      },
+      createBeomzDbFunction: async () => {
+        sharedProvisionCalls += 1;
+      },
+      insertSchemaRegistry: async () => {
+        sharedProvisionCalls += 1;
+      },
+      exposeSchemaInPostgREST: async () => {
+        sharedProvisionCalls += 1;
+      },
+      provisionNeonProject: async () => {
+        neonCalls += 1;
+        return {
+          neonProjectId: "should-not-be-called",
+          connectionUri: "postgresql://unused",
+          pooledConnectionUri: "postgresql://unused",
+        };
+      },
+    });
+
+    const response = await app.request(`http://localhost/projects/${project.id}/db/enable`, {
+      method: "POST",
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "connected" });
+    assert.equal(sharedProvisionCalls > 0, true);
+    assert.equal(neonCalls, 0);
+  } finally {
+    if (originalNeonApiKey === undefined) {
+      delete process.env.NEON_API_KEY;
+    } else {
+      process.env.NEON_API_KEY = originalNeonApiKey;
+    }
+  }
 });

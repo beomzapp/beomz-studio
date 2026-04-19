@@ -31,6 +31,8 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 import { getFeatureLimits } from "../../lib/features.js";
+import { provisionNeonProject } from "../../lib/neonClient.js";
+import { rewireNeonDb } from "./rewire-neon.js";
 
 export function countActiveDbEnabledProjects(
   projects: ReadonlyArray<Record<string, unknown>>,
@@ -55,6 +57,8 @@ interface EnableDbRouteDeps {
   createBeomzDbFunction?: typeof createBeomzDbFunction;
   insertSchemaRegistry?: typeof insertSchemaRegistry;
   exposeSchemaInPostgREST?: typeof exposeSchemaInPostgREST;
+  provisionNeonProject?: typeof provisionNeonProject;
+  rewireNeonDb?: typeof rewireNeonDb;
 }
 
 export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
@@ -66,9 +70,12 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
   const createBeomzDbFunctionFn = deps.createBeomzDbFunction ?? createBeomzDbFunction;
   const insertSchemaRegistryFn = deps.insertSchemaRegistry ?? insertSchemaRegistry;
   const exposeSchemaInPostgRESTFn = deps.exposeSchemaInPostgREST ?? exposeSchemaInPostgREST;
+  const provisionNeonProjectFn = deps.provisionNeonProject ?? provisionNeonProject;
+  const rewireNeonDbFn = deps.rewireNeonDb ?? rewireNeonDb;
 
   enableDbRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
-    if (!isUserDataConfiguredFn()) {
+    const neonEnabled = Boolean(process.env.NEON_API_KEY);
+    if (!neonEnabled && !isUserDataConfiguredFn()) {
       return c.json({ error: "Database service not configured" }, 503);
     }
 
@@ -103,6 +110,61 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
         },
         402,
       );
+    }
+
+    if (neonEnabled) {
+      try {
+        const projectName = `beomz-${project.id.slice(0, 12)}`;
+        const { neonProjectId, connectionUri } = await provisionNeonProjectFn(projectName);
+
+        // Mark connected immediately; rewire helper finalizes db_wired + env context.
+        await db.updateProject(projectId, {
+          database_enabled: true,
+          db_provider: "neon",
+          db_wired: false,
+          db_schema: null,
+          db_nonce: null,
+          db_config: null,
+        });
+
+        try {
+          await db.insertProjectDbLimits(
+            projectId,
+            limits.storage_mb,
+            limits.rows ?? 0,
+            limits.tables ?? 0,
+          );
+        } catch (limitsErr) {
+          // Non-fatal: row may already exist.
+          console.warn("[db/enable] insertProjectDbLimits failed (non-fatal):", limitsErr);
+        }
+
+        // Best-effort metadata write for Neon linkage columns.
+        const dbWithConnectionUpdate = db as typeof db & {
+          updateProjectDbConnection?: (
+            projectId: string,
+            patch: { neon_project_id?: string | null; db_url?: string | null },
+          ) => Promise<void>;
+        };
+        await dbWithConnectionUpdate.updateProjectDbConnection?.(projectId, {
+          neon_project_id: neonProjectId,
+          db_url: connectionUri,
+        });
+
+        await rewireNeonDbFn(projectId, connectionUri);
+
+        return c.json({
+          success: true,
+          db_provider: "neon",
+          message: "Database provisioned successfully",
+        });
+      } catch (err) {
+        console.error("[db/enable] neon provisioning failed:", err);
+        return c.json(
+          { error: err instanceof Error ? err.message : "Failed to provision Neon database" },
+          500,
+        );
+      }
     }
 
     const schema = `app_${randomBytes(16).toString("hex")}`;

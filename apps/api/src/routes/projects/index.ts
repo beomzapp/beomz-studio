@@ -18,6 +18,7 @@ import {
   isUserDataConfigured,
   runSql,
 } from "../../lib/userDataClient.js";
+import { deleteNeonProject } from "../../lib/neonClient.js";
 
 interface ProjectsRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -25,6 +26,7 @@ interface ProjectsRouteDeps {
   isUserDataConfigured?: typeof isUserDataConfigured;
   runSql?: typeof runSql;
   deleteSchemaRegistry?: typeof deleteSchemaRegistry;
+  deleteNeonProject?: typeof deleteNeonProject;
 }
 
 export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
@@ -34,6 +36,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const isUserDataConfiguredFn = deps.isUserDataConfigured ?? isUserDataConfigured;
   const runSqlFn = deps.runSql ?? runSql;
   const deleteSchemaRegistryFn = deps.deleteSchemaRegistry ?? deleteSchemaRegistry;
+  const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
 
   projectsRoute.get("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
     const orgContext = c.get("orgContext") as OrgContext;
@@ -103,6 +106,17 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       return c.json({ error: "Project not found" }, 404);
     }
 
+    let neonProjectId: string | null = null;
+    try {
+      const dbWithLimits = orgContext.db as OrgContext["db"] & {
+        getProjectDbLimits?: (projectId: string) => Promise<{ neon_project_id?: string | null } | null>;
+      };
+      const limits = await dbWithLimits.getProjectDbLimits?.(projectId);
+      neonProjectId = typeof limits?.neon_project_id === "string" ? limits.neon_project_id : null;
+    } catch (err) {
+      console.error("[projects/delete] failed reading project_db_limits (non-fatal):", err);
+    }
+
     await orgContext.db.deleteProject(projectId);
 
     try {
@@ -124,6 +138,13 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
         if (project.db_schema) {
           await deleteSchemaRegistryFn(project.db_schema);
         }
+      }
+
+      if (neonProjectId) {
+        await deleteNeonProjectFn(neonProjectId).catch((err) => {
+          console.error("[delete] Neon cleanup failed:", err);
+          // Non-fatal
+        });
       }
     } catch (err) {
       console.error("[projects/delete] cleanup error:", err);

@@ -147,3 +147,43 @@ test("project deletion triggers project_db_limits cleanup", async () => {
   );
   assert.equal(deletedRegistrySchema, "app_test_schema");
 });
+
+test("project deletion cleans up Neon project when neon_project_id exists", async () => {
+  const project = createProject({
+    db_provider: "neon",
+    db_schema: null,
+  });
+  const neonDeleteCalls: string[] = [];
+  const orgContext = createOrgContext(project, {
+    getProjectDbLimits: async () => ({
+      id: "limits-1",
+      project_id: project.id,
+      plan_storage_mb: 200,
+      plan_rows: 0,
+      tables_limit: 0,
+      extra_storage_mb: 0,
+      extra_rows: 0,
+      neon_project_id: "neon-proj-123",
+      db_url: "postgresql://user:pass@host/db",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }),
+  });
+
+  const app = createApp(orgContext, {
+    isUserDataConfigured: () => true,
+    runSql: async () => [],
+    deleteSchemaRegistry: async () => undefined,
+    deleteNeonProject: async (neonProjectId: string) => {
+      neonDeleteCalls.push(neonProjectId);
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}`, {
+    method: "DELETE",
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.deepEqual(neonDeleteCalls, ["neon-proj-123"]);
+});

@@ -23,6 +23,16 @@ test("iteration system prompt injects the inline Supabase rule when db_wired=tru
   assert.match(prompt, /Do NOT generate any file named supabase\.ts, supabase\.tsx, supabase-js, or supabase-client\./);
 });
 
+test("iteration system prompt injects Neon pg guidance when db_wired=true and provider=neon", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, true, "neon");
+
+  assert.match(prompt, /This project uses a Neon Postgres database/);
+  assert.match(prompt, /import \{ Pool \} from 'pg'/);
+  assert.match(prompt, /process\.env\.DATABASE_URL/);
+  assert.match(prompt, /Do NOT use @supabase\/supabase-js\. Do NOT use createClient\(\)\./);
+  assert.equal(prompt.includes("inline createClient()"), false);
+});
+
 test("iteration system prompt does not inject the inline Supabase rule when db_wired=false", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, false);
 

@@ -1673,7 +1673,9 @@ export function buildIterationSystemPrompt(
   schemaSummary?: string,
   imageContextBlock?: string,
   hasWiredSupabaseClient = false,
+  dbProvider: string | null = null,
 ): string {
+  const isNeonWired = hasWiredSupabaseClient && dbProvider === "neon";
   const dbBlock = schemaSummary
     ? [
         "",
@@ -1689,7 +1691,7 @@ export function buildIterationSystemPrompt(
   const imageBlock = imageContextBlock
     ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
     : "";
-  const existingSupabaseClientBlock = hasWiredSupabaseClient
+  const existingSupabaseClientBlock = hasWiredSupabaseClient && !isNeonWired
     ? [
         "",
         "This project already has Supabase wired. The existing code uses inline createClient() calls — do NOT create or import from a shared supabase.ts or supabase.tsx file.",
@@ -1698,6 +1700,31 @@ export function buildIterationSystemPrompt(
         "Use the Supabase URL and anon key already present in the codebase.",
       ].join("\n")
     : "";
+  const neonDbBlock = isNeonWired
+    ? [
+        "",
+        "This project uses a Neon Postgres database. The connection string is available as process.env.DATABASE_URL.",
+        "Use the 'pg' package to connect:",
+        "  import { Pool } from 'pg';",
+        "  const pool = new Pool({",
+        "    connectionString: process.env.DATABASE_URL,",
+        "    ssl: { rejectUnauthorized: false }",
+        "  });",
+        "  // Query example:",
+        "  const { rows } = await pool.query('SELECT * FROM table_name');",
+        "Do NOT use @supabase/supabase-js. Do NOT use createClient().",
+        "Use raw SQL via the pg Pool.",
+      ].join("\n")
+    : "";
+  const dbImportRules = isNeonWired
+    ? [
+        "8. NEON IMPORTS: Use: import { Pool } from 'pg' and process.env.DATABASE_URL.",
+        "   Do NOT use @supabase/supabase-js. Do NOT use createClient().",
+      ]
+    : [
+        "8. SUPABASE IMPORTS: Always use: import { createClient } from '@supabase/supabase-js'",
+        "   NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
+      ];
   return [
     "You are modifying an existing React application. Apply ONLY the specific change the user requests.",
     imageBlock,
@@ -1711,8 +1738,7 @@ export function buildIterationSystemPrompt(
     "6. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
     "   Do NOT include <script src=\"https://cdn.tailwindcss.com\"> or any cdn.tailwindcss.com link/script tag. Tailwind CSS v4 is already configured in the scaffold.",
     "7. Keep all existing functionality that the user did NOT ask to change.",
-    "8. SUPABASE IMPORTS: Always use: import { createClient } from '@supabase/supabase-js'",
-    "   NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
+    ...dbImportRules,
     "9. Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
     "",
     "COLOR CHANGES (highest priority rule):",
@@ -1736,7 +1762,7 @@ export function buildIterationSystemPrompt(
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
     "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock,
+    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock,
   ].join("\n");
 }
 
@@ -1783,6 +1809,7 @@ async function callModelIterate(
   imageContextBlock?: string,
   imageUrl?: string,
   hasWiredSupabaseClient = false,
+  dbProvider: string | null = null,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
 
@@ -1790,6 +1817,7 @@ async function callModelIterate(
     schemaSummary,
     imageContextBlock,
     hasWiredSupabaseClient,
+    dbProvider,
   );
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
@@ -2617,10 +2645,12 @@ async function _runBuildInBackground(
       // Load DB schema for this project if database is enabled (BEO-288)
       let iterSchemaSummary: string | undefined;
       let hasWiredSupabaseClient = false;
+      let iterDbProvider: string | null = null;
       let iterProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
       try {
         iterProject = await db.findProjectById(projectId);
         hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
+        iterDbProvider = iterProject?.db_provider ?? null;
         if (iterProject?.database_enabled && iterProject.db_schema) {
           const tables = await getSchemaTableList(iterProject.db_schema);
           if (tables.length > 0) {
@@ -2710,6 +2740,7 @@ async function _runBuildInBackground(
           imageContextBlock,
           input.imageUrl,
           hasWiredSupabaseClient,
+          iterDbProvider,
         );
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
