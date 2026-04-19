@@ -46,56 +46,41 @@ import {
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 type ModeTab = "shared" | "dedicated" | "byo";
 
-const WIRING_PROMPT = `CRITICAL — use these EXACT import statements verbatim.
-Never shorten, alias, or split into local files:
+const WIRING_PROMPT = `Wire this app to its Postgres database.
 
+CRITICAL — use this EXACT import, verbatim, in every file that needs database access:
   import { neon } from '@neondatabase/serverless'
-  import { createAuthClient } from '@neondatabase/neon-js/auth'
-  import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'
+  const sql = neon(import.meta.env.VITE_DATABASE_URL)
 
-NEVER:
-- Create ./auth.ts, ./ui.tsx, ./db.ts, ./client.ts or ANY local helper files that re-export these packages
-- Shorten '@neondatabase/neon-js/auth/react/ui' to './ui'
-- Shorten '@neondatabase/neon-js/auth' to './auth' or './neon-auth'
-- Shorten '@neondatabase/serverless' to './serverless' or './db'
-- Write import { AuthView } from './ui' — WRONG
-- Write import { createAuthClient } from './auth' — WRONG
-Use the FULL package path in EVERY component file that needs it.
+DO NOT use or import:
+- pg, Pool, node-postgres
+- @neondatabase/neon-js or any neon-js subpath
+- NeonAuthUIProvider, AuthView, createAuthClient
+- process.env.DATABASE_URL (use import.meta.env.VITE_DATABASE_URL)
+- Do NOT create auth UI, login pages, or authentication
+- Do NOT create local helper files (./db.ts, ./neon.ts, ./client.ts)
 
-Wire this app to its Postgres database and add user authentication.
+Instructions:
+1. At app startup, run CREATE TABLE IF NOT EXISTS for each table the app needs, inside a useEffect that runs once:
+   useEffect(() => {
+     const init = async () => {
+       await sql\`CREATE TABLE IF NOT EXISTS tasks (
+         id SERIAL PRIMARY KEY,
+         title TEXT NOT NULL,
+         done BOOLEAN DEFAULT false,
+         created_at TIMESTAMPTZ DEFAULT NOW()
+       )\`
+     }
+     init()
+   }, [])
 
-Database connection (browser-safe — IMPORTANT):
-- Use @neondatabase/serverless, NOT pg or node-postgres
-- import { neon } from '@neondatabase/serverless'
-- const sql = neon(import.meta.env.VITE_DATABASE_URL)
-- Use tagged template literals for ALL queries:
-  const rows = await sql\`SELECT * FROM table_name\`
-  await sql\`INSERT INTO tasks (title) VALUES (\${title})\`
-- CREATE tables at app startup in a useEffect that runs once:
-  useEffect(() => {
-    const init = async () => {
-      await sql\`CREATE TABLE IF NOT EXISTS tasks (
-        id SERIAL PRIMARY KEY,
-        title TEXT NOT NULL,
-        done BOOLEAN DEFAULT false,
-        user_id TEXT,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )\`
-    }
-    init()
-  }, [])
-- NEVER use pg, Pool, new Pool(), or process.env.DATABASE_URL
-- ALWAYS use import.meta.env.VITE_DATABASE_URL
-
-Authentication (Neon Auth — already provisioned and ready):
-- import { createAuthClient } from '@neondatabase/neon-js/auth'
-- import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'
-- const authClient = createAuthClient(import.meta.env.VITE_NEON_AUTH_URL)
-- Wrap the entire app in <NeonAuthUIProvider authClient={authClient}>
-- Add a dedicated sign-in page using <AuthView pathname="sign-in" />
-- Auth supports Google, GitHub, and email/password by default
-
-Based on the app's existing features and UI, create all appropriate database tables and wire all existing components to read and write real data instead of mock/static data.`;
+2. Replace all mock/static data with real database queries
+3. Wire all existing UI components to read and write real data
+4. Keep all existing UI, layout, and styling intact
+5. Use tagged template literals for ALL queries:
+   const rows = await sql\`SELECT * FROM tasks ORDER BY created_at DESC\`
+   await sql\`INSERT INTO tasks (title) VALUES (\${title})\`
+   await sql\`DELETE FROM tasks WHERE id = \${id}\`\`;
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
