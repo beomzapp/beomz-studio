@@ -12,13 +12,14 @@ import { getTemplateDefinitionSafe } from "@beomz-studio/templates";
 
 // ─── Workspace scaffold (mirrors workers/preview-e2b/src/templates/vite-react/workspace) ───
 
-const WORKSPACE_PACKAGE_JSON = JSON.stringify(
+export const WORKSPACE_PACKAGE_JSON = JSON.stringify(
   {
     name: "beomz-preview",
     private: true,
     type: "module",
     scripts: { dev: "vite" },
     dependencies: {
+      "@neondatabase/serverless": "^0.10.4",
       "@supabase/supabase-js": "^2.39.0",
       clsx: "^2.0.0",
       "framer-motion": "^11.0.0",
@@ -79,6 +80,9 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "apps/web/src"),
     },
+  },
+  optimizeDeps: {
+    include: ["@neondatabase/serverless"],
   },
   server: {
     allowedHosts: true,

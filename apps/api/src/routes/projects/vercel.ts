@@ -25,6 +25,7 @@ const SCAFFOLD_PACKAGE_JSON = JSON.stringify(
     type: "module",
     scripts: { build: "vite build" },
     dependencies: {
+      "@neondatabase/serverless": "^0.10.4",
       "@supabase/supabase-js": "^2.39.0",
       clsx: "^2.0.0",
       "framer-motion": "^11.0.0",
@@ -55,6 +56,9 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  optimizeDeps: {
+    include: ["@neondatabase/serverless"],
+  },
 });
 `;
 

@@ -6,6 +6,7 @@ import {
   buildPreviewFileTree,
   getOrBootWebContainer,
   isWebContainerSupported,
+  WORKSPACE_PACKAGE_JSON,
   type DbEnv,
   type WcInstance,
   type WcStatus,
@@ -378,36 +379,7 @@ export function useWebContainerPreview(
             await instance.wc.mount({
               "package.json": {
                 file: {
-                  contents: JSON.stringify(
-                    {
-                      name: "beomz-preview",
-                      private: true,
-                      type: "module",
-                      scripts: { dev: "vite" },
-                      dependencies: {
-                        "@supabase/supabase-js": "^2.39.0",
-                        clsx: "^2.0.0",
-                        "framer-motion": "^11.0.0",
-                        "lucide-react": "^0.400.0",
-                        react: "^19.2.0",
-                        "react-dom": "^19.2.0",
-                        "react-icons": "^5.5.0",
-                        "react-router-dom": "^7.0.0",
-                        "tailwind-merge": "^2.0.0",
-                      },
-                      devDependencies: {
-                        "@tailwindcss/vite": "^4.2.2",
-                        "@types/react": "^19.2.2",
-                        "@types/react-dom": "^19.2.2",
-                        "@vitejs/plugin-react": "^6.0.1",
-                        tailwindcss: "^4.2.2",
-                        typescript: "^5.9.3",
-                        vite: "^8.0.1",
-                      },
-                    },
-                    null,
-                    2,
-                  ),
+                  contents: WORKSPACE_PACKAGE_JSON,
                 },
               },
             });
