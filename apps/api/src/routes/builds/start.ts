@@ -22,7 +22,7 @@ import {
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 import { runBuildInBackground, filterBlockedGeneratedFiles } from "./generate.js";
-import { CREDIT_THRESHOLD, PLAN_LIMITS, SIMPLE_BUILD_MIN, isAdminEmail } from "../../lib/credits.js";
+import { NEGATIVE_FLOOR_CONST, PLAN_LIMITS, isAdminEmail } from "../../lib/credits.js";
 import { detectIntent } from "./generate.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
@@ -203,8 +203,9 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     || projectRow?.name
     || buildProjectNameFromPrompt(prompt, selectedTemplateDef.defaultProjectName);
 
-  // ── Credit balance check (synchronous 402 before generation row creation) ──
-  // Admins bypass; block if totalAvailable <= 0.
+  // ── Credit balance snapshot ───────────────────────────────────────────────
+  // Admins bypass. The actual soft/hard block happens after the generation row
+  // is created so the frontend receives the normal insufficient_credits state.
   // BEO-322: daily reset mechanic removed — free plan is signup grant only.
   const userEmail = orgContext.user.email;
   let totalAvailable = Infinity; // admins never reach the threshold checks below
@@ -215,12 +216,6 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       const topupCredits   = Number(freshOrg.topup_credits ?? 0);
 
       totalAvailable = monthlyCredits + topupCredits;
-      if (totalAvailable <= 0) {
-        return c.json(
-          { error: "Insufficient credits. Please purchase a credit pack or upgrade your plan." },
-          402,
-        );
-      }
     }
   }
 
@@ -299,28 +294,27 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     template_id: selectedTemplateId as TemplateId, warnings: [],
   });
 
-  // ── BEO-320: minimum balance guard ───────────────────────────────────────
-  // Only fires when balance is below CREDIT_THRESHOLD (8) to skip the Haiku
-  // call for well-funded orgs. Question/ambiguous intent needs no credits.
-  // Iterations are excluded — they already have a project and prior credits spent.
-  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable < CREDIT_THRESHOLD && !(imageUrl && !confirmedIntent)) {
+  // ── Balance-based credit gate ────────────────────────────────────────────
+  // Only runs when the org is exhausted or already too negative so we avoid
+  // the extra Haiku intent call for healthy balances. Question/ambiguous
+  // prompts still pass through because they don't start a build here.
+  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable <= 0 && !(imageUrl && !confirmedIntent)) {
     const intent = await detectIntent(prompt, false);
-    const minRequired =
-      intent === "build" ? CREDIT_THRESHOLD :
-      intent === "edit"  ? SIMPLE_BUILD_MIN  :
-      0; // question/ambiguous — no build triggered, no guard needed
-
-    if (minRequired > 0 && totalAvailable < minRequired) {
+    if (intent === "build" || intent === "edit") {
+      const reason = totalAvailable <= NEGATIVE_FLOOR_CONST
+        ? "negative_floor_reached"
+        : "credits_exhausted";
       const icEventId = "2";
-      const icEvent: BuilderV3InsufficientCreditsEvent = {
+      const icEvent = {
         type: "insufficient_credits",
         id: icEventId,
         timestamp: new Date().toISOString(),
         operation: operation,
         available: totalAvailable,
-        required: minRequired,
+        required: 0,
         features: [],
-      };
+        reason,
+      } as unknown as BuilderV3InsufficientCreditsEvent;
 
       const icTrace: BuilderV3TraceMetadata = {
         ...initialBuilderTrace,
@@ -333,8 +327,11 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         status: "insufficient_credits",
       });
 
-      console.log("[BEO-320] minimum balance guard fired — build blocked.", {
-        buildId, intent, available: totalAvailable, required: minRequired,
+      console.log("[BEO-439] balance gate fired — build blocked.", {
+        buildId,
+        intent,
+        available: totalAvailable,
+        reason,
       });
 
       const metadata = readBuildMetadata(generationRow.metadata);

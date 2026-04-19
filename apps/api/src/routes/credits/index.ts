@@ -16,7 +16,7 @@ creditsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   const monthly = Number(org.credits ?? 0);
   const topup = Number(org.topup_credits ?? 0);
   const plan = org.plan ?? "free";
-  const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free!;
+  const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.free;
 
   return c.json({
     balance: monthly + topup,

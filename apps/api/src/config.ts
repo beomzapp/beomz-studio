@@ -36,7 +36,10 @@ const envSchema = z.object({
   STRIPE_CREDITS_200_PRICE_ID: z.string().optional(),
   STRIPE_CREDITS_400_PRICE_ID: z.string().optional(),
   STRIPE_CREDITS_500_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_1000_PRICE_ID: z.string().optional(),
   STRIPE_CREDITS_1200_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_2500_PRICE_ID: z.string().optional(),
+  STRIPE_CREDITS_5000_PRICE_ID: z.string().optional(),
   // Redirect URLs for Stripe Checkout
   STRIPE_SUCCESS_URL: z.string().url().optional(),
   STRIPE_CANCEL_URL: z.string().url().optional(),

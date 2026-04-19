@@ -159,7 +159,7 @@ webhookRoute.post("/", async (c) => {
           if (plan === "pro" || plan === "builder") plan = "pro_builder";
           if (plan === "starter")                   plan = "pro_starter";
 
-          const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.pro_starter!;
+          const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.pro_starter;
           const now = new Date();
           const periodEnd = new Date(Date.UTC(
             now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate(),
@@ -199,7 +199,7 @@ webhookRoute.post("/", async (c) => {
 
         const priceId = sub.items.data[0]?.price.id;
         const plan = priceId ? (PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? "pro_starter") : "pro_starter";
-        const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.pro_starter!;
+        const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.pro_starter;
 
         const periodStart = new Date((sub.billing_cycle_anchor ?? 0) * 1000).toISOString();
         // Estimate period end as 1 month from anchor for subscription.created
@@ -252,7 +252,7 @@ webhookRoute.post("/", async (c) => {
         const isDowngrade =
           (planOrder[newPlan] ?? 0) < (planOrder[currentPlan] ?? 0);
 
-        const planLimit = PLAN_LIMITS[newPlan] ?? PLAN_LIMITS.pro_starter!;
+        const planLimit = PLAN_LIMITS[newPlan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.pro_starter;
 
         if (isDowngrade) {
           // Schedule downgrade — apply new plan and lower rollover_cap at period end
@@ -317,7 +317,7 @@ webhookRoute.post("/", async (c) => {
         const effectivePlan = (org.downgrade_at_period_end && org.pending_plan)
           ? org.pending_plan
           : org.plan;
-        const planLimit = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.free!;
+        const planLimit = PLAN_LIMITS[effectivePlan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.free;
 
         if (!planLimit.credits && effectivePlan === "free") {
           // Free plan: no monthly allocation, just apply the downgrade

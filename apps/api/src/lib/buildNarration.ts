@@ -18,6 +18,21 @@ export interface NextStepsPayload {
   suggestions: NextStepSuggestion[];
 }
 
+export interface HaikuUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface StagePreambleResult {
+  payload: StagePreamblePayload;
+  usage: HaikuUsage;
+}
+
+export interface NextStepsResult {
+  payload: NextStepsPayload | null;
+  usage: HaikuUsage;
+}
+
 export const PREAMBLE_FALLBACK: StagePreamblePayload = {
   restatement: "Got it — building this now.",
   bullets: [
@@ -43,7 +58,12 @@ interface HaikuTextRequest {
   userMessage: string;
 }
 
-export type HaikuTextInvoker = (request: HaikuTextRequest) => Promise<string>;
+interface HaikuTextResponse {
+  text: string;
+  usage: HaikuUsage;
+}
+
+export type HaikuTextInvoker = (request: HaikuTextRequest) => Promise<string | HaikuTextResponse>;
 
 interface GenerateStagePreambleOptions {
   invokeModel?: HaikuTextInvoker;
@@ -224,7 +244,18 @@ function toTextResponse(response: Anthropic.Messages.Message): string {
     .trim();
 }
 
-async function defaultInvokeHaiku(request: HaikuTextRequest): Promise<string> {
+function normaliseHaikuResponse(response: string | HaikuTextResponse): HaikuTextResponse {
+  if (typeof response === "string") {
+    return {
+      text: response,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
+  }
+
+  return response;
+}
+
+async function defaultInvokeHaiku(request: HaikuTextRequest): Promise<HaikuTextResponse> {
   const { apiConfig } = await import("../config.js");
 
   if (!apiConfig.ANTHROPIC_API_KEY) {
@@ -247,7 +278,13 @@ async function defaultInvokeHaiku(request: HaikuTextRequest): Promise<string> {
       { signal: controller.signal },
     );
 
-    return toTextResponse(response);
+    return {
+      text: toTextResponse(response),
+      usage: {
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+      },
+    };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -334,14 +371,14 @@ async function runWithTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T
   });
 }
 
-export async function generateStagePreamble({
+export async function generateStagePreambleWithUsage({
   invokeModel = defaultInvokeHaiku,
   isIteration,
   prompt,
   timeoutMs = PREAMBLE_TIMEOUT_MS,
-}: GenerateStagePreambleOptions): Promise<StagePreamblePayload> {
+}: GenerateStagePreambleOptions): Promise<StagePreambleResult> {
   try {
-    const rawText = await runWithTimeout(
+    const response = normaliseHaikuResponse(await runWithTimeout(
       invokeModel({
         maxTokens: 300,
         systemPrompt: isIteration ? ITERATION_PREAMBLE_SYSTEM_PROMPT : PREAMBLE_SYSTEM_PROMPT,
@@ -350,25 +387,39 @@ export async function generateStagePreamble({
         userMessage: prompt,
       }),
       timeoutMs,
-    );
+    ));
 
-    return normalisePreamble(parseJsonText(rawText), isIteration);
+    return {
+      payload: normalisePreamble(parseJsonText(response.text), isIteration),
+      usage: response.usage,
+    };
   } catch (error) {
     console.warn("[buildNarration] preamble failed — using fallback:", error instanceof Error ? error.message : String(error));
-    return isIteration ? iterationPreambleFallback(prompt) : PREAMBLE_FALLBACK;
+    return {
+      payload: isIteration ? iterationPreambleFallback(prompt) : PREAMBLE_FALLBACK,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
   }
 }
 
-export async function generateNextSteps({
+export async function generateStagePreamble(options: GenerateStagePreambleOptions): Promise<StagePreamblePayload> {
+  const result = await generateStagePreambleWithUsage(options);
+  return result.payload;
+}
+
+export async function generateNextStepsWithUsage({
   appDescriptor,
   fileList,
   invokeModel = defaultInvokeHaiku,
   isIteration,
   prompt,
   timeoutMs = NEXT_STEPS_TIMEOUT_MS,
-}: GenerateNextStepsOptions): Promise<NextStepsPayload | null> {
+}: GenerateNextStepsOptions): Promise<NextStepsResult> {
   if (isIteration) {
-    return null;
+    return {
+      payload: null,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
   }
 
   const fileContext = fileList.length > 0 ? fileList.join(", ") : "App.tsx";
@@ -379,7 +430,7 @@ export async function generateNextSteps({
   ].join("\n");
 
   try {
-    const rawText = await runWithTimeout(
+    const response = normaliseHaikuResponse(await runWithTimeout(
       invokeModel({
         maxTokens: 400,
         systemPrompt: NEXT_STEPS_SYSTEM_PROMPT,
@@ -388,11 +439,22 @@ export async function generateNextSteps({
         userMessage,
       }),
       timeoutMs,
-    );
+    ));
 
-    return normaliseNextSteps(parseJsonText(rawText));
+    return {
+      payload: normaliseNextSteps(parseJsonText(response.text)),
+      usage: response.usage,
+    };
   } catch (error) {
     console.warn("[buildNarration] next_steps failed — using fallback:", error instanceof Error ? error.message : String(error));
-    return NEXT_STEPS_FALLBACK;
+    return {
+      payload: NEXT_STEPS_FALLBACK,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
   }
+}
+
+export async function generateNextSteps(options: GenerateNextStepsOptions): Promise<NextStepsPayload | null> {
+  const result = await generateNextStepsWithUsage(options);
+  return result.payload;
 }

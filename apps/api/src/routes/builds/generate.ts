@@ -47,10 +47,16 @@ import {
 
 import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
-import { generateNextSteps, generateStagePreamble } from "../../lib/buildNarration.js";
+import { generateNextStepsWithUsage, generateStagePreambleWithUsage } from "../../lib/buildNarration.js";
 import { createBuildStageEmitter } from "../../lib/buildStageEvents.js";
 import { classifyImageIntent } from "../../lib/classifyImageIntent.js";
-import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isAdminEmail } from "../../lib/credits.js";
+import {
+  CONVERSATIONAL_COST,
+  NEGATIVE_FLOOR_CONST,
+  calcCreditCost,
+  calcCreditCostHaiku,
+  isAdminEmail,
+} from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { planPhases } from "../../lib/planPhases.js";
 import type { Phase } from "../../lib/planPhases.js";
@@ -106,6 +112,40 @@ interface CustomiseResult {
   migrations?: string[];
   outputTokens: number;
   inputTokens?: number;
+}
+
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface NarrationTextResult {
+  message: string;
+  usage: TokenUsage;
+}
+
+const ZERO_TOKEN_USAGE: TokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+};
+
+function addTokenUsage(total: TokenUsage, usage: TokenUsage): TokenUsage {
+  return {
+    inputTokens: total.inputTokens + usage.inputTokens,
+    outputTokens: total.outputTokens + usage.outputTokens,
+  };
+}
+
+function calcSonnetCostUsd(inputTokens: number, outputTokens: number): number {
+  return (inputTokens * 3 + outputTokens * 15) / 1_000_000;
+}
+
+function calcHaikuCostUsd(inputTokens: number, outputTokens: number): number {
+  return (inputTokens * 1 + outputTokens * 5) / 1_000_000;
+}
+
+function roundUsd(costUsd: number): number {
+  return Math.round(costUsd * 10000) / 10000;
 }
 
 // ─── Anthropic tool definition ────────────────────────────────────────────────
@@ -2154,9 +2194,14 @@ export async function detectIntent(
   }
 }
 
-async function generatePreBuildAck(prompt: string, intent: "edit" | "build"): Promise<string> {
+async function generatePreBuildAck(prompt: string, intent: "edit" | "build"): Promise<NarrationTextResult> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
-  if (!apiKey) return intent === "edit" ? "Applying your changes..." : "Building your app...";
+  if (!apiKey) {
+    return {
+      message: intent === "edit" ? "Applying your changes..." : "Building your app...",
+      usage: ZERO_TOKEN_USAGE,
+    };
+  }
 
   const systemPrompt = intent === "edit"
     ? `Generate a one-sentence acknowledgement that you're about to make the edit the user requested.
@@ -2179,10 +2224,19 @@ Examples: "Building your restaurant POS system." "Building your task management 
       },
       { signal: controller.signal },
     );
-    return (response.content[0] as { type: string; text?: string })?.text?.trim()
-      ?? (intent === "edit" ? "Applying your changes..." : "Building your app...");
+    return {
+      message: (response.content[0] as { type: string; text?: string })?.text?.trim()
+        ?? (intent === "edit" ? "Applying your changes..." : "Building your app..."),
+      usage: {
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+      },
+    };
   } catch {
-    return intent === "edit" ? "Applying your changes..." : "Building your app...";
+    return {
+      message: intent === "edit" ? "Applying your changes..." : "Building your app...",
+      usage: ZERO_TOKEN_USAGE,
+    };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -2255,9 +2309,15 @@ Examples: "Do you want me to redesign the layout or just adjust the spacing?" "W
   }
 }
 
-async function generateBuildSummary(prompt: string, changedFiles: string[]): Promise<string> {
+async function generateBuildSummary(prompt: string, changedFiles: string[]): Promise<NarrationTextResult> {
+  const fallbackMessage = `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
-  if (!apiKey) return `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
+  if (!apiKey) {
+    return {
+      message: fallbackMessage,
+      usage: ZERO_TOKEN_USAGE,
+    };
+  }
 
   const fileList = changedFiles.slice(0, 5).join(", ") + (changedFiles.length > 5 ? ` and ${changedFiles.length - 5} more` : "");
   const controller = new AbortController();
@@ -2276,10 +2336,19 @@ Example: "Done — I've darkened the sidebar to a deeper grey and improved the i
       },
       { signal: controller.signal },
     );
-    return (response.content[0] as { type: string; text?: string })?.text?.trim()
-      ?? `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
+    return {
+      message: (response.content[0] as { type: string; text?: string })?.text?.trim()
+        ?? fallbackMessage,
+      usage: {
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+      },
+    };
   } catch {
-    return `Done — changes applied across ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}.`;
+    return {
+      message: fallbackMessage,
+      usage: ZERO_TOKEN_USAGE,
+    };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -2326,6 +2395,7 @@ async function _runBuildInBackground(
   let preBuildAckEmitted = false;
   // BEO-368: record wall-clock start for duration footer in build_summary.
   const buildStartTime = Date.now();
+  let narrationUsage = { ...ZERO_TOKEN_USAGE };
   const stageEvents = createBuildStageEmitter({
     operation: op,
     nextId,
@@ -2569,9 +2639,9 @@ async function _runBuildInBackground(
       } catch (err) {
         console.warn("[generate] credit check failed (non-fatal):", err instanceof Error ? err.message : String(err));
       }
-      console.log("[generate] credit balance check:", { orgBalance, required: CREDIT_THRESHOLD, buildId });
+      console.log("[generate] credit balance check:", { orgBalance, negativeFloor: NEGATIVE_FLOOR_CONST, buildId });
 
-      if (!isAdminEmail(input.userEmail ?? "") && orgBalance < CREDIT_THRESHOLD) {
+      if (!isAdminEmail(input.userEmail ?? "") && orgBalance <= NEGATIVE_FLOOR_CONST) {
         await appendEventToDb(
           db,
           buildId,
@@ -2581,12 +2651,32 @@ async function _runBuildInBackground(
             timestamp: ts(),
             operation: op,
             available: orgBalance,
-            required: CREDIT_THRESHOLD,
+            required: 0,
             features: [],
           } as unknown as BuilderV3StatusEvent,
           { status: "insufficient_credits" },
         );
-        console.log("[generate] insufficient_credits — available:", orgBalance, "required:", CREDIT_THRESHOLD, { buildId });
+        console.log("[generate] insufficient_credits — balance already below negative floor.", { buildId, orgBalance });
+        return;
+      }
+
+      if (!isAdminEmail(input.userEmail ?? "") && orgBalance <= 0) {
+        await appendEventToDb(
+          db,
+          buildId,
+          {
+            type: "insufficient_credits" as const,
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            available: orgBalance,
+            required: 0,
+            features: [],
+            reason: "credits_exhausted",
+          } as unknown as BuilderV3StatusEvent,
+          { status: "insufficient_credits" },
+        );
+        console.log("[generate] credits exhausted — soft-blocking new build.", { buildId, orgBalance });
         return;
       }
       // Credit check passed — fall through to build
@@ -2663,18 +2753,19 @@ async function _runBuildInBackground(
   });
 
   const emitStagePreamble = async (rawPrompt: string, isIteration: boolean): Promise<void> => {
-    const preamble = await generateStagePreamble({
+    const preamble = await generateStagePreambleWithUsage({
       prompt: rawPrompt,
       isIteration,
     });
+    narrationUsage = addTokenUsage(narrationUsage, preamble.usage);
 
     const event: BuilderV3PreambleEvent = {
       type: "stage_preamble",
       id: nextId(),
       timestamp: ts(),
       operation: op,
-      restatement: preamble.restatement,
-      bullets: preamble.bullets,
+      restatement: preamble.payload.restatement,
+      bullets: preamble.payload.bullets,
     };
 
     await appendEventToDb(db, buildId, event);
@@ -2775,18 +2866,19 @@ async function _runBuildInBackground(
       if (!preBuildAckEmitted) {
         try {
           preBuildAckEmitted = true;
-          const ackMessage = await generatePreBuildAck(prompt, "edit");
+          const ack = await generatePreBuildAck(prompt, "edit");
+          narrationUsage = addTokenUsage(narrationUsage, ack.usage);
           await appendEventToDb(db, buildId, {
             type: "pre_build_ack",
             id: nextId(),
             timestamp: ts(),
             operation: op,
-            message: ackMessage,
+            message: ack.message,
           } as unknown as BuilderV3StatusEvent);
           stageEvents.markPreBuildAck();
           // BEO-374: await sequentially to prevent race condition (both reads getting [])
           await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-          await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
+          await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ack.message });
         } catch {
           // non-fatal
         }
@@ -2926,48 +3018,48 @@ async function _runBuildInBackground(
 
       // BEO-368: credit deduction runs first so iterCreditsUsed is available for the summary footer.
       // Post-deduction for successful iteration (no charge on failure)
+      const iterInputTokens = iterResult.inputTokens ?? 0;
       const iterTokens = iterResult.outputTokens ?? 0;
       let iterCreditsUsed = 0;
-      if (iterResult.files.length > 0 && iterTokens > 0 && !isAdminEmail(userEmail)) {
-        const iterCost = calcCreditCost(iterTokens);
-        const iterCostUsd = calcCostUsd(iterCost);
-        try {
-          const deduction = await db.applyOrgUsageDeduction(orgId, iterCost, buildId, "App iteration");
-          iterCreditsUsed = deduction.deducted;
-          await db.upsertBuildTelemetry({
-            id: buildId,
-            project_id: projectId,
-            user_id: userId,
-            prompt: input.sourcePrompt,
-            template_used: templateId,
-            palette_used: "iteration",
-            files_generated: iterFinalFiles.length,
-            succeeded: true,
-            output_tokens: iterTokens,
-            credits_used: deduction.deducted,
-            cost_usd: iterCostUsd,
-            user_iterated: true,
-            iteration_count: 0,
-            model_used: model,
-          }).catch(() => undefined);
-          console.log("[generate] iteration credits deducted:", { deducted: deduction.deducted, tokens: iterTokens, buildId });
-        } catch (deductErr) {
-          console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
-        }
-      }
+      let iterCostUsd: number | null = null;
 
       // BEO-362: post-build summary via Haiku
       if (iterResult.files.length > 0) {
         try {
           const changedPaths = iterResult.files.map((f) => f.path.replace(/^.*\//, ""));
-          const summaryMessage = await generateBuildSummary(prompt, changedPaths);
+          const summaryResult = await generateBuildSummary(prompt, changedPaths);
+          narrationUsage = addTokenUsage(narrationUsage, summaryResult.usage);
+          if (iterTokens > 0 && !isAdminEmail(userEmail)) {
+            const mainCost = calcCreditCost(iterInputTokens, iterTokens);
+            const narrationCost = calcCreditCostHaiku(narrationUsage.inputTokens, narrationUsage.outputTokens);
+            const totalCost = mainCost + narrationCost;
+            iterCostUsd = roundUsd(
+              calcSonnetCostUsd(iterInputTokens, iterTokens)
+              + calcHaikuCostUsd(narrationUsage.inputTokens, narrationUsage.outputTokens),
+            );
+            try {
+              const deduction = await db.applyOrgUsageDeduction(orgId, totalCost, buildId, "App iteration");
+              iterCreditsUsed = deduction.deducted;
+              console.log("[generate] iteration credits deducted:", {
+                deducted: deduction.deducted,
+                mainCost,
+                narrationCost,
+                inputTokens: iterInputTokens,
+                outputTokens: iterTokens,
+                narrationUsage,
+                buildId,
+              });
+            } catch (deductErr) {
+              console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
+            }
+          }
           const iterDurationMs = Date.now() - buildStartTime;
           await appendEventToDb(db, buildId, {
             type: "build_summary",
             id: nextId(),
             timestamp: ts(),
             operation: op,
-            message: summaryMessage,
+            message: summaryResult.message,
             filesChanged: changedPaths,
             durationMs: iterDurationMs,
             creditsUsed: iterCreditsUsed,
@@ -2975,7 +3067,7 @@ async function _runBuildInBackground(
           // BEO-374: await so session_events is written before the function returns
           await appendSessionEventToDb(db, buildId, {
             type: "build_summary",
-            content: summaryMessage,
+            content: summaryResult.message,
             filesChanged: changedPaths,
             durationMs: iterDurationMs,
             creditsUsed: iterCreditsUsed,
@@ -3026,6 +3118,7 @@ async function _runBuildInBackground(
         generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
         credits_used: iterCreditsUsed,
         output_tokens: iterTokens,
+        cost_usd: iterCostUsd,
         user_iterated: true,
         iteration_count: 0,
         model_used: model,
@@ -3098,18 +3191,19 @@ async function _runBuildInBackground(
       try {
         preBuildAckEmitted = true;
         const ackIntent = detectedIntent === "edit" ? "edit" : "build";
-        const ackMessage = await generatePreBuildAck(prompt, ackIntent);
+        const ack = await generatePreBuildAck(prompt, ackIntent);
+        narrationUsage = addTokenUsage(narrationUsage, ack.usage);
         await appendEventToDb(db, buildId, {
           type: "pre_build_ack",
           id: nextId(),
           timestamp: ts(),
           operation: op,
-          message: ackMessage,
+          message: ack.message,
         } as unknown as BuilderV3StatusEvent);
         stageEvents.markPreBuildAck();
         // BEO-374: await sequentially to prevent race condition (both reads getting [])
         await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-        await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ackMessage });
+        await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ack.message });
       } catch {
         // non-fatal
       }
@@ -3250,54 +3344,17 @@ async function _runBuildInBackground(
 
     // BEO-362: post-build summary via Haiku
     // BEO-368: credit deduction runs first so creditsUsed is available for the summary footer.
+    const inputTokens = customised.inputTokens ?? 0;
     const outputTokens = customised.outputTokens ?? 0;
     let creditsUsed = 0;
     let costUsd: number | null = null;
 
-    // Only deduct when AI actually ran (not fallback) and user is not admin
-    if (!fallbackUsed && outputTokens > 0 && !isAdminEmail(userEmail)) {
-      const creditCost = calcCreditCost(outputTokens);
-      costUsd = calcCostUsd(creditCost);
-      try {
-        const deduction = await db.applyOrgUsageDeduction(orgId, creditCost, buildId, "App generation");
-        creditsUsed = deduction.deducted;
-        console.log("[generate] credits deducted:", { deducted: creditsUsed, tokens: outputTokens, buildId });
-      } catch (deductErr) {
-        console.error("[generate] credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
-      }
-    }
-
     if (!fallbackUsed) {
       try {
         const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
-        const summaryMessage = await generateBuildSummary(prompt, changedPaths);
-        const finalDurationMs = Date.now() - buildStartTime;
-        await appendEventToDb(db, buildId, {
-          type: "build_summary",
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          message: summaryMessage,
-          filesChanged: changedPaths,
-          durationMs: finalDurationMs,
-          creditsUsed,
-        } as unknown as BuilderV3StatusEvent);
-        // BEO-374: await so session_events is written before the function returns
-        await appendSessionEventToDb(db, buildId, {
-          type: "build_summary",
-          content: summaryMessage,
-          filesChanged: changedPaths,
-          durationMs: finalDurationMs,
-          creditsUsed,
-        });
-      } catch {
-        // non-fatal
-      }
-    }
-
-    if (!fallbackUsed) {
-      try {
-        const nextSteps = await generateNextSteps({
+        const summaryResult = await generateBuildSummary(prompt, changedPaths);
+        narrationUsage = addTokenUsage(narrationUsage, summaryResult.usage);
+        const nextSteps = await generateNextStepsWithUsage({
           appDescriptor: workingPrompt,
           fileList: finalFiles
             .map((file) => file.path.replace(/^.*\//, ""))
@@ -3305,14 +3362,57 @@ async function _runBuildInBackground(
           isIteration: input.isIteration,
           prompt: input.sourcePrompt,
         });
-
-        if (nextSteps) {
+        narrationUsage = addTokenUsage(narrationUsage, nextSteps.usage);
+        if (outputTokens > 0 && !isAdminEmail(userEmail)) {
+          const mainCost = calcCreditCost(inputTokens, outputTokens);
+          const narrationCost = calcCreditCostHaiku(narrationUsage.inputTokens, narrationUsage.outputTokens);
+          const totalCost = mainCost + narrationCost;
+          costUsd = roundUsd(
+            calcSonnetCostUsd(inputTokens, outputTokens)
+            + calcHaikuCostUsd(narrationUsage.inputTokens, narrationUsage.outputTokens),
+          );
+          try {
+            const deduction = await db.applyOrgUsageDeduction(orgId, totalCost, buildId, "App generation");
+            creditsUsed = deduction.deducted;
+            console.log("[generate] credits deducted:", {
+              deducted: creditsUsed,
+              mainCost,
+              narrationCost,
+              inputTokens,
+              outputTokens,
+              narrationUsage,
+              buildId,
+            });
+          } catch (deductErr) {
+            console.error("[generate] credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
+          }
+        }
+        const finalDurationMs = Date.now() - buildStartTime;
+        await appendEventToDb(db, buildId, {
+          type: "build_summary",
+          id: nextId(),
+          timestamp: ts(),
+          operation: op,
+          message: summaryResult.message,
+          filesChanged: changedPaths,
+          durationMs: finalDurationMs,
+          creditsUsed,
+        } as unknown as BuilderV3StatusEvent);
+        // BEO-374: await so session_events is written before the function returns
+        await appendSessionEventToDb(db, buildId, {
+          type: "build_summary",
+          content: summaryResult.message,
+          filesChanged: changedPaths,
+          durationMs: finalDurationMs,
+          creditsUsed,
+        });
+        if (nextSteps.payload) {
           const nextStepsEvent: BuilderV3NextStepsEvent = {
             type: "next_steps",
             id: nextId(),
             timestamp: ts(),
             operation: op,
-            suggestions: nextSteps.suggestions,
+            suggestions: nextSteps.payload.suggestions,
           };
           await appendEventToDb(db, buildId, nextStepsEvent);
         }

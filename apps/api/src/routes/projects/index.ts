@@ -84,7 +84,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       beomz_app_url: row.beomz_app_url ?? null,
     }));
     const plan = orgContext.org.plan ?? "free";
-    const planLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free!;
+    const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.free;
     // Free plan is capped at 3 projects; paid plans are unlimited (-1 = unlimited)
     const maxProjects = plan === "free" ? 3 : -1;
 

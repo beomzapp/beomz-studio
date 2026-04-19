@@ -58,7 +58,7 @@ export const loadOrgContext: MiddlewareHandler = async (c, next) => {
     org = await db.createOrg({
       name: buildDefaultOrgName(jwt.email, jwt.sub),
       owner_id: user.id,
-      credits: PLAN_LIMITS.free!.signupGrant,  // 10 credits one-time signup grant
+      credits: PLAN_LIMITS.free!.signupGrant,  // 50 credits one-time signup grant
     });
 
     membership = await db.createOrgMembership({
