@@ -414,6 +414,41 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     } catch { /* ignore */ }
   }, [messages]);
 
+  // ─── BEO-447: persist chat messages to localStorage ───────────────────────
+  useEffect(() => {
+    const pid = resolvedProjectIdRef.current;
+    if (!pid) return;
+    // Filter out ephemeral / in-flight messages before persisting
+    const persistable = messages.filter(m => {
+      if (m.type === "thinking") return false;
+      if (m.type === "server_restarting") return false;
+      // Only keep building messages that have completed (have a summary)
+      if (m.type === "building") return !!(m as BuildingMsg).summary;
+      // Only keep chat responses that are fully streamed
+      if (m.type === "chat_response")
+        return !(m as Extract<ChatMessage, { type: "chat_response" }>).streaming;
+      return true;
+    });
+    if (persistable.length === 0) return;
+    try {
+      localStorage.setItem(`chat:${pid}`, JSON.stringify(persistable.slice(-20)));
+    } catch { /* quota exceeded — ignore */ }
+  }, [messages]);
+
+  // ─── BEO-447: restore chat from localStorage on mount (fast path) ─────────
+  useEffect(() => {
+    const pid = projectId !== "new" ? projectId : "";
+    if (!pid) return;
+    try {
+      const saved = localStorage.getItem(`chat:${pid}`);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as ChatMessage[];
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+      setMessages(prev => (prev.length > 0 ? prev : parsed));
+    } catch { /* corrupted data — ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Seed chat history from session_events on mount (BEO-370) ─────────────
   const historySeededRef = useRef(false);
   useEffect(() => {
