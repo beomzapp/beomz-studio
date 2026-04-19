@@ -18,7 +18,7 @@ export function calcCreditCostHaiku(inputTokens: number, outputTokens: number): 
 export const NEGATIVE_FLOOR_CONST = NEGATIVE_FLOOR
 
 export const PLAN_LIMITS = {
-  free:         { credits: 0, rolloverCap: 0, signupGrant: 50, maxTopup: false, price: 0, label: "Free" },
+  free:         { credits: 0, rolloverCap: 0, signupGrant: 200, maxTopup: false, price: 0, label: "Free" },
   pro_starter:  { credits: 2000, rolloverCap: 2000, signupGrant: 0, maxTopup: true, price: 19, label: "Pro Starter" },
   pro_builder:  { credits: 4000, rolloverCap: 8000, signupGrant: 0, maxTopup: true, price: 39, label: "Pro Builder" },
   business:     { credits: 20000, rolloverCap: 60000, signupGrant: 0, maxTopup: true, price: 199, label: "Business" },
