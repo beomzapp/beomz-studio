@@ -327,12 +327,19 @@ function SummaryFooterRow({
 // ─── Markdown-lite renderer ───────────────────────────────────────────────────
 
 function renderInline(text: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*.*?\*\*|`[^`]+`)/g);
+  // Order matters: bold before italic so **x** isn't caught by *x*
+  const parts = text.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_|`[^`]+`)/g);
   return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
     }
-    if (part.startsWith("`") && part.endsWith("`")) {
+    if (
+      (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**") && part.length > 2) ||
+      (part.startsWith("_") && part.endsWith("_") && part.length > 2)
+    ) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
       return (
         <code key={i} className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[13px]">
           {part.slice(1, -1)}
@@ -347,6 +354,9 @@ function MarkdownText({ text }: { text: string }) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
   let listBuffer: { type: "ul" | "ol"; items: string[] } | null = null;
+  let inCodeBlock = false;
+  let codeLang = "";
+  let codeLines: string[] = [];
 
   const flushList = () => {
     if (!listBuffer) return;
@@ -355,17 +365,17 @@ function MarkdownText({ text }: { text: string }) {
     elements.push(
       isOrdered ? (
         <ol key={`list-${elements.length}`} className="space-y-1 my-1.5">
-          {items.map((item, i) => (
-            <li key={i} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
-              <span className="flex-shrink-0 select-none text-zinc-400">{i + 1}.</span>
+          {items.map((item, idx) => (
+            <li key={idx} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
+              <span className="flex-shrink-0 select-none text-zinc-400">{idx + 1}.</span>
               <span className="min-w-0">{renderInline(item)}</span>
             </li>
           ))}
         </ol>
       ) : (
         <ul key={`list-${elements.length}`} className="space-y-1 my-1.5">
-          {items.map((item, i) => (
-            <li key={i} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
+          {items.map((item, idx) => (
+            <li key={idx} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
               <span className="flex-shrink-0 select-none text-zinc-400">•</span>
               <span className="min-w-0">{renderInline(item)}</span>
             </li>
@@ -376,10 +386,53 @@ function MarkdownText({ text }: { text: string }) {
     listBuffer = null;
   };
 
+  const flushCodeBlock = () => {
+    const codeContent = codeLines.join("\n");
+    elements.push(
+      <div key={`code-${elements.length}`} className="my-2 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900">
+        <div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1.5">
+          <span className="font-mono text-xs text-zinc-400">{codeLang || "code"}</span>
+          <CopyButton content={codeContent} />
+        </div>
+        <pre className="overflow-x-auto px-3 py-2.5">
+          <code className="whitespace-pre font-mono text-[13px] leading-relaxed text-zinc-100">
+            {codeContent}
+          </code>
+        </pre>
+      </div>,
+    );
+    inCodeBlock = false;
+    codeLang = "";
+    codeLines = [];
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+
+    // ── fenced code block handling ─────────────────────────────────────────────
+    if (!inCodeBlock) {
+      const fenceMatch = line.match(/^```(\w*)/);
+      if (fenceMatch) {
+        flushList();
+        inCodeBlock = true;
+        codeLang = fenceMatch[1] ?? "";
+        codeLines = [];
+        continue;
+      }
+    } else {
+      if (line.trimEnd() === "```" || line.startsWith("```")) {
+        flushCodeBlock();
+      } else {
+        codeLines.push(line);
+      }
+      continue;
+    }
+
+    // ── normal line parsing ────────────────────────────────────────────────────
     const ulMatch = line.match(/^[-•*]\s+(.*)/);
     const olMatch = line.match(/^\d+[.)]\s+(.*)/);
+    const headingMatch = line.match(/^(#{1,3})\s+(.*)/);
+
     if (ulMatch) {
       if (listBuffer?.type !== "ul") {
         flushList();
@@ -392,6 +445,17 @@ function MarkdownText({ text }: { text: string }) {
         listBuffer = { type: "ol", items: [] };
       }
       listBuffer!.items.push(olMatch[1]);
+    } else if (headingMatch) {
+      flushList();
+      const level = headingMatch[1].length;
+      elements.push(
+        <p
+          key={`h-${i}`}
+          className={`font-semibold text-[#1a1a1a] break-words ${level === 1 ? "text-base mt-3 mb-1" : "text-sm mt-2 mb-0.5"}`}
+        >
+          {renderInline(headingMatch[2])}
+        </p>,
+      );
     } else {
       flushList();
       if (line.trim() === "") {
@@ -405,7 +469,11 @@ function MarkdownText({ text }: { text: string }) {
       }
     }
   }
-  flushList();
+
+  // flush any unclosed code block or list
+  if (inCodeBlock) flushCodeBlock();
+  else flushList();
+
   return <>{elements}</>;
 }
 

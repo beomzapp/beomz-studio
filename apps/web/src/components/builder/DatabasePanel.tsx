@@ -101,7 +101,11 @@ no npm packages, no imports.
 
   Store token: localStorage.setItem('beomz_token', data.token)
   Read token:  localStorage.getItem('beomz_token')
-  No npm auth packages. No imports. Just fetch and localStorage.`;
+  No npm auth packages. No imports. Just fetch and localStorage.
+
+After completing the wiring, respond with ONLY 1-2 sentences confirming what you did.
+Do not show file contents, import statements, or code examples in your response.
+Example: 'Done — I've wired your app to the Neon database. Notes are now saved and loaded from Postgres automatically.'`;
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
