@@ -31,9 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
-  enableDatabase,
   wireDatabase,
-  connectDatabase,
   getDbSchema,
   getDbRows,
   runDbMigration,
@@ -95,21 +93,9 @@ export function DatabasePanel({
   plan,
   onDbStateChange,
 }: DatabasePanelProps) {
-  const isFree = (plan || "free").toLowerCase() === "free";
-
   // ── Connection / wiring state ─────────────────────────────
-  const [enabling, setEnabling] = useState(false);
   const [wiringDb, setWiringDb] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // BEO-400: DB project limit reached (402 from enable)
-  const [dbLimitReached, setDbLimitReached] = useState(false);
-
-  // BYO Supabase modal
-  const [showByoModal, setShowByoModal] = useState(false);
-  const [byoUrl, setByoUrl] = useState("");
-  const [byoAnonKey, setByoAnonKey] = useState("");
-  const [byoConnecting, setByoConnecting] = useState(false);
 
   // ── Mode tabs (BEO-400) ───────────────────────────────────
   const [modeTab, setModeTab] = useState<ModeTab>("shared");
@@ -188,24 +174,6 @@ export function DatabasePanel({
     }
   }, []);
 
-  const handleEnable = useCallback(async () => {
-    if (!projectId) return;
-    setEnabling(true);
-    setError(null);
-    try {
-      await enableDatabase(projectId);
-      onDbStateChange();
-    } catch (err) {
-      if (err instanceof Error && err.message === "db_project_limit_reached") {
-        setDbLimitReached(true);
-      } else {
-        setError(err instanceof Error ? err.message : "Failed to enable database.");
-      }
-    } finally {
-      setEnabling(false);
-    }
-  }, [projectId, onDbStateChange]);
-
   const handleWire = useCallback(async () => {
     if (!projectId) return;
     setWiringDb(true);
@@ -220,23 +188,6 @@ export function DatabasePanel({
       setWiringDb(false);
     }
   }, [projectId, onDbStateChange]);
-
-  const handleByoConnect = useCallback(async () => {
-    if (!projectId) return;
-    setByoConnecting(true);
-    setError(null);
-    try {
-      await connectDatabase(projectId, { url: byoUrl.trim(), anonKey: byoAnonKey.trim() });
-      setShowByoModal(false);
-      setByoUrl("");
-      setByoAnonKey("");
-      onDbStateChange();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to connect database.");
-    } finally {
-      setByoConnecting(false);
-    }
-  }, [projectId, byoUrl, byoAnonKey, onDbStateChange]);
 
   const fetchSchema = useCallback(async () => {
     if (!projectId) return;
@@ -399,76 +350,23 @@ export function DatabasePanel({
             </p>
           </div>
 
-          {/* DB project limit reached state */}
-          {dbLimitReached ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-left">
-              <p className="text-sm font-semibold text-amber-800">
-                You already have a database on another project.
-              </p>
-              <p className="mt-1 text-xs text-amber-700">
-                Each plan includes 1 shared database.
-              </p>
-              <div className="mt-4 space-y-2">
-                <button
-                  onClick={() => showToast("Coming soon — dedicated database provisioning")}
-                  className="flex w-full items-center justify-between rounded-lg border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-colors hover:border-[#F97316]/40"
-                >
-                  <span className="flex items-center gap-2">
-                    <HardDrive size={14} className="text-[#F97316]" />
-                    Add dedicated database <span className="text-[#9ca3af]">$39/month</span>
-                  </span>
-                  <ArrowUpRight size={14} className="text-[#9ca3af]" />
-                </button>
-                <button
-                  onClick={() => showToast("Coming soon — BYO Supabase OAuth flow")}
-                  className="flex w-full items-center justify-between rounded-lg border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-colors hover:border-[#F97316]/40"
-                >
-                  <span className="flex items-center gap-2">
-                    <PlugZap size={14} className="text-[#F97316]" />
-                    Connect your own Supabase
-                  </span>
-                  <ArrowUpRight size={14} className="text-[#9ca3af]" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <button
-                onClick={() => void handleEnable()}
-                disabled={enabling}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
-              >
-                {enabling ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Zap size={16} />
-                )}
-                {enabling ? "Provisioning..." : "Add Database"}
-              </button>
-
-              <div className="relative flex items-center gap-3">
-                <div className="h-px flex-1 bg-[#e5e7eb]" />
-                <span className="text-xs text-[#9ca3af]">or</span>
-                <div className="h-px flex-1 bg-[#e5e7eb]" />
-              </div>
-
-              <div className="relative group inline-block">
-                <button
-                  onClick={() => !isFree && setShowByoModal(true)}
-                  disabled={isFree}
-                  className={cn(
-                    "flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
-                    isFree
-                      ? "cursor-not-allowed border-[#e5e7eb] text-[#9ca3af]"
-                      : "border-[#e5e7eb] text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#1a1a1a]",
-                  )}
-                >
-                  <Link2 size={14} />
-                  Connect your own Supabase
-                </button>
-              </div>
-            </>
-          )}
+          {/* BEO-401: Database coming soon — hiding Add Database flow while Neon integration is built */}
+          <div style={{
+            textAlign: 'center',
+            padding: '2rem',
+            color: 'var(--color-text-secondary)',
+            fontSize: '14px'
+          }}>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔧</div>
+            <p style={{ fontWeight: 500, color: 'var(--color-text-primary)',
+              marginBottom: '6px' }}>
+              Database coming soon
+            </p>
+            <p>
+              We're upgrading our database infrastructure.
+              Check back shortly.
+            </p>
+          </div>
 
           {error && (
             <p className="flex items-center justify-center gap-1.5 text-xs text-red-500">
@@ -476,71 +374,6 @@ export function DatabasePanel({
             </p>
           )}
         </div>
-
-        {/* BYO Supabase modal */}
-        {showByoModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="relative w-full max-w-md rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-2xl">
-              <button
-                onClick={() => setShowByoModal(false)}
-                className="absolute right-4 top-4 rounded-lg p-1 text-[#9ca3af] transition-colors hover:text-[#1a1a1a]"
-              >
-                <X size={16} />
-              </button>
-
-              <h3 className="mb-1 text-base font-semibold text-[#1a1a1a]">
-                Connect your Supabase
-              </h3>
-              <p className="mb-5 text-xs text-[#9ca3af]">
-                Enter your project URL and anon key. We never store your service role key.
-              </p>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-[#6b7280]">
-                    Project URL
-                  </label>
-                  <input
-                    value={byoUrl}
-                    onChange={(e) => setByoUrl(e.target.value)}
-                    placeholder="https://xxx.supabase.co"
-                    className="h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#F97316]/50"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-[#6b7280]">
-                    Anon Key
-                  </label>
-                  <input
-                    value={byoAnonKey}
-                    onChange={(e) => setByoAnonKey(e.target.value)}
-                    placeholder="eyJ..."
-                    className="h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#F97316]/50"
-                  />
-                </div>
-              </div>
-
-              <button
-                onClick={() => void handleByoConnect()}
-                disabled={byoConnecting || !byoUrl.trim() || !byoAnonKey.trim()}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
-              >
-                {byoConnecting ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Link2 size={14} />
-                )}
-                {byoConnecting ? "Connecting..." : "Connect"}
-              </button>
-
-              {error && (
-                <p className="mt-3 flex items-center gap-1.5 text-xs text-red-500">
-                  <AlertCircle size={12} /> {error}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Toast */}
         {toast && (
