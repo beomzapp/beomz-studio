@@ -165,9 +165,10 @@ async function requestJson<TResponse>(
 ): Promise<TResponse> {
   const accessToken = await getAccessToken();
   const url = `${getApiBaseUrl()}${path}`;
+  const method = (init.method ?? "GET").toUpperCase();
   const headers = {
     authorization: `Bearer ${accessToken}`,
-    "content-type": "application/json",
+    ...(method !== "GET" ? { "content-type": "application/json" } : {}),
     ...(init.headers ?? {}),
   };
 
