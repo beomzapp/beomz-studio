@@ -21,6 +21,35 @@ import { fixFile } from "../lib/api";
 
 export type { WcStatus };
 
+// BEO-421: Stale stub filenames that Sonnet sometimes generates when shortening
+// npm package paths to local relative imports. Deleted from the WebContainer
+// before each new iteration so old broken files don't shadow the new build.
+const STALE_FILENAMES_TO_DELETE = [
+  "serverless.tsx", "serverless.ts",
+  "supabase.tsx", "supabase.ts",
+  "supabase-js.tsx", "supabase-js.ts",
+  "ui.tsx", "ui.ts",
+  "auth.tsx", "auth.ts",
+  "db.tsx", "db.ts",
+  "client.tsx", "client.ts",
+  "neon.tsx", "neon.ts",
+  "neon-auth.tsx", "neon-auth.ts",
+  "neon-js.tsx", "neon-js.ts",
+];
+
+async function deleteStaleStubFiles(
+  wc: import("@webcontainer/api").WebContainer,
+  generatedDir: string,
+): Promise<void> {
+  for (const filename of STALE_FILENAMES_TO_DELETE) {
+    try {
+      await wc.fs.rm(`${generatedDir}/${filename}`);
+    } catch {
+      // File doesn't exist — ignore
+    }
+  }
+}
+
 export interface WcPreviewState {
   status: WcStatus;
   previewUrl: string | null;
@@ -98,6 +127,17 @@ export function useWebContainerPreview(
       const { wc } = instance;
 
       // Mount the full file tree (scaffold + generated files + runtime.json + DB env).
+      // BEO-421: delete stale stub files from the previous build before mounting.
+      const firstFilePath = currentFiles[0]?.path
+        .replaceAll("\\", "/")
+        .replace(/^\.\//, "")
+        .replace(/\/+/g, "/") ?? "";
+      const generatedDir = firstFilePath.includes("/")
+        ? firstFilePath.slice(0, firstFilePath.lastIndexOf("/"))
+        : "";
+      if (generatedDir) {
+        await deleteStaleStubFiles(wc, generatedDir);
+      }
       const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
       await wc.mount(tree);
 
