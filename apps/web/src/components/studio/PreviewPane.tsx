@@ -6,32 +6,18 @@ import {
   Tablet,
   RefreshCw,
   Zap,
-  Check,
   AlertTriangle,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────
-// BEO-454: First-build shimmer checklist helpers
+// BEO-454/455: Progress bar milestones (% at start of each phase)
 // ─────────────────────────────────────────────
-
-const INITIAL_BUILD_STEPS = [
-  "Planning your app",
-  "Writing the code",
-  "Polishing details",
-  "Launching preview",
-] as const;
 
 /** Progress percentage at the START of each step (before it completes). */
 const STEP_PROGRESS_START = [5, 15, 75, 90] as const;
 
 /** Milliseconds each step lasts before advancing (initial build timings). */
 const STEP_DURATIONS_MS = [30_000, 180_000, 60_000, 30_000] as const;
-
-function formatElapsed(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 import { cn } from "../../lib/cn";
 import { buildStudioPreviewHtml } from "../../lib/studio-preview";
@@ -203,7 +189,6 @@ export function PreviewPane({
   neonDbUrl,
   buildErrorMessage,
   onRetry,
-  creditsUsed,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
   const wcIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -332,11 +317,9 @@ export function PreviewPane({
     !!(files && files.length > 0) &&
     (wcIsLoading || !wcReadyConfirmed);
 
-  // ── BEO-454: First-build shimmer checklist + progress bar ───────────────
+  // ── BEO-454/455: Progress bar only (shimmer checklist moved to chat panel) ─
   const firstBuildActive = isBuilding && !wcReadyConfirmed;
 
-  const [activeStep, setActiveStep] = useState(0);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [progressPct, setProgressPct] = useState(5);
   const [showProgressBar, setShowProgressBar] = useState(false);
   const buildWasActiveRef = useRef(false);
@@ -346,41 +329,26 @@ export function PreviewPane({
     if (!firstBuildActive) {
       if (buildWasActiveRef.current) {
         buildWasActiveRef.current = false;
-        // Don't jump to 100% here — wait for wcReadyConfirmed (see effect below)
       }
       return;
     }
     if (buildWasActiveRef.current) return;
     buildWasActiveRef.current = true;
 
-    setActiveStep(0);
-    setElapsedSeconds(0);
     setProgressPct(STEP_PROGRESS_START[0]);
     setShowProgressBar(true);
     if (progressBarHideTimerRef.current) clearTimeout(progressBarHideTimerRef.current);
-
-    const start = Date.now();
-    const intervalId = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
-    }, 1000);
 
     let runningTotal = 0;
     const timers: ReturnType<typeof setTimeout>[] = [];
     for (let i = 0; i < STEP_DURATIONS_MS.length - 1; i++) {
       runningTotal += STEP_DURATIONS_MS[i];
-      const nextStep = i + 1;
-      const nextProgress = STEP_PROGRESS_START[nextStep];
+      const nextProgress = STEP_PROGRESS_START[i + 1];
       const delay = runningTotal;
-      timers.push(
-        setTimeout(() => {
-          setActiveStep(nextStep);
-          setProgressPct(nextProgress);
-        }, delay),
-      );
+      timers.push(setTimeout(() => setProgressPct(nextProgress), delay));
     }
 
     return () => {
-      clearInterval(intervalId);
       for (const t of timers) clearTimeout(t);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -476,7 +444,7 @@ export function PreviewPane({
               "absolute inset-0 h-full w-full bg-white",
               iframeFadeIn && "preview-fade-in",
             )}
-            style={{ visibility: showLoadingOverlay ? "hidden" : "visible" }}
+            style={{ visibility: (showLoadingOverlay || (isBuilding && !wcReadyConfirmed)) ? "hidden" : "visible" }}
             referrerPolicy="no-referrer"
             sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
             src={activeFrame.src}
@@ -596,7 +564,7 @@ export function PreviewPane({
                     overflowY: "auto",
                     width: `${vpW}px`,
                     height: `${vpH}px`,
-                    visibility: showLoadingOverlay ? "hidden" : "visible",
+                    visibility: (showLoadingOverlay || (isBuilding && !wcReadyConfirmed)) ? "hidden" : "visible",
                   }}
                   sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
                   title={`${viewMode} preview`}
@@ -733,75 +701,6 @@ export function PreviewPane({
       <div className={cn("relative min-h-0 flex-1 overflow-auto", viewMode !== "web" && "p-4 md:p-6")}>
         {viewMode === "web" ? renderWebView() : renderFramedView()}
       </div>
-
-      {/* BEO-454: First-build shimmer overlay — shimmer checklist, elapsed timer, credit estimate.
-          BEO-451: never show for iterations — isBuilding is false once files exist. */}
-      {(isBuilding && !wcReadyConfirmed) && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#faf9f6]">
-          <div className="flex w-64 flex-col gap-5">
-            {/* B logo */}
-            <div className="flex items-center gap-3">
-              <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center">
-                <div className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/15" />
-                <div className="absolute inset-1.5 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
-                <span className="text-sm font-bold text-[#F97316]">B</span>
-              </div>
-              <span className="text-sm font-semibold text-[#1a1a1a]">Building your app…</span>
-            </div>
-
-            {/* Shimmer checklist */}
-            <div className="flex flex-col gap-2">
-              {INITIAL_BUILD_STEPS.map((label, idx) => {
-                const isDone = idx < activeStep;
-                const isActive = idx === activeStep;
-                const isFuture = idx > activeStep;
-                return (
-                  <div
-                    key={label}
-                    className="flex items-center gap-2.5"
-                    style={{ opacity: isFuture ? 0.3 : 1 }}
-                  >
-                    {/* Step icon */}
-                    <div className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
-                      {isDone ? (
-                        <Check className="h-3.5 w-3.5 text-[#9ca3af]" strokeWidth={2.5} />
-                      ) : isActive ? (
-                        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F97316]" />
-                      ) : null}
-                    </div>
-                    {/* Step label */}
-                    <span
-                      className={cn(
-                        "text-sm",
-                        isDone && "text-[#9ca3af]",
-                        isActive && "build-shimmer-text font-medium",
-                        isFuture && "text-[#6b7280]",
-                      )}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Time estimate + elapsed */}
-            <p className="text-[11px] text-[#9ca3af]">
-              Usually takes 3–5 min
-              {elapsedSeconds > 0 && (
-                <> · {formatElapsed(elapsedSeconds)} elapsed</>
-              )}
-            </p>
-
-            {/* Credit estimate */}
-            <p className="text-[11px] text-[#9ca3af]">
-              {typeof creditsUsed === "number"
-                ? `${creditsUsed.toFixed(1)} credits used`
-                : "~40–55 credits"}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

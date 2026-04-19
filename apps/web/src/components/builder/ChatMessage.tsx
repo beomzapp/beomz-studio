@@ -5,7 +5,6 @@
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send } from "lucide-react";
-import { CHECKLIST_LABELS } from "../../lib/buildStatusCopy";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
 
@@ -80,32 +79,94 @@ function ElapsedTimer({
   );
 }
 
-// ─── Pending card (before stage_preamble arrives) ────────────────────────────
+// ─── Pending card (BEO-455: animated shimmer checklist in chat) ──────────────
+
+const SHIMMER_STEPS = [
+  "Planning your app",
+  "Writing the code",
+  "Polishing details",
+  "Launching preview",
+] as const;
+
+const SHIMMER_STEP_DURATIONS_MS = [30_000, 180_000, 60_000, 30_000] as const;
+
+function formatShimmerElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export function BuildingShimmer() {
+  const [activeStep, setActiveStep] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    const start = Date.now();
+    const intervalId = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+
+    let runningTotal = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < SHIMMER_STEP_DURATIONS_MS.length - 1; i++) {
+      runningTotal += SHIMMER_STEP_DURATIONS_MS[i];
+      const nextStep = i + 1;
+      timers.push(setTimeout(() => setActiveStep(nextStep), runningTotal));
+    }
+
+    return () => {
+      clearInterval(intervalId);
+      for (const t of timers) clearTimeout(t);
+    };
+  }, []);
+
   return (
     <div className="flex items-start gap-2 py-1">
       <BAvatar />
       <div className="min-w-0 flex-1">
-        <div className="rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-1 pr-16 opacity-60">
+        <div className="rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2.5">
           <ul className="space-y-0">
-            {(
-              [
-                ["planning", CHECKLIST_LABELS.planning],
-                ["writing", CHECKLIST_LABELS.writing],
-                ["polishing", CHECKLIST_LABELS.polishing],
-                ["deploying", CHECKLIST_LABELS.deploying],
-              ] as const
-            ).map(([id, label]) => (
-              <li key={id} className="flex min-h-[40px] items-center gap-3">
-                <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
-                  <span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" />
-                </span>
-                <span className="text-[15px] text-zinc-400">{label}</span>
-              </li>
-            ))}
+            {SHIMMER_STEPS.map((label, idx) => {
+              const isDone = idx < activeStep;
+              const isActive = idx === activeStep;
+              const isFuture = idx > activeStep;
+              return (
+                <li
+                  key={label}
+                  className="flex min-h-[40px] items-center gap-3"
+                  style={{ opacity: isFuture ? 0.3 : 1 }}
+                >
+                  <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+                    {isDone ? (
+                      <span className="text-[15px] text-emerald-600/70">✓</span>
+                    ) : isActive ? (
+                      <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+                    ) : (
+                      <span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" />
+                    )}
+                  </span>
+                  <span
+                    className={
+                      isDone
+                        ? "text-[15px] text-zinc-400"
+                        : isActive
+                          ? "build-shimmer-text text-[15px] font-medium"
+                          : "text-[15px] text-zinc-400"
+                    }
+                  >
+                    {label}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
-          <p className="pb-1 text-xs text-zinc-400">Starting…</p>
+          <div className="mt-1 space-y-0.5">
+            <p className="text-xs text-zinc-400">
+              Usually takes 3–5 min
+              {elapsedSeconds > 0 && ` · ${formatShimmerElapsed(elapsedSeconds)} elapsed`}
+            </p>
+            <p className="text-xs text-zinc-400">~40–55 credits</p>
+          </div>
         </div>
       </div>
     </div>

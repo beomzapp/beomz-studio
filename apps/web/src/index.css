@@ -90,18 +90,24 @@ body {
   animation: orb-pulse 1.5s ease-in-out infinite;
 }
 
-/* BEO-454: First-build overlay shimmer sweep (cream background, light text) */
+/* BEO-455: Revised first-build shimmer — right→left, transparent ghost highlight, 2.5s */
 @keyframes build-shimmer {
-  0% { background-position: -200% center; }
-  100% { background-position: 200% center; }
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
 }
 .build-shimmer-text {
-  background: linear-gradient(90deg, #888 0%, #fff 40%, #fff 60%, #888 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(0,0,0,0.7) 0%,
+    rgba(0,0,0,0.15) 40%,
+    rgba(0,0,0,0.15) 60%,
+    rgba(0,0,0,0.7) 100%
+  );
   background-size: 200% auto;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: build-shimmer 1.8s linear infinite;
+  animation: build-shimmer 2.5s linear infinite;
 }
 
 /* BEO-454: Preview iframe fade-in on first reveal */
