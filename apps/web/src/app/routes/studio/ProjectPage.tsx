@@ -113,6 +113,10 @@ export function ProjectPage() {
           });
       }
     },
+    onOutOfCredits: (isHardBlock) => {
+      setIsHardBlockCredits(isHardBlock);
+      setShowOutOfCreditsModal(true);
+    },
   });
 
   // ─── Build / preview state ────────────────────────────────────────────────
@@ -141,6 +145,7 @@ export function ProjectPage() {
 
   const { credits, deductOptimistic, refresh: refreshCredits } = useCredits();
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
+  const [isHardBlockCredits, setIsHardBlockCredits] = useState(false);
 
   // ─── Panel layout state ───────────────────────────────────────────────────
 
@@ -304,6 +309,7 @@ export function ProjectPage() {
   const handleSendMessage = useCallback(
     (text: string, imageUrl?: string) => {
       if (credits && credits.balance <= 0) {
+        setIsHardBlockCredits(false);
         setShowOutOfCreditsModal(true);
         return;
       }
@@ -754,6 +760,7 @@ export function ProjectPage() {
         onCloseShareModal={() => setShowShareModal(false)}
         showOutOfCreditsModal={showOutOfCreditsModal}
         onCloseOutOfCreditsModal={() => setShowOutOfCreditsModal(false)}
+        isHardBlock={isHardBlockCredits}
       />
 
       {showPublishModal && projectId && (

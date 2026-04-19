@@ -25,8 +25,8 @@ const PLANS: Plan[] = [
     id: "free",
     name: "Free",
     priceMonthly: 0,
-    credits: "10 credits on signup",
-    bonus: "one-time grant",
+    credits: "200 credits to start",
+    bonus: "one-time only",
     features: [
       "1 project",
       "Basic templates",
@@ -38,8 +38,8 @@ const PLANS: Plan[] = [
     id: "starter",
     name: "Pro Starter",
     priceMonthly: 19,
-    credits: "500 credits/mo",
-    bonus: "+ 500 rollover",
+    credits: "2,000 credits/mo",
+    bonus: "",
     features: [
       "5 projects",
       "All templates",
@@ -52,8 +52,8 @@ const PLANS: Plan[] = [
     id: "builder",
     name: "Pro Builder",
     priceMonthly: 39,
-    credits: "1,200 credits/mo",
-    bonus: "+ 2,400 rollover",
+    credits: "4,000 credits/mo",
+    bonus: "",
     features: [
       "Unlimited projects",
       "All templates",
@@ -69,8 +69,8 @@ const PLANS: Plan[] = [
     id: "business",
     name: "Business",
     priceMonthly: 199,
-    credits: "6,000 credits/mo",
-    bonus: "+ 18,000 rollover",
+    credits: "20,000 credits/mo",
+    bonus: "",
     features: [
       "Everything in Pro Builder",
       "Dedicated support",
@@ -83,7 +83,7 @@ const PLANS: Plan[] = [
 ];
 
 const CREDITS_TOOLTIP =
-  "1 credit ≈ a small edit or tweak. A full app build uses 3–30 credits depending on complexity.";
+  "1 credit ≈ a small tweak. A full app build uses 40–55 credits.";
 
 const ANNUAL_DISCOUNT = 0.8; // 20% off
 
@@ -224,7 +224,9 @@ export function PricingModal() {
                         </span>
                       </span>
                     </div>
-                    <div className="text-xs text-zinc-400">{plan.bonus}</div>
+                    {plan.bonus && (
+                      <div className="text-xs text-zinc-400">{plan.bonus}</div>
+                    )}
                   </div>
 
                   {/* Features */}
@@ -285,22 +287,29 @@ const TOPUP_PACKS = [
     id: "starter",
     label: "Starter Pack",
     price: "$5",
-    credits: "50 credits",
+    credits: "400 credits",
     priceId: "price_1TMrSK8PEPiIN5kIA4XBE0t4",
   },
   {
-    id: "growth",
-    label: "Growth Pack",
+    id: "builder",
+    label: "Builder Pack",
     price: "$12",
-    credits: "150 credits",
+    credits: "1,000 credits",
     priceId: "price_1TMrU58PEPiIN5kIzrCXmTnw",
   },
   {
     id: "power",
     label: "Power Pack",
     price: "$29",
-    credits: "400 credits",
+    credits: "2,500 credits",
     priceId: "price_1TMrVf8PEPiIN5kIphG84meu",
+  },
+  {
+    id: "mega",
+    label: "Mega Pack",
+    price: "$59",
+    credits: "5,000 credits",
+    priceId: "price_mega_5000",
   },
 ] as const;
 
@@ -327,7 +336,7 @@ function TopupSection({ onError }: { onError: (msg: string | null) => void }) {
         <span className="text-sm font-semibold text-zinc-900">Need more credits?</span>
         <span className="text-xs text-zinc-400">One-time top-ups — never expire</span>
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {TOPUP_PACKS.map((pack) => (
           <div
             key={pack.id}

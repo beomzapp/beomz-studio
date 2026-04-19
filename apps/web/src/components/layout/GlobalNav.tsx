@@ -215,7 +215,7 @@ interface CreditPillProps {
 }
 
 function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
-  const totalBalance = Math.round(credits.balance);
+  const totalBalance = Math.floor(credits.balance);
   const monthly = Math.round(credits.monthly ?? 0);
   const rollover = Math.round(credits.rollover ?? 0);
   const topup = Math.round(credits.topup ?? 0);
@@ -322,7 +322,7 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
         </div>
 
         <p className="mt-2 text-[10px] leading-relaxed text-zinc-400">
-          1 credit &asymp; a small edit. A full app build uses 3&ndash;30 credits.
+          1 credit &asymp; a small tweak. A full app build uses 40&ndash;55 credits.
         </p>
 
         <button

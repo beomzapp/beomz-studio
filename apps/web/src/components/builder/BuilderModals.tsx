@@ -4,12 +4,15 @@
  * Light mode.
  */
 import { X, Zap } from "lucide-react";
+import { usePricingModal } from "../../contexts/PricingModalContext";
 
 interface BuilderModalsProps {
   showShareModal: boolean;
   onCloseShareModal: () => void;
   showOutOfCreditsModal?: boolean;
   onCloseOutOfCreditsModal?: () => void;
+  /** BEO-439: true = hard block (build blocked before starting); false = soft block (build completed, now out) */
+  isHardBlock?: boolean;
 }
 
 export function BuilderModals({
@@ -17,7 +20,15 @@ export function BuilderModals({
   onCloseShareModal,
   showOutOfCreditsModal = false,
   onCloseOutOfCreditsModal,
+  isHardBlock = false,
 }: BuilderModalsProps) {
+  const { openPricingModal } = usePricingModal();
+
+  const handleBuyCredits = () => {
+    onCloseOutOfCreditsModal?.();
+    openPricingModal();
+  };
+
   return (
     <>
       {/* Share modal */}
@@ -53,38 +64,53 @@ export function BuilderModals({
       {showOutOfCreditsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="relative w-full max-w-sm rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-2xl">
-            <button
-              onClick={onCloseOutOfCreditsModal}
-              className="absolute top-4 right-4 rounded-lg p-1 text-[#9ca3af] transition-colors hover:text-[#1a1a1a]"
-            >
-              <X size={16} />
-            </button>
+            {!isHardBlock && (
+              <button
+                onClick={onCloseOutOfCreditsModal}
+                className="absolute top-4 right-4 rounded-lg p-1 text-[#9ca3af] transition-colors hover:text-[#1a1a1a]"
+              >
+                <X size={16} />
+              </button>
+            )}
 
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F97316]/10">
               <Zap size={24} className="text-[#F97316]" />
             </div>
 
-            <h3 className="mb-2 text-lg font-bold text-[#1a1a1a]">
-              Out of credits
-            </h3>
-            <p className="text-sm leading-relaxed text-[#6b7280]">
-              You've used all your credits for this period.
-              Upgrade your plan or purchase a top-up pack to keep building.
-            </p>
+            {isHardBlock ? (
+              <>
+                <h3 className="mb-2 text-lg font-bold text-[#1a1a1a]">
+                  Credits required
+                </h3>
+                <p className="text-sm leading-relaxed text-[#6b7280]">
+                  Add credits or upgrade your plan to continue building.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="mb-2 text-lg font-bold text-[#1a1a1a]">
+                  You're out of credits
+                </h3>
+                <p className="text-sm leading-relaxed text-[#6b7280]">
+                  Your last build completed but you've run out of credits.
+                  Top up or upgrade to keep building.
+                </p>
+              </>
+            )}
 
             <div className="mt-6 flex flex-col gap-2">
+              <button
+                onClick={handleBuyCredits}
+                className="flex w-full items-center justify-center rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+              >
+                Buy credits
+              </button>
               <a
                 href="/studio/settings"
-                className="flex w-full items-center justify-center rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+                className="flex w-full items-center justify-center rounded-xl border border-[#e5e7eb] px-4 py-2.5 text-sm font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6]"
               >
                 Upgrade plan
               </a>
-              <button
-                onClick={onCloseOutOfCreditsModal}
-                className="w-full rounded-xl border border-[#e5e7eb] px-4 py-2.5 text-sm font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6]"
-              >
-                Maybe later
-              </button>
             </div>
           </div>
         </div>

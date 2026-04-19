@@ -302,6 +302,8 @@ export interface UseBuildChatOptions {
   onProjectIdResolved?: (projectId: string, projectName: string, projectIcon: string | null) => void;
   onBuildStatus?: (status: BuildStatusResponse) => void;
   onBuildStarted?: (response: StartBuildResponse) => void;
+  /** BEO-439: called when credits are insufficient. isHardBlock=true = build blocked before start; false = exhausted mid-session */
+  onOutOfCredits?: (isHardBlock: boolean) => void;
 }
 
 export function useBuildChat(projectId: string, options: UseBuildChatOptions = {}) {
@@ -467,6 +469,14 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       switch (event.type) {
         case "intent_detected":
           break;
+
+        case "insufficient_credits": {
+          // BEO-439: hard block — build was rejected before starting due to insufficient credits
+          setIsBuilding(false);
+          activeBuildingMsgIdRef.current = null;
+          optionsRef.current.onOutOfCredits?.(true);
+          break;
+        }
 
         case "pre_build_ack": {
           // BEO-392: record internal state only — NO message pushed to chat.
@@ -915,6 +925,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           }
           setIsBuilding(false);
           activeBuildingMsgIdRef.current = null;
+          // BEO-439: soft block — build completed but credits exhausted
+          if (event.code === "credits_exhausted") {
+            optionsRef.current.onOutOfCredits?.(false);
+          }
           break;
 
         case "stage_classifying":

@@ -679,7 +679,7 @@ export function DatabasePanel({
                   <p className={cn("text-[11px] font-medium leading-snug", storageUrgent ? "text-amber-800" : "text-[#374151]")}>
                     {storageUrgent
                       ? "Storage almost full — upgrade to avoid data loss"
-                      : "Need more storage? Upgrade to Pro for 5GB"}
+                      : "Need more storage? Upgrade to Pro Starter (2,000 credits/mo) or higher"}
                   </p>
                 </div>
                 <button

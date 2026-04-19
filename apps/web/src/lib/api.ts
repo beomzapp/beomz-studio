@@ -468,7 +468,7 @@ export async function getDbRows(
   table: string,
 ): Promise<DbRowsResponse> {
   return requestJson<DbRowsResponse>(
-    `/projects/${projectId}/db/rows?table=${encodeURIComponent(table)}`,
+    `/projects/${projectId}/db/data?table=${encodeURIComponent(table)}`,
     { method: "GET" },
   );
 }

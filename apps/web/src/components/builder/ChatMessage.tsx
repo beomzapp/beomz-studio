@@ -304,7 +304,7 @@ function SummaryFooterRow({
         )}
         {showFooter && (
           <span>
-            {formatDuration(durationMs!)} · {creditsUsed} credits used
+            {formatDuration(durationMs!)} · {creditsUsed.toFixed(2)} credits used
           </span>
         )}
         <span className="ml-auto">
