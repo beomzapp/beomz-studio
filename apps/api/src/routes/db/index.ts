@@ -19,6 +19,7 @@ import disableDbRoute from "./disable.js";
 import connectDbRoute from "./connect.js";
 import migrateDbRoute from "./migrate.js";
 import usageDbRoute from "./usage.js";
+import dataDbRoute from "./data.js";
 
 const dbRouter = new Hono();
 
@@ -30,5 +31,6 @@ dbRouter.route("/disable", disableDbRoute);
 dbRouter.route("/connect", connectDbRoute);
 dbRouter.route("/migrate", migrateDbRoute);
 dbRouter.route("/usage", usageDbRoute);
+dbRouter.route("/data", dataDbRoute);
 
 export default dbRouter;

@@ -10,6 +10,22 @@ export interface NeonSchemaTable {
   columns: NeonSchemaColumn[];
 }
 
+export interface NeonTableRowsResult {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+}
+
+export interface NeonProjectUser {
+  id: number;
+  email: string;
+  name: string | null;
+  created_at: string;
+}
+
+export interface NeonProjectUserRow extends NeonProjectUser {
+  password_hash: string;
+}
+
 function createSqlClient(connectionString: string) {
   return neon(connectionString);
 }
@@ -17,6 +33,13 @@ function createSqlClient(connectionString: string) {
 function toNumber(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function assertSafeIdentifier(identifier: string): string {
+  if (!/^[A-Za-z0-9_]+$/.test(identifier)) {
+    throw new Error("Invalid table name");
+  }
+  return identifier;
 }
 
 export async function getNeonSchemaTableList(
@@ -51,6 +74,104 @@ export async function getNeonSchemaTableList(
     table_name,
     columns,
   }));
+}
+
+export async function fetchTableRows(
+  connectionString: string,
+  tableName: string,
+): Promise<NeonTableRowsResult> {
+  const safeTableName = assertSafeIdentifier(tableName);
+  const sql = createSqlClient(connectionString) as ReturnType<typeof neon> & {
+    query: <T extends Record<string, unknown>>(query: string, params?: unknown[]) => Promise<T[]>;
+  };
+
+  const columnsResult = await sql.query<{ column_name: string }>(
+    `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = $1
+      ORDER BY ordinal_position;
+    `,
+    [safeTableName],
+  );
+  const columns = columnsResult.map((column) => column.column_name);
+
+  if (columns.length === 0) {
+    throw new Error("Table not found");
+  }
+
+  const rows = await sql.query<Record<string, unknown>>(
+    `SELECT * FROM "${safeTableName}" LIMIT 100;`,
+  );
+
+  return { rows, columns };
+}
+
+export async function createUsersTable(connectionString: string): Promise<void> {
+  const sql = createSqlClient(connectionString);
+  await sql`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `;
+}
+
+export async function getUserByEmail(
+  connectionString: string,
+  email: string,
+): Promise<NeonProjectUserRow | null> {
+  const sql = createSqlClient(connectionString);
+  const rows = await sql`
+    SELECT id, email, password_hash, name, created_at
+    FROM users
+    WHERE email = ${email}
+    LIMIT 1;
+  ` as NeonProjectUserRow[];
+
+  return rows[0] ?? null;
+}
+
+export async function getUserById(
+  connectionString: string,
+  id: number,
+): Promise<NeonProjectUser | null> {
+  const sql = createSqlClient(connectionString);
+  const rows = await sql`
+    SELECT id, email, name, created_at
+    FROM users
+    WHERE id = ${id}
+    LIMIT 1;
+  ` as NeonProjectUser[];
+
+  return rows[0] ?? null;
+}
+
+export async function insertUser(
+  connectionString: string,
+  input: {
+    email: string;
+    passwordHash: string;
+    name?: string | null;
+  },
+): Promise<NeonProjectUser> {
+  const sql = createSqlClient(connectionString);
+  const rows = await sql`
+    INSERT INTO users (email, password_hash, name)
+    VALUES (${input.email}, ${input.passwordHash}, ${input.name ?? null})
+    RETURNING id, email, name, created_at;
+  ` as NeonProjectUser[];
+
+  const user = rows[0];
+  if (!user) {
+    throw new Error("Failed to create user");
+  }
+
+  return user;
 }
 
 export async function getNeonUsage(
