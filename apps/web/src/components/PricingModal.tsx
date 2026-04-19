@@ -288,28 +288,28 @@ const TOPUP_PACKS = [
     label: "Starter Pack",
     price: "$5",
     credits: "400 credits",
-    priceId: "price_1TMrSK8PEPiIN5kIA4XBE0t4",
+    priceId: "price_1TNwno8PEPiIN5kIudRqO4nJ",
   },
   {
     id: "builder",
     label: "Builder Pack",
     price: "$12",
     credits: "1,000 credits",
-    priceId: "price_1TMrU58PEPiIN5kIzrCXmTnw",
+    priceId: "price_1TNwnx8PEPiIN5kITRRNpix2",
   },
   {
     id: "power",
     label: "Power Pack",
     price: "$29",
     credits: "2,500 credits",
-    priceId: "price_1TMrVf8PEPiIN5kIphG84meu",
+    priceId: "price_1TNwo58PEPiIN5kIbPCXQEIk",
   },
   {
     id: "mega",
     label: "Mega Pack",
     price: "$59",
     credits: "5,000 credits",
-    priceId: "price_mega_5000",
+    priceId: "price_1TNwoB8PEPiIN5kIizpQPz7a",
   },
 ] as const;
 
