@@ -154,6 +154,8 @@ interface PreviewPaneProps {
   onPreviewServerReady?: () => void;
   /** BEO-340: Build ended in fallback (no AI files) — show error state instead of preview. */
   buildFailed?: boolean;
+  /** BEO-452: Neon connection string — re-injected into .env.local after every hot-swap. */
+  neonDbUrl?: string | null;
 }
 
 export function PreviewPane({
@@ -167,6 +169,7 @@ export function PreviewPane({
   onFilesWritten,
   onPreviewServerReady,
   buildFailed = false,
+  neonDbUrl,
 }: PreviewPaneProps) {
   const isBuilding = !!(project?.id && (!files || files.length === 0));
   const wcIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -191,6 +194,7 @@ export function PreviewPane({
     undefined, // dbEnv is injected separately via ProjectPage
     generationId,
     onPreviewServerReady,
+    neonDbUrl,
   );
 
   // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──

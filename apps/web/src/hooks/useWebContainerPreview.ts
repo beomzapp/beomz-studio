@@ -69,6 +69,8 @@ export function useWebContainerPreview(
   generationId?: string | null,
   /** BEO-391: fired only when Vite binds the dev port (not on every HMR write). */
   onServerReady?: () => void,
+  /** BEO-452: Neon connection string to re-inject after every hot-swap wc.mount(). */
+  neonDbUrl?: string | null,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -113,6 +115,10 @@ export function useWebContainerPreview(
   const dbEnvRef = useRef(dbEnv);
   dbEnvRef.current = dbEnv;
 
+  // BEO-452: keep neonDbUrl in a ref so startVite ([] deps) reads the live value.
+  const neonDbUrlRef = useRef(neonDbUrl);
+  neonDbUrlRef.current = neonDbUrl;
+
   // BEO-375: keep generationId in a ref for access inside stable closures.
   const generationIdRef = useRef(generationId);
   generationIdRef.current = generationId;
@@ -141,6 +147,16 @@ export function useWebContainerPreview(
       }
       const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
       await wc.mount(tree);
+
+      // BEO-452: Re-inject Neon env vars after every hot-swap wc.mount() so they
+      // survive HMR reload. mount() does not preserve files absent from the tree.
+      if (neonDbUrlRef.current) {
+        const envLines = [
+          `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
+          `VITE_PROJECT_ID=${currentProject.id}`,
+        ];
+        await wc.fs.writeFile(".env.local", envLines.join("\n"));
+      }
 
       // BEO-375: persist source files to IndexedDB so the next page load can
       // skip the API round-trip and mount immediately while npm install is warm.

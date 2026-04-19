@@ -179,6 +179,7 @@ export function ProjectPage() {
   const [dbEnabled, setDbEnabled] = useState(false);
   const [dbProvider, setDbProvider] = useState<string | null>(null);
   const [dbWired, setDbWired] = useState(false);
+  const [neonDbUrl, setNeonDbUrl] = useState<string | null>(null);
 
   // ─── SSE event handler ─────────────────────────────────────────────────────
   // Handles preview overlay, project-name updates, and suggestion chips.
@@ -365,6 +366,8 @@ export function ProjectPage() {
               ".env.local",
               `VITE_DATABASE_URL=${state.neonDbUrl}\nVITE_PROJECT_ID=${projectId}\n`,
             );
+            // BEO-452: store in state so PreviewPane re-injects after hot-swap mounts.
+            setNeonDbUrl(state.neonDbUrl);
           } else if (state.supabaseUrl && state.anonKey) {
             const envContent = [
               `VITE_SUPABASE_URL=${state.supabaseUrl}`,
@@ -667,6 +670,7 @@ export function ProjectPage() {
             onFilesWritten={handleFilesWrittenToWC}
             onPreviewServerReady={notifyPreviewServerReady}
             buildFailed={buildFailed}
+            neonDbUrl={neonDbUrl}
           />
         );
       case "code":
