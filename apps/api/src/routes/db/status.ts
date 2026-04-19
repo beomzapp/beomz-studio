@@ -79,6 +79,16 @@ statusDbRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         nonce: "",
       };
     }
+  } else if (project.db_provider === "neon") {
+    // BEO-428: return the Neon connection string so the frontend can inject
+    // VITE_DATABASE_URL into the WebContainer .env.local on every page load.
+    const limits = await db.getProjectDbLimits(projectId);
+    return c.json({
+      enabled: true,
+      provider: "neon",
+      wired: true,
+      dbUrl: limits?.db_url ?? null,
+    });
   }
 
   return c.json({

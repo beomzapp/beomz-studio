@@ -348,16 +348,22 @@ export function ProjectPage() {
       setDbEnabled(state.database_enabled);
       setDbProvider(state.db_provider);
       setDbWired(state.db_wired);
-      if (state.db_wired && state.supabaseUrl && state.anonKey && isWebContainerSupported()) {
+      if (state.db_wired && isWebContainerSupported()) {
         try {
-          const envContent = [
-            `VITE_SUPABASE_URL=${state.supabaseUrl}`,
-            `VITE_SUPABASE_ANON_KEY=${state.anonKey}`,
-            `VITE_DB_SCHEMA=${state.schemaName ?? "public"}`,
-            "",
-          ].join("\n");
           const { wc } = await getOrBootWebContainer();
-          await wc.fs.writeFile(".env.local", envContent);
+          if (state.db_provider === "neon" && state.neonDbUrl) {
+            // BEO-428: inject Neon connection string so VITE_DATABASE_URL is
+            // available at Vite startup and picked up via env-file hot reload.
+            await wc.fs.writeFile(".env.local", `VITE_DATABASE_URL=${state.neonDbUrl}\n`);
+          } else if (state.supabaseUrl && state.anonKey) {
+            const envContent = [
+              `VITE_SUPABASE_URL=${state.supabaseUrl}`,
+              `VITE_SUPABASE_ANON_KEY=${state.anonKey}`,
+              `VITE_DB_SCHEMA=${state.schemaName ?? "public"}`,
+              "",
+            ].join("\n");
+            await wc.fs.writeFile(".env.local", envContent);
+          }
         } catch (wcErr) {
           console.warn("[ProjectPage] Failed to inject DB env into WebContainer:", wcErr);
         }

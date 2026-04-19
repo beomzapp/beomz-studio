@@ -383,6 +383,8 @@ export interface ProjectDbState {
   supabaseUrl?: string;
   anonKey?: string;
   schemaName?: string;
+  /** BEO-428: Neon connection string — injected as VITE_DATABASE_URL into WC .env.local */
+  neonDbUrl?: string | null;
 }
 
 export async function getProjectDbState(projectId: string): Promise<ProjectDbState> {
@@ -391,6 +393,8 @@ export async function getProjectDbState(projectId: string): Promise<ProjectDbSta
     provider: string | null;
     wired: boolean;
     env?: { url: string; anonKey: string; dbSchema: string } | null;
+    /** BEO-428: Neon connection string returned by status endpoint */
+    dbUrl?: string | null;
   }>(`/projects/${projectId}/db/status`, { method: "GET" });
   return {
     database_enabled: Boolean(status.enabled),
@@ -399,6 +403,7 @@ export async function getProjectDbState(projectId: string): Promise<ProjectDbSta
     supabaseUrl: status.env?.url,
     anonKey: status.env?.anonKey,
     schemaName: status.env?.dbSchema,
+    neonDbUrl: status.dbUrl ?? null,
   };
 }
 
