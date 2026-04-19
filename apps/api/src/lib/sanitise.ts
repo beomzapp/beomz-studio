@@ -16,6 +16,29 @@
 
 import dynamicIconImports from "lucide-react/dynamicIconImports.mjs";
 
+// ── Post-processing stage: Neon import rewrites ─────────────────────────────
+// Maps shortened relative import paths that LLMs generate back to the correct
+// npm package paths. This runs before stub injection so validateAndInjectStubs
+// never sees paths like ./serverless.
+
+const NEON_IMPORT_REWRITES: [RegExp, string][] = [
+  [/from\s+['"]\.\.?\/serverless['"]/g, "from '@neondatabase/serverless'"],
+  [/from\s+['"]\.\.?\/neon['"]/g, "from '@neondatabase/serverless'"],
+  [/from\s+['"]\.\.?\/db['"]/g, "from '@neondatabase/serverless'"],
+  [/from\s+['"]\.\.?\/neon-auth['"]/g, "from '@neondatabase/neon-js/auth'"],
+  [/from\s+['"]\.\.?\/neon-js['"]/g, "from '@neondatabase/neon-js'"],
+];
+
+export function rewriteNeonImports<T extends { content: string }>(files: T[]): T[] {
+  return files.map((file) => {
+    let content = file.content;
+    for (const [pattern, replacement] of NEON_IMPORT_REWRITES) {
+      content = content.replace(pattern, replacement);
+    }
+    return { ...file, content };
+  });
+}
+
 // ── Fixer type ────────────────────────────────────────────────────────────────
 
 interface Fixer {

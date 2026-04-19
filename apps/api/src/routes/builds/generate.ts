@@ -54,7 +54,7 @@ import { CONVERSATIONAL_COST, CREDIT_THRESHOLD, calcCreditCost, calcCostUsd, isA
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { planPhases } from "../../lib/planPhases.js";
 import type { Phase } from "../../lib/planPhases.js";
-import { sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
+import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
   getSchemaTableList,
@@ -383,6 +383,16 @@ export function validateAndInjectStubs(
   }
 
   return { files: stubs.length > 0 ? [...files, ...stubs] : files, missing };
+}
+
+export function postProcessGeneratedFiles(
+  files: StudioFile[],
+  templateId: string,
+): { files: StudioFile[]; missing: string[] } {
+  const rewrittenFiles = rewriteNeonImports(files);
+  const { files: withStubs, missing } = validateAndInjectStubs(rewrittenFiles, templateId);
+  const filteredFiles = filterBlockedGeneratedFiles(withStubs);
+  return { files: filteredFiles, missing };
 }
 
 function readTrace(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
@@ -2890,10 +2900,10 @@ async function _runBuildInBackground(
 
       // Merge: new files are added, updated files override existing ones
       const mergedIterFiles = mergeFiles([...existingFiles], iterResult.files);
-      const { files: iterFinalFilesRaw, missing: iterMissingImports } = validateAndInjectStubs(mergedIterFiles, templateId);
-      // BEO-421: strip any blocked stubs validateAndInjectStubs may have injected
-      // (e.g. if Sonnet imported from './ui', the stub injector would create ui.tsx)
-      const iterFinalFiles = filterBlockedGeneratedFiles(iterFinalFilesRaw);
+      const { files: iterFinalFiles, missing: iterMissingImports } = postProcessGeneratedFiles(
+        mergedIterFiles,
+        templateId,
+      );
       if (iterMissingImports.length > 0) {
         console.warn("[generate] WARNING: missing imports detected in iteration:", iterMissingImports);
         console.log("[generate] generating stub files for missing components...", { count: iterMissingImports.length });
@@ -3204,9 +3214,10 @@ async function _runBuildInBackground(
       mergeFiles(templateFiles, [...(input.existingFiles ?? [])]),
       customised.files,
     );
-    const { files: finalFilesRaw, missing: missingImports } = validateAndInjectStubs(mergedFiles, templateId);
-    // BEO-421: strip any blocked stubs validateAndInjectStubs may have injected
-    const finalFiles = filterBlockedGeneratedFiles(finalFilesRaw);
+    const { files: finalFiles, missing: missingImports } = postProcessGeneratedFiles(
+      mergedFiles,
+      templateId,
+    );
     if (missingImports.length > 0) {
       console.warn("[generate] WARNING: missing imports detected:", missingImports);
       console.log("[generate] generating stub files for missing components...", { count: missingImports.length });

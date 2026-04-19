@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   fixInvalidLucideIcons,
+  rewriteNeonImports,
   sanitiseContent,
   VALID_LUCIDE_ICONS,
 } from "./sanitise.ts";
@@ -193,4 +194,64 @@ test("fixInvalidLucideIcons replaces invalid icon JSX usages with Circle", () =>
   assert.match(output, /<Circle className=\"w-4 h-4\"><\/Circle>/);
   assert.equal(output.includes("<LayoutKanban"), false);
   assert.equal(output.includes("</LayoutKanban>"), false);
+});
+
+test("rewriteNeonImports rewrites ./serverless to @neondatabase/serverless", () => {
+  const [file] = rewriteNeonImports([
+    { path: TEST_PATH, content: "import { neon } from './serverless'\n" },
+  ]);
+  assert.equal(file.content, "import { neon } from '@neondatabase/serverless'\n");
+});
+
+test("rewriteNeonImports rewrites ../serverless to @neondatabase/serverless", () => {
+  const [file] = rewriteNeonImports([
+    { path: TEST_PATH, content: "import { neon } from '../serverless'\n" },
+  ]);
+  assert.equal(file.content, "import { neon } from '@neondatabase/serverless'\n");
+});
+
+test("rewriteNeonImports rewrites ./neon to @neondatabase/serverless", () => {
+  const [file] = rewriteNeonImports([
+    { path: TEST_PATH, content: "import { neon } from './neon'\n" },
+  ]);
+  assert.equal(file.content, "import { neon } from '@neondatabase/serverless'\n");
+});
+
+test("rewriteNeonImports rewrites ./db to @neondatabase/serverless", () => {
+  const [file] = rewriteNeonImports([
+    { path: TEST_PATH, content: "import { neon } from './db'\n" },
+  ]);
+  assert.equal(file.content, "import { neon } from '@neondatabase/serverless'\n");
+});
+
+test("rewriteNeonImports rewrites ./neon-auth to @neondatabase/neon-js/auth", () => {
+  const [file] = rewriteNeonImports([
+    { path: TEST_PATH, content: "import { createAuthClient } from './neon-auth'\n" },
+  ]);
+  assert.equal(file.content, "import { createAuthClient } from '@neondatabase/neon-js/auth'\n");
+});
+
+test("rewriteNeonImports rewrites ./neon-js to @neondatabase/neon-js", () => {
+  const [file] = rewriteNeonImports([
+    { path: TEST_PATH, content: "import { neonConfig } from './neon-js'\n" },
+  ]);
+  assert.equal(file.content, "import { neonConfig } from '@neondatabase/neon-js'\n");
+});
+
+test("rewriteNeonImports leaves non-Neon npm imports unchanged", () => {
+  const input = "import React from 'react'\n";
+  const [file] = rewriteNeonImports([{ path: TEST_PATH, content: input }]);
+  assert.equal(file.content, input);
+});
+
+test("rewriteNeonImports leaves legitimate relative component imports unchanged", () => {
+  const input = "import Button from './components/Button'\n";
+  const [file] = rewriteNeonImports([{ path: TEST_PATH, content: input }]);
+  assert.equal(file.content, input);
+});
+
+test("rewriteNeonImports leaves relative subdirectory imports unchanged", () => {
+  const input = "import setup from './database/setup'\n";
+  const [file] = rewriteNeonImports([{ path: TEST_PATH, content: input }]);
+  assert.equal(file.content, input);
 });

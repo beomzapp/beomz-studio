@@ -12,6 +12,7 @@ const {
   buildIterationSystemPrompt,
   buildSystemPrompt,
   isNpmPackage,
+  postProcessGeneratedFiles,
   validateAndInjectStubs,
 } = await import("./generate.js");
 
@@ -291,4 +292,27 @@ test("save path: filterBlockedGeneratedFiles strips stubs injected by validateAn
   const savedPaths = toSave.map((f) => f.path.replace(/^.*\//, ""));
   assert.equal(savedPaths.includes("ui.tsx"), false, "ui.tsx stub must not be persisted");
   assert.equal(savedPaths.includes("App.tsx"), true, "App.tsx must be kept");
+});
+
+test("pipeline order: rewriteNeonImports runs before validateAndInjectStubs", () => {
+  const fileWithShortNeonImport = {
+    path: "apps/web/src/app/generated/workspace-task/App.tsx",
+    kind: "entry" as const,
+    language: "tsx" as const,
+    content: "import { neon } from './serverless'\nexport default function App() { return null; }\n",
+    source: "ai" as const,
+    locked: false,
+  };
+
+  const { files, missing } = postProcessGeneratedFiles([fileWithShortNeonImport], "workspace-task");
+  const paths = files.map((f) => f.path.replace(/^.*\//, ""));
+  const appFile = files.find((f) => f.path.endsWith("/App.tsx"));
+
+  assert.equal(paths.includes("serverless.tsx"), false, "No serverless.tsx stub should be created");
+  assert.deepEqual(missing, [], "No missing imports should remain after Neon import rewrite");
+  assert.match(
+    appFile?.content ?? "",
+    /from '@neondatabase\/serverless'/,
+    "Short Neon import should be rewritten to package import before stub validation",
+  );
 });
