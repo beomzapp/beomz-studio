@@ -31,7 +31,7 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 import { getFeatureLimits } from "../../lib/features.js";
-import { provisionNeonProject } from "../../lib/neonClient.js";
+import { enableNeonAuth, getNeonProjectBranches, provisionNeonProject } from "../../lib/neonClient.js";
 import { rewireNeonDb } from "./rewire-neon.js";
 
 export function countActiveDbEnabledProjects(
@@ -58,6 +58,8 @@ interface EnableDbRouteDeps {
   insertSchemaRegistry?: typeof insertSchemaRegistry;
   exposeSchemaInPostgREST?: typeof exposeSchemaInPostgREST;
   provisionNeonProject?: typeof provisionNeonProject;
+  getNeonProjectBranches?: typeof getNeonProjectBranches;
+  enableNeonAuth?: typeof enableNeonAuth;
   rewireNeonDb?: typeof rewireNeonDb;
 }
 
@@ -71,6 +73,8 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
   const insertSchemaRegistryFn = deps.insertSchemaRegistry ?? insertSchemaRegistry;
   const exposeSchemaInPostgRESTFn = deps.exposeSchemaInPostgREST ?? exposeSchemaInPostgREST;
   const provisionNeonProjectFn = deps.provisionNeonProject ?? provisionNeonProject;
+  const getNeonProjectBranchesFn = deps.getNeonProjectBranches ?? getNeonProjectBranches;
+  const enableNeonAuthFn = deps.enableNeonAuth ?? enableNeonAuth;
   const rewireNeonDbFn = deps.rewireNeonDb ?? rewireNeonDb;
 
   enableDbRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
@@ -116,6 +120,21 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
       try {
         const projectName = `beomz-${project.id.slice(0, 12)}`;
         const { neonProjectId, connectionUri } = await provisionNeonProjectFn(projectName);
+        const emptyNeonAuth = { baseUrl: "", pubClientKey: "", secretServerKey: "" };
+        let branchId = "";
+        let neonAuth = emptyNeonAuth;
+
+        try {
+          const branches = await getNeonProjectBranchesFn(neonProjectId);
+          const mainBranch = branches.find((branch) => branch.default) ?? branches[0];
+          branchId = mainBranch?.id ?? "";
+          neonAuth = branchId
+            ? await enableNeonAuthFn(neonProjectId, branchId)
+            : emptyNeonAuth;
+        } catch (authErr) {
+          console.error("[db/enable] neon auth setup failed (non-fatal):", authErr);
+          // Non-fatal — DB provisioning should still succeed
+        }
 
         // Mark connected immediately; rewire helper finalizes db_wired + env context.
         await db.updateProject(projectId, {
@@ -143,12 +162,23 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
         const dbWithConnectionUpdate = db as typeof db & {
           updateProjectDbConnection?: (
             projectId: string,
-            patch: { neon_project_id?: string | null; db_url?: string | null },
+            patch: {
+              neon_project_id?: string | null;
+              neon_branch_id?: string | null;
+              db_url?: string | null;
+              neon_auth_base_url?: string | null;
+              neon_auth_pub_key?: string | null;
+              neon_auth_secret_key?: string | null;
+            },
           ) => Promise<void>;
         };
         await dbWithConnectionUpdate.updateProjectDbConnection?.(projectId, {
           neon_project_id: neonProjectId,
+          neon_branch_id: branchId || null,
           db_url: connectionUri,
+          neon_auth_base_url: neonAuth.baseUrl || null,
+          neon_auth_pub_key: neonAuth.pubClientKey || null,
+          neon_auth_secret_key: neonAuth.secretServerKey || null,
         });
 
         await rewireNeonDbFn(projectId, connectionUri);

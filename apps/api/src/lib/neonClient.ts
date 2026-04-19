@@ -53,3 +53,59 @@ export async function deleteNeonProject(neonProjectId: string): Promise<void> {
     console.error("[neon] delete failed:", res.status);
   }
 }
+
+export async function enableNeonAuth(
+  neonProjectId: string,
+  branchId: string,
+): Promise<{
+  baseUrl: string;
+  pubClientKey: string;
+  secretServerKey: string;
+}> {
+  const res = await fetch(
+    `${NEON_API}/projects/${neonProjectId}/branches/${branchId}/auth`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getNeonKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ auth_provider: "better_auth" }),
+    },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    // Non-fatal — log and continue without auth
+    console.error("[neon] auth enable failed:", res.status, err);
+    return { baseUrl: "", pubClientKey: "", secretServerKey: "" };
+  }
+  const data = await res.json() as {
+    base_url?: string;
+    pub_client_key?: string;
+    secret_server_key?: string;
+  };
+  return {
+    baseUrl: data.base_url ?? "",
+    pubClientKey: data.pub_client_key ?? "",
+    secretServerKey: data.secret_server_key ?? "",
+  };
+}
+
+export async function getNeonProjectBranches(
+  neonProjectId: string,
+): Promise<Array<{ id: string; name: string; default: boolean }>> {
+  const res = await fetch(
+    `${NEON_API}/projects/${neonProjectId}/branches`,
+    {
+      headers: { Authorization: `Bearer ${getNeonKey()}` },
+    },
+  );
+  const data = await res.json() as {
+    branches?: Array<{ id?: string; name?: string; default?: boolean }>;
+  };
+  return (data.branches ?? []).map((branch) => ({
+    id: branch.id ?? "",
+    name: branch.name ?? "",
+    default: Boolean(branch.default),
+  }));
+}

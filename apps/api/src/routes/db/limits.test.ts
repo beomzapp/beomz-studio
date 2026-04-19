@@ -76,6 +76,10 @@ function createTestOrgContext(
         extra_rows: 0,
         neon_project_id: null,
         db_url: null,
+        neon_branch_id: null,
+        neon_auth_base_url: null,
+        neon_auth_pub_key: null,
+        neon_auth_secret_key: null,
         created_at: now,
         updated_at: now,
       }),
@@ -195,6 +199,10 @@ test("db enable succeeds when the org has 0 DB-enabled projects", async () => {
         extra_rows: 0,
         neon_project_id: null,
         db_url: null,
+        neon_branch_id: null,
+        neon_auth_base_url: null,
+        neon_auth_pub_key: null,
+        neon_auth_secret_key: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -304,6 +312,10 @@ test("db migrate still returns 402 storage_limit_reached when storage is exhaust
       extra_rows: 0,
       neon_project_id: null,
       db_url: null,
+      neon_branch_id: null,
+      neon_auth_base_url: null,
+      neon_auth_pub_key: null,
+      neon_auth_secret_key: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }),
@@ -372,6 +384,10 @@ test("db migrate no longer returns 402 for row or table limits", async () => {
       extra_rows: 0,
       neon_project_id: null,
       db_url: null,
+      neon_branch_id: null,
+      neon_auth_base_url: null,
+      neon_auth_pub_key: null,
+      neon_auth_secret_key: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }),
@@ -424,6 +440,8 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
     const updateConnectionCalls: Array<{ projectId: string; patch: Record<string, unknown> }> = [];
     const updateCalls: Array<Record<string, unknown>> = [];
     const rewireCalls: Array<{ projectId: string; connectionUri: string }> = [];
+    const branchCalls: string[] = [];
+    const authCalls: Array<{ neonProjectId: string; branchId: string }> = [];
     const orgContext = createTestOrgContext(project, {
       findProjectsByOrgId: async () => [],
       updateProject: async (_id: string, patch: Record<string, unknown>) => {
@@ -447,6 +465,10 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
           extra_rows: 0,
           neon_project_id: null,
           db_url: null,
+          neon_branch_id: null,
+          neon_auth_base_url: null,
+          neon_auth_pub_key: null,
+          neon_auth_secret_key: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -463,6 +485,21 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
           neonProjectId: "neon-proj-1",
           connectionUri: "postgresql://user:pass@host/db",
           pooledConnectionUri: "postgresql://user:pass@pool/db",
+        };
+      },
+      getNeonProjectBranches: async (neonProjectId: string) => {
+        branchCalls.push(neonProjectId);
+        return [
+          { id: "branch-main", name: "main", default: true },
+          { id: "branch-other", name: "feature", default: false },
+        ];
+      },
+      enableNeonAuth: async (neonProjectId: string, branchId: string) => {
+        authCalls.push({ neonProjectId, branchId });
+        return {
+          baseUrl: "https://auth.neon.example",
+          pubClientKey: "pub-auth-key",
+          secretServerKey: "secret-auth-key",
         };
       },
       rewireNeonDb: async (projectId: string, connectionUri: string) => {
@@ -495,12 +532,84 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
         projectId: project.id,
         patch: {
           neon_project_id: "neon-proj-1",
+          neon_branch_id: "branch-main",
           db_url: "postgresql://user:pass@host/db",
+          neon_auth_base_url: "https://auth.neon.example",
+          neon_auth_pub_key: "pub-auth-key",
+          neon_auth_secret_key: "secret-auth-key",
+        },
+      },
+    ]);
+    assert.deepEqual(branchCalls, ["neon-proj-1"]);
+    assert.deepEqual(authCalls, [{ neonProjectId: "neon-proj-1", branchId: "branch-main" }]);
+    assert.deepEqual(rewireCalls, [
+      { projectId: project.id, connectionUri: "postgresql://user:pass@host/db" },
+    ]);
+  } finally {
+    if (originalNeonApiKey === undefined) {
+      delete process.env.NEON_API_KEY;
+    } else {
+      process.env.NEON_API_KEY = originalNeonApiKey;
+    }
+  }
+});
+
+test("db enable remains successful when Neon auth enable throws", async () => {
+  const originalNeonApiKey = process.env.NEON_API_KEY;
+  process.env.NEON_API_KEY = "test-neon-key";
+
+  try {
+    const project = createProject();
+    const updateConnectionCalls: Array<{ projectId: string; patch: Record<string, unknown> }> = [];
+    const rewireCalls: Array<{ projectId: string; connectionUri: string }> = [];
+    const orgContext = createTestOrgContext(project, {
+      findProjectsByOrgId: async () => [],
+      updateProjectDbConnection: async (projectId: string, patch: Record<string, unknown>) => {
+        updateConnectionCalls.push({ projectId, patch });
+      },
+    });
+
+    const app = createEnableApp(orgContext, {
+      provisionNeonProject: async () => ({
+        neonProjectId: "neon-proj-2",
+        connectionUri: "postgresql://user:pass@host/db2",
+        pooledConnectionUri: "postgresql://user:pass@pool/db2",
+      }),
+      getNeonProjectBranches: async () => [{ id: "branch-main", name: "main", default: true }],
+      enableNeonAuth: async () => {
+        throw new Error("auth failure");
+      },
+      rewireNeonDb: async (projectId: string, connectionUri: string) => {
+        rewireCalls.push({ projectId, connectionUri });
+      },
+      isUserDataConfigured: () => false,
+    });
+
+    const response = await app.request(`http://localhost/projects/${project.id}/db/enable`, {
+      method: "POST",
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      success: true,
+      db_provider: "neon",
+      message: "Database provisioned successfully",
+    });
+    assert.deepEqual(updateConnectionCalls, [
+      {
+        projectId: project.id,
+        patch: {
+          neon_project_id: "neon-proj-2",
+          neon_branch_id: "branch-main",
+          db_url: "postgresql://user:pass@host/db2",
+          neon_auth_base_url: null,
+          neon_auth_pub_key: null,
+          neon_auth_secret_key: null,
         },
       },
     ]);
     assert.deepEqual(rewireCalls, [
-      { projectId: project.id, connectionUri: "postgresql://user:pass@host/db" },
+      { projectId: project.id, connectionUri: "postgresql://user:pass@host/db2" },
     ]);
   } finally {
     if (originalNeonApiKey === undefined) {

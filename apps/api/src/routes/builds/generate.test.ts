@@ -33,6 +33,27 @@ test("iteration system prompt injects Neon pg guidance when db_wired=true and pr
   assert.equal(prompt.includes("inline createClient()"), false);
 });
 
+test("iteration system prompt injects Neon Auth guidance when neon auth URL exists", () => {
+  const prompt = buildIterationSystemPrompt(
+    undefined,
+    undefined,
+    true,
+    "neon",
+    "https://auth.neon.example",
+  );
+
+  assert.match(prompt, /Authentication \(Neon Auth — already provisioned\):/);
+  assert.match(prompt, /createAuthClient/);
+  assert.match(prompt, /NeonAuthUIProvider/);
+  assert.match(prompt, /AuthView pathname='sign-in'/);
+});
+
+test("iteration system prompt omits Neon Auth guidance when neon auth URL is missing", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, true, "neon", "");
+
+  assert.equal(prompt.includes("Authentication (Neon Auth — already provisioned):"), false);
+});
+
 test("iteration system prompt does not inject the inline Supabase rule when db_wired=false", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, false);
 

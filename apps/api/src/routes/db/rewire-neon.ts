@@ -3,26 +3,41 @@ import { createStudioDbClient } from "@beomz-studio/studio-db";
 
 const ENV_FILE_PATH = ".env.local";
 
-function upsertDatabaseUrlEnvFile(
+function upsertEnvFile(
   files: readonly StudioFile[],
-  connectionUri: string,
+  envVars: Record<string, string>,
 ): readonly StudioFile[] {
-  const dbLine = `DATABASE_URL=${connectionUri}`;
+  const entries = Object.entries(envVars).filter(([, value]) => value.trim().length > 0);
+  if (entries.length === 0) return files;
+
+  const keys = new Set(entries.map(([key]) => key));
   let updated = false;
 
   const next = files.map((file) => {
     if (file.path !== ENV_FILE_PATH) return file;
 
     const lines = file.content.split(/\r?\n/);
-    const hasDatabaseUrl = lines.some((line) => line.startsWith("DATABASE_URL="));
-    const content = hasDatabaseUrl
-      ? lines.map((line) => (line.startsWith("DATABASE_URL=") ? dbLine : line)).join("\n")
-      : `${file.content.replace(/\s*$/, "")}\n${dbLine}\n`;
+    const seen = new Set<string>();
+
+    const replaced = lines.map((line) => {
+      const eqIndex = line.indexOf("=");
+      if (eqIndex <= 0) return line;
+      const key = line.slice(0, eqIndex);
+      if (!keys.has(key)) return line;
+      seen.add(key);
+      const value = envVars[key] ?? "";
+      return `${key}=${value}`;
+    });
+
+    const missing = entries
+      .filter(([key]) => !seen.has(key))
+      .map(([key, value]) => `${key}=${value}`);
+    const content = [...replaced.filter((line) => line.length > 0), ...missing].join("\n");
 
     updated = true;
     return {
       ...file,
-      content,
+      content: `${content}\n`,
       source: "platform" as const,
       locked: false,
     };
@@ -36,7 +51,7 @@ function upsertDatabaseUrlEnvFile(
       path: ENV_FILE_PATH,
       kind: "config",
       language: "dotenv",
-      content: `${dbLine}\n`,
+      content: `${entries.map(([key, value]) => `${key}=${value}`).join("\n")}\n`,
       source: "platform" as const,
       locked: false,
     },
@@ -63,8 +78,27 @@ export async function rewireNeonDb(
     return;
   }
 
+  const limits = await studioDb.getProjectDbLimits(projectId);
+  const dbUrl = typeof limits?.db_url === "string" && limits.db_url.length > 0
+    ? limits.db_url
+    : connectionUri;
+  const neonAuthBaseUrl = typeof limits?.neon_auth_base_url === "string"
+    ? limits.neon_auth_base_url
+    : "";
+  const neonAuthSecretKey = typeof limits?.neon_auth_secret_key === "string"
+    ? limits.neon_auth_secret_key
+    : "";
+  const neonAuthPubKey = typeof limits?.neon_auth_pub_key === "string"
+    ? limits.neon_auth_pub_key
+    : "";
+
   const files = latestGen.files as readonly StudioFile[];
-  const nextFiles = upsertDatabaseUrlEnvFile(files, connectionUri);
+  const nextFiles = upsertEnvFile(files, {
+    DATABASE_URL: dbUrl,
+    VITE_NEON_AUTH_URL: neonAuthBaseUrl,
+    NEON_AUTH_SECRET: neonAuthSecretKey,
+    NEON_AUTH_PUB_KEY: neonAuthPubKey,
+  });
   const metadata = typeof latestGen.metadata === "object" && latestGen.metadata !== null
     ? latestGen.metadata as Record<string, unknown>
     : {};
@@ -75,6 +109,7 @@ export async function rewireNeonDb(
       ...metadata,
       neon: {
         databaseUrlEnvVar: "DATABASE_URL",
+        authUrlEnvVar: neonAuthBaseUrl ? "VITE_NEON_AUTH_URL" : null,
       },
     },
   });

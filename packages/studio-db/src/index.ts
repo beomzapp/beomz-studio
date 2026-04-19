@@ -415,7 +415,11 @@ export interface ProjectDbLimitsRow extends Record<string, unknown> {
   extra_storage_mb: number;
   extra_rows: number;
   neon_project_id: string | null;
+  neon_branch_id: string | null;
   db_url: string | null;
+  neon_auth_base_url: string | null;
+  neon_auth_pub_key: string | null;
+  neon_auth_secret_key: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -429,7 +433,11 @@ export interface ProjectDbLimitsInsert extends Record<string, unknown> {
   extra_storage_mb?: number;
   extra_rows?: number;
   neon_project_id?: string | null;
+  neon_branch_id?: string | null;
   db_url?: string | null;
+  neon_auth_base_url?: string | null;
+  neon_auth_pub_key?: string | null;
+  neon_auth_secret_key?: string | null;
 }
 
 export interface ProjectDbLimitsUpdate extends Record<string, unknown> {
@@ -439,7 +447,11 @@ export interface ProjectDbLimitsUpdate extends Record<string, unknown> {
   extra_storage_mb?: number;
   extra_rows?: number;
   neon_project_id?: string | null;
+  neon_branch_id?: string | null;
   db_url?: string | null;
+  neon_auth_base_url?: string | null;
+  neon_auth_pub_key?: string | null;
+  neon_auth_secret_key?: string | null;
   updated_at?: string;
 }
 
@@ -1281,7 +1293,14 @@ export class StudioDbClient {
 
   async updateProjectDbConnection(
     projectId: string,
-    patch: { neon_project_id?: string | null; db_url?: string | null },
+    patch: {
+      neon_project_id?: string | null;
+      neon_branch_id?: string | null;
+      db_url?: string | null;
+      neon_auth_base_url?: string | null;
+      neon_auth_pub_key?: string | null;
+      neon_auth_secret_key?: string | null;
+    },
   ): Promise<void> {
     const response = await this.client
       .from("project_db_limits")

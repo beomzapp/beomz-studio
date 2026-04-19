@@ -1674,8 +1674,10 @@ export function buildIterationSystemPrompt(
   imageContextBlock?: string,
   hasWiredSupabaseClient = false,
   dbProvider: string | null = null,
+  neonAuthBaseUrl: string | null = null,
 ): string {
   const isNeonWired = hasWiredSupabaseClient && dbProvider === "neon";
+  const hasNeonAuth = isNeonWired && typeof neonAuthBaseUrl === "string" && neonAuthBaseUrl.length > 0;
   const dbBlock = schemaSummary
     ? [
         "",
@@ -1714,6 +1716,19 @@ export function buildIterationSystemPrompt(
         "  const { rows } = await pool.query('SELECT * FROM table_name');",
         "Do NOT use @supabase/supabase-js. Do NOT use createClient().",
         "Use raw SQL via the pg Pool.",
+      ].join("\n")
+    : "";
+  const neonAuthBlock = hasNeonAuth
+    ? [
+        "",
+        "Authentication (Neon Auth — already provisioned):",
+        "- Use @neondatabase/neon-js for auth",
+        "- import { createAuthClient } from '@neondatabase/neon-js/auth'",
+        "- import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'",
+        "- const authClient = createAuthClient(import.meta.env.VITE_NEON_AUTH_URL)",
+        "- Wrap app in <NeonAuthUIProvider authClient={authClient}>",
+        "- Add sign-in page: <AuthView pathname='sign-in' />",
+        "- Auth includes Google, GitHub, and email/password by default",
       ].join("\n")
     : "";
   const dbImportRules = isNeonWired
@@ -1762,7 +1777,7 @@ export function buildIterationSystemPrompt(
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
     "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock,
+    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock + neonAuthBlock,
   ].join("\n");
 }
 
@@ -1810,6 +1825,7 @@ async function callModelIterate(
   imageUrl?: string,
   hasWiredSupabaseClient = false,
   dbProvider: string | null = null,
+  neonAuthBaseUrl: string | null = null,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
 
@@ -1818,6 +1834,7 @@ async function callModelIterate(
     imageContextBlock,
     hasWiredSupabaseClient,
     dbProvider,
+    neonAuthBaseUrl,
   );
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
@@ -2646,11 +2663,17 @@ async function _runBuildInBackground(
       let iterSchemaSummary: string | undefined;
       let hasWiredSupabaseClient = false;
       let iterDbProvider: string | null = null;
+      let iterNeonAuthBaseUrl: string | null = null;
       let iterProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
       try {
         iterProject = await db.findProjectById(projectId);
         hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
         iterDbProvider = iterProject?.db_provider ?? null;
+        if (iterDbProvider === "neon") {
+          const limits = await db.getProjectDbLimits(projectId);
+          iterNeonAuthBaseUrl =
+            typeof limits?.neon_auth_base_url === "string" ? limits.neon_auth_base_url : null;
+        }
         if (iterProject?.database_enabled && iterProject.db_schema) {
           const tables = await getSchemaTableList(iterProject.db_schema);
           if (tables.length > 0) {
@@ -2741,6 +2764,7 @@ async function _runBuildInBackground(
           input.imageUrl,
           hasWiredSupabaseClient,
           iterDbProvider,
+          iterNeonAuthBaseUrl,
         );
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
