@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
+  enableDatabase,
   wireDatabase,
   getDbSchema,
   getDbRows,
@@ -48,20 +49,6 @@ type ModeTab = "shared" | "dedicated" | "byo";
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
   return `${Math.round(mb)}MB`;
-}
-
-function getPlanBadgeStyle(plan: string): { className: string; dotClass: string; label: string } {
-  const normalized = (plan ?? "free").toLowerCase().replace(/[\s-]+/g, "_");
-  switch (normalized) {
-    case "pro_starter":
-      return { className: "bg-blue-100 text-blue-700", dotClass: "bg-blue-500", label: "Pro Starter" };
-    case "pro_builder":
-      return { className: "bg-purple-100 text-purple-700", dotClass: "bg-purple-500", label: "Pro Builder" };
-    case "business":
-      return { className: "bg-[#F97316]/10 text-[#F97316]", dotClass: "bg-[#F97316]", label: "Business" };
-    default:
-      return { className: "bg-[#f3f4f6] text-[#6b7280]", dotClass: "bg-[#9ca3af]", label: "Free" };
-  }
 }
 
 function getPlanStorageLimitMb(plan: string): number {
@@ -94,6 +81,7 @@ export function DatabasePanel({
   onDbStateChange,
 }: DatabasePanelProps) {
   // ── Connection / wiring state ─────────────────────────────
+  const [enabling, setEnabling] = useState(false);
   const [wiringDb, setWiringDb] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -173,6 +161,20 @@ export function DatabasePanel({
       setAddonsLoading(false);
     }
   }, []);
+
+  const handleEnable = useCallback(async () => {
+    if (!projectId) return;
+    setEnabling(true);
+    setError(null);
+    try {
+      await enableDatabase(projectId);
+      onDbStateChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to enable database.");
+    } finally {
+      setEnabling(false);
+    }
+  }, [projectId, onDbStateChange]);
 
   const handleWire = useCallback(async () => {
     if (!projectId) return;
@@ -333,8 +335,6 @@ export function DatabasePanel({
       ? "bg-amber-500"
       : "bg-[#F97316]";
 
-  const planBadge = getPlanBadgeStyle(plan);
-
   // ── STATE 1: Not connected ──────────────────────────────────
   if (!databaseEnabled) {
     return (
@@ -350,27 +350,33 @@ export function DatabasePanel({
             </p>
           </div>
 
-          {/* BEO-401: Database coming soon — hiding Add Database flow while Neon integration is built */}
-          <div style={{
-            textAlign: 'center',
-            padding: '2rem',
-            color: 'var(--color-text-secondary)',
-            fontSize: '14px'
-          }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔧</div>
-            <p style={{ fontWeight: 500, color: 'var(--color-text-primary)',
-              marginBottom: '6px' }}>
-              Database coming soon
-            </p>
-            <p>
-              We're upgrading our database infrastructure.
-              Check back shortly.
-            </p>
-          </div>
+          {/* BEO-401: Neon is live — real Add Database flow */}
+          <button
+            onClick={() => void handleEnable()}
+            disabled={enabling}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+          >
+            {enabling ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Zap size={16} />
+            )}
+            {enabling ? "Setting up..." : "Add Database"}
+          </button>
+
+          <p className="text-[11px] text-[#9ca3af]">
+            Isolated · Auto-scaling · Backed up daily
+          </p>
 
           {error && (
             <p className="flex items-center justify-center gap-1.5 text-xs text-red-500">
-              <AlertCircle size={12} /> {error}
+              <AlertCircle size={12} /> {error}{" "}
+              <button
+                onClick={() => void handleEnable()}
+                className="underline underline-offset-2 hover:text-red-700"
+              >
+                Retry
+              </button>
             </p>
           )}
         </div>
@@ -451,19 +457,22 @@ export function DatabasePanel({
       <div className="flex items-center gap-0.5 border-b border-[#e5e7eb] bg-[#faf9f6] px-4 pt-3 pb-0">
         {(
           [
-            { key: "shared" as ModeTab, label: "Shared" },
-            { key: "dedicated" as ModeTab, label: "Dedicated" },
-            { key: "byo" as ModeTab, label: "Connect your own" },
-          ] as const
-        ).map(({ key, label }) => (
+            { key: "shared" as ModeTab, label: "Database", locked: false },
+            { key: "dedicated" as ModeTab, label: "Dedicated", locked: true },
+            { key: "byo" as ModeTab, label: "Connect your own", locked: false },
+          ] as { key: ModeTab; label: string; locked: boolean }[]
+        ).map(({ key, label, locked }) => (
           <button
             key={key}
-            onClick={() => setModeTab(key)}
+            onClick={() => !locked && setModeTab(key)}
+            disabled={locked}
             className={cn(
               "rounded-t-lg border border-b-0 px-3 py-1.5 text-xs font-medium transition-colors",
-              modeTab === key
-                ? "border-[#e5e7eb] bg-white text-[#1a1a1a]"
-                : "border-transparent text-[#9ca3af] hover:text-[#6b7280]",
+              locked
+                ? "cursor-not-allowed border-transparent text-[#d1d5db]"
+                : modeTab === key
+                  ? "border-[#e5e7eb] bg-white text-[#1a1a1a]"
+                  : "border-transparent text-[#9ca3af] hover:text-[#6b7280]",
             )}
           >
             {label}
@@ -487,14 +496,14 @@ export function DatabasePanel({
             {/* Info card: plan badge + storage bar */}
             <div className="rounded-xl border border-[#e5e7eb] bg-[#faf9f6] p-3.5">
 
-              {/* Plan badge + Shared badge */}
+              {/* Managed Postgres badge */}
               <div className="mb-3 flex items-center gap-2">
-                <span className={cn("flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-semibold", planBadge.className)}>
-                  <span className={cn("h-1.5 w-1.5 rounded-full", planBadge.dotClass)} />
-                  {planBadge.label}
+                <span className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Managed Postgres
                 </span>
                 <span className="rounded-md bg-[#ebebeb] px-2 py-0.5 text-[11px] font-semibold text-[#6b7280]">
-                  Shared
+                  Neon
                 </span>
               </div>
 
