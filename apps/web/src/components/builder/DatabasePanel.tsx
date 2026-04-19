@@ -46,11 +46,40 @@ import {
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 type ModeTab = "shared" | "dedicated" | "byo";
 
-const WIRING_PROMPT =
-  "Wire this app to its Postgres database. Based on the app's existing features " +
-  "and UI, create the appropriate database tables using CREATE TABLE IF NOT EXISTS, " +
-  "then wire all existing components to read and write real data. " +
-  "Use process.env.DATABASE_URL with the pg package. Do not use supabase-js.";
+const WIRING_PROMPT = `Wire this app to its Postgres database and add user authentication.
+
+Database connection (browser-safe — IMPORTANT):
+- Use @neondatabase/serverless, NOT pg or node-postgres
+- import { neon } from '@neondatabase/serverless'
+- const sql = neon(import.meta.env.VITE_DATABASE_URL)
+- Use tagged template literals for ALL queries:
+  const rows = await sql\`SELECT * FROM table_name\`
+  await sql\`INSERT INTO tasks (title) VALUES (\${title})\`
+- CREATE tables at app startup in a useEffect that runs once:
+  useEffect(() => {
+    const init = async () => {
+      await sql\`CREATE TABLE IF NOT EXISTS tasks (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        done BOOLEAN DEFAULT false,
+        user_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )\`
+    }
+    init()
+  }, [])
+- NEVER use pg, Pool, new Pool(), or process.env.DATABASE_URL
+- ALWAYS use import.meta.env.VITE_DATABASE_URL
+
+Authentication (Neon Auth — already provisioned and ready):
+- import { createAuthClient } from '@neondatabase/neon-js/auth'
+- import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'
+- const authClient = createAuthClient(import.meta.env.VITE_NEON_AUTH_URL)
+- Wrap the entire app in <NeonAuthUIProvider authClient={authClient}>
+- Add a dedicated sign-in page using <AuthView pathname="sign-in" />
+- Auth supports Google, GitHub, and email/password by default
+
+Based on the app's existing features and UI, create all appropriate database tables and wire all existing components to read and write real data instead of mock/static data.`;
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
