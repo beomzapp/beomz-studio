@@ -296,6 +296,16 @@ const BLOCKED_FILENAMES = new Set([
   "supabase-helper.ts",
   "serverless.tsx",
   "serverless.ts",
+  "ui.tsx",
+  "ui.ts",
+  "auth.tsx",
+  "auth.ts",
+  "db.tsx",
+  "db.ts",
+  "client.tsx",
+  "client.ts",
+  "neon-auth.tsx",
+  "neon-auth.ts",
 ]);
 
 export function filterBlockedGeneratedFiles<T extends { path: string }>(files: T[]): T[] {

@@ -200,3 +200,45 @@ test("filterBlockedGeneratedFiles removes blocked supabase placeholder files", (
     ["apps/web/src/app/generated/workspace-task/App.tsx"],
   );
 });
+
+test("filterBlockedGeneratedFiles removes new helper re-export filenames", () => {
+  const blockedHelperFilenames = [
+    "ui.tsx",
+    "ui.ts",
+    "auth.tsx",
+    "auth.ts",
+    "db.tsx",
+    "db.ts",
+    "client.tsx",
+    "client.ts",
+    "neon-auth.tsx",
+    "neon-auth.ts",
+  ];
+
+  for (const blockedFilename of blockedHelperFilenames) {
+    const result = filterBlockedGeneratedFiles([
+      {
+        path: "apps/web/src/app/generated/workspace-task/App.tsx",
+        kind: "entry",
+        language: "tsx",
+        content: "export default function App() { return null; }\n",
+        source: "ai",
+        locked: false,
+      },
+      {
+        path: `apps/web/src/app/generated/workspace-task/${blockedFilename}`,
+        kind: "component",
+        language: blockedFilename.endsWith(".tsx") ? "tsx" : "ts",
+        content: "export const value = null;\n",
+        source: "platform",
+        locked: false,
+      },
+    ]);
+
+    assert.deepEqual(
+      result.map((file) => file.path),
+      ["apps/web/src/app/generated/workspace-task/App.tsx"],
+      `Expected ${blockedFilename} to be filtered out`,
+    );
+  }
+});
