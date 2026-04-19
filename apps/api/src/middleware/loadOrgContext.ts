@@ -29,52 +29,57 @@ function buildUserFallbackEmail(jwt: VerifiedPlatformJwt) {
 }
 
 export const loadOrgContext: MiddlewareHandler = async (c, next) => {
-  const jwt = c.get("platformJwt") as VerifiedPlatformJwt | undefined;
-  if (!jwt) {
-    return c.json({ error: "JWT context missing." }, 401);
-  }
+  try {
+    const jwt = c.get("platformJwt") as VerifiedPlatformJwt | undefined;
+    if (!jwt) {
+      return c.json({ error: "JWT context missing." }, 401);
+    }
 
-  const db = createStudioDbClient();
-  const email = buildUserFallbackEmail(jwt);
+    const db = createStudioDbClient();
+    const email = buildUserFallbackEmail(jwt);
 
-  let user = await db.findUserByPlatformUserId(jwt.sub);
-  if (!user) {
-    user = await db.createUser({
-      email,
-      platform_user_id: jwt.sub,
+    let user = await db.findUserByPlatformUserId(jwt.sub);
+    if (!user) {
+      user = await db.createUser({
+        email,
+        platform_user_id: jwt.sub,
+      });
+    } else if (user.email !== email) {
+      user = await db.updateUserEmail(user.id, email);
+    }
+
+    let membership = await db.findMembershipByUserId(user.id);
+    let org: OrgRow | null = null;
+
+    if (membership) {
+      org = await db.findOrgById(membership.org_id);
+    }
+
+    if (!membership || !org) {
+      org = await db.createOrg({
+        name: buildDefaultOrgName(jwt.email, jwt.sub),
+        owner_id: user.id,
+        credits: PLAN_LIMITS.free!.signupGrant,  // 50 credits one-time signup grant
+      });
+
+      membership = await db.createOrgMembership({
+        org_id: org.id,
+        role: "owner",
+        user_id: user.id,
+      });
+    }
+
+    c.set("orgContext", {
+      db,
+      jwt,
+      membership,
+      org,
+      user,
     });
-  } else if (user.email !== email) {
-    user = await db.updateUserEmail(user.id, email);
+
+    await next();
+  } catch (err) {
+    console.error("[loadOrgContext] DB error:", err);
+    return c.json({ error: "Authentication failed." }, 401);
   }
-
-  let membership = await db.findMembershipByUserId(user.id);
-  let org: OrgRow | null = null;
-
-  if (membership) {
-    org = await db.findOrgById(membership.org_id);
-  }
-
-  if (!membership || !org) {
-    org = await db.createOrg({
-      name: buildDefaultOrgName(jwt.email, jwt.sub),
-      owner_id: user.id,
-      credits: PLAN_LIMITS.free!.signupGrant,  // 50 credits one-time signup grant
-    });
-
-    membership = await db.createOrgMembership({
-      org_id: org.id,
-      role: "owner",
-      user_id: user.id,
-    });
-  }
-
-  c.set("orgContext", {
-    db,
-    jwt,
-    membership,
-    org,
-    user,
-  });
-
-  await next();
 };

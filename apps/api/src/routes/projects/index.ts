@@ -39,62 +39,72 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
 
   projectsRoute.get("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
-    const orgContext = c.get("orgContext") as OrgContext;
-    const projectId = c.req.param("id");
+    try {
+      const orgContext = c.get("orgContext") as OrgContext;
+      const projectId = c.req.param("id");
 
-    const project = await orgContext.db.findProjectById(projectId);
-    if (!project || project.org_id !== orgContext.org.id) {
-      return c.json({ error: "Project not found" }, 404);
+      const project = await orgContext.db.findProjectById(projectId);
+      if (!project || project.org_id !== orgContext.org.id) {
+        return c.json({ error: "Project not found" }, 404);
+      }
+
+      return c.json({
+        ...mapProjectRowToProject(project),
+        // Extra fields not on the core Project type
+        database_enabled: Boolean(project.database_enabled),
+        db_provider: project.db_provider ?? null,
+        db_wired: Boolean(project.db_wired),
+        thumbnail_url: project.thumbnail_url ?? null,
+        published: Boolean(project.published),
+        published_slug: project.published_slug ?? null,
+        beomz_app_url: project.beomz_app_url ?? null,
+      });
+    } catch (err) {
+      console.error("[GET /projects/:id] error:", err);
+      return c.json({ error: "Failed to load project." }, 500);
     }
-
-    return c.json({
-      ...mapProjectRowToProject(project),
-      // Extra fields not on the core Project type
-      database_enabled: Boolean(project.database_enabled),
-      db_provider: project.db_provider ?? null,
-      db_wired: Boolean(project.db_wired),
-      thumbnail_url: project.thumbnail_url ?? null,
-      published: Boolean(project.published),
-      published_slug: project.published_slug ?? null,
-      beomz_app_url: project.beomz_app_url ?? null,
-    });
   });
 
   projectsRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
-    const orgContext = c.get("orgContext") as OrgContext;
+    try {
+      const orgContext = c.get("orgContext") as OrgContext;
 
-    const rows = await orgContext.db.findProjectsByOrgId(orgContext.org.id);
+      const rows = await orgContext.db.findProjectsByOrgId(orgContext.org.id);
 
-    const genCounts = await orgContext.db.countGenerationsByProjectIds(
-      rows.map((r) => r.id),
-    );
+      const genCounts = await orgContext.db.countGenerationsByProjectIds(
+        rows.map((r) => r.id),
+      );
 
-    const projects = rows.map((row) => ({
-      ...mapProjectRowToProject(row),
-      generationCount: genCounts[row.id] ?? 0,
-      // BEO-130: DB status for the frontend (no credentials, no nonce)
-      database_enabled: Boolean(row.database_enabled),
-      db_provider: row.db_provider ?? null,
-      db_wired: Boolean(row.db_wired),
-      // BEO-300: thumbnail for project cards
-      thumbnail_url: row.thumbnail_url ?? null,
-      // BEO-262: Publish
-      published: Boolean(row.published),
-      published_slug: row.published_slug ?? null,
-      beomz_app_url: row.beomz_app_url ?? null,
-    }));
-    const plan = orgContext.org.plan ?? "free";
-    const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.free;
-    // Free plan is capped at 3 projects; paid plans are unlimited (-1 = unlimited)
-    const maxProjects = plan === "free" ? 3 : -1;
+      const projects = rows.map((row) => ({
+        ...mapProjectRowToProject(row),
+        generationCount: genCounts[row.id] ?? 0,
+        // BEO-130: DB status for the frontend (no credentials, no nonce)
+        database_enabled: Boolean(row.database_enabled),
+        db_provider: row.db_provider ?? null,
+        db_wired: Boolean(row.db_wired),
+        // BEO-300: thumbnail for project cards
+        thumbnail_url: row.thumbnail_url ?? null,
+        // BEO-262: Publish
+        published: Boolean(row.published),
+        published_slug: row.published_slug ?? null,
+        beomz_app_url: row.beomz_app_url ?? null,
+      }));
+      const plan = orgContext.org.plan ?? "free";
+      const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.free;
+      // Free plan is capped at 3 projects; paid plans are unlimited (-1 = unlimited)
+      const maxProjects = plan === "free" ? 3 : -1;
 
-    return c.json({
-      projects,
-      plan,
-      maxProjects,
-      canCreateMore: maxProjects === -1 || projects.length < maxProjects,
-      planCredits: planLimit.credits,
-    });
+      return c.json({
+        projects,
+        plan,
+        maxProjects,
+        canCreateMore: maxProjects === -1 || projects.length < maxProjects,
+        planCredits: planLimit.credits,
+      });
+    } catch (err) {
+      console.error("[GET /projects] error:", err);
+      return c.json({ error: "Failed to load projects." }, 500);
+    }
   });
 
   projectsRoute.delete("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
