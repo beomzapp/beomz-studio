@@ -7,100 +7,117 @@
  * in the top-level response body and NOT stored in db_config.
  */
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { getUserDataAnonKey, getUserDataPublicUrl, isUserDataConfigured } from "../../lib/userDataClient.js";
+import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
-const statusDbRoute = new Hono();
+interface StatusDbRouteDeps {
+  authMiddleware?: MiddlewareHandler;
+  loadOrgContextMiddleware?: MiddlewareHandler;
+}
 
-statusDbRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
-  const projectId = c.req.param("id") as string;
-  const orgContext = c.get("orgContext") as OrgContext;
-  const { db, org } = orgContext;
+export function createStatusDbRoute(deps: StatusDbRouteDeps = {}) {
+  const statusDbRoute = new Hono();
+  const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
+  const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
 
-  const project = await db.findProjectById(projectId);
-  if (!project || project.org_id !== org.id) {
-    return c.json({ error: "Project not found" }, 404);
-  }
+  statusDbRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const projectId = c.req.param("id") as string;
+    const orgContext = c.get("orgContext") as OrgContext;
+    const { db, org } = orgContext;
 
-  if (!project.database_enabled) {
-    return c.json({
-      enabled: false,
-      provider: null,
-      wired: false,
-    });
-  }
-
-  // Never return credentials for unwired projects.
-  if (!project.db_wired) {
-    return c.json({
-      enabled: true,
-      provider: project.db_provider,
-      wired: false,
-    });
-  }
-
-  // Project is wired — build credentials block.
-  let env: {
-    url: string;
-    anonKey: string;
-    dbSchema: string;
-    nonce: string;
-  } | null = null;
-
-  let supabaseUrl: string | null = null;
-  let anonKey: string | null = null;
-  let schemaName: string | null = null;
-
-  if (project.db_provider === "beomz" && project.db_schema && project.db_nonce) {
-    if (isUserDataConfigured()) {
-      supabaseUrl = getUserDataPublicUrl();
-      anonKey = getUserDataAnonKey();
-      schemaName = project.db_schema;
-      env = {
-        url: supabaseUrl,
-        anonKey,
-        dbSchema: project.db_schema,
-        nonce: project.db_nonce,
-      };
+    const project = await db.findProjectById(projectId);
+    if (!project || project.org_id !== org.id) {
+      return c.json({ error: "Project not found" }, 404);
     }
-  } else if (project.db_provider === "supabase" && project.db_config) {
-    const cfg = project.db_config as Record<string, unknown>;
-    if (typeof cfg.url === "string" && typeof cfg.anonKey === "string") {
-      supabaseUrl = cfg.url;
-      anonKey = cfg.anonKey;
-      schemaName = "public";
-      env = {
-        url: cfg.url,
-        anonKey: cfg.anonKey,
-        dbSchema: "public",
-        nonce: "",
-      };
+
+    if (!project.database_enabled) {
+      return c.json({
+        enabled: false,
+        provider: null,
+        wired: false,
+      });
     }
-  } else if (project.db_provider === "neon") {
-    // BEO-428: return the Neon connection string so the frontend can inject
-    // VITE_DATABASE_URL into the WebContainer .env.local on every page load.
+
     const limits = await db.getProjectDbLimits(projectId);
+    const provider = resolveProjectDbProvider(project, limits);
+
+    // Never return credentials for unwired projects.
+    if (!project.db_wired) {
+      return c.json({
+        enabled: true,
+        provider,
+        wired: false,
+      });
+    }
+
+    // Project is wired — build credentials block.
+    let env: {
+      url: string;
+      anonKey: string;
+      dbSchema: string;
+      nonce: string;
+    } | null = null;
+
+    let supabaseUrl: string | null = null;
+    let anonKey: string | null = null;
+    let schemaName: string | null = null;
+
+    if (provider === "beomz" && project.db_schema && project.db_nonce) {
+      if (isUserDataConfigured()) {
+        supabaseUrl = getUserDataPublicUrl();
+        anonKey = getUserDataAnonKey();
+        schemaName = project.db_schema;
+        env = {
+          url: supabaseUrl,
+          anonKey,
+          dbSchema: project.db_schema,
+          nonce: project.db_nonce,
+        };
+      }
+    } else if (provider === "supabase" && project.db_config) {
+      const cfg = project.db_config as Record<string, unknown>;
+      if (typeof cfg.url === "string" && typeof cfg.anonKey === "string") {
+        supabaseUrl = cfg.url;
+        anonKey = cfg.anonKey;
+        schemaName = "public";
+        env = {
+          url: cfg.url,
+          anonKey: cfg.anonKey,
+          dbSchema: "public",
+          nonce: "",
+        };
+      }
+    } else if (provider === "neon") {
+      // BEO-428: return the Neon connection string so the frontend can inject
+      // VITE_DATABASE_URL into the WebContainer .env.local on every page load.
+      return c.json({
+        enabled: true,
+        provider: "neon",
+        wired: true,
+        dbUrl: getNeonDbUrl(limits),
+      });
+    }
+
     return c.json({
       enabled: true,
-      provider: "neon",
+      provider,
       wired: true,
-      dbUrl: limits?.db_url ?? null,
+      supabaseUrl,
+      anonKey,
+      schemaName,
+      schema: project.db_schema,
+      env,
     });
-  }
-
-  return c.json({
-    enabled: true,
-    provider: project.db_provider,
-    wired: true,
-    supabaseUrl,
-    anonKey,
-    schemaName,
-    schema: project.db_schema,
-    env,
   });
-});
+
+  return statusDbRoute;
+}
+
+const statusDbRoute = createStatusDbRoute();
 
 export default statusDbRoute;
