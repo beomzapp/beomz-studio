@@ -46,19 +46,21 @@ import {
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 type ModeTab = "shared" | "dedicated" | "byo";
 
-const WIRING_PROMPT = `CRITICAL — use these EXACT import statements, copied verbatim.
-Never shorten, split, or create local helper files for these:
+const WIRING_PROMPT = `CRITICAL — use these EXACT import statements verbatim.
+Never shorten, alias, or split into local files:
 
-import { neon } from '@neondatabase/serverless'
-import { createAuthClient } from '@neondatabase/neon-js/auth'
-import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'
+  import { neon } from '@neondatabase/serverless'
+  import { createAuthClient } from '@neondatabase/neon-js/auth'
+  import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'
 
-DO NOT:
-- Create ./auth.ts, ./ui.tsx, ./db.ts or any local re-export files
+NEVER:
+- Create ./auth.ts, ./ui.tsx, ./db.ts, ./client.ts or ANY local helper files that re-export these packages
 - Shorten '@neondatabase/neon-js/auth/react/ui' to './ui'
-- Shorten '@neondatabase/neon-js/auth' to './auth'
-- Create any helper file that wraps these packages
-Use the FULL package path directly in every component that needs it.
+- Shorten '@neondatabase/neon-js/auth' to './auth' or './neon-auth'
+- Shorten '@neondatabase/serverless' to './serverless' or './db'
+- Write import { AuthView } from './ui' — WRONG
+- Write import { createAuthClient } from './auth' — WRONG
+Use the FULL package path in EVERY component file that needs it.
 
 Wire this app to its Postgres database and add user authentication.
 
