@@ -254,11 +254,6 @@ export function ProjectPage() {
                   if (chips.length > 0) setSuggestionChips(chips);
                 });
               }
-              // BEO-454: Extract creditsUsed from latest build_summary message
-              const summaryMsg = messages.slice().reverse().find(m => m.type === "build_summary");
-              if (summaryMsg?.type === "build_summary" && typeof summaryMsg.creditsUsed === "number") {
-                setCreditsUsed(summaryMsg.creditsUsed);
-              }
               deductOptimistic(5);
               void refreshCredits();
             })
@@ -271,6 +266,7 @@ export function ProjectPage() {
         }
         setIsAiCustomising(false);
         setBuildFailed(true);
+        if (event.fallbackReason) setBuildErrorMessage(event.fallbackReason);
       }
     }
 

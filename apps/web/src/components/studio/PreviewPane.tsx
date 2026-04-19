@@ -340,14 +340,13 @@ export function PreviewPane({
   const [progressPct, setProgressPct] = useState(5);
   const [showProgressBar, setShowProgressBar] = useState(false);
   const buildWasActiveRef = useRef(false);
+  const progressBarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!firstBuildActive) {
       if (buildWasActiveRef.current) {
         buildWasActiveRef.current = false;
-        setProgressPct(100);
-        const t = setTimeout(() => setShowProgressBar(false), 600);
-        return () => clearTimeout(t);
+        // Don't jump to 100% here — wait for wcReadyConfirmed (see effect below)
       }
       return;
     }
@@ -358,6 +357,7 @@ export function PreviewPane({
     setElapsedSeconds(0);
     setProgressPct(STEP_PROGRESS_START[0]);
     setShowProgressBar(true);
+    if (progressBarHideTimerRef.current) clearTimeout(progressBarHideTimerRef.current);
 
     const start = Date.now();
     const intervalId = setInterval(() => {
@@ -385,6 +385,21 @@ export function PreviewPane({
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstBuildActive]);
+
+  // When WC confirms live — jump progress bar to 100% then hide it after 600ms
+  const prevWcReadyRef = useRef(wcReadyConfirmed);
+  useEffect(() => {
+    const wasReady = prevWcReadyRef.current;
+    prevWcReadyRef.current = wcReadyConfirmed;
+    if (!wasReady && wcReadyConfirmed && showProgressBar) {
+      setProgressPct(100);
+      if (progressBarHideTimerRef.current) clearTimeout(progressBarHideTimerRef.current);
+      progressBarHideTimerRef.current = setTimeout(() => {
+        setShowProgressBar(false);
+        progressBarHideTimerRef.current = null;
+      }, 600);
+    }
+  }, [wcReadyConfirmed, showProgressBar]);
 
   // ── BEO-454: Preview iframe fade-in on first reveal ─────────────────────
   const [iframeFadeIn, setIframeFadeIn] = useState(false);
