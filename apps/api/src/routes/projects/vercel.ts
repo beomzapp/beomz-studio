@@ -14,6 +14,7 @@ import type { OrgContext } from "../../types.js";
 import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
+import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 // ── Scaffold files required for Vercel to build a Vite + React project ────────
 // Mirrors the WebContainer scaffold in apps/web/src/lib/webcontainer.ts
@@ -169,6 +170,16 @@ function injectSupabaseEnvVars(
     .replace(/import\.meta\.env\.VITE_DB_SCHEMA/g, JSON.stringify(dbSchema));
 }
 
+export function injectNeonEnvVars(
+  content: string,
+  neonDbUrl: string,
+): string {
+  return content.replace(
+    /import\.meta\.env\.VITE_DATABASE_URL/g,
+    JSON.stringify(neonDbUrl),
+  );
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 export const vercelDeployRoute = new Hono();
@@ -214,10 +225,23 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       f.content.includes("@supabase/supabase-js") ||
       f.content.includes("VITE_SUPABASE_URL"),
   );
+  const usesNeon = rawGeneratedFiles.some(
+    (f) =>
+      f.content.includes("@neondatabase/serverless")
+      || f.content.includes("VITE_DATABASE_URL"),
+  );
 
   let supabaseUrl = PLACEHOLDER_SUPABASE_URL;
   let supabaseAnonKey = PLACEHOLDER_SUPABASE_KEY;
   let dbSchema = PLACEHOLDER_SUPABASE_SCHEMA;
+  let neonDbUrl: string | null = null;
+
+  const limits = usesNeon
+    ? await orgContext.db.getProjectDbLimits(projectId)
+    : null;
+  const provider = usesNeon
+    ? resolveProjectDbProvider(project, limits)
+    : project.db_provider;
 
   if (usesSupabase) {
     if (project.db_wired && project.db_schema) {
@@ -236,12 +260,35 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     }
   }
 
-  const generatedFiles = usesSupabase
-    ? rawGeneratedFiles.map((f) => ({
-        filename: f.filename,
-        content: injectSupabaseEnvVars(f.content, supabaseUrl, supabaseAnonKey, dbSchema),
-      }))
-    : rawGeneratedFiles;
+  if (usesNeon) {
+    if (provider === "neon") {
+      neonDbUrl = getNeonDbUrl(limits);
+      if (neonDbUrl) {
+        console.log("[vercel deploy] injecting Neon DB URL into published bundle");
+      } else {
+        console.warn("[vercel deploy] provider=neon but no db_url found in project_db_limits — leaving VITE_DATABASE_URL unresolved");
+      }
+    } else {
+      console.log(`[vercel deploy] app references Neon but resolved provider=${provider ?? "null"} — leaving VITE_DATABASE_URL unresolved`);
+    }
+  }
+
+  const generatedFiles = rawGeneratedFiles.map((f) => {
+    let content = f.content;
+
+    if (usesSupabase) {
+      content = injectSupabaseEnvVars(content, supabaseUrl, supabaseAnonKey, dbSchema);
+    }
+
+    if (neonDbUrl) {
+      content = injectNeonEnvVars(content, neonDbUrl);
+    }
+
+    return {
+      filename: f.filename,
+      content,
+    };
+  });
 
   // Scaffold + generated files (scaffold first so generated files can override if needed)
   const deployFiles = [...buildScaffold(), ...generatedFiles];
