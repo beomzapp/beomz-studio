@@ -28,6 +28,7 @@ import {
   HardDrive,
   PlugZap,
   ArrowUpRight,
+  Users,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
@@ -43,7 +44,7 @@ import {
   type StorageAddonInfo,
 } from "../../lib/api";
 
-type PanelTab = "schema" | "data" | "bindings" | "logs";
+type PanelTab = "schema" | "data" | "bindings" | "logs" | "users";
 type ModeTab = "shared" | "dedicated" | "byo";
 
 const WIRING_PROMPT = `Wire this app to its Postgres database.
@@ -85,7 +86,22 @@ Instructions:
 5. Use tagged template literals for ALL queries:
    const rows = await sql\`SELECT * FROM tasks ORDER BY created_at DESC\`
    await sql\`INSERT INTO tasks (title) VALUES (\${title})\`
-   await sql\`DELETE FROM tasks WHERE id = \${id}\``;
+   await sql\`DELETE FROM tasks WHERE id = \${id}\`
+
+Authentication (optional — only include if the app needs user accounts):
+The Beomz API handles auth for your app. Use simple fetch() calls only —
+no npm packages, no imports.
+
+  const PROJECT_ID = import.meta.env.VITE_PROJECT_ID;
+  const API = \`/api/projects/\${PROJECT_ID}\`;
+
+  // Signup: POST \${API}/auth/signup  body: { email, password, name? }
+  // Login:  POST \${API}/auth/login   body: { email, password }
+  // Me:     GET  \${API}/auth/me      header: Authorization: Bearer <token>
+
+  Store token: localStorage.setItem('beomz_token', data.token)
+  Read token:  localStorage.getItem('beomz_token')
+  No npm auth packages. No imports. Just fetch and localStorage.`;
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
@@ -172,6 +188,11 @@ export function DatabasePanel({
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; column: string } | null>(null);
   const [showAddRowModal, setShowAddRowModal] = useState(false);
   const [newRow, setNewRow] = useState<Record<string, string>>({});
+
+  // Users tab
+  const [usersRows, setUsersRows] = useState<Record<string, unknown>[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
 
   const selectedTableSchema = useMemo(
     () => schemaTables.find((t) => t.table_name === dataTable) ?? null,
@@ -268,6 +289,20 @@ export function DatabasePanel({
     }
   }, [projectId]);
 
+  const fetchUsers = useCallback(async () => {
+    if (!projectId) return;
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const data = await getDbRows(projectId, "users");
+      setUsersRows(data.rows ?? []);
+    } catch {
+      setUsersError("Couldn't load users — retry");
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [projectId]);
+
   const runMigrationSafe = useCallback(async (sql: string) => {
     if (!projectId) return;
     try {
@@ -357,6 +392,13 @@ export function DatabasePanel({
       void fetchRows(dataTable);
     }
   }, [dbWired, modeTab, activeTab, dataTable, fetchRows]);
+
+  // Auto-fetch users when switching to users tab
+  useEffect(() => {
+    if (dbWired && modeTab === "shared" && activeTab === "users") {
+      void fetchUsers();
+    }
+  }, [dbWired, modeTab, activeTab, fetchUsers]);
 
   // Fetch storage usage + addons on mount and when entering shared mode
   useEffect(() => {
@@ -515,6 +557,7 @@ export function DatabasePanel({
     { key: "data", icon: Table2, label: "Data" },
     { key: "bindings", icon: Link2, label: "Bindings" },
     { key: "logs", icon: ScrollText, label: "Logs" },
+    { key: "users", icon: Users, label: "Users" },
   ];
 
   return (
@@ -714,7 +757,7 @@ export function DatabasePanel({
             </div>
           )}
 
-          {/* Inner tab bar — Schema / Data / Bindings / Logs (unchanged) */}
+          {/* Inner tab bar — Schema / Data / Bindings / Logs / Users */}
           <div className="flex items-center gap-1 border-b border-[#e5e7eb] bg-[#faf9f6] px-4 pt-2 pb-0">
             {INNER_TAB_ITEMS.map(({ key, icon: Icon, label }) => (
               <button
@@ -728,7 +771,7 @@ export function DatabasePanel({
                 )}
               >
                 <Icon size={12} />
-                {label}
+                {key === "users" ? `Users (${usersRows.length})` : label}
               </button>
             ))}
           </div>
@@ -1061,6 +1104,98 @@ export function DatabasePanel({
                     We're building real-time query logging infrastructure.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* ── USERS TAB ── */}
+            {activeTab === "users" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-[#1a1a1a]">Users</p>
+                  <button
+                    onClick={() => void fetchUsers()}
+                    disabled={usersLoading}
+                    className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
+                  >
+                    <RefreshCw size={12} className={usersLoading ? "animate-spin" : ""} />
+                    Refresh
+                  </button>
+                </div>
+
+                {usersLoading && usersRows.length === 0 && (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+                  </div>
+                )}
+
+                {usersError && (
+                  <p className="flex items-center gap-1.5 text-xs text-red-500">
+                    <AlertCircle size={12} /> {usersError}{" "}
+                    <button
+                      onClick={() => void fetchUsers()}
+                      className="underline underline-offset-2 hover:text-red-700"
+                    >
+                      retry
+                    </button>
+                  </p>
+                )}
+
+                {!usersLoading && !usersError && usersRows.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+                    <Users size={28} className="mx-auto mb-3 text-[#d1d5db]" />
+                    <p className="text-sm font-medium text-[#6b7280]">No users yet</p>
+                    <p className="mt-1 text-xs text-[#9ca3af]">
+                      Add auth to your app to see users here.
+                    </p>
+                  </div>
+                )}
+
+                {usersRows.length > 0 && (
+                  <div className="overflow-auto rounded-xl border border-[#e5e7eb] bg-white">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#e5e7eb] bg-[#faf9f6]">
+                          {["id", "email", "name", "created_at"].map((col) => (
+                            <th
+                              key={col}
+                              className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9ca3af]"
+                            >
+                              {col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...usersRows]
+                          .sort((a, b) => {
+                            const ta = a.created_at ? new Date(String(a.created_at)).getTime() : 0;
+                            const tb = b.created_at ? new Date(String(b.created_at)).getTime() : 0;
+                            return tb - ta;
+                          })
+                          .map((row, idx) => (
+                            <tr key={idx} className="border-b border-[#f3f4f6] last:border-b-0 hover:bg-[#faf9f6]">
+                              {["id", "email", "name", "created_at"].map((col) => {
+                                const val = row[col];
+                                let display: string;
+                                if (val == null) {
+                                  display = "";
+                                } else if (col === "created_at") {
+                                  display = new Date(String(val)).toLocaleString();
+                                } else {
+                                  display = String(val);
+                                }
+                                return (
+                                  <td key={col} className="px-3 py-2 text-[#374151]">
+                                    {display || <span className="text-[#d1d5db]">—</span>}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>

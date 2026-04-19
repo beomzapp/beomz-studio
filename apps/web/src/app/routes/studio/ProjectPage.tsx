@@ -354,7 +354,11 @@ export function ProjectPage() {
           if (state.db_provider === "neon" && state.neonDbUrl) {
             // BEO-428: inject Neon connection string so VITE_DATABASE_URL is
             // available at Vite startup and picked up via env-file hot reload.
-            await wc.fs.writeFile(".env.local", `VITE_DATABASE_URL=${state.neonDbUrl}\n`);
+            // BEO-424: also inject VITE_PROJECT_ID for auth fetch helpers.
+            await wc.fs.writeFile(
+              ".env.local",
+              `VITE_DATABASE_URL=${state.neonDbUrl}\nVITE_PROJECT_ID=${projectId}\n`,
+            );
           } else if (state.supabaseUrl && state.anonKey) {
             const envContent = [
               `VITE_SUPABASE_URL=${state.supabaseUrl}`,
