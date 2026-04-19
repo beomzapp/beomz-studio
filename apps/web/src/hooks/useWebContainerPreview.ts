@@ -163,15 +163,23 @@ export function useWebContainerPreview(
           write: (chunk: string) => {
             // 1) Detect Vite oxc parse errors: [plugin:vite:oxc] or [PARSE_ERROR]
             if (chunk.includes("[plugin:vite:oxc]") || chunk.includes("[PARSE_ERROR]")) {
-              const fileMatch = chunk.match(/at\s+(?:\/[^\s:]+\/)?(\S+\.tsx?):(\d+)/);
+              // Extract the file path — try Vite 8 / OXC format first, then fallbacks.
+              // OXC emits:  [plugin:vite:oxc] apps/web/.../App.tsx:15:3
+              // Vite detail: File: /abs/path/App.tsx:15:3
+              // Stack trace: at /abs/path/App.tsx:15:3
+              const pathMatch =
+                chunk.match(/\[plugin:vite:oxc\]\s+([^\s:]+\.tsx?):\d+/) ??
+                chunk.match(/File:\s*([^\s:]+\.tsx?):\d+/) ??
+                chunk.match(/at\s+([^\s(]+\.tsx?):\d+/) ??
+                chunk.match(/([^\s:]+\.tsx?):\d+/);
               const errorLines = chunk.split("\n").filter((l: string) =>
                 l.includes("PARSE_ERROR") || l.includes("Unexpected") || l.includes("Expected") || l.includes("vite:oxc"),
               ).join(" ").trim();
 
-              if (fileMatch) {
-                const fileName = fileMatch[1].replace(/^.*\//, "");
+              if (pathMatch) {
+                const filePath = pathMatch[1];
                 const errorMsg = errorLines || chunk.slice(0, 300);
-                void handleViteError(wc, fileName, errorMsg);
+                void handleViteError(wc, filePath, errorMsg);
               }
             }
 
@@ -251,32 +259,40 @@ export function useWebContainerPreview(
 
   // ── Self-healing: fix Vite parse errors via AI ────────────────────────────
   const handleViteError = useCallback(
-    async (wc: import("@webcontainer/api").WebContainer, fileName: string, errorMessage: string) => {
+    async (wc: import("@webcontainer/api").WebContainer, filePath: string, errorMessage: string) => {
       const MAX_ATTEMPTS = 2;
-      const attempts = fixAttemptsRef.current[fileName] ?? 0;
+      const attempts = fixAttemptsRef.current[filePath] ?? 0;
       if (attempts >= MAX_ATTEMPTS) {
-        console.warn(`[self-heal] Max fix attempts reached for ${fileName}`);
+        console.warn(`[self-heal] Max fix attempts reached for ${filePath}`);
         return;
       }
-      fixAttemptsRef.current[fileName] = attempts + 1;
+      fixAttemptsRef.current[filePath] = attempts + 1;
 
-      // Read the broken file from WebContainer
+      // Normalize: WC paths are relative to root; strip any leading slash
+      // that Vite may emit as an absolute path (e.g. /apps/web/src/...).
+      const relativePath = filePath.startsWith("/") ? filePath.slice(1) : filePath;
+      const baseName = filePath.replace(/^.*\//, "");
+
+      // Try the full relative path first, then legacy basename-only fallbacks.
       const readPaths = [
-        `apps/web/src/app/generated/${fileName}`,
-        `src/${fileName}`,
-        fileName,
+        relativePath,
+        `apps/web/src/app/generated/${baseName}`,
+        `src/${baseName}`,
+        baseName,
       ];
       let fileContent: string | null = null;
+      let resolvedPath: string | null = null;
       for (const p of readPaths) {
         try {
           fileContent = await wc.fs.readFile(p, "utf-8");
+          resolvedPath = p;
           break;
         } catch {
           continue;
         }
       }
-      if (!fileContent) {
-        console.warn(`[self-heal] Could not read ${fileName} from WebContainer`);
+      if (!fileContent || !resolvedPath) {
+        console.warn(`[self-heal] Could not read ${filePath} from WebContainer`);
         return;
       }
 
@@ -286,25 +302,13 @@ export function useWebContainerPreview(
       try {
         const fixedContent = await fixFile({
           buildId: projectRef.current?.id ?? "unknown",
-          filePath: fileName,
+          filePath: baseName,
           errorMessage,
           fileContent,
         });
 
-        // Write the fixed file back to WebContainer
-        const paths = [
-          `apps/web/src/app/generated/${fileName}`,
-          `src/${fileName}`,
-        ];
-        for (const p of paths) {
-          try {
-            await wc.fs.readFile(p, "utf-8"); // check it exists
-            await wc.fs.writeFile(p, fixedContent);
-            break;
-          } catch {
-            continue;
-          }
-        }
+        // Write fixed content back to the exact path that was successfully read.
+        await wc.fs.writeFile(resolvedPath, fixedContent);
       } catch (err) {
         console.error("[self-heal] Fix failed:", err instanceof Error ? err.message : err);
       } finally {
