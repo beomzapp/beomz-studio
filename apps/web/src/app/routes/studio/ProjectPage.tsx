@@ -307,7 +307,7 @@ export function ProjectPage() {
   // ─── Send message ─────────────────────────────────────────────────────────
 
   const handleSendMessage = useCallback(
-    (text: string, imageUrl?: string) => {
+    (text: string, imageUrl?: string, isSystem?: boolean) => {
       if (credits && credits.balance <= 0) {
         setIsHardBlockCredits(false);
         setShowOutOfCreditsModal(true);
@@ -323,7 +323,7 @@ export function ProjectPage() {
         clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = null;
       }
-      sendMessage(text, imageUrl);
+      sendMessage(text, imageUrl, isSystem);
     },
     [credits, sendMessage, buildDoneRef],
   );
@@ -333,7 +333,7 @@ export function ProjectPage() {
   const handleWireToDatabase = useCallback(
     (prompt: string) => {
       setActiveView("preview");
-      handleSendMessage(prompt);
+      handleSendMessage(prompt, undefined, true);
     },
     [handleSendMessage, setActiveView],
   );

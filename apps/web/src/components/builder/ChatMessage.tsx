@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
-import { Check, ChevronDown, ChevronRight, Copy, FileCode, Send } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send } from "lucide-react";
 import { CHECKLIST_LABELS } from "../../lib/buildStatusCopy";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
@@ -543,6 +543,45 @@ function ImageIntentCard({
   );
 }
 
+// ─── Collapsible user message (long text or system instructions) ─────────────
+
+const USER_COLLAPSE_THRESHOLD = 200;
+const USER_PREVIEW_LENGTH = 150;
+
+type UserMsg = Extract<ChatMessage, { type: "user" }>;
+
+function CollapsibleUserMessage({ message }: { message: UserMsg }) {
+  const [expanded, setExpanded] = useState(false);
+  const isSystem = message.isSystem === true;
+
+  return (
+    <div className="flex flex-col items-end">
+      <button
+        className="max-w-[80%] min-w-0 cursor-pointer rounded-2xl rounded-br-sm bg-[#0a0a0a] px-3.5 py-2 text-left shadow-sm"
+        onClick={() => setExpanded(e => !e)}
+      >
+        {expanded ? (
+          <div className="flex items-start gap-2">
+            <span className="min-w-0 flex-1 break-words text-sm leading-relaxed text-white">
+              {message.content}
+            </span>
+            <ChevronUp size={14} className="mt-0.5 flex-shrink-0 text-zinc-400" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-sm text-zinc-400">
+              {isSystem
+                ? "System instructions"
+                : `${message.content.slice(0, USER_PREVIEW_LENGTH)}…`}
+            </span>
+            <ChevronDown size={14} className="flex-shrink-0 text-zinc-400" />
+          </div>
+        )}
+      </button>
+    </div>
+  );
+}
+
 // ─── ChatMessageView ──────────────────────────────────────────────────────────
 
 export function ChatMessageView({
@@ -576,6 +615,9 @@ export function ChatMessageView({
       );
 
     case "user":
+      if (message.isSystem || message.content.length > USER_COLLAPSE_THRESHOLD) {
+        return <CollapsibleUserMessage message={message} />;
+      }
       return (
         <div className="flex flex-col items-end">
           <div className="max-w-[70%] min-w-0 rounded-2xl rounded-br-sm bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm break-words">

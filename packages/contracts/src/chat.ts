@@ -6,7 +6,7 @@
 export type ChatChecklistStatus = "pending" | "active" | "done" | "failed";
 
 export type ChatMessage =
-  | { id: string; type: "user"; content: string; timestamp: Date }
+  | { id: string; type: "user"; content: string; timestamp: Date; isSystem?: boolean }
   | { id: string; type: "thinking" }
   | { id: string; type: "question_answer"; content: string; streaming: boolean }
   | { id: string; type: "pre_build_ack"; content: string }

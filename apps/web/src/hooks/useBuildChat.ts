@@ -1309,7 +1309,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const sendMessageInternalRef = useRef<((text: string) => void) | null>(null);
 
   const sendMessage = useCallback(
-    (text: string, imageUrl?: string) => {
+    (text: string, imageUrl?: string, isSystem?: boolean) => {
       // BEO-410: hard double-guard — if either ref OR state says chat mode,
       // always route to chat. Prevents stale-closure fallthrough to build.
       if (chatModeRef.current || chatModeActive) {
@@ -1341,7 +1341,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       setIsBuilding(true);
       setMessages(prev => [
         ...prev.filter(m => m.type !== "server_restarting"),
-        { id: makeId(), type: "user", content: text, timestamp: new Date() },
+        { id: makeId(), type: "user", content: text, timestamp: new Date(), isSystem: isSystem || undefined },
         { id: `thinking-${makeId()}`, type: "thinking" },
       ]);
 
