@@ -14,6 +14,8 @@
  *   2. After iteration files assembled       → sanitiseFiles(files)
  */
 
+import dynamicIconImports from "lucide-react/dynamicIconImports.mjs";
+
 // ── Fixer type ────────────────────────────────────────────────────────────────
 
 interface Fixer {
@@ -41,6 +43,46 @@ function kebabToPascal(name: string): string {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// Build valid icon set from the installed package — always accurate for the
+// currently installed lucide-react version.
+function toLucideExportName(iconKey: string): string {
+  return iconKey
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join("");
+}
+
+const dynamicIconImportsMap: Record<string, unknown> = (
+  typeof dynamicIconImports === "object"
+  && dynamicIconImports !== null
+  && "default" in dynamicIconImports
+  && typeof (dynamicIconImports as { default?: unknown }).default === "object"
+)
+  ? (dynamicIconImports as { default: Record<string, unknown> }).default
+  : (dynamicIconImports as Record<string, unknown>);
+
+export const VALID_LUCIDE_ICONS = new Set(
+  Object.keys(dynamicIconImportsMap).map(toLucideExportName),
+);
+
+// Safe fallback for unknown icons.
+export const LUCIDE_FALLBACK = "Circle";
+
+const DISALLOWED_LUCIDE_ICONS = new Set([
+  "LayoutKanban",
+  "KanbanSquare",
+  "LayoutDashboard",
+  "CheckSquare",
+  "BadgeCheck",
+  "StickyNote",
+  "ClipboardList",
+  "ListChecks",
+  "PackageSearch",
+  "ReceiptText",
+  "FileClock",
+]);
 
 // ── Fixer 1: supabaseImport ──────────────────────────────────────────────────
 // AI hallucinates './supabase-js' or 'supabase-js' instead of the correct
@@ -238,6 +280,71 @@ const hyphenatedFunctionName: Fixer = {
   },
 };
 
+// ── Fixer 9: invalidLucideIcon ───────────────────────────────────────────────
+// Sonnet can import icon names that do not exist in the installed lucide-react
+// version, causing runtime module import failures. Replace invalid names with a
+// known-good fallback and update JSX usages in the same file.
+
+export function fixInvalidLucideIcons(content: string): string {
+  const replacedNames = new Set<string>();
+  const importsFixed = content.replace(
+    /import\s*\{([^}]+)\}\s*from\s*['"]lucide-react['"]/g,
+    (_match, imports: string) => {
+      const names = imports
+        .split(",")
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+      const fixed = names.map((name: string) => {
+        const [importedNameRaw, aliasRaw] = name.split(/\s+as\s+/);
+        const importedName = importedNameRaw?.trim() ?? "";
+        const alias = aliasRaw?.trim();
+        const isDisallowed = DISALLOWED_LUCIDE_ICONS.has(importedName);
+        if (!isDisallowed && VALID_LUCIDE_ICONS.has(importedName)) return name;
+
+        replacedNames.add(importedName);
+        if (isDisallowed) {
+          console.warn(
+            `[sanitise] replacing disallowed lucide icon: ${importedName} -> ${LUCIDE_FALLBACK}`,
+          );
+        } else {
+          console.warn(
+            `[sanitise] replacing invalid lucide icon: ${importedName} -> ${LUCIDE_FALLBACK}`,
+          );
+        }
+        return alias
+          ? `${LUCIDE_FALLBACK} as ${alias}`
+          : LUCIDE_FALLBACK;
+      });
+      const unique = [...new Set(fixed)];
+      return `import { ${unique.join(", ")} } from 'lucide-react'`;
+    },
+  );
+
+  if (replacedNames.size === 0) return importsFixed;
+
+  let jsxFixed = importsFixed;
+  for (const oldName of replacedNames) {
+    if (!oldName || oldName === LUCIDE_FALLBACK) continue;
+    const escapedOld = escapeRegExp(oldName);
+    jsxFixed = jsxFixed
+      .replace(
+        new RegExp(`<${escapedOld}(?=[\\s>/])`, "g"),
+        `<${LUCIDE_FALLBACK}`,
+      )
+      .replace(
+        new RegExp(`</${escapedOld}(?=\\s*>)`, "g"),
+        `</${LUCIDE_FALLBACK}`,
+      );
+  }
+
+  return jsxFixed;
+}
+
+const invalidLucideIcon: Fixer = {
+  name: "invalidLucideIcon",
+  fix: fixInvalidLucideIcons,
+};
+
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 // Order matters:
 //   supabaseImport    — before flatImports (don't re-flatten the corrected path)
@@ -249,6 +356,7 @@ const hyphenatedFunctionName: Fixer = {
 //   externalUrls      — strip remaining CDN URLs
 //   apostropheStrings — convert single-quoted strings with word apostrophes to double-quoted
 //   hyphenatedFunctionName — convert invalid kebab-case function exports to PascalCase
+//   invalidLucideIcon — replace non-existent lucide-react imports with a safe fallback
 
 const PIPELINE: readonly Fixer[] = [
   supabaseImport,
@@ -259,6 +367,7 @@ const PIPELINE: readonly Fixer[] = [
   externalUrls,
   apostropheStrings,
   hyphenatedFunctionName,
+  invalidLucideIcon,
 ];
 
 // ── Public API ────────────────────────────────────────────────────────────────

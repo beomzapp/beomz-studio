@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sanitiseContent } from "./sanitise.js";
+import {
+  fixInvalidLucideIcons,
+  sanitiseContent,
+  VALID_LUCIDE_ICONS,
+} from "./sanitise.ts";
 
 const TEST_PATH = "apps/web/src/app/generated/dreadmeter/App.tsx";
 
@@ -139,4 +143,54 @@ test("sanitiseContent converts a-b-c-d to ABCD", () => {
     output,
     "export default function ABCD() {\n  return null;\n}\n",
   );
+});
+
+test("VALID_LUCIDE_ICONS includes Circle and Home, excludes LayoutKanban", () => {
+  assert.equal(VALID_LUCIDE_ICONS.has("Circle"), true);
+  assert.equal(VALID_LUCIDE_ICONS.has("Home"), true);
+  assert.equal(VALID_LUCIDE_ICONS.has("LayoutKanban"), false);
+});
+
+test("fixInvalidLucideIcons replaces LayoutKanban with Circle", () => {
+  const input = "import { LayoutKanban } from 'lucide-react'\n";
+  const output = fixInvalidLucideIcons(input);
+
+  assert.equal(output, "import { Circle } from 'lucide-react'\n");
+});
+
+test("fixInvalidLucideIcons replaces KanbanSquare with Circle", () => {
+  const input = "import { KanbanSquare } from 'lucide-react'\n";
+  const output = fixInvalidLucideIcons(input);
+
+  assert.equal(output, "import { Circle } from 'lucide-react'\n");
+});
+
+test("fixInvalidLucideIcons keeps valid Home unchanged", () => {
+  const input = "import { Home } from 'lucide-react'\n";
+  const output = fixInvalidLucideIcons(input);
+
+  assert.equal(output, input);
+});
+
+test("fixInvalidLucideIcons preserves alias when replacing invalid icon", () => {
+  const input = "import { LayoutKanban as BoardIcon, Home } from 'lucide-react'\n";
+  const output = fixInvalidLucideIcons(input);
+
+  assert.equal(output, "import { Circle as BoardIcon, Home } from 'lucide-react'\n");
+});
+
+test("fixInvalidLucideIcons replaces invalid icon JSX usages with Circle", () => {
+  const input = [
+    "import { LayoutKanban, Home } from 'lucide-react'",
+    "export default function App() {",
+    "  return <div><LayoutKanban className=\"w-4 h-4\"></LayoutKanban><Home /></div>;",
+    "}",
+  ].join("\n");
+
+  const output = fixInvalidLucideIcons(input);
+
+  assert.match(output, /import \{ Circle, Home \} from 'lucide-react'/);
+  assert.match(output, /<Circle className=\"w-4 h-4\"><\/Circle>/);
+  assert.equal(output.includes("<LayoutKanban"), false);
+  assert.equal(output.includes("</LayoutKanban>"), false);
 });

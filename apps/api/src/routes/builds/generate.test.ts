@@ -69,6 +69,16 @@ test("initial build system prompt does not inject the inline Supabase rule", () 
   assert.equal(prompt.includes("import { supabase } from"), false);
 });
 
+test("system prompts include lucide safe icon guidance and banned icon list", () => {
+  const initialPrompt = buildSystemPrompt("professional-blue");
+  const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);
+
+  assert.match(initialPrompt, /When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist:/);
+  assert.match(initialPrompt, /Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard/);
+  assert.match(iterationPrompt, /When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist:/);
+  assert.match(iterationPrompt, /Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard/);
+});
+
 test("validateAndInjectStubs does not create supabase.tsx when a supabase import is missing", () => {
   const result = validateAndInjectStubs(
     [
