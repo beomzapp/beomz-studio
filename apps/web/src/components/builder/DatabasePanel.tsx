@@ -80,7 +80,7 @@ Instructions:
 5. Use tagged template literals for ALL queries:
    const rows = await sql\`SELECT * FROM tasks ORDER BY created_at DESC\`
    await sql\`INSERT INTO tasks (title) VALUES (\${title})\`
-   await sql\`DELETE FROM tasks WHERE id = \${id}\`\`;
+   await sql\`DELETE FROM tasks WHERE id = \${id}\``;
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
