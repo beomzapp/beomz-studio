@@ -46,7 +46,21 @@ import {
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 type ModeTab = "shared" | "dedicated" | "byo";
 
-const WIRING_PROMPT = `Wire this app to its Postgres database and add user authentication.
+const WIRING_PROMPT = `CRITICAL — use these EXACT import statements, copied verbatim.
+Never shorten, split, or create local helper files for these:
+
+import { neon } from '@neondatabase/serverless'
+import { createAuthClient } from '@neondatabase/neon-js/auth'
+import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'
+
+DO NOT:
+- Create ./auth.ts, ./ui.tsx, ./db.ts or any local re-export files
+- Shorten '@neondatabase/neon-js/auth/react/ui' to './ui'
+- Shorten '@neondatabase/neon-js/auth' to './auth'
+- Create any helper file that wraps these packages
+Use the FULL package path directly in every component that needs it.
+
+Wire this app to its Postgres database and add user authentication.
 
 Database connection (browser-safe — IMPORTANT):
 - Use @neondatabase/serverless, NOT pg or node-postgres
