@@ -442,6 +442,7 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
     const rewireCalls: Array<{ projectId: string; connectionUri: string }> = [];
     const branchCalls: string[] = [];
     const authCalls: Array<{ neonProjectId: string; branchId: string }> = [];
+    const dataApiCalls: Array<{ neonProjectId: string; branchId: string }> = [];
     const orgContext = createTestOrgContext(project, {
       findProjectsByOrgId: async () => [],
       updateProject: async (_id: string, patch: Record<string, unknown>) => {
@@ -502,6 +503,9 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
           secretServerKey: "secret-auth-key",
         };
       },
+      enableNeonDataApi: async (neonProjectId: string, branchId: string) => {
+        dataApiCalls.push({ neonProjectId, branchId });
+      },
       rewireNeonDb: async (projectId: string, connectionUri: string) => {
         rewireCalls.push({ projectId, connectionUri });
       },
@@ -542,6 +546,7 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
     ]);
     assert.deepEqual(branchCalls, ["neon-proj-1"]);
     assert.deepEqual(authCalls, [{ neonProjectId: "neon-proj-1", branchId: "branch-main" }]);
+    assert.deepEqual(dataApiCalls, [{ neonProjectId: "neon-proj-1", branchId: "branch-main" }]);
     assert.deepEqual(rewireCalls, [
       { projectId: project.id, connectionUri: "postgresql://user:pass@host/db" },
     ]);
@@ -562,6 +567,7 @@ test("db enable remains successful when Neon auth enable throws", async () => {
     const project = createProject();
     const updateConnectionCalls: Array<{ projectId: string; patch: Record<string, unknown> }> = [];
     const rewireCalls: Array<{ projectId: string; connectionUri: string }> = [];
+    let dataApiCalls = 0;
     const orgContext = createTestOrgContext(project, {
       findProjectsByOrgId: async () => [],
       updateProjectDbConnection: async (projectId: string, patch: Record<string, unknown>) => {
@@ -578,6 +584,9 @@ test("db enable remains successful when Neon auth enable throws", async () => {
       getNeonProjectBranches: async () => [{ id: "branch-main", name: "main", default: true }],
       enableNeonAuth: async () => {
         throw new Error("auth failure");
+      },
+      enableNeonDataApi: async () => {
+        dataApiCalls += 1;
       },
       rewireNeonDb: async (projectId: string, connectionUri: string) => {
         rewireCalls.push({ projectId, connectionUri });
@@ -611,6 +620,7 @@ test("db enable remains successful when Neon auth enable throws", async () => {
     assert.deepEqual(rewireCalls, [
       { projectId: project.id, connectionUri: "postgresql://user:pass@host/db2" },
     ]);
+    assert.equal(dataApiCalls, 0);
   } finally {
     if (originalNeonApiKey === undefined) {
       delete process.env.NEON_API_KEY;

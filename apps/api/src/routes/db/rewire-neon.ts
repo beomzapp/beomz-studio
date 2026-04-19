@@ -3,7 +3,7 @@ import { createStudioDbClient } from "@beomz-studio/studio-db";
 
 const ENV_FILE_PATH = ".env.local";
 
-function upsertEnvFile(
+export function upsertEnvFile(
   files: readonly StudioFile[],
   envVars: Record<string, string>,
 ): readonly StudioFile[] {
@@ -94,7 +94,7 @@ export async function rewireNeonDb(
 
   const files = latestGen.files as readonly StudioFile[];
   const nextFiles = upsertEnvFile(files, {
-    DATABASE_URL: dbUrl,
+    VITE_DATABASE_URL: dbUrl,
     VITE_NEON_AUTH_URL: neonAuthBaseUrl,
     NEON_AUTH_SECRET: neonAuthSecretKey,
     NEON_AUTH_PUB_KEY: neonAuthPubKey,
@@ -108,7 +108,7 @@ export async function rewireNeonDb(
     metadata: {
       ...metadata,
       neon: {
-        databaseUrlEnvVar: "DATABASE_URL",
+        databaseUrlEnvVar: "VITE_DATABASE_URL",
         authUrlEnvVar: neonAuthBaseUrl ? "VITE_NEON_AUTH_URL" : null,
       },
     },

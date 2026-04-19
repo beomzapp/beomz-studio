@@ -31,7 +31,12 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 import { getFeatureLimits } from "../../lib/features.js";
-import { enableNeonAuth, getNeonProjectBranches, provisionNeonProject } from "../../lib/neonClient.js";
+import {
+  enableNeonAuth,
+  enableNeonDataApi,
+  getNeonProjectBranches,
+  provisionNeonProject,
+} from "../../lib/neonClient.js";
 import { rewireNeonDb } from "./rewire-neon.js";
 
 export function countActiveDbEnabledProjects(
@@ -60,6 +65,7 @@ interface EnableDbRouteDeps {
   provisionNeonProject?: typeof provisionNeonProject;
   getNeonProjectBranches?: typeof getNeonProjectBranches;
   enableNeonAuth?: typeof enableNeonAuth;
+  enableNeonDataApi?: typeof enableNeonDataApi;
   rewireNeonDb?: typeof rewireNeonDb;
 }
 
@@ -75,6 +81,7 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
   const provisionNeonProjectFn = deps.provisionNeonProject ?? provisionNeonProject;
   const getNeonProjectBranchesFn = deps.getNeonProjectBranches ?? getNeonProjectBranches;
   const enableNeonAuthFn = deps.enableNeonAuth ?? enableNeonAuth;
+  const enableNeonDataApiFn = deps.enableNeonDataApi ?? enableNeonDataApi;
   const rewireNeonDbFn = deps.rewireNeonDb ?? rewireNeonDb;
 
   enableDbRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
@@ -131,6 +138,9 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
           neonAuth = branchId
             ? await enableNeonAuthFn(neonProjectId, branchId)
             : emptyNeonAuth;
+          if (branchId && neonAuth.baseUrl) {
+            await enableNeonDataApiFn(neonProjectId, branchId);
+          }
         } catch (authErr) {
           console.error("[db/enable] neon auth setup failed (non-fatal):", authErr);
           // Non-fatal — DB provisioning should still succeed

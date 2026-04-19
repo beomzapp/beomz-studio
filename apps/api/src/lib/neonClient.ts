@@ -109,3 +109,27 @@ export async function getNeonProjectBranches(
     default: Boolean(branch.default),
   }));
 }
+
+export async function enableNeonDataApi(
+  neonProjectId: string,
+  branchId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${NEON_API}/projects/${neonProjectId}/branches/${branchId}/data-api/neondb`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getNeonKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        auth_provider: "neon_auth",
+        add_default_grants: true,
+      }),
+    },
+  );
+  if (!res.ok) {
+    console.error("[neon] data api enable failed:", res.status);
+    // Non-fatal
+  }
+}

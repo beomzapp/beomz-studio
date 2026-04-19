@@ -5,6 +5,7 @@ const {
   provisionNeonProject,
   deleteNeonProject,
   enableNeonAuth,
+  enableNeonDataApi,
   getNeonProjectBranches,
 } = await import("./neonClient.js");
 
@@ -188,6 +189,59 @@ test("getNeonProjectBranches returns the branches array", async () => {
       { id: "br_default", name: "main", default: true },
       { id: "br_feature", name: "feature", default: false },
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalNeonApiKey === undefined) {
+      delete process.env.NEON_API_KEY;
+    } else {
+      process.env.NEON_API_KEY = originalNeonApiKey;
+    }
+  }
+});
+
+test("enableNeonDataApi calls Neon Data API endpoint with expected payload", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalNeonApiKey = process.env.NEON_API_KEY;
+  process.env.NEON_API_KEY = "test-neon-key";
+
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init });
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    await enableNeonDataApi("proj_123", "br_abc");
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0]?.url,
+      "https://console.neon.tech/api/v2/projects/proj_123/branches/br_abc/data-api/neondb",
+    );
+    assert.equal(calls[0]?.init?.method, "POST");
+    const body = JSON.parse(String(calls[0]?.init?.body));
+    assert.deepEqual(body, {
+      auth_provider: "neon_auth",
+      add_default_grants: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalNeonApiKey === undefined) {
+      delete process.env.NEON_API_KEY;
+    } else {
+      process.env.NEON_API_KEY = originalNeonApiKey;
+    }
+  }
+});
+
+test("enableNeonDataApi is non-fatal on failure", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalNeonApiKey = process.env.NEON_API_KEY;
+  process.env.NEON_API_KEY = "test-neon-key";
+
+  globalThis.fetch = (async () => new Response("", { status: 500 })) as typeof fetch;
+
+  try {
+    await enableNeonDataApi("proj_123", "br_abc");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalNeonApiKey === undefined) {

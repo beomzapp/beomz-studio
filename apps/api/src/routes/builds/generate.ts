@@ -1705,17 +1705,26 @@ export function buildIterationSystemPrompt(
   const neonDbBlock = isNeonWired
     ? [
         "",
-        "This project uses a Neon Postgres database. The connection string is available as process.env.DATABASE_URL.",
-        "Use the 'pg' package to connect:",
-        "  import { Pool } from 'pg';",
-        "  const pool = new Pool({",
-        "    connectionString: process.env.DATABASE_URL,",
-        "    ssl: { rejectUnauthorized: false }",
-        "  });",
+        "This project uses a Neon Postgres database. The connection string is available as import.meta.env.VITE_DATABASE_URL.",
+        "Use @neondatabase/serverless (browser-safe HTTP) to connect:",
+        "  import { neon } from '@neondatabase/serverless';",
+        "  const sql = neon(import.meta.env.VITE_DATABASE_URL);",
         "  // Query example:",
-        "  const { rows } = await pool.query('SELECT * FROM table_name');",
+        "  const tasks = await sql`SELECT * FROM tasks`;",
+        "  // Insert example:",
+        "  await sql`INSERT INTO tasks (title, done) VALUES (${title}, false)`;",
+        "  // CREATE TABLE example:",
+        "  await sql`CREATE TABLE IF NOT EXISTS tasks (",
+        "    id SERIAL PRIMARY KEY,",
+        "    title TEXT NOT NULL,",
+        "    done BOOLEAN DEFAULT false,",
+        "    created_at TIMESTAMPTZ DEFAULT NOW()",
+        "  )`;",
+        "Use tagged template literals: sql`...` (NOT sql('...')).",
+        "All DB calls are async — use await in useEffect or event handlers.",
+        "Create tables with CREATE TABLE IF NOT EXISTS at app startup (in a useEffect or init function that runs once on mount).",
         "Do NOT use @supabase/supabase-js. Do NOT use createClient().",
-        "Use raw SQL via the pg Pool.",
+        "Do NOT use pg.",
       ].join("\n")
     : "";
   const neonAuthBlock = hasNeonAuth
@@ -1733,8 +1742,9 @@ export function buildIterationSystemPrompt(
     : "";
   const dbImportRules = isNeonWired
     ? [
-        "8. NEON IMPORTS: Use: import { Pool } from 'pg' and process.env.DATABASE_URL.",
-        "   Do NOT use @supabase/supabase-js. Do NOT use createClient().",
+        "8. NEON IMPORTS: Use: import { neon } from '@neondatabase/serverless' and import.meta.env.VITE_DATABASE_URL.",
+        "   Use sql tagged templates (sql`...`) and CREATE TABLE IF NOT EXISTS at startup.",
+        "   Do NOT use pg. Do NOT use @supabase/supabase-js. Do NOT use createClient().",
       ]
     : [
         "8. SUPABASE IMPORTS: Always use: import { createClient } from '@supabase/supabase-js'",
