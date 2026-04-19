@@ -3,12 +3,11 @@ import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
 
-import { activeBuilds } from "./lib/activeBuilds.js";
-import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "./config.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
 import projectAuthRoute from "./routes/auth/project-auth.js";
+import meRoute from "./routes/me.js";
 import buildsEventsRoute from "./routes/builds/events.js";
 import buildsForkRoute from "./routes/builds/fork.js";
 import buildsLatestRoute from "./routes/builds/latest.js";
@@ -48,7 +47,14 @@ import {
 } from "./routes/projects/publish.js";
 import { vercelDeployRoute } from "./routes/projects/vercel.js";
 import nextPhaseRoute from "./routes/projects/next-phase.js";
+
 const app = new Hono();
+const activeSseConnections = new Set<string>();
+const SSE_DRAIN_TIMEOUT_MS = 25_000;
+const SSE_DRAIN_POLL_INTERVAL_MS = 500;
+
+let isShuttingDown = false;
+let shutdownPromise: Promise<void> | null = null;
 
 app.use(
   "*",
@@ -70,10 +76,68 @@ app.use(
   }),
 );
 
+app.use("*", async (c, next) => {
+  if (isShuttingDown) {
+    return c.json({ error: "Server is restarting. Please retry shortly." }, 503);
+  }
+
+  await next();
+
+  const contentType = c.res.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream") || !c.res.body) {
+    return;
+  }
+
+  const connectionId = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  activeSseConnections.add(connectionId);
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    activeSseConnections.delete(connectionId);
+    c.req.raw.signal.removeEventListener("abort", cleanup);
+  };
+
+  c.req.raw.signal.addEventListener("abort", cleanup, { once: true });
+
+  const reader = c.res.body.getReader();
+  const trackedBody = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          cleanup();
+          controller.close();
+          return;
+        }
+
+        if (value) {
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        cleanup();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      cleanup();
+      await reader.cancel(reason);
+    },
+  });
+
+  c.res = new Response(trackedBody, {
+    headers: new Headers(c.res.headers),
+    status: c.res.status,
+    statusText: c.res.statusText,
+  });
+});
+
 app.get("/", (c) => c.json({ status: "ok" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);
+app.route("/me", meRoute);
 app.route("/projects/:projectId/auth", projectAuthRoute);
 app.route("/builds/start", buildsStartRoute);
 app.route("/builds/upload-image", buildsUploadImageRoute);
@@ -118,7 +182,7 @@ app.route("/projects/:id/deploy/vercel", vercelDeployRoute);
 // BEO-197: Phased build system
 app.route("/projects/:id/next-phase", nextPhaseRoute);
 
-serve(
+const server = serve(
   {
     fetch: app.fetch,
     hostname: "0.0.0.0",
@@ -135,116 +199,34 @@ serve(
   },
 );
 
-// ── Graceful shutdown (BEO-255 / BEO-318) ────────────────────────────────────
-// PM2 sends SIGTERM when reloading. We:
-//  1. Write a server_restarting error event to each active build's builderTrace
-//     (so events.ts SSE relay delivers it to the frontend before the stream dies).
-//  2. Mark the generation as failed so the polling loop terminates cleanly.
-//  3. Exit — no 180s drain needed; the DB write is the only critical work.
-//     kill_timeout in ecosystem.config.cjs is set to 35s to allow the write.
-
-/** Read the builderTrace from generation metadata (same logic as readTrace in generate.ts). */
-function readBuilderTrace(metadata: Record<string, unknown>): {
-  events: unknown[];
-  lastEventId: string | null;
-  previewReady: boolean;
-  fallbackUsed: boolean;
-  fallbackReason: string | null;
-} {
-  const t = metadata.builderTrace;
-  if (typeof t === "object" && t !== null && !Array.isArray(t)) {
-    const raw = t as Record<string, unknown>;
-    return {
-      events: Array.isArray(raw.events) ? raw.events : [],
-      lastEventId: typeof raw.lastEventId === "string" ? raw.lastEventId : null,
-      previewReady: raw.previewReady === true,
-      fallbackUsed: raw.fallbackUsed === true,
-      fallbackReason: typeof raw.fallbackReason === "string" ? raw.fallbackReason : null,
-    };
-  }
-  return { events: [], lastEventId: null, previewReady: false, fallbackUsed: false, fallbackReason: null };
-}
-
 async function gracefulShutdown(signal: string): Promise<void> {
-  if (activeBuilds.size === 0) {
-    console.log(`[shutdown] ${signal} received — no active builds. Exiting immediately.`);
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+
+  isShuttingDown = true;
+  console.log(`[shutdown] ${signal} received — ${activeSseConnections.size} active SSE stream(s). Draining before exit.`);
+
+  server.close();
+
+  shutdownPromise = (async () => {
+    const startedAt = Date.now();
+
+    while (activeSseConnections.size > 0 && Date.now() - startedAt < SSE_DRAIN_TIMEOUT_MS) {
+      await new Promise((resolve) => setTimeout(resolve, SSE_DRAIN_POLL_INTERVAL_MS));
+    }
+
+    const timedOut = activeSseConnections.size > 0;
+    if (timedOut) {
+      console.warn(`[shutdown] drain timeout reached with ${activeSseConnections.size} active SSE stream(s). Exiting.`);
+    } else {
+      console.log("[shutdown] all active SSE streams drained. Exiting.");
+    }
+
     process.exit(0);
-  }
+  })();
 
-  console.log(`[shutdown] ${signal} received — ${activeBuilds.size} active build(s). Writing server_restarting events...`);
-
-  try {
-    const db = createStudioDbClient();
-    const completedAt = new Date().toISOString();
-
-    await Promise.allSettled(
-      [...activeBuilds].map(async (buildId) => {
-        try {
-          const row = await db.findGenerationById(buildId);
-          if (!row) {
-            // Row not found — just mark failed without trace update
-            await db.updateGeneration(buildId, {
-              status: "failed",
-              error: "Server restarted during build",
-              completed_at: completedAt,
-            });
-            return;
-          }
-
-          const meta = typeof row.metadata === "object" && row.metadata !== null
-            ? (row.metadata as Record<string, unknown>)
-            : {};
-
-          const trace = readBuilderTrace(meta);
-
-          // Append server_restarting error event to trace so events.ts emits
-          // it as the terminal event — frontend receives code "server_restarting"
-          // (CC's frontend handler keeps the overlay up rather than dropping it).
-          const restartingEvent = {
-            id: `${buildId}:server-restarting`,
-            type: "error" as const,
-            code: "server_restarting",
-            message: "Server is restarting. Your build will resume shortly.",
-            buildId,
-            projectId: row.project_id,
-            operation: "initial_build" as const,
-            timestamp: completedAt,
-          };
-
-          const newTrace = {
-            ...trace,
-            events: [...trace.events, restartingEvent],
-            lastEventId: restartingEvent.id,
-          };
-
-          await db.updateGeneration(buildId, {
-            status: "failed",
-            error: "Server restarted during build",
-            completed_at: completedAt,
-            metadata: { ...meta, builderTrace: newTrace },
-          });
-
-          console.log(`[shutdown] server_restarting event written for build ${buildId}`);
-        } catch (err) {
-          console.warn(`[shutdown] failed to write server_restarting for build ${buildId}:`, err instanceof Error ? err.message : String(err));
-          // Best-effort fallback: mark failed without trace
-          try {
-            await db.updateGeneration(buildId, {
-              status: "failed",
-              error: "Server restarted during build",
-              completed_at: completedAt,
-            });
-          } catch { /* ignore */ }
-        }
-      }),
-    );
-
-    console.log(`[shutdown] DB writes complete. Exiting.`);
-  } catch (err) {
-    console.warn("[shutdown] gracefulShutdown DB write failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-
-  process.exit(0);
+  return shutdownPromise;
 }
 
 process.on("SIGTERM", () => { void gracefulShutdown("SIGTERM"); });
