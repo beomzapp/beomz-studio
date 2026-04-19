@@ -8,23 +8,16 @@ import type { OrgContext } from "../../types.js";
 
 /**
  * Builds a map of allowed Stripe price IDs → credit amounts for top-up packs.
- * Reads both the current naming (STRIPE_CREDITS_400/1000/2500/5000_PRICE_ID) and the
- * legacy naming deployed on the server (STRIPE_CREDITS_200/500/1200_PRICE_ID).
- * See BEO-197 for the server env var → credit amount mapping.
+ * Uses the current naming that matches CREDIT_PACKS exactly.
  */
 function buildTopupPriceMap(): Record<string, number> {
   const map: Record<string, number> = {};
 
   const entries: Array<[keyof typeof apiConfig, number]> = [
-    // Current naming (matches CREDIT_PACKS ids)
     ["STRIPE_CREDITS_400_PRICE_ID",   400],
     ["STRIPE_CREDITS_1000_PRICE_ID",  1000],
     ["STRIPE_CREDITS_2500_PRICE_ID",  2500],
     ["STRIPE_CREDITS_5000_PRICE_ID",  5000],
-    // Legacy naming as set on the production server (BEO-197)
-    ["STRIPE_CREDITS_200_PRICE_ID",  50],   // price_1TMrSK8... $5  → 50 credits
-    ["STRIPE_CREDITS_500_PRICE_ID",  150],  // price_1TMrU58... $12 → 150 credits
-    ["STRIPE_CREDITS_1200_PRICE_ID", 400],  // price_1TMrVf8... $29 → 400 credits
   ];
 
   for (const [key, credits] of entries) {
