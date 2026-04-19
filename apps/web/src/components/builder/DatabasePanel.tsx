@@ -61,15 +61,20 @@ DO NOT use or import:
 - Do NOT create local helper files (./db.ts, ./neon.ts, ./client.ts)
 
 Instructions:
-1. At app startup, run CREATE TABLE IF NOT EXISTS for each table the app needs, inside a useEffect that runs once:
+1. At app startup, run CREATE TABLE IF NOT EXISTS for each table the app needs, inside a useEffect that runs once.
+   Wrap the entire init() body in try/catch and swallow errors silently — the table likely already exists. Example:
    useEffect(() => {
-     const init = async () => {
-       await sql\`CREATE TABLE IF NOT EXISTS tasks (
-         id SERIAL PRIMARY KEY,
-         title TEXT NOT NULL,
-         done BOOLEAN DEFAULT false,
-         created_at TIMESTAMPTZ DEFAULT NOW()
-       )\`
+     async function init() {
+       try {
+         await sql\`CREATE TABLE IF NOT EXISTS tasks (
+           id SERIAL PRIMARY KEY,
+           title TEXT NOT NULL,
+           done BOOLEAN DEFAULT false,
+           created_at TIMESTAMPTZ DEFAULT NOW()
+         )\`
+       } catch (e) {
+         // table already exists, ignore
+       }
      }
      init()
    }, [])
@@ -379,6 +384,10 @@ export function DatabasePanel({
       ? "bg-amber-500"
       : "bg-[#F97316]";
 
+  const normalizedPlan = (plan ?? "free").toLowerCase().replace(/[\s-]+/g, "_");
+  const isFreePlan = normalizedPlan === "free";
+  const storageUrgent = fillPct > 80;
+
   // ── STATE 1: Not connected ──────────────────────────────────
   if (!databaseEnabled) {
     return (
@@ -608,6 +617,41 @@ export function DatabasePanel({
                 )}
               </div>
             </div>
+
+            {/* Upsell card — free plan soft upsell (always) or urgent upsell (>80%) */}
+            {(isFreePlan || storageUrgent) && (
+              <div
+                className={cn(
+                  "flex items-center justify-between rounded-xl border px-3.5 py-3",
+                  storageUrgent
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-[#e5e7eb] bg-white",
+                )}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Zap
+                    size={14}
+                    className={storageUrgent ? "shrink-0 text-amber-500" : "shrink-0 text-[#F97316]"}
+                  />
+                  <p className={cn("text-[11px] font-medium leading-snug", storageUrgent ? "text-amber-800" : "text-[#374151]")}>
+                    {storageUrgent
+                      ? "Storage almost full — upgrade to avoid data loss"
+                      : "Need more storage? Upgrade to Pro for 5GB"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => window.open("https://beomz.ai/plan", "_blank")}
+                  className={cn(
+                    "ml-3 shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
+                    storageUrgent
+                      ? "bg-amber-500 text-white hover:bg-amber-600"
+                      : "bg-[#F97316] text-white hover:bg-[#ea6c10]",
+                  )}
+                >
+                  Upgrade →
+                </button>
+              </div>
+            )}
 
             {/* Storage add-on row */}
             <div>
