@@ -3,7 +3,6 @@ import type { Project, StudioFile } from "@beomz-studio/contracts";
 import {
   Monitor,
   Smartphone,
-  Sparkles,
   Tablet,
   RefreshCw,
   Zap,
@@ -287,11 +286,13 @@ export function PreviewPane({
 
   // Unified "should hide iframe behind overlay" — true when:
   //  - WC is still booting (not ready yet), OR
-  //  - WC just became ready but we haven't confirmed it's serving, OR
-  //  - AI is actively writing files (iteration race)
+  //  - WC just became ready but we haven't confirmed it's serving yet.
+  // BEO-449: isAiCustomising no longer forces the overlay when WC is already
+  // confirmed live. For iterations the iframe stays visible and Vite HMR
+  // updates it in place; only the "Updating…" badge in the URL bar changes.
   const showLoadingOverlay =
     !!(files && files.length > 0) &&
-    (wcIsLoading || !wcReadyConfirmed || isAiCustomising);
+    (wcIsLoading || !wcReadyConfirmed);
 
   const handleRotate = useCallback(() => {
     if (viewMode === "mobile") setMobileLandscape((prev) => !prev);
@@ -321,9 +322,9 @@ export function PreviewPane({
         <div className="flex flex-1 items-center gap-2 rounded-md border border-[#e5e5e5] bg-white px-3 py-1">
           <span className="flex-1 text-xs text-[#9ca3af]">{urlBarText}</span>
           {wcStatus === "ready" && isAiCustomising && (
-            <span className="flex items-center gap-1 text-[10px] font-medium text-[#a855f7]">
-              <Sparkles size={9} className="animate-pulse" />
-              Customising…
+            <span className="flex items-center gap-1 rounded-full bg-[#a855f7]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#a855f7]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#a855f7]" />
+              Updating…
             </span>
           )}
           {wcStatus === "ready" && !isAiCustomising && !isFixing && (
@@ -375,7 +376,7 @@ export function PreviewPane({
               </div>
               <div className="text-center">
                 <p className="text-sm text-[#9ca3af]">
-                  {isAiCustomising && wcStatus === "ready" ? "Customising…" : "Starting preview…"}
+                  Starting preview…
                 </p>
                 <p className="mt-1 text-xs text-[#6b7280]">{progressMessage}</p>
               </div>
@@ -472,7 +473,7 @@ export function PreviewPane({
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-[#9ca3af]">
-                        {isAiCustomising && wcStatus === "ready" ? "Customising…" : "Starting preview…"}
+                        Starting preview…
                       </p>
                       <p className="mt-1 text-xs text-[#6b7280]">{progressMessage}</p>
                     </div>
@@ -587,8 +588,10 @@ export function PreviewPane({
       {/* Building overlay — shown until AI generation is complete.
           isBuilding covers the pre-scaffold window (no files yet).
           isAiCustomising covers scaffold→done (template mounted silently in background).
-          First thing the user sees is the finished AI-built app, not the raw template. */}
-      {(isBuilding || isAiCustomising) && (
+          First thing the user sees is the finished AI-built app, not the raw template.
+          BEO-449: suppress for iterations when WC is already confirmed live —
+          the preview stays visible and Vite HMR updates it in place. */}
+      {(isBuilding || (isAiCustomising && !wcReadyConfirmed)) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#faf9f6]">
           <div className="flex flex-col items-center gap-4">
             <div className="relative flex h-16 w-16 items-center justify-center">
