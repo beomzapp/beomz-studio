@@ -38,14 +38,45 @@ function buildInlineRuntimeContract(input: BuildStudioPreviewHtmlInput): Preview
     readGeneratedManifestFromFiles(template.id, input.files)
     ?? buildGeneratedManifest(template);
 
+  // BEO-440: Verify the manifest's primary route filePath exists in the actual
+  // file list. When the manifest falls back to buildGeneratedManifest(template),
+  // it uses template page IDs (e.g. "feed", "explore", "profile") as file paths
+  // — but the AI generates a single App.tsx at a different path. Resolve from
+  // the real files so the inline bundle entry import doesn't go missing.
+  let resolvedManifest = manifest;
+  if (manifest.routes.length > 0) {
+    const filePaths = new Set(input.files.map((f) => normalizeGeneratedPath(f.path)));
+    const primaryPath = normalizeGeneratedPath(manifest.routes[0]!.filePath);
+    if (!filePaths.has(primaryPath)) {
+      const base = `apps/web/src/app/generated/${input.project.templateId}/`;
+      const CANDIDATES = [
+        `${base}App.tsx`,
+        `${base}app.tsx`,
+        `${base}index.tsx`,
+        "apps/web/src/App.tsx",
+        "src/App.tsx",
+        "App.tsx",
+      ];
+      const realEntry = CANDIDATES.find((p) => filePaths.has(p));
+      if (realEntry) {
+        resolvedManifest = {
+          ...manifest,
+          routes: manifest.routes.map((route, i) =>
+            i === 0 ? { ...route, filePath: realEntry } : route,
+          ),
+        };
+      }
+    }
+  }
+
   return {
-    entryPath: input.previewEntryPath ?? manifest.entryPath,
+    entryPath: input.previewEntryPath ?? resolvedManifest.entryPath,
     mode: "preview",
-    navigation: buildGeneratedNavigationFromManifest(manifest),
+    navigation: buildGeneratedNavigationFromManifest(resolvedManifest),
     project: input.project,
     provider: "local",
-    routes: buildGeneratedRoutesFromManifest(manifest),
-    shell: manifest.shell,
+    routes: buildGeneratedRoutesFromManifest(resolvedManifest),
+    shell: resolvedManifest.shell,
     templateId: template.id,
   };
 }

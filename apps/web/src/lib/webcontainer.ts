@@ -149,6 +149,22 @@ function resolveActiveRoute() {
   );
 }
 
+// BEO-440: If the primary route module key is missing from generatedModules
+// (stale scaffold path baked into runtime.json on a cold boot), scan all loaded
+// modules for a likely entry component as a fallback so the preview never blanks.
+function findFallbackComponent(
+  modules: Record<string, AnyGeneratedModule>,
+): ComponentType | undefined {
+  const ENTRY_NAMES = new Set(["App", "app", "main", "Main", "index", "Index"]);
+  for (const [key, mod] of Object.entries(modules)) {
+    const baseName = key.replace(/^.*\\//, "").replace(/\\.(tsx?|jsx?)$/, "");
+    if (ENTRY_NAMES.has(baseName) && typeof mod?.default === "function") {
+      return mod.default as ComponentType;
+    }
+  }
+  return undefined;
+}
+
 function EmptyRoute() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0a0a0a", color: "#9ca3af" }}>
@@ -162,9 +178,15 @@ function EmptyRoute() {
 
 export function PreviewApp() {
   const activeRoute = useMemo(resolveActiveRoute, []);
-  const ActiveRoute =
-    generatedModules[resolveModuleKey(activeRoute.filePath)]?.default ??
-    EmptyRoute;
+  const moduleKey = resolveModuleKey(activeRoute.filePath);
+  const resolvedDefault = generatedModules[moduleKey]?.default;
+
+  // BEO-440: Fall back to scanning generatedModules if the route's module key
+  // is not present (e.g. stale scaffold path baked into the runtime.json).
+  const ActiveRoute: ComponentType =
+    (typeof resolvedDefault === "function" ? resolvedDefault : undefined)
+    ?? findFallbackComponent(generatedModules)
+    ?? EmptyRoute;
 
   return <ActiveRoute />;
 }
@@ -279,6 +301,27 @@ function pathsToFileTree(
 
 // ─── Runtime contract builder ─────────────────────────────────────────────────
 
+// Ordered candidates for finding the real app entry file when the manifest
+// route path doesn't match any file in the injected tree (BEO-440).
+function resolveRealEntryPath(
+  filePaths: Set<string>,
+  templateId: string,
+): string | undefined {
+  const base = `apps/web/src/app/generated/${templateId}/`;
+  const CANDIDATES = [
+    `${base}App.tsx`,
+    `${base}app.tsx`,
+    `${base}index.tsx`,
+    "apps/web/src/App.tsx",
+    "apps/web/src/main.tsx",
+    "src/App.tsx",
+    "src/main.tsx",
+    "App.tsx",
+    "main.tsx",
+  ];
+  return CANDIDATES.find((p) => filePaths.has(p));
+}
+
 function buildRuntimeJson(
   files: readonly Pick<StudioFile, "path" | "content">[],
   project: Pick<Project, "id" | "name" | "templateId">,
@@ -287,6 +330,32 @@ function buildRuntimeJson(
   const manifest =
     readGeneratedManifestFromFiles(project.templateId, files) ??
     buildGeneratedManifest(template);
+
+  // BEO-440: Verify that the manifest's primary route filePath actually exists
+  // in the injected file list. On a cold boot the scaffold module path can be
+  // stale (template fallback uses page IDs that don't match what the AI
+  // generated) causing the WC to boot from a non-existent entry and render
+  // EmptyRoute → blank preview. Resolve from the real file tree instead.
+  const filePaths = new Set(files.map((f) => normalizeGeneratedPath(f.path)));
+  let resolvedManifest = manifest;
+
+  if (manifest.routes.length > 0) {
+    const primaryPath = normalizeGeneratedPath(manifest.routes[0]!.filePath);
+    if (!filePaths.has(primaryPath)) {
+      const realEntry = resolveRealEntryPath(filePaths, project.templateId);
+      if (realEntry) {
+        console.warn(
+          `[BEO-440] WC runtime: manifest entry "${primaryPath}" not in file tree — resolved to "${realEntry}"`,
+        );
+        resolvedManifest = {
+          ...manifest,
+          routes: manifest.routes.map((route, i) =>
+            i === 0 ? { ...route, filePath: realEntry } : route,
+          ),
+        };
+      }
+    }
+  }
 
   const contract = {
     mode: "preview" as const,
@@ -297,10 +366,10 @@ function buildRuntimeJson(
       templateId: project.templateId,
     },
     templateId: template.id,
-    shell: manifest.shell,
-    entryPath: manifest.entryPath,
-    navigation: buildGeneratedNavigationFromManifest(manifest),
-    routes: buildGeneratedRoutesFromManifest(manifest),
+    shell: resolvedManifest.shell,
+    entryPath: resolvedManifest.entryPath,
+    navigation: buildGeneratedNavigationFromManifest(resolvedManifest),
+    routes: buildGeneratedRoutesFromManifest(resolvedManifest),
   };
 
   return JSON.stringify(contract, null, 2);
