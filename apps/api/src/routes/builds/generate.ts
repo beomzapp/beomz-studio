@@ -308,8 +308,12 @@ const BLOCKED_FILENAMES = new Set([
   "neon-auth.ts",
 ]);
 
+export function isBlockedFile(filePath: string): boolean {
+  return BLOCKED_FILENAMES.has(basename(filePath).toLowerCase());
+}
+
 export function filterBlockedGeneratedFiles<T extends { path: string }>(files: T[]): T[] {
-  return files.filter((file) => !BLOCKED_FILENAMES.has(basename(file.path).toLowerCase()));
+  return files.filter((file) => !isBlockedFile(file.path));
 }
 
 export function isNpmPackage(importPath: string): boolean {
@@ -2886,7 +2890,10 @@ async function _runBuildInBackground(
 
       // Merge: new files are added, updated files override existing ones
       const mergedIterFiles = mergeFiles([...existingFiles], iterResult.files);
-      const { files: iterFinalFiles, missing: iterMissingImports } = validateAndInjectStubs(mergedIterFiles, templateId);
+      const { files: iterFinalFilesRaw, missing: iterMissingImports } = validateAndInjectStubs(mergedIterFiles, templateId);
+      // BEO-421: strip any blocked stubs validateAndInjectStubs may have injected
+      // (e.g. if Sonnet imported from './ui', the stub injector would create ui.tsx)
+      const iterFinalFiles = filterBlockedGeneratedFiles(iterFinalFilesRaw);
       if (iterMissingImports.length > 0) {
         console.warn("[generate] WARNING: missing imports detected in iteration:", iterMissingImports);
         console.log("[generate] generating stub files for missing components...", { count: iterMissingImports.length });
@@ -3197,7 +3204,9 @@ async function _runBuildInBackground(
       mergeFiles(templateFiles, [...(input.existingFiles ?? [])]),
       customised.files,
     );
-    const { files: finalFiles, missing: missingImports } = validateAndInjectStubs(mergedFiles, templateId);
+    const { files: finalFilesRaw, missing: missingImports } = validateAndInjectStubs(mergedFiles, templateId);
+    // BEO-421: strip any blocked stubs validateAndInjectStubs may have injected
+    const finalFiles = filterBlockedGeneratedFiles(finalFilesRaw);
     if (missingImports.length > 0) {
       console.warn("[generate] WARNING: missing imports detected:", missingImports);
       console.log("[generate] generating stub files for missing components...", { count: missingImports.length });

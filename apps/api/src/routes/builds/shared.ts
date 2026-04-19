@@ -277,6 +277,30 @@ export function mapProjectRowToProject(row: ProjectRow): Project {
   };
 }
 
+// BEO-421: blocked stub filenames that should never be sent to the client.
+// Mirrors BLOCKED_FILENAMES in generate.ts — kept local to avoid circular imports.
+const BLOCKED_FILE_BASENAMES = new Set([
+  "supabase.tsx", "supabase.ts", "supabase-js.tsx", "supabase-js.ts",
+  "supabase-client.tsx", "supabase-client.ts", "supabase-helper.tsx", "supabase-helper.ts",
+  "serverless.tsx", "serverless.ts",
+  "ui.tsx", "ui.ts",
+  "auth.tsx", "auth.ts",
+  "db.tsx", "db.ts",
+  "client.tsx", "client.ts",
+  "neon-auth.tsx", "neon-auth.ts",
+  "neon.tsx", "neon.ts",
+  "neon-js.tsx", "neon-js.ts",
+]);
+
+export function isBlockedFile(filePath: string): boolean {
+  const base = (filePath.split("/").pop() ?? "").toLowerCase();
+  return BLOCKED_FILE_BASENAMES.has(base);
+}
+
+function filterBlockedFiles<T extends { path: string }>(files: T[]): T[] {
+  return files.filter((f) => !isBlockedFile(f.path));
+}
+
 export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput | null {
   // Never return anything for terminal-failure states.
   if (row.status === "failed" || row.status === "cancelled") {
@@ -292,7 +316,9 @@ export function buildInitialBuildOutput(row: GenerationRow): InitialBuildOutput 
   }
 
   return {
-    files: row.files,
+    files: Array.isArray(row.files)
+      ? filterBlockedFiles(row.files as Array<{ path: string } & Record<string, unknown>>) as typeof row.files
+      : row.files,
     generation: {
       changedPaths: row.output_paths,
       id: row.id,

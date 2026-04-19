@@ -21,7 +21,7 @@ import {
   startBuildRequestSchema,
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
-import { runBuildInBackground } from "./generate.js";
+import { runBuildInBackground, filterBlockedGeneratedFiles } from "./generate.js";
 import { CREDIT_THRESHOLD, PLAN_LIMITS, SIMPLE_BUILD_MIN, isAdminEmail } from "../../lib/credits.js";
 import { detectIntent } from "./generate.js";
 
@@ -175,7 +175,11 @@ buildsStartRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   let existingFiles = parsedBody.data.existingFiles ? [...parsedBody.data.existingFiles] : [];
   if (projectRow && existingFiles.length === 0) {
     const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectRow.id);
-    existingFiles = latestGeneration?.files ? [...latestGeneration.files] : [];
+    // BEO-421: strip stale blocked stub files at load time so they are never
+    // passed into the build pipeline or returned to the client as existingFiles.
+    existingFiles = latestGeneration?.files
+      ? filterBlockedGeneratedFiles([...latestGeneration.files])
+      : [];
   }
 
   const isIteration = Boolean(projectRow && existingFiles.length > 0);

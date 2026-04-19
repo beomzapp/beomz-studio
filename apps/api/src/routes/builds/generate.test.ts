@@ -8,6 +8,7 @@ process.env.PORT ??= "3001";
 
 const {
   filterBlockedGeneratedFiles,
+  isBlockedFile,
   buildIterationSystemPrompt,
   buildSystemPrompt,
   isNpmPackage,
@@ -241,4 +242,53 @@ test("filterBlockedGeneratedFiles removes new helper re-export filenames", () =>
       `Expected ${blockedFilename} to be filtered out`,
     );
   }
+});
+
+test("isBlockedFile returns true for blocked basenames", () => {
+  assert.equal(isBlockedFile("serverless.tsx"), true);
+  assert.equal(isBlockedFile("serverless.ts"), true);
+  assert.equal(isBlockedFile("ui.tsx"), true);
+  assert.equal(isBlockedFile("auth.ts"), true);
+  assert.equal(isBlockedFile("db.tsx"), true);
+  assert.equal(isBlockedFile("client.ts"), true);
+  assert.equal(isBlockedFile("neon-auth.tsx"), true);
+  assert.equal(isBlockedFile("supabase.tsx"), true);
+  assert.equal(isBlockedFile("supabase-js.ts"), true);
+});
+
+test("isBlockedFile returns false for non-blocked filenames", () => {
+  assert.equal(isBlockedFile("App.tsx"), false);
+  assert.equal(isBlockedFile("Button.tsx"), false);
+  assert.equal(isBlockedFile("index.ts"), false);
+  assert.equal(isBlockedFile("utils.ts"), false);
+});
+
+test("isBlockedFile matches on basename — path prefix is ignored", () => {
+  assert.equal(isBlockedFile("src/components/serverless.tsx"), true);
+  assert.equal(isBlockedFile("apps/web/src/app/generated/workspace-task/ui.tsx"), true);
+  assert.equal(isBlockedFile("some/deep/path/auth.ts"), true);
+  assert.equal(isBlockedFile("src/components/App.tsx"), false);
+});
+
+test("save path: filterBlockedGeneratedFiles strips stubs injected by validateAndInjectStubs", () => {
+  // Simulate: AI imports from './ui' (shortened package path), validateAndInjectStubs
+  // creates a ui.tsx stub. filterBlockedGeneratedFiles must remove it before DB persist.
+  const fileWithBadImport = {
+    path: "apps/web/src/app/generated/workspace-task/App.tsx",
+    kind: "entry" as const,
+    language: "tsx" as const,
+    content: "import { AuthView } from './ui'\nexport default function App() { return null; }\n",
+    source: "ai" as const,
+    locked: false,
+  };
+  const { files: withStubs } = validateAndInjectStubs([fileWithBadImport], "workspace-task");
+  // validateAndInjectStubs should have injected ui.tsx
+  const stubPaths = withStubs.map((f) => f.path.replace(/^.*\//, ""));
+  assert.equal(stubPaths.includes("ui.tsx"), true, "validateAndInjectStubs should have injected ui.tsx stub");
+
+  // Now simulate what _runBuildInBackground does before persisting:
+  const toSave = filterBlockedGeneratedFiles(withStubs);
+  const savedPaths = toSave.map((f) => f.path.replace(/^.*\//, ""));
+  assert.equal(savedPaths.includes("ui.tsx"), false, "ui.tsx stub must not be persisted");
+  assert.equal(savedPaths.includes("App.tsx"), true, "App.tsx must be kept");
 });
