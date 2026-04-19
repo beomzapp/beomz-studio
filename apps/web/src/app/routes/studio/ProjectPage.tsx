@@ -322,6 +322,16 @@ export function ProjectPage() {
     [credits, sendMessage, buildDoneRef],
   );
 
+  // ─── Wire to database (fires after Neon provisioning) ────────────────────
+
+  const handleWireToDatabase = useCallback(
+    (prompt: string) => {
+      setActiveView("preview");
+      handleSendMessage(prompt);
+    },
+    [handleSendMessage, setActiveView],
+  );
+
   // ─── Stop streaming ───────────────────────────────────────────────────────
 
   const handleStopStreaming = useCallback(() => {
@@ -655,6 +665,7 @@ export function ProjectPage() {
             dbWired={dbWired}
             plan={credits?.plan ?? "free"}
             onDbStateChange={fetchDbState}
+            onWireToDatabase={handleWireToDatabase}
           />
         );
       case "integrations":

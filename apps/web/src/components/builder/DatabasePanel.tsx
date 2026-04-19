@@ -46,6 +46,12 @@ import {
 type PanelTab = "schema" | "data" | "bindings" | "logs";
 type ModeTab = "shared" | "dedicated" | "byo";
 
+const WIRING_PROMPT =
+  "Wire this app to its Postgres database. Based on the app's existing features " +
+  "and UI, create the appropriate database tables using CREATE TABLE IF NOT EXISTS, " +
+  "then wire all existing components to read and write real data. " +
+  "Use process.env.DATABASE_URL with the pg package. Do not use supabase-js.";
+
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
   return `${Math.round(mb)}MB`;
@@ -69,6 +75,7 @@ interface DatabasePanelProps {
   dbWired: boolean;
   plan: string;
   onDbStateChange: () => void;
+  onWireToDatabase?: (prompt: string) => void;
 }
 
 export function DatabasePanel({
@@ -79,9 +86,11 @@ export function DatabasePanel({
   dbWired,
   plan,
   onDbStateChange,
+  onWireToDatabase,
 }: DatabasePanelProps) {
   // ── Connection / wiring state ─────────────────────────────
   const [enabling, setEnabling] = useState(false);
+  const [wiringStatus, setWiringStatus] = useState<"idle" | "connected">("idle");
   const [wiringDb, setWiringDb] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -168,13 +177,18 @@ export function DatabasePanel({
     setError(null);
     try {
       await enableDatabase(projectId);
+      setEnabling(false);
+      setWiringStatus("connected");
       onDbStateChange();
+      // After a brief "Connected! Wiring…" moment, fire the build and switch to preview
+      setTimeout(() => {
+        onWireToDatabase?.(WIRING_PROMPT);
+      }, 1400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to enable database.");
-    } finally {
       setEnabling(false);
     }
-  }, [projectId, onDbStateChange]);
+  }, [projectId, onDbStateChange, onWireToDatabase]);
 
   const handleWire = useCallback(async () => {
     if (!projectId) return;
@@ -351,24 +365,38 @@ export function DatabasePanel({
           </div>
 
           {/* BEO-401: Neon is live — real Add Database flow */}
-          <button
-            onClick={() => void handleEnable()}
-            disabled={enabling}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
-          >
-            {enabling ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Zap size={16} />
-            )}
-            {enabling ? "Setting up..." : "Add Database"}
-          </button>
+          {wiringStatus === "connected" ? (
+            <div className="flex flex-col items-center gap-3 py-2">
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
+                <Loader2 size={16} className="animate-spin" />
+                Connected! Wiring to your app…
+              </div>
+              <p className="text-[11px] text-[#9ca3af]">
+                The build will start in a moment.
+              </p>
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => void handleEnable()}
+                disabled={enabling}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+              >
+                {enabling ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Zap size={16} />
+                )}
+                {enabling ? "Setting up..." : "Add Database"}
+              </button>
 
-          <p className="text-[11px] text-[#9ca3af]">
-            Isolated · Auto-scaling · Backed up daily
-          </p>
+              <p className="text-[11px] text-[#9ca3af]">
+                Isolated · Auto-scaling · Backed up daily
+              </p>
+            </>
+          )}
 
-          {error && (
+          {error && wiringStatus === "idle" && (
             <p className="flex items-center justify-center gap-1.5 text-xs text-red-500">
               <AlertCircle size={12} /> {error}{" "}
               <button
