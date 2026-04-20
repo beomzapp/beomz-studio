@@ -248,15 +248,22 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
               })
             : (typeof project?.chat_summary === "string" ? project.chat_summary : null);
 
-          await orgContext.db.updateProject(projectId, {
-            chat_history: updatedHistory,
-            chat_summary: nextChatSummary,
-          }).catch((error: unknown) => {
-            console.warn(
-              "[builds/chat] failed to persist chat memory (non-fatal):",
-              error instanceof Error ? error.message : String(error),
-            );
-          });
+          try {
+            await orgContext.db.updateProject(projectId, {
+              chat_history: updatedHistory,
+              chat_summary: nextChatSummary,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/chat_summary/i.test(message)) {
+              await orgContext.db.updateProject(projectId, {
+                chat_history: updatedHistory,
+              }).catch(() => undefined);
+              console.warn("[builds/chat] chat_summary column missing — persisted chat_history only.");
+            } else {
+              console.warn("[builds/chat] failed to persist chat memory (non-fatal):", message);
+            }
+          }
         }
 
         if (assistantResponse.trim().length > 0 && !isAdminEmail(orgContext.user.email)) {

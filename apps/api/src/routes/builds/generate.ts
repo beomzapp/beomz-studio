@@ -532,10 +532,22 @@ async function persistProjectChatHistory(
         })
       : (typeof project.chat_summary === "string" ? project.chat_summary : null);
 
-    await db.updateProject(projectId, {
-      chat_history: updatedHistory,
-      chat_summary: nextChatSummary,
-    });
+    try {
+      await db.updateProject(projectId, {
+        chat_history: updatedHistory,
+        chat_summary: nextChatSummary,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/chat_summary/i.test(message)) {
+        await db.updateProject(projectId, {
+          chat_history: updatedHistory,
+        });
+        console.warn("[generate] chat_summary column missing — persisted chat_history only.");
+      } else {
+        throw error;
+      }
+    }
   } catch (err) {
     console.warn("[generate] persistProjectChatHistory failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
