@@ -16,7 +16,20 @@ const files: StudioFile[] = [
     path: "apps/web/src/app/generated/pettycash/App.tsx",
     kind: "route",
     language: "tsx",
-    content: "export default function App() { return <div>Dashboard Expenses Top-ups</div>; }",
+    content: [
+      "import ExpensesPage from './ExpensesPage';",
+      "import TopUpsPage from './TopUpsPage';",
+      "import { theme } from './theme';",
+      "",
+      "export default function App() {",
+      "  return (",
+      "    <div style={{ color: theme.accent }}>",
+      "      <ExpensesPage />",
+      "      <TopUpsPage />",
+      "    </div>",
+      "  );",
+      "}",
+    ].join("\n"),
     source: "ai",
     locked: false,
   },
@@ -94,6 +107,9 @@ test("buildProjectMemoryPrompt injects app name, files, summary, recent conversa
   assert.match(prompt, /## Recent conversation[\s\S]*user: hi[\s\S]*assistant: Everything is set up\./i);
   assert.match(prompt, /Greeting -> respond warmly, briefly describe what the app does/i);
   assert.match(prompt, /Likely existing features: Expenses, Top Ups/i);
+  assert.match(prompt, /## App\.tsx first 10 lines[\s\S]*import ExpensesPage/);
+  assert.match(prompt, /## theme\.ts contents[\s\S]*accent: '#F97316'/);
+  assert.match(prompt, /Detected routes\/pages: Expenses, Top Ups/i);
 });
 
 test("shouldRefreshProjectChatSummary triggers every 10 messages", () => {

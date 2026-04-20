@@ -13,7 +13,6 @@ import {
   normalisePlanningMessages,
 } from "../../lib/chatMode.js";
 import {
-  buildProjectMemoryPrompt,
   type ProjectChatHistoryEntry,
   appendProjectChatHistory,
   readProjectChatHistory,
@@ -30,17 +29,12 @@ import {
   buildAnthropicImageBlock,
   isSupportedAnthropicImageUrl,
 } from "../../lib/anthropicImages.js";
+import {
+  buildStructuredChatSystemPrompt,
+  parseStructuredChatResponse,
+} from "../../lib/chatPrompts.js";
+import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
 import { anthropic } from "../plan/shared.js";
-
-const BASE_CHAT_MODE_SYSTEM_PROMPT = [
-  "You are Beomz, a warm and sharp senior AI product builder.",
-  "Keep responses natural, concise, and helpful.",
-  "If the request is clear, respond directly instead of asking extra questions.",
-  "If the request is ambiguous, ask exactly one targeted clarifying question.",
-  "Avoid robotic question lists, onboarding interviews, and generic filler.",
-  "For greetings or small talk, reply warmly and briefly.",
-  "If there is no existing app context yet, guide the user with one focused question at a time and say when you have enough to build.",
-].join(" ");
 
 type ChatAnthropicMessage = Anthropic.MessageParam;
 interface BuildsChatRouteDeps {
@@ -98,6 +92,20 @@ function calculateChatCreditCharge(model: string, hasImage: boolean): number {
     ? CHAT_MESSAGE_COST_HAIKU
     : CHAT_MESSAGE_COST_SONNET;
   return baseCost + (hasImage ? CHAT_IMAGE_ANALYSIS_SURCHARGE : 0);
+}
+
+async function loadWebsiteContext(message: string) {
+  const url = extractUrlLike(message);
+  if (!url) {
+    return null;
+  }
+
+  const content = await fetchUrlContent(url);
+  return {
+    url,
+    content,
+    fetchFailed: content === null,
+  };
 }
 
 const requestSchema = z.object({
@@ -178,15 +186,14 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
             content: message.content,
             timestamp: new Date(index).toISOString(),
           }));
-      const systemPrompt = [
-        BASE_CHAT_MODE_SYSTEM_PROMPT,
-        buildProjectMemoryPrompt({
-          appName: project?.name ?? null,
-          chatSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
-          files: projectFiles,
-          history: contextHistory,
-        }),
-      ].join("\n\n");
+      const websiteContext = await loadWebsiteContext(currentUserMessage.content);
+      const systemPrompt = buildStructuredChatSystemPrompt({
+        projectName: project?.name ?? null,
+        chatSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
+        existingFiles: projectFiles,
+        chatHistory: contextHistory,
+        websiteContext,
+      });
       const modelMessages: ChatAnthropicMessage[] = [
         {
           role: "user",
@@ -196,7 +203,7 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
 
       return streamSSE(c, async (sse) => {
         let nextEventId = 1;
-        let assistantResponse = "";
+        let rawAssistantResponse = "";
 
         const writeEvent = async (event: string, payload: Record<string, unknown>) => {
           const id = String(nextEventId++);
@@ -225,19 +232,32 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
             && event.delta.type === "text_delta"
             && event.delta.text.length > 0
           ) {
-            assistantResponse += event.delta.text;
-            await writeEvent("chat_response", {
-              type: "chat_response",
-              delta: event.delta.text,
-            });
+            rawAssistantResponse += event.delta.text;
           }
         }
 
-        if (projectId && assistantResponse.trim().length > 0) {
+        const assistantResponse = parseStructuredChatResponse(rawAssistantResponse);
+        if (assistantResponse.message.trim().length > 0) {
+          await writeEvent("chat_response", {
+            type: "chat_response",
+            delta: assistantResponse.message,
+          });
+        }
+
+        if (assistantResponse.readyToImplement && assistantResponse.implementPlan) {
+          await writeEvent("ready_to_implement", {
+            type: "ready_to_implement",
+            readyToImplement: true,
+            implementPlan: assistantResponse.implementPlan,
+            plan: assistantResponse.implementPlan,
+          });
+        }
+
+        if (projectId && assistantResponse.message.trim().length > 0) {
           const updatedHistory = appendProjectChatHistory(
             project?.chat_history,
             currentUserMessage.content,
-            assistantResponse,
+            assistantResponse.message,
           );
           const nextChatSummary = shouldRefreshProjectChatSummary(updatedHistory.length)
             ? await generateProjectChatSummary({
@@ -266,7 +286,7 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
           }
         }
 
-        if (assistantResponse.trim().length > 0 && !isAdminEmail(orgContext.user.email)) {
+        if (assistantResponse.message.trim().length > 0 && !isAdminEmail(orgContext.user.email)) {
           orgContext.db.applyOrgUsageDeduction(
             orgContext.org.id,
             creditsToDeduct,
@@ -280,7 +300,9 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
           });
         }
 
-        const decision = getImplementSuggestionDecision(messages, assistantResponse);
+        const decision = assistantResponse.readyToImplement
+          ? { shouldEmit: false, summary: null }
+          : getImplementSuggestionDecision(messages, assistantResponse.message);
         if (decision.shouldEmit && decision.summary) {
           await writeEvent("implement_suggestion", {
             type: "implement_suggestion",

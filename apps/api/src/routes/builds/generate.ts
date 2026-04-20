@@ -63,7 +63,6 @@ import type { Phase } from "../../lib/planPhases.js";
 import {
   appendProjectChatHistory,
   buildConversationMessages,
-  buildProjectMemoryPrompt,
   readProjectChatHistory,
   shouldRefreshProjectChatSummary,
   type ProjectChatHistoryEntry,
@@ -77,6 +76,13 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 import { buildAnthropicImageBlock } from "../../lib/anthropicImages.js";
+import {
+  buildClarifyingQuestionSystemPrompt,
+  buildStructuredChatSystemPrompt,
+  parseStructuredChatResponse,
+  type StructuredChatResponse,
+} from "../../lib/chatPrompts.js";
+import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -558,26 +564,19 @@ function buildConversationalSystemPrompt(
   existingFiles: readonly StudioFile[],
   chatSummary: string | null,
   chatHistory: readonly ProjectChatHistoryEntry[],
+  websiteContext?: {
+    content: string | null;
+    fetchFailed: boolean;
+    url: string;
+  } | null,
 ): string {
-  const basePrompt = [
-    "You are Beomz, a warm and sharp senior AI product builder.",
-    "Answer naturally, confidently, and concisely.",
-    "If the user greets you, greet them back and briefly describe the current app.",
-    "If the user asks what the app does, infer it from the existing files and answer directly.",
-    "If the user asks for recommendations, give concrete suggestions tailored to the existing app.",
-    "Never ask setup or onboarding questions when files already exist.",
-  ].join(" ");
-
-  if (existingFiles.length > 0) {
-    return `${basePrompt}\n\n${buildProjectMemoryPrompt({
-      appName: projectName,
-      chatSummary,
-      files: existingFiles,
-      history: chatHistory,
-    })}`;
-  }
-
-  return `${basePrompt}\n\nIf there is no existing app yet, help the user with one focused question at a time.`;
+  return buildStructuredChatSystemPrompt({
+    projectName,
+    existingFiles,
+    chatSummary,
+    chatHistory,
+    websiteContext,
+  });
 }
 
 function buildClarifyingSystemPrompt(
@@ -585,25 +584,19 @@ function buildClarifyingSystemPrompt(
   existingFiles: readonly StudioFile[],
   chatSummary: string | null,
   chatHistory: readonly ProjectChatHistoryEntry[],
+  websiteContext?: {
+    content: string | null;
+    fetchFailed: boolean;
+    url: string;
+  } | null,
 ): string {
-  const basePrompt = [
-    "You are Beomz.",
-    "Ask exactly one focused clarifying question to unblock the next action.",
-    "Keep it under 20 words.",
-    "Do not ask setup or onboarding questions when files already exist.",
-    "Make the question specific to the current app and the user's request.",
-  ].join(" ");
-
-  if (existingFiles.length > 0) {
-    return `${basePrompt}\n\n${buildProjectMemoryPrompt({
-      appName: projectName,
-      chatSummary,
-      files: existingFiles,
-      history: chatHistory,
-    })}`;
-  }
-
-  return basePrompt;
+  return buildClarifyingQuestionSystemPrompt({
+    projectName,
+    existingFiles,
+    chatSummary,
+    chatHistory,
+    websiteContext,
+  });
 }
 
 const IMAGE_INTENT_PROMPT_CONTEXT: Record<BuilderImageIntent, string> = {
@@ -648,6 +641,20 @@ function buildAnthropicUserContent(
     buildAnthropicImageBlock(imageUrl),
     { type: "text", text: userMessage },
   ];
+}
+
+async function loadWebsiteContext(message: string) {
+  const url = extractUrlLike(message);
+  if (!url) {
+    return null;
+  }
+
+  const content = await fetchUrlContent(url);
+  return {
+    url,
+    content,
+    fetchFailed: content === null,
+  };
 }
 
 // ─── Design system detection + spec injection ─────────────────────────────────
@@ -2376,14 +2383,21 @@ async function generateConversationalAnswer(
     existingFiles: readonly StudioFile[];
     projectName?: string;
   },
-): Promise<string> {
+): Promise<StructuredChatResponse> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
-  if (!apiKey) return "I'm not sure — could you give me more details?";
+  if (!apiKey) {
+    return {
+      message: "Share the next change or question, and I'll map the fastest path.",
+      readyToImplement: false,
+      implementPlan: null,
+    };
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12_000);
   try {
     const client = new Anthropic({ apiKey });
+    const websiteContext = await loadWebsiteContext(input.currentMessage);
     const response = await client.messages.create(
       {
         model: "claude-sonnet-4-6",
@@ -2393,15 +2407,20 @@ async function generateConversationalAnswer(
           input.existingFiles,
           input.chatSummary,
           input.chatHistory,
+          websiteContext,
         ),
         messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },
       { signal: controller.signal },
     );
-    return (response.content[0] as { type: string; text?: string })?.text?.trim()
-      ?? "I'm not sure — could you describe what you'd like to build?";
+    const rawText = (response.content[0] as { type: string; text?: string })?.text?.trim() ?? "";
+    return parseStructuredChatResponse(rawText);
   } catch {
-    return "I'm not sure — could you describe what you'd like to build?";
+    return {
+      message: "Share the next change or question, and I'll map the fastest path.",
+      readyToImplement: false,
+      implementPlan: null,
+    };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -2415,12 +2434,13 @@ async function generateClarifyingQuestion(input: {
   projectName?: string;
 }): Promise<string> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
-  if (!apiKey) return "Could you be more specific about what you'd like to change?";
+  if (!apiKey) return "Which specific part should I change?";
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4_000);
   try {
     const client = new Anthropic({ apiKey });
+    const websiteContext = await loadWebsiteContext(input.currentMessage);
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",
@@ -2430,15 +2450,16 @@ async function generateClarifyingQuestion(input: {
           input.existingFiles,
           input.chatSummary,
           input.chatHistory,
+          websiteContext,
         ),
         messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },
       { signal: controller.signal },
     );
     return (response.content[0] as { type: string; text?: string })?.text?.trim()
-      ?? "Could you be more specific about what you'd like to change?";
+      ?? "Which specific part should I change?";
   } catch {
-    return "Could you be more specific about what you'd like to change?";
+    return "Which specific part should I change?";
   } finally {
     clearTimeout(timeoutId);
   }
@@ -2703,13 +2724,14 @@ async function _runBuildInBackground(
       // BEO-370: persist user prompt before answering
       await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
 
-      const answer = await generateConversationalAnswer({
+      const answerResult = await generateConversationalAnswer({
         chatHistory: projectChatHistory,
         chatSummary: projectChatSummary,
         currentMessage: input.sourcePrompt,
         existingFiles: input.existingFiles,
         projectName: input.projectName,
       });
+      const answer = answerResult.message;
 
       // BEO-371: deduct 1 credit (non-fatal)
       if (!isAdminEmail(userEmail ?? "")) {

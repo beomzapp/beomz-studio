@@ -19,7 +19,7 @@ const MAX_STORED_CHAT_MESSAGES = 50;
 const MAX_CONTEXT_CHAT_MESSAGES = 5;
 const CHAT_SUMMARY_REFRESH_INTERVAL = 10;
 const MAX_FILE_COUNT_IN_PROMPT = 30;
-const MAX_SNIPPET_LENGTH = 500;
+const MAX_THEME_CONTENT_LENGTH = 3_000;
 
 const GENERIC_FILE_NAMES = new Set([
   "app",
@@ -105,22 +105,56 @@ function deriveFeatureHints(fileNames: readonly string[]): string[] {
   return hints.slice(0, 8);
 }
 
-function buildSnippet(content: string): string {
-  const compact = content
-    .replace(/\s+/g, " ")
-    .replace(/`/g, "'")
-    .trim();
-
-  if (compact.length <= MAX_SNIPPET_LENGTH) {
-    return compact;
-  }
-
-  return `${compact.slice(0, MAX_SNIPPET_LENGTH - 3).trimEnd()}...`;
-}
-
 function findFileContent(files: readonly StudioFile[], targetBaseName: string): string | null {
   const match = files.find((file) => basename(file.path) === targetBaseName);
   return match?.content?.trim() ? match.content : null;
+}
+
+function buildLeadingLinesSnippet(content: string, lineCount: number): string {
+  return content
+    .split(/\r?\n/)
+    .slice(0, lineCount)
+    .join("\n")
+    .trim();
+}
+
+function buildThemeContentSnippet(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed.length <= MAX_THEME_CONTENT_LENGTH) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, MAX_THEME_CONTENT_LENGTH).trimEnd()}\n// ...truncated`;
+}
+
+function deriveRouteHints(files: readonly StudioFile[]): string[] {
+  const routeHints: string[] = [];
+
+  for (const file of files) {
+    const fileName = basename(file.path);
+    const isRouteLikePath = /\/(routes|pages|screens|views)\//.test(file.path);
+    const isRouteLikeFile = /(?:Page|Screen|View|Route)\.(?:t|j)sx?$/.test(fileName);
+
+    if (!isRouteLikePath && !isRouteLikeFile) {
+      continue;
+    }
+
+    const label = prettifyFeatureLabel(fileName);
+    if (!label) {
+      continue;
+    }
+
+    const formatted = label
+      .split(" ")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+
+    if (!routeHints.includes(formatted)) {
+      routeHints.push(formatted);
+    }
+  }
+
+  return routeHints.slice(0, 10);
 }
 
 function formatRecentConversation(history: readonly ProjectChatHistoryEntry[]): string {
@@ -194,6 +228,7 @@ export function buildProjectMemoryPrompt({
     : "No existing files found.";
 
   const featureHints = deriveFeatureHints(fileNames);
+  const routeHints = deriveRouteHints(files);
   const appSnippet = findFileContent(files, "App.tsx");
   const themeSnippet = findFileContent(files, "theme.ts");
 
@@ -223,11 +258,21 @@ export function buildProjectMemoryPrompt({
   }
 
   if (appSnippet) {
-    lines.push(`App.tsx excerpt: ${buildSnippet(appSnippet)}`);
+    lines.push("## App.tsx first 10 lines");
+    lines.push("```tsx");
+    lines.push(buildLeadingLinesSnippet(appSnippet, 10));
+    lines.push("```");
   }
 
   if (themeSnippet) {
-    lines.push(`theme.ts excerpt: ${buildSnippet(themeSnippet)}`);
+    lines.push("## theme.ts contents");
+    lines.push("```ts");
+    lines.push(buildThemeContentSnippet(themeSnippet));
+    lines.push("```");
+  }
+
+  if (routeHints.length > 0) {
+    lines.push(`Detected routes/pages: ${routeHints.join(", ")}`);
   }
 
   return lines.join("\n");

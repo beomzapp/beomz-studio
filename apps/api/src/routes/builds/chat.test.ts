@@ -241,3 +241,55 @@ test("builds/chat blocks requests when the org has no credits left", async () =>
   const payload = await response.json() as { error: string };
   assert.match(payload.error, /out of credits for chat/i);
 });
+
+test("builds/chat translates structured model JSON into chat_response and ready_to_implement events", async () => {
+  const route = createBuildsChatRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", createTestOrgContext());
+      await next();
+    },
+    createMessageStream: () => (async function* () {
+      yield {
+        type: "content_block_delta",
+        delta: {
+          type: "text_delta",
+          text: "{\"message\":\"**Plan**\\n\\nI'll add dark mode.\",\"readyToImplement\":true,",
+        },
+      };
+      yield {
+        type: "content_block_delta",
+        delta: {
+          type: "text_delta",
+          text: "\"implementPlan\":\"Update `theme.ts` with dark tokens. Add a toggle in `App.tsx`.\"}",
+        },
+      };
+    })(),
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: "user",
+          content: "add dark mode",
+        },
+      ],
+    }),
+  });
+
+  assert.equal(response.status, 200);
+
+  const body = await response.text();
+  assert.match(body, /"type":"chat_response"/);
+  assert.match(body, /\*\*Plan\*\*/);
+  assert.match(body, /"type":"ready_to_implement"/);
+  assert.match(body, /Update `theme\.ts` with dark tokens/);
+  assert.doesNotMatch(body, /\\"message\\":\\"\*\*Plan\*\*/);
+});
