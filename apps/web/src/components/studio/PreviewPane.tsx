@@ -487,10 +487,7 @@ export function PreviewPane({
         {/* Loading overlay — shown while WC is booting or mid-HMR.
             Layered ON TOP of iframe so the iframe can keep its stable mount. */}
         {showLoadingOverlay && (
-          <div
-            className="absolute inset-0 flex items-center justify-center"
-            style={{ background: "#060612" }}
-          >
+          <div className="absolute inset-0 flex items-center justify-center bg-white">
             <div className="flex flex-col items-center gap-4">
               <div className="relative flex h-16 w-16 items-center justify-center">
                 <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
@@ -602,8 +599,8 @@ export function PreviewPane({
                 />
                 {showLoadingOverlay && (
                   <div
-                    className="absolute inset-0 flex flex-col items-center justify-center gap-4"
-                    style={{ background: "#060612", borderRadius: "inherit" }}
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-white"
+                    style={{ borderRadius: "inherit" }}
                   >
                     <div className="relative flex h-14 w-14 items-center justify-center">
                       <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
@@ -619,10 +616,7 @@ export function PreviewPane({
                 )}
               </div>
             ) : showLoadingOverlay ? (
-              <div
-                className="flex h-full flex-col items-center justify-center gap-4"
-                style={{ background: "#060612" }}
-              >
+              <div className="flex h-full flex-col items-center justify-center gap-4 bg-white">
                 <div className="relative flex h-14 w-14 items-center justify-center">
                   <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
                   <span className="text-lg font-bold text-[#F97316]">B</span>
