@@ -393,11 +393,11 @@ export interface DbEnv {
   nonce: string;
 }
 
-export function buildPreviewFileTree(
+function buildPreviewFlatFiles(
   files: readonly StudioFile[],
   project: Pick<Project, "id" | "name" | "templateId">,
   dbEnv?: DbEnv | null,
-): FileSystemTree {
+): Array<{ path: string; contents: string }> {
   const flatFiles: Array<{ path: string; contents: string }> = [
     { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
     { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
@@ -431,7 +431,35 @@ export function buildPreviewFileTree(
     flatFiles.push({ path: ".env.local", contents: envLines });
   }
 
-  return pathsToFileTree(flatFiles);
+  return flatFiles;
+}
+
+export function buildPreviewFileTree(
+  files: readonly StudioFile[],
+  project: Pick<Project, "id" | "name" | "templateId">,
+  dbEnv?: DbEnv | null,
+): FileSystemTree {
+  return pathsToFileTree(buildPreviewFlatFiles(files, project, dbEnv));
+}
+
+// BEO-456: Write preview files to a running WebContainer via fs.writeFile()
+// instead of wc.mount(). wc.mount() is not allowed after Vite's dev server has
+// started — it throws "invalid mount point". fs.writeFile() works at any time
+// and triggers Vite's HMR so the preview hot-reloads to the real app.
+export async function writePreviewFilesToWc(
+  wc: WebContainer,
+  files: readonly StudioFile[],
+  project: Pick<Project, "id" | "name" | "templateId">,
+  dbEnv?: DbEnv | null,
+): Promise<void> {
+  const flatFiles = buildPreviewFlatFiles(files, project, dbEnv);
+  for (const { path, contents } of flatFiles) {
+    const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    if (dir) {
+      await wc.fs.mkdir(dir, { recursive: true });
+    }
+    await wc.fs.writeFile(path, contents);
+  }
 }
 
 // ─── BEO-456: Minimal shell for first-build boot ─────────────────────────────

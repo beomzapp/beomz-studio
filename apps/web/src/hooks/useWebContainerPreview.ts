@@ -5,6 +5,7 @@ import type { Project, StudioFile } from "@beomz-studio/contracts";
 import {
   buildPreviewFileTree,
   buildShellFileTree,
+  writePreviewFilesToWc,
   getOrBootWebContainer,
   isWebContainerSupported,
   WORKSPACE_PACKAGE_JSON,
@@ -238,9 +239,11 @@ export function useWebContainerPreview(
           };
 
           if (latestFiles && latestFiles.length > 0 && latestProject) {
-            void wc.mount(buildPreviewFileTree(latestFiles, latestProject, dbEnvRef.current))
+            // BEO-456: use fs.writeFile() per-file instead of wc.mount() —
+            // wc.mount() throws "invalid mount point" after Vite has started.
+            void writePreviewFilesToWc(wc, latestFiles, latestProject, dbEnvRef.current)
               .then(async () => {
-                // BEO-452: re-inject Neon env after mount so it survives HMR.
+                // BEO-452: re-inject Neon env after writing files so it survives HMR.
                 if (neonDbUrlRef.current) {
                   await wc.fs.writeFile(".env.local", [
                     `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
