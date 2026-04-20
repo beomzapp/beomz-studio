@@ -57,6 +57,13 @@ export interface WcPreviewState {
   previewUrl: string | null;
   progressMessage: string;
   isFixing: boolean;
+  /**
+   * BEO-456 follow-up: true AFTER deliverFiles() has completed its first
+   * wc.mount() with the real app files. PreviewPane uses this to gate the
+   * 600ms wcReadyConfirmed timer so the iframe never becomes visible while
+   * Vite is still serving the blank shell.
+   */
+  firstFilesDelivered: boolean;
 }
 
 // Eagerly kick off the WebContainer boot + npm install as soon as the hook
@@ -78,6 +85,10 @@ export function useWebContainerPreview(
   const [progressMessage, setProgressMessage] = useState("Preparing…");
 
   const [isFixing, setIsFixing] = useState(false);
+  // BEO-456 follow-up: flips to true AFTER the first deliverFiles() call has
+  // completed wc.mount() with the real app files. Exposed so PreviewPane can
+  // gate wcReadyConfirmed on real delivery rather than server-ready timing.
+  const [firstFilesDelivered, setFirstFilesDelivered] = useState(false);
 
   const instanceRef = useRef<WcInstance | null>(null);
   const viteStartedRef = useRef(false);
@@ -196,8 +207,18 @@ export function useWebContainerPreview(
         void wcCacheSetFiles(currentProject.id, gId, currentFiles);
       }
 
+      const wasFirstBuild = !firstBuildDeliveredRef.current;
       firstBuildDeliveredRef.current = true;
       onFilesWrittenRef.current?.();
+
+      // BEO-456 follow-up: signal PreviewPane only AFTER the real app files
+      // have actually been mounted — this is the gate for starting the 600ms
+      // wcReadyConfirmed timer so the iframe never reveals the blank shell.
+      // Iterations are no-ops: firstFilesDelivered stays true across the
+      // component lifetime so their wcReadyConfirmed behaviour is unchanged.
+      if (wasFirstBuild) {
+        setFirstFilesDelivered(true);
+      }
     },
     [],
   );
@@ -496,6 +517,9 @@ export function useWebContainerPreview(
             serverReadyFiredRef.current = false;
             firstBuildDeliveredRef.current = false;
             pendingDeliverRef.current = false;
+            // BEO-456 follow-up: keep the gate closed through the rebuild so
+            // the iframe stays hidden until the real files land again.
+            setFirstFilesDelivered(false);
             instance.installedAt = null;
             setStatus("installing");
             setProgressMessage("Installing packages…");
@@ -623,5 +647,5 @@ export function useWebContainerPreview(
     void deliverFiles(instance, files, project);
   }, [files, project, project?.id, deliverFiles]);
 
-  return { status, previewUrl, progressMessage, isFixing };
+  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered };
 }

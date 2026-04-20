@@ -206,7 +206,13 @@ export function PreviewPane({
   const tabletViewportHeight = tabletPortrait ? 1024 : 768;
 
   // ── WebContainer (primary preview) ──────────────────────────────────────
-  const { status: wcStatus, previewUrl, progressMessage, isFixing } = useWebContainerPreview(
+  const {
+    status: wcStatus,
+    previewUrl,
+    progressMessage,
+    isFixing,
+    firstFilesDelivered,
+  } = useWebContainerPreview(
     files,
     project,
     onFilesWritten,
@@ -298,17 +304,26 @@ export function PreviewPane({
   // binds, but Vite still needs a moment to serve initial content.
   // Delay revealing the iframe by 600ms after wcStatus=ready+previewUrl set,
   // so the user sees the loading spinner instead of a transient error page.
-  // BEO-456: also re-trigger when isBuilding transitions true→false (first-build
-  // files arriving) so the scaffold template can't flash before WC hot-reloads.
+  // BEO-456 follow-up: server-ready fires for the BLANK SHELL first. If we
+  // start the 600ms timer at that point, the iframe can fade in while Vite
+  // is still serving the shell — briefly exposing the old scaffold template.
+  // Gate the timer on firstFilesDelivered so it only runs AFTER deliverFiles()
+  // has wc.mount()-ed the real app files. Iterations: firstFilesDelivered
+  // stays true across the component lifetime so their behaviour is unchanged.
   const [wcReadyConfirmed, setWcReadyConfirmed] = useState(false);
   useEffect(() => {
-    if (!isBuilding && wcStatus === "ready" && previewUrl) {
+    if (
+      !isBuilding &&
+      wcStatus === "ready" &&
+      previewUrl &&
+      firstFilesDelivered
+    ) {
       setWcReadyConfirmed(false);
       const t = setTimeout(() => setWcReadyConfirmed(true), 600);
       return () => clearTimeout(t);
     }
     setWcReadyConfirmed(false);
-  }, [wcStatus, previewUrl, isBuilding]);
+  }, [wcStatus, previewUrl, isBuilding, firstFilesDelivered]);
 
   // Unified "should hide iframe behind overlay" — true when:
   //  - WC is still booting (not ready yet), OR
