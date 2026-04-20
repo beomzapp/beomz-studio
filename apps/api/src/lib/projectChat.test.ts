@@ -1,0 +1,89 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { StudioFile } from "@beomz-studio/contracts";
+
+import {
+  appendProjectChatHistory,
+  buildConversationMessages,
+  buildProjectMemoryPrompt,
+  readProjectChatHistory,
+} from "./projectChat.js";
+
+const files: StudioFile[] = [
+  {
+    path: "apps/web/src/app/generated/pettycash/App.tsx",
+    kind: "route",
+    language: "tsx",
+    content: "export default function App() { return <div>Dashboard Expenses Top-ups</div>; }",
+    source: "ai",
+    locked: false,
+  },
+  {
+    path: "apps/web/src/app/generated/pettycash/ExpensesPage.tsx",
+    kind: "route",
+    language: "tsx",
+    content: "export function ExpensesPage() { return <div>Expenses</div>; }",
+    source: "ai",
+    locked: false,
+  },
+  {
+    path: "apps/web/src/app/generated/pettycash/TopUpsPage.tsx",
+    kind: "route",
+    language: "tsx",
+    content: "export function TopUpsPage() { return <div>Top-ups</div>; }",
+    source: "ai",
+    locked: false,
+  },
+  {
+    path: "apps/web/src/app/generated/pettycash/theme.ts",
+    kind: "style",
+    language: "ts",
+    content: "export const theme = { accent: '#F97316' } as const;",
+    source: "ai",
+    locked: false,
+  },
+];
+
+test("appendProjectChatHistory keeps only the last 50 messages", () => {
+  const existing = Array.from({ length: 50 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `message-${index + 1}`,
+    timestamp: new Date(index * 1_000).toISOString(),
+  }));
+
+  const updated = appendProjectChatHistory(existing, "latest user", "latest assistant");
+
+  assert.equal(updated.length, 50);
+  assert.equal(updated[0]?.content, "message-3");
+  assert.equal(updated.at(-2)?.content, "latest user");
+  assert.equal(updated.at(-1)?.content, "latest assistant");
+});
+
+test("buildConversationMessages injects only the last 25 history messages plus the current turn", () => {
+  const history = readProjectChatHistory(
+    Array.from({ length: 30 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `message-${index + 1}`,
+      timestamp: new Date(index * 1_000).toISOString(),
+    })),
+  );
+
+  const messages = buildConversationMessages(history, "current prompt");
+
+  assert.equal(messages.length, 26);
+  assert.equal(messages[0]?.content, "message-6");
+  assert.equal(messages.at(-1)?.content, "current prompt");
+});
+
+test("buildProjectMemoryPrompt injects app name, files, and behavior rules", () => {
+  const prompt = buildProjectMemoryPrompt({
+    appName: "PettyCash",
+    files,
+  });
+
+  assert.match(prompt, /existing app called "PettyCash"/i);
+  assert.match(prompt, /Current files: .*App\.tsx.*ExpensesPage\.tsx.*TopUpsPage\.tsx/i);
+  assert.match(prompt, /Greeting -> respond warmly, briefly describe what the app does/i);
+  assert.match(prompt, /Likely existing features: Expenses, Top Ups/i);
+});

@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
+import type { StudioFile } from "@beomz-studio/contracts";
+import type { ProjectRow } from "@beomz-studio/studio-db";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -9,11 +11,34 @@ import {
   getImplementSuggestionDecision,
   normalisePlanningMessages,
 } from "../../lib/chatMode.js";
+import {
+  appendProjectChatHistory,
+  buildConversationMessages,
+  buildProjectMemoryPrompt,
+  type ProjectChatHistoryEntry,
+  readProjectChatHistory,
+} from "../../lib/projectChat.js";
 import { anthropic } from "../plan/shared.js";
 
 const buildsChatRoute = new Hono();
 
-const CHAT_MODE_SYSTEM_PROMPT = "You are Beomz in planning mode. The user wants to think through an app before building. Ask focused questions to understand what the app does, who uses it, key features, any design preferences. Keep responses short — 2-4 sentences max. When you have enough to build, say you think you have enough and include a brief summary of what you'll build. Don't ask more than one question per message.";
+const BASE_CHAT_MODE_SYSTEM_PROMPT = [
+  "You are Beomz, a warm and sharp senior AI product builder.",
+  "Keep responses natural, concise, and helpful.",
+  "If the request is clear, respond directly instead of asking extra questions.",
+  "If the request is ambiguous, ask exactly one targeted clarifying question.",
+  "Avoid robotic question lists, onboarding interviews, and generic filler.",
+  "For greetings or small talk, reply warmly and briefly.",
+  "If there is no existing app context yet, guide the user with one focused question at a time and say when you have enough to build.",
+].join(" ");
+
+function buildChatModeSystemPrompt(projectName?: string | null, files: readonly StudioFile[] = []): string {
+  if (files.length > 0) {
+    return `${BASE_CHAT_MODE_SYSTEM_PROMPT}\n\n${buildProjectMemoryPrompt({ appName: projectName, files })}`;
+  }
+
+  return BASE_CHAT_MODE_SYSTEM_PROMPT;
+}
 
 const requestSchema = z.object({
   messages: z.array(z.record(z.string(), z.unknown())).min(1),
@@ -31,17 +56,37 @@ buildsChatRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   const { messages: rawMessages, projectId } = parsed.data;
 
+  let project: ProjectRow | null = null;
+  let projectFiles: readonly StudioFile[] = [];
+  let projectHistory: ProjectChatHistoryEntry[] = [];
+
   if (projectId) {
-    const project = await orgContext.db.findProjectById(projectId);
+    project = await orgContext.db.findProjectById(projectId);
     if (!project || project.org_id !== orgContext.org.id) {
       return c.json({ error: "Project not found." }, 404);
     }
+
+    const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectId).catch(() => null);
+    projectFiles = Array.isArray(latestGeneration?.files)
+      ? latestGeneration.files as StudioFile[]
+      : [];
+    projectHistory = readProjectChatHistory(project.chat_history);
   }
 
   const messages = normalisePlanningMessages(rawMessages);
   if (messages.length === 0) {
     return c.json({ error: "No conversational messages found." }, 400);
   }
+
+  const currentUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  if (!currentUserMessage) {
+    return c.json({ error: "No user message found." }, 400);
+  }
+
+  const modelMessages = projectId
+    ? buildConversationMessages(projectHistory, currentUserMessage.content)
+    : messages.slice(-25);
+  const systemPrompt = buildChatModeSystemPrompt(project?.name ?? null, projectFiles);
 
   return streamSSE(c, async (sse) => {
     let nextEventId = 1;
@@ -64,8 +109,8 @@ buildsChatRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     const stream = anthropic.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 400,
-      system: CHAT_MODE_SYSTEM_PROMPT,
-      messages: messages.map((message) => ({
+      system: systemPrompt,
+      messages: modelMessages.map((message) => ({
         role: message.role,
         content: message.content,
       })),
@@ -83,6 +128,23 @@ buildsChatRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
           delta: event.delta.text,
         });
       }
+    }
+
+    if (projectId && assistantResponse.trim().length > 0) {
+      const updatedHistory = appendProjectChatHistory(
+        project?.chat_history,
+        currentUserMessage.content,
+        assistantResponse,
+      );
+
+      await orgContext.db.updateProject(projectId, {
+        chat_history: updatedHistory,
+      }).catch((error: unknown) => {
+        console.warn(
+          "[builds/chat] failed to persist chat_history (non-fatal):",
+          error instanceof Error ? error.message : String(error),
+        );
+      });
     }
 
     const decision = getImplementSuggestionDecision(messages, assistantResponse);

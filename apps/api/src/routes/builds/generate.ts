@@ -60,6 +60,13 @@ import {
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
 import { planPhases } from "../../lib/planPhases.js";
 import type { Phase } from "../../lib/planPhases.js";
+import {
+  appendProjectChatHistory,
+  buildConversationMessages,
+  buildProjectMemoryPrompt,
+  readProjectChatHistory,
+  type ProjectChatHistoryEntry,
+} from "../../lib/projectChat.js";
 import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
@@ -494,6 +501,65 @@ async function appendSessionEventToDb(
   } catch (err) {
     console.warn("[generate] appendSessionEventToDb failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
+}
+
+async function persistProjectChatHistory(
+  db: StudioDbClient,
+  projectId: string,
+  userContent: string,
+  assistantContent: string,
+): Promise<void> {
+  try {
+    const project = await db.findProjectById(projectId);
+    if (!project) {
+      return;
+    }
+
+    await db.updateProject(projectId, {
+      chat_history: appendProjectChatHistory(project.chat_history, userContent, assistantContent),
+    });
+  } catch (err) {
+    console.warn("[generate] persistProjectChatHistory failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
+function buildConversationalSystemPrompt(
+  projectName: string | undefined,
+  existingFiles: readonly StudioFile[],
+): string {
+  const basePrompt = [
+    "You are Beomz, a warm and sharp senior AI product builder.",
+    "Answer naturally, confidently, and concisely.",
+    "If the user greets you, greet them back and briefly describe the current app.",
+    "If the user asks what the app does, infer it from the existing files and answer directly.",
+    "If the user asks for recommendations, give concrete suggestions tailored to the existing app.",
+    "Never ask setup or onboarding questions when files already exist.",
+  ].join(" ");
+
+  if (existingFiles.length > 0) {
+    return `${basePrompt}\n\n${buildProjectMemoryPrompt({ appName: projectName, files: existingFiles })}`;
+  }
+
+  return `${basePrompt}\n\nIf there is no existing app yet, help the user with one focused question at a time.`;
+}
+
+function buildClarifyingSystemPrompt(
+  projectName: string | undefined,
+  existingFiles: readonly StudioFile[],
+): string {
+  const basePrompt = [
+    "You are Beomz.",
+    "Ask exactly one focused clarifying question to unblock the next action.",
+    "Keep it under 20 words.",
+    "Do not ask setup or onboarding questions when files already exist.",
+    "Make the question specific to the current app and the user's request.",
+  ].join(" ");
+
+  if (existingFiles.length > 0) {
+    return `${basePrompt}\n\n${buildProjectMemoryPrompt({ appName: projectName, files: existingFiles })}`;
+  }
+
+  return basePrompt;
 }
 
 const IMAGE_INTENT_PROMPT_CONTEXT: Record<BuilderImageIntent, string> = {
@@ -2259,21 +2325,15 @@ Examples: "Building your restaurant POS system." "Building your task management 
 }
 
 async function generateConversationalAnswer(
-  prompt: string,
-  existingFiles: readonly StudioFile[],
-  projectName?: string,
-  originalPrompt?: string,
+  input: {
+    chatHistory: readonly ProjectChatHistoryEntry[];
+    currentMessage: string;
+    existingFiles: readonly StudioFile[];
+    projectName?: string;
+  },
 ): Promise<string> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) return "I'm not sure — could you give me more details?";
-
-  const fileContext = existingFiles.length > 0
-    ? `\n\nThe user has an existing project with these files: ${existingFiles.map((f) => f.path.replace(/^.*\//, "")).join(", ")}.`
-    : "";
-
-  const projectContext = projectName
-    ? `The user is working on: ${projectName}${originalPrompt ? ` (originally: "${originalPrompt}")` : ""}.`
-    : "You are a helpful assistant for Beomz Studio.";
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12_000);
@@ -2283,8 +2343,8 @@ async function generateConversationalAnswer(
       {
         model: "claude-sonnet-4-6",
         max_tokens: 600,
-        system: `${projectContext} Answer the user's question helpfully and concisely.${fileContext} If they ask what to add or for recommendations, give 3-5 specific, concrete feature suggestions relevant to their app. Be direct and friendly. No filler phrases.`,
-        messages: [{ role: "user", content: prompt }],
+        system: buildConversationalSystemPrompt(input.projectName, input.existingFiles),
+        messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },
       { signal: controller.signal },
     );
@@ -2297,7 +2357,12 @@ async function generateConversationalAnswer(
   }
 }
 
-async function generateClarifyingQuestion(prompt: string): Promise<string> {
+async function generateClarifyingQuestion(input: {
+  chatHistory: readonly ProjectChatHistoryEntry[];
+  currentMessage: string;
+  existingFiles: readonly StudioFile[];
+  projectName?: string;
+}): Promise<string> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) return "Could you be more specific about what you'd like to change?";
 
@@ -2309,10 +2374,8 @@ async function generateClarifyingQuestion(prompt: string): Promise<string> {
       {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 60,
-        system: `Generate one focused clarifying question to understand the user's intent.
-Max 20 words. No filler. Start with "Do you want to" or "Would you like me to" or similar.
-Examples: "Do you want me to redesign the layout or just adjust the spacing?" "Would you like to add a new feature or change the visual style?"`,
-        messages: [{ role: "user", content: prompt }],
+        system: buildClarifyingSystemPrompt(input.projectName, input.existingFiles),
+        messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },
       { signal: controller.signal },
     );
@@ -2419,6 +2482,16 @@ async function _runBuildInBackground(
   });
   const imageConfirmationPending = Boolean(input.imageUrl && !input.confirmedIntent);
   const imageConfirmed = Boolean(input.imageUrl && input.confirmedIntent);
+  let projectChatHistory: ProjectChatHistoryEntry[] = [];
+
+  try {
+    if (typeof db.findProjectById === "function") {
+      const currentProject = await db.findProjectById(projectId);
+      projectChatHistory = readProjectChatHistory(currentProject?.chat_history);
+    }
+  } catch (err) {
+    console.warn("[generate] failed to load project chat_history (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
 
   if (!input.phaseOverride && !input.confirmedScope && imageConfirmationPending && input.imageUrl) {
     await appendSessionEventToDb(db, buildId, {
@@ -2570,7 +2643,12 @@ async function _runBuildInBackground(
       // BEO-370: persist user prompt before answering
       await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
 
-      const answer = await generateConversationalAnswer(prompt, input.existingFiles, input.projectName, input.sourcePrompt);
+      const answer = await generateConversationalAnswer({
+        chatHistory: projectChatHistory,
+        currentMessage: input.sourcePrompt,
+        existingFiles: input.existingFiles,
+        projectName: input.projectName,
+      });
 
       // BEO-371: deduct 1 credit (non-fatal)
       if (!isAdminEmail(userEmail ?? "")) {
@@ -2588,6 +2666,7 @@ async function _runBuildInBackground(
       } as unknown as BuilderV3StatusEvent);
       // BEO-370: persist the answer
       await appendSessionEventToDb(db, buildId, { type: "question_answer", content: answer });
+      await persistProjectChatHistory(db, projectId, input.sourcePrompt, answer);
       // BEO-366: emit terminal done so the SSE relay closes cleanly and
       // buildDoneRef resets to true on the frontend (no overlay stuck).
       await appendEventToDb(db, buildId, {
@@ -2613,7 +2692,12 @@ async function _runBuildInBackground(
     if (detectedIntent === "ambiguous") {
       // BEO-370: persist user prompt before asking clarifying question
       await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-      const clarifyingQuestion = await generateClarifyingQuestion(prompt);
+      const clarifyingQuestion = await generateClarifyingQuestion({
+        chatHistory: projectChatHistory,
+        currentMessage: input.sourcePrompt,
+        existingFiles: input.existingFiles,
+        projectName: input.projectName,
+      });
       await appendEventToDb(db, buildId, {
         type: "clarifying_question" as const,
         id: nextId(),
@@ -2623,6 +2707,7 @@ async function _runBuildInBackground(
       } as unknown as BuilderV3StatusEvent);
       // BEO-370: persist clarifying question
       await appendSessionEventToDb(db, buildId, { type: "clarifying_question", content: clarifyingQuestion });
+      await persistProjectChatHistory(db, projectId, input.sourcePrompt, clarifyingQuestion);
       // BEO-366: emit terminal done so the SSE relay closes cleanly.
       await appendEventToDb(db, buildId, {
         type: "done",
@@ -3028,6 +3113,7 @@ async function _runBuildInBackground(
         total: iterFinalFiles.length,
       });
       const iterCompletedAt = ts();
+      let iterationHistoryReply = iterResult.summary;
 
       await stageEvents.emit("persisting");
       await stageEvents.emit("deploying");
@@ -3070,6 +3156,7 @@ async function _runBuildInBackground(
             }
           }
           const iterDurationMs = Date.now() - buildStartTime;
+          iterationHistoryReply = summaryResult.message;
           await appendEventToDb(db, buildId, {
             type: "build_summary",
             id: nextId(),
@@ -3141,6 +3228,7 @@ async function _runBuildInBackground(
       }).catch(() => undefined);
 
       await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
+      await persistProjectChatHistory(db, projectId, input.sourcePrompt, iterationHistoryReply);
       return;
     }
 
@@ -3365,10 +3453,13 @@ async function _runBuildInBackground(
     let creditsUsed = 0;
     let costUsd: number | null = null;
 
+    let buildHistoryReply = customised.summary;
+
     if (!fallbackUsed) {
       try {
         const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
         const summaryResult = await generateBuildSummary(prompt, changedPaths);
+        buildHistoryReply = summaryResult.message;
         narrationUsage = addTokenUsage(narrationUsage, summaryResult.usage);
         const nextSteps = await generateNextStepsWithUsage({
           appDescriptor: workingPrompt,
@@ -3462,6 +3553,8 @@ async function _runBuildInBackground(
       filesCount: finalFiles.length,
       fallbackUsed,
     });
+
+    await persistProjectChatHistory(db, projectId, input.sourcePrompt, buildHistoryReply);
 
     // ── 5. Telemetry (non-fatal) ───────────────────────────────────────────
     const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
