@@ -34,6 +34,8 @@ interface ChatPanelProps {
   onImplement?: () => void;
   /** BEO-398: Fires when user clicks ✕ on the implement zone */
   onDismissImplement?: () => void;
+  /** BEO-460: Required for POST /builds/upload-image (FormData projectId). */
+  projectId?: string | null;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -53,6 +55,7 @@ export function ChatPanel({
   implementSuggestion,
   onImplement,
   onDismissImplement,
+  projectId,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
@@ -83,6 +86,10 @@ export function ChatPanel({
       setImageError("Only image files are supported.");
       return;
     }
+    if (!projectId) {
+      setImageError("Project not ready yet. Try again in a moment.");
+      return;
+    }
     // Preview
     const objectUrl = URL.createObjectURL(file);
     setPendingImageFile(file);
@@ -92,7 +99,7 @@ export function ChatPanel({
     // Upload
     setImageUploading(true);
     try {
-      const { imageUrl } = await uploadImage(file);
+      const { imageUrl } = await uploadImage(file, projectId);
       setPendingImageUrl(imageUrl);
     } catch (err) {
       setImageError(err instanceof Error ? err.message : "Upload failed.");
@@ -101,7 +108,7 @@ export function ChatPanel({
     } finally {
       setImageUploading(false);
     }
-  }, []);
+  }, [projectId]);
 
   const clearPendingImage = useCallback(() => {
     if (pendingImagePreview) URL.revokeObjectURL(pendingImagePreview);

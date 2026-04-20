@@ -215,11 +215,15 @@ export function startBuild(body: {
   });
 }
 
-export async function uploadImage(file: File): Promise<{ imageUrl: string }> {
+export async function uploadImage(
+  file: File,
+  projectId: string,
+): Promise<{ imageUrl: string }> {
   const { data: { session } } = await supabase.auth.getSession();
   const accessToken = session?.access_token ?? "";
   const form = new FormData();
   form.append("image", file);
+  form.append("projectId", projectId);
   const resp = await fetch(`${getApiBaseUrl()}/builds/upload-image`, {
     method: "POST",
     headers: { authorization: `Bearer ${accessToken}` },

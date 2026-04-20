@@ -768,6 +768,7 @@ export function ProjectPage() {
             <ChatPanel
               messages={messages}
               isBuilding={isBuilding}
+              projectId={projectId}
               onSendMessage={handleSendMessage}
               onStopStreaming={handleStopStreaming}
               onRetry={retryLastBuild}
