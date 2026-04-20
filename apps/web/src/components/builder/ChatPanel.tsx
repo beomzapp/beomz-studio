@@ -11,6 +11,18 @@ import { BuildingShimmer, ChatMessageView } from "./ChatMessage";
 import { ImplementBar } from "./ImplementBar";
 import { uploadImage } from "../../lib/api";
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("Could not read image."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read image."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface ChatPanelProps {
@@ -34,7 +46,7 @@ interface ChatPanelProps {
   onImplement?: () => void;
   /** BEO-398: Fires when user clicks ✕ on the implement zone */
   onDismissImplement?: () => void;
-  /** BEO-460: Required for POST /builds/upload-image (FormData projectId). */
+  /** BEO-460: When set, uploads go to POST /builds/upload-image; otherwise image is sent on submit (data URL). */
   projectId?: string | null;
   /** BEO-461: Fires build with the given plan string (from ⚡ Implement button on chat_response). */
   onImplementPlan?: (plan: string) => void;
@@ -74,6 +86,7 @@ export function ChatPanel({
   const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
+  const [imagePreparing, setImagePreparing] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,25 +102,23 @@ export function ChatPanel({
       setImageError("Only image files are supported.");
       return;
     }
-    if (!projectId) {
-      setImageError("Project not ready yet. Try again in a moment.");
-      return;
-    }
-    // Preview
+    // Preview (always — new projects have no projectId until the first build starts)
     const objectUrl = URL.createObjectURL(file);
     setPendingImageFile(file);
     setPendingImagePreview(objectUrl);
     setPendingImageUrl(null);
 
-    // Upload
+    if (!projectId) {
+      return;
+    }
+
     setImageUploading(true);
     try {
       const { imageUrl } = await uploadImage(file, projectId);
       setPendingImageUrl(imageUrl);
-    } catch (err) {
-      setImageError(err instanceof Error ? err.message : "Upload failed.");
-      setPendingImageFile(null);
-      setPendingImagePreview(null);
+    } catch {
+      // Non-fatal: keep local file; image is sent as a data URL when the user sends.
+      setImageError(null);
     } finally {
       setImageUploading(false);
     }
@@ -120,6 +131,7 @@ export function ChatPanel({
     setPendingImageUrl(null);
     setImageError(null);
     setImageUploading(false);
+    setImagePreparing(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [pendingImagePreview]);
 
@@ -195,14 +207,45 @@ export function ChatPanel({
   }, []);
 
   const handleSend = useCallback(() => {
+    if (isBuilding) return;
     const text = input.trim();
-    // Need text OR image (not both empty)
-    if ((!text && !pendingImageUrl) || isBuilding) return;
-    onSendMessage(text, pendingImageUrl ?? undefined);
-    setInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-    clearPendingImage();
-  }, [input, isBuilding, pendingImageUrl, onSendMessage, clearPendingImage]);
+    const hasDeferredImage = Boolean(pendingImageFile && !pendingImageUrl);
+    if (!text && !pendingImageUrl && !hasDeferredImage) return;
+
+    const finishSend = (imageUrl?: string) => {
+      onSendMessage(text, imageUrl);
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      clearPendingImage();
+    };
+
+    if (pendingImageUrl) {
+      finishSend(pendingImageUrl);
+      return;
+    }
+    if (pendingImageFile) {
+      setImagePreparing(true);
+      void fileToDataUrl(pendingImageFile)
+        .then(dataUrl => {
+          finishSend(dataUrl);
+        })
+        .catch(() => {
+          setImageError("Could not read image.");
+        })
+        .finally(() => {
+          setImagePreparing(false);
+        });
+      return;
+    }
+    finishSend();
+  }, [
+    input,
+    isBuilding,
+    pendingImageUrl,
+    pendingImageFile,
+    onSendMessage,
+    clearPendingImage,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -242,7 +285,11 @@ export function ChatPanel({
   // Enhance disabled when image attached but no text
   const enhanceDisabled = !!pendingImageFile && !input.trim();
   // Send disabled when no text and no image, or out of credits
-  const sendDisabled = (!input.trim() && !pendingImageUrl) || outOfCredits || imageUploading;
+  const sendDisabled =
+    (!input.trim() && !pendingImageUrl && !pendingImageFile)
+    || outOfCredits
+    || imageUploading
+    || imagePreparing;
 
   return (
     <div
@@ -350,7 +397,7 @@ export function ChatPanel({
                   alt="Attached"
                   className="h-[60px] max-w-[80px] rounded-lg object-cover"
                 />
-                {imageUploading && (
+                {(imageUploading || imagePreparing) && (
                   <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">
                     <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   </div>
