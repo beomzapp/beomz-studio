@@ -6,7 +6,7 @@
 export type ChatChecklistStatus = "pending" | "active" | "done" | "failed";
 
 export type ChatMessage =
-  | { id: string; type: "user"; content: string; timestamp: Date; isSystem?: boolean }
+  | { id: string; type: "user"; content: string; timestamp: Date; isSystem?: boolean; imageUrl?: string }
   | { id: string; type: "thinking" }
   | { id: string; type: "question_answer"; content: string; streaming: boolean }
   | { id: string; type: "pre_build_ack"; content: string }
@@ -45,7 +45,7 @@ export type ChatMessage =
   | { id: string; type: "error"; content: string; code?: string }
   | { id: string; type: "server_restarting" }
   /** BEO-396: Chat mode — Beomz conversational reply (B avatar, flowing text, no checklist). */
-  | { id: string; type: "chat_response"; content: string; streaming?: boolean }
+  | { id: string; type: "chat_response"; content: string; streaming?: boolean; implementPlan?: string }
   /** BEO-182: Image intent classification confirmation card. */
   | {
       id: string;
@@ -53,4 +53,5 @@ export type ChatMessage =
       intent: "logo" | "reference" | "error" | "theme" | "general";
       description: string;
       imageUrl: string;
+      ctaText?: string;
     };

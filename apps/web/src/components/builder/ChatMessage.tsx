@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send, Zap } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
 
@@ -631,7 +631,7 @@ function ImageIntentCard({
     );
   }
 
-  const primaryLabel = INTENT_PRIMARY_LABEL[message.intent];
+  const primaryLabel = message.ctaText ?? INTENT_PRIMARY_LABEL[message.intent];
 
   const handlePrimary = (prompt: string) => {
     setDismissed(true);
@@ -746,11 +746,13 @@ export function ChatMessageView({
   onRetry,
   onPopulateInput,
   onConfirmImageIntent,
+  onImplementPlan,
 }: {
   message: ChatMessage;
   onRetry?: () => void;
   onPopulateInput?: (text: string) => void;
   onConfirmImageIntent?: (prompt: string, imageUrl: string) => void;
+  onImplementPlan?: (plan: string) => void;
 }) {
   switch (message.type) {
     case "thinking":
@@ -778,6 +780,13 @@ export function ChatMessageView({
       return (
         <div className="flex flex-col items-end">
           <div className="max-w-[70%] min-w-0 rounded-2xl rounded-br-sm bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm break-words">
+            {message.imageUrl && (
+              <img
+                src={message.imageUrl}
+                alt="Attached"
+                className="mb-2 h-20 w-auto max-w-[140px] rounded-lg object-cover"
+              />
+            )}
             {message.content}
           </div>
         </div>
@@ -836,7 +845,16 @@ export function ChatMessageView({
             )}
           </div>
           {!message.streaming && message.content && (
-            <div className="mt-1.5 flex justify-end">
+            <div className="mt-1.5 flex items-center justify-between">
+              {message.implementPlan ? (
+                <button
+                  onClick={() => onImplementPlan?.(message.implementPlan!)}
+                  className="flex items-center gap-1.5 rounded-full bg-[#F97316] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+                >
+                  <Zap size={11} />
+                  Implement
+                </button>
+              ) : <span />}
               <CopyButton content={message.content} />
             </div>
           )}

@@ -36,6 +36,8 @@ interface ChatPanelProps {
   onDismissImplement?: () => void;
   /** BEO-460: Required for POST /builds/upload-image (FormData projectId). */
   projectId?: string | null;
+  /** BEO-461: Fires build with the given plan string (from ⚡ Implement button on chat_response). */
+  onImplementPlan?: (plan: string) => void;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -56,6 +58,7 @@ export function ChatPanel({
   onImplement,
   onDismissImplement,
   projectId,
+  onImplementPlan,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
@@ -269,6 +272,7 @@ export function ChatPanel({
                   onRetry={onRetry}
                   onPopulateInput={populateInputWithoutSend}
                   onConfirmImageIntent={(prompt, imageUrl) => onSendMessage(prompt, imageUrl)}
+                  onImplementPlan={onImplementPlan}
                 />
               </div>
             ))}

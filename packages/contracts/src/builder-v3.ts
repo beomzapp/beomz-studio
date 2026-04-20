@@ -124,6 +124,7 @@ export interface BuilderV3ImageIntentEvent extends BuilderV3BaseEvent {
   intent: BuilderImageIntent;
   description: string;
   imageUrl: string;
+  ctaText?: string;
 }
 
 // BEO-387: stage boundary events emitted by the backend at real pipeline transitions.

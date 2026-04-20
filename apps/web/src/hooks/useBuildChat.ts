@@ -632,6 +632,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               intent: event.intent as "logo" | "reference" | "error" | "theme" | "general",
               description: event.description as string,
               imageUrl: event.imageUrl as string,
+              ctaText: typeof event.ctaText === "string" ? event.ctaText : undefined,
             },
           ]);
           setIsBuilding(false);
@@ -1111,7 +1112,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   // ─── BEO-396: Chat mode — send a conversational message ──────────────────
 
   const sendChatMessage = useCallback(
-    (text: string) => {
+    (text: string, imageUrl?: string) => {
       chatAbortRef.current?.abort();
       const controller = new AbortController();
       chatAbortRef.current = controller;
@@ -1119,7 +1120,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       const thinkingId = `thinking-chat-${makeId()}`;
       setMessages(prev => [
         ...prev,
-        { id: makeId(), type: "user", content: text, timestamp: new Date() },
+        { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date() },
         { id: thinkingId, type: "thinking" },
       ]);
 
@@ -1200,6 +1201,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               body: JSON.stringify({
                 messages: [...thread, { role: "user", content: text }],
                 projectId: resolvedProjectIdRef.current || undefined,
+                imageUrl: imageUrl || undefined,
               }),
               signal: controller.signal,
             });
@@ -1225,7 +1227,14 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               const payload = dataLines.join("\n");
               dataLines = [];
               try {
-                const ev = JSON.parse(payload) as { type: string; delta?: string; summary?: string };
+                const ev = JSON.parse(payload) as {
+                  type: string;
+                  delta?: string;
+                  summary?: string;
+                  plan?: string;
+                  readyToImplement?: boolean;
+                  implementPlan?: string;
+                };
                 if (ev.type === "chat_response" && ev.delta) {
                   setMessages(prev =>
                     prev.map(m =>
@@ -1244,6 +1253,34 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   );
                   setImplementSuggestion({ summary: ev.summary! });
                   activeChatMsgIdRef.current = null;
+                } else if (
+                  ev.type === "ready_to_implement" ||
+                  (ev.readyToImplement && (ev.plan || ev.implementPlan))
+                ) {
+                  const plan = ev.plan ?? ev.implementPlan ?? "";
+                  if (plan) {
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === chatMsgId && m.type === "chat_response"
+                          ? { ...m, streaming: false, implementPlan: plan }
+                          : m,
+                      ),
+                    );
+                    activeChatMsgIdRef.current = null;
+                  }
+                }
+                // Also handle readyToImplement as a field on any event (e.g. done)
+                if (ev.readyToImplement && (ev.plan || ev.implementPlan) && ev.type !== "ready_to_implement") {
+                  const plan = ev.plan ?? ev.implementPlan ?? "";
+                  if (plan) {
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === chatMsgId && m.type === "chat_response"
+                          ? { ...m, implementPlan: plan }
+                          : m,
+                      ),
+                    );
+                  }
                 }
               } catch { /* ignore parse errors */ }
             };
@@ -1340,6 +1377,15 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     sendMessageInternalRef.current?.(prompt);
   }, []);
 
+  // ─── BEO-460/461: Implement a specific plan (⚡ button on chat_response) ───
+  const implementWithPlan = useCallback(async (plan: string) => {
+    setImplementSuggestion(null);
+    setChatModeActive(false);
+    chatModeRef.current = false;
+    await delay(50);
+    sendMessageInternalRef.current?.(plan);
+  }, []);
+
   // Ref that points to the raw build sender (set after sendMessage is defined)
   const sendMessageInternalRef = useRef<((text: string) => void) | null>(null);
 
@@ -1348,7 +1394,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       // BEO-410: hard double-guard — if either ref OR state says chat mode,
       // always route to chat. Prevents stale-closure fallthrough to build.
       if (chatModeRef.current || chatModeActive) {
-        sendChatMessage(text);
+        sendChatMessage(text, imageUrl);
         return;
       }
 
@@ -1376,7 +1422,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       setIsBuilding(true);
       setMessages(prev => [
         ...prev.filter(m => m.type !== "server_restarting"),
-        { id: makeId(), type: "user", content: text, timestamp: new Date(), isSystem: isSystem || undefined },
+        { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date(), isSystem: isSystem || undefined },
         { id: `thinking-${makeId()}`, type: "thinking" },
       ]);
 
@@ -1563,6 +1609,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     chatModeActive,
     toggleChatMode,
     implementCard,
+    implementWithPlan,
     // BEO-398: Sticky implement zone
     implementSuggestion,
     dismissImplementSuggestion,

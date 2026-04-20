@@ -81,6 +81,7 @@ export function ProjectPage() {
     chatModeActive,
     toggleChatMode,
     implementCard,
+    implementWithPlan,
     implementSuggestion,
     dismissImplementSuggestion,
   } = useBuildChat(id, {
@@ -781,6 +782,7 @@ export function ProjectPage() {
               implementSuggestion={implementSuggestion}
               onImplement={() => { void implementCard(); }}
               onDismissImplement={dismissImplementSuggestion}
+              onImplementPlan={plan => { void implementWithPlan(plan); }}
             />
           </div>
         </div>
