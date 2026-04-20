@@ -71,17 +71,29 @@ export function createBuildsUploadImageRoute(deps: UploadImageRouteDeps = {}) {
         return c.json({ error: "Project not found." }, 404);
       }
 
-      const uploader = deps.uploadImage ?? uploadChatImage;
-      const result = await uploader({
-        bytes: await image.arrayBuffer(),
-        contentType: image.type,
-        fileName: image.name || "upload",
-        projectId: parsed.data.projectId,
-        sessionId: parsed.data.sessionId ?? randomUUID(),
-        timestamp: deps.now?.() ?? Date.now(),
-      });
+      try {
+        const uploader = deps.uploadImage ?? uploadChatImage;
+        const result = await uploader({
+          bytes: await image.arrayBuffer(),
+          contentType: image.type,
+          fileName: image.name || "upload",
+          projectId: parsed.data.projectId,
+          sessionId: parsed.data.sessionId ?? randomUUID(),
+          timestamp: deps.now?.() ?? Date.now(),
+        });
 
-      return c.json({ url: result.url });
+        return c.json({
+          imageUrl: result.url,
+          url: result.url,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown upload error.";
+        console.error("[builds/upload-image] upload failed.", {
+          projectId: parsed.data.projectId,
+          error: message,
+        });
+        return c.json({ error: `Image upload failed: ${message}` }, 500);
+      }
     },
   );
 
