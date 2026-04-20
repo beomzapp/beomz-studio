@@ -12,6 +12,7 @@ import type { GenerationRow, ProjectRow } from "@beomz-studio/studio-db";
 import { getTemplateDefinition, getTemplateDefinitionSafe } from "@beomz-studio/templates";
 import { z } from "zod";
 
+import { isSupportedAnthropicImageUrl } from "../../lib/anthropicImages.js";
 import { buildPlanContextSchema } from "../plan/shared.js";
 
 export const FAILURE_REASONS = [
@@ -65,7 +66,9 @@ const imageIntentSchema = z.enum(["logo", "reference", "error", "theme", "genera
 export const startBuildRequestSchema = z.object({
   confirmedIntent: imageIntentSchema.optional(),
   existingFiles: z.array(studioFileSchema).optional(),
-  imageUrl: z.string().trim().url().optional(),
+  imageUrl: z.string().trim().refine(isSupportedAnthropicImageUrl, {
+    message: "imageUrl must be an http(s) URL or a data:image/*;base64 URL.",
+  }).optional(),
   model: z.string().trim().min(1).optional(),
   prompt: z.string().max(50000),
   projectId: z.string().trim().uuid().optional(),

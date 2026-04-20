@@ -8,6 +8,7 @@ import {
   buildConversationMessages,
   buildProjectMemoryPrompt,
   readProjectChatHistory,
+  shouldRefreshProjectChatSummary,
 } from "./projectChat.js";
 
 const files: StudioFile[] = [
@@ -60,7 +61,7 @@ test("appendProjectChatHistory keeps only the last 50 messages", () => {
   assert.equal(updated.at(-1)?.content, "latest assistant");
 });
 
-test("buildConversationMessages injects only the last 25 history messages plus the current turn", () => {
+test("buildConversationMessages sends only the current turn because memory lives in the system prompt", () => {
   const history = readProjectChatHistory(
     Array.from({ length: 30 }, (_, index) => ({
       role: index % 2 === 0 ? "user" : "assistant",
@@ -71,19 +72,32 @@ test("buildConversationMessages injects only the last 25 history messages plus t
 
   const messages = buildConversationMessages(history, "current prompt");
 
-  assert.equal(messages.length, 26);
-  assert.equal(messages[0]?.content, "message-6");
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.content, "current prompt");
   assert.equal(messages.at(-1)?.content, "current prompt");
 });
 
-test("buildProjectMemoryPrompt injects app name, files, and behavior rules", () => {
+test("buildProjectMemoryPrompt injects app name, files, summary, recent conversation, and behavior rules", () => {
   const prompt = buildProjectMemoryPrompt({
     appName: "PettyCash",
+    chatSummary: "PettyCash is a dark dashboard for tracking expenses and top-ups.",
     files,
+    history: readProjectChatHistory([
+      { role: "user", content: "hi", timestamp: new Date(0).toISOString() },
+      { role: "assistant", content: "Everything is set up.", timestamp: new Date(1_000).toISOString() },
+    ]),
   });
 
   assert.match(prompt, /existing app called "PettyCash"/i);
   assert.match(prompt, /Current files: .*App\.tsx.*ExpensesPage\.tsx.*TopUpsPage\.tsx/i);
+  assert.match(prompt, /## Project Memory[\s\S]*PettyCash is a dark dashboard/i);
+  assert.match(prompt, /## Recent conversation[\s\S]*user: hi[\s\S]*assistant: Everything is set up\./i);
   assert.match(prompt, /Greeting -> respond warmly, briefly describe what the app does/i);
   assert.match(prompt, /Likely existing features: Expenses, Top Ups/i);
+});
+
+test("shouldRefreshProjectChatSummary triggers every 10 messages", () => {
+  assert.equal(shouldRefreshProjectChatSummary(9), false);
+  assert.equal(shouldRefreshProjectChatSummary(10), true);
+  assert.equal(shouldRefreshProjectChatSummary(20), true);
 });

@@ -2,23 +2,32 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { BuilderImageIntent } from "@beomz-studio/contracts";
 
 import { apiConfig } from "../config.js";
+import { buildAnthropicImageBlock } from "./anthropicImages.js";
 
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
-const DEFAULT_TIMEOUT_MS = 3_000;
+const SONNET_MODEL = "claude-sonnet-4-6";
+const DEFAULT_TIMEOUT_MS = 5_000;
 
-const CLASSIFICATION_SYSTEM_PROMPT = `You are classifying an image attached to a chat message.
+const CLASSIFICATION_SYSTEM_PROMPT = `Analyse this image carefully and describe what you see in detail.
+
+If it's a UI/app screenshot: describe layout, colour scheme, components, navigation structure, and overall design style.
+If it's a design reference or mockup: describe visual style, colours, typography, spacing, and design patterns.
+If it's a logo or brand asset: describe colours, style, and visual identity.
+If it's something else: describe it clearly.
+
+Then classify the user's most likely intent from these internal values:
+- theme: use for color_theme, brand palette, style guide, or visual theme changes
+- reference: use for layout_reference, screenshot_reference, UI inspiration, or design mockups
+- logo: use for logo_change or brand asset requests
+- error: use only when the screenshot clearly shows a crash, error overlay, or broken preview
+- general: anything else
+
+Provide a specific actionable description the user can act on.
+
 Output JSON only:
 { intent, confidence, description }
 
-Intent values:
-- logo: brand mark, logo, transparent/white background, brand mark
-- reference: screenshot of a website, app UI, or design comp
-- error: console error, error overlay, broken/crashed preview
-- theme: color palette, brand guidelines, style guide, moodboard
-- general: anything else
-
 confidence: 0.0-1.0
-description: one sentence describing what you see
+description: 1-2 sentences, specific and actionable
 
 If the user also provided text, weight it heavily — text like
 'fix this', 'match this style', 'use this as my logo' overrides
@@ -132,8 +141,15 @@ function normaliseClassification(raw: unknown, textOverride: BuilderImageIntent 
 
   const record = raw as Record<string, unknown>;
   const rawIntent = typeof record.intent === "string" ? record.intent.trim().toLowerCase() : "";
-  const modelIntent = VALID_INTENTS.has(rawIntent as BuilderImageIntent)
-    ? (rawIntent as BuilderImageIntent)
+  const intentAliases: Record<string, BuilderImageIntent> = {
+    color_theme: "theme",
+    layout_reference: "reference",
+    logo_change: "logo",
+    screenshot_reference: "reference",
+  };
+  const mappedIntent = intentAliases[rawIntent] ?? rawIntent;
+  const modelIntent = VALID_INTENTS.has(mappedIntent as BuilderImageIntent)
+    ? (mappedIntent as BuilderImageIntent)
     : "general";
   const description = typeof record.description === "string" && record.description.trim().length > 0
     ? record.description.trim()
@@ -176,7 +192,7 @@ async function defaultInvokeModel(request: VisionRequest): Promise<string> {
   try {
     const response = await client.messages.create(
       {
-        model: HAIKU_MODEL,
+        model: SONNET_MODEL,
         max_tokens: request.maxTokens,
         temperature: 0,
         system: request.systemPrompt,
@@ -184,7 +200,7 @@ async function defaultInvokeModel(request: VisionRequest): Promise<string> {
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "url", url: request.imageUrl } },
+              buildAnthropicImageBlock(request.imageUrl),
               { type: "text", text: promptText },
             ],
           },

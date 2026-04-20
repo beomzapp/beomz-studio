@@ -10,11 +10,14 @@ export interface ProjectChatHistoryEntry {
 
 interface BuildProjectMemoryPromptOptions {
   appName?: string | null;
+  chatSummary?: string | null;
   files: readonly StudioFile[];
+  history?: readonly ProjectChatHistoryEntry[];
 }
 
 const MAX_STORED_CHAT_MESSAGES = 50;
-const MAX_CONTEXT_CHAT_MESSAGES = 25;
+const MAX_CONTEXT_CHAT_MESSAGES = 5;
+const CHAT_SUMMARY_REFRESH_INTERVAL = 10;
 const MAX_FILE_COUNT_IN_PROMPT = 30;
 const MAX_SNIPPET_LENGTH = 500;
 
@@ -120,6 +123,17 @@ function findFileContent(files: readonly StudioFile[], targetBaseName: string): 
   return match?.content?.trim() ? match.content : null;
 }
 
+function formatRecentConversation(history: readonly ProjectChatHistoryEntry[]): string {
+  const recent = history.slice(-MAX_CONTEXT_CHAT_MESSAGES);
+  if (recent.length === 0) {
+    return "No recent conversation yet.";
+  }
+
+  return recent
+    .map((entry) => `${entry.role}: ${entry.content}`)
+    .join("\n");
+}
+
 export function readProjectChatHistory(value: unknown): ProjectChatHistoryEntry[] {
   if (!Array.isArray(value)) {
     return [];
@@ -154,30 +168,26 @@ export function appendProjectChatHistory(
 }
 
 export function buildConversationMessages(
-  history: readonly ProjectChatHistoryEntry[],
+  _history: readonly ProjectChatHistoryEntry[],
   currentMessage: string,
 ): Array<{ role: "user" | "assistant"; content: string }> {
   const trimmedMessage = currentMessage.trim();
-  if (!trimmedMessage) {
-    return history.slice(-MAX_CONTEXT_CHAT_MESSAGES).map((entry) => ({
-      role: entry.role,
-      content: entry.content,
-    }));
-  }
+  return trimmedMessage
+    ? [{ role: "user", content: trimmedMessage }]
+    : [];
+}
 
-  return [
-    ...history.slice(-MAX_CONTEXT_CHAT_MESSAGES).map((entry) => ({
-      role: entry.role,
-      content: entry.content,
-    })),
-    { role: "user", content: trimmedMessage },
-  ];
+export function shouldRefreshProjectChatSummary(messageCount: number): boolean {
+  return messageCount > 0 && messageCount % CHAT_SUMMARY_REFRESH_INTERVAL === 0;
 }
 
 export function buildProjectMemoryPrompt({
   appName,
+  chatSummary,
   files,
+  history = [],
 }: BuildProjectMemoryPromptOptions): string {
+  const hasExistingProjectContext = Boolean((appName && appName.trim().length > 0) || files.length > 0);
   const fileNames = uniqueFileNames(files);
   const fileList = fileNames.length > 0
     ? fileNames.slice(0, MAX_FILE_COUNT_IN_PROMPT).join(", ")
@@ -188,14 +198,24 @@ export function buildProjectMemoryPrompt({
   const themeSnippet = findFileContent(files, "theme.ts");
 
   const lines = [
-    `You are working on an existing app called "${appName?.trim() || "this app"}".`,
+    hasExistingProjectContext
+      ? `You are working on an existing app called "${appName?.trim() || "this app"}".`
+      : "There is no saved project context yet.",
     `Current files: ${fileList}`,
-    "The app already exists — NEVER ask setup questions like \"who will use this\", \"what industry\", \"what is the purpose\". The app is built.",
+    hasExistingProjectContext
+      ? "The app already exists — NEVER ask setup questions like \"who will use this\", \"what industry\", \"what is the purpose\". The app is built."
+      : "If the app does not exist yet, gather only the minimum context needed to help.",
     "Behaviour rules:",
     "Greeting -> respond warmly, briefly describe what the app does",
     "Clear request -> just do it, no questions",
     "Ambiguous request -> ask exactly ONE targeted question, nothing more",
     "Never ask setup/onboarding questions when files already exist",
+    "",
+    "## Project Memory",
+    chatSummary?.trim() || "New project, no history yet.",
+    "",
+    "## Recent conversation",
+    formatRecentConversation(history),
   ];
 
   if (featureHints.length > 0) {

@@ -65,8 +65,10 @@ import {
   buildConversationMessages,
   buildProjectMemoryPrompt,
   readProjectChatHistory,
+  shouldRefreshProjectChatSummary,
   type ProjectChatHistoryEntry,
 } from "../../lib/projectChat.js";
+import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
 import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
@@ -74,6 +76,7 @@ import {
   isAllowedMigrationStatement,
   runSql,
 } from "../../lib/userDataClient.js";
+import { buildAnthropicImageBlock } from "../../lib/anthropicImages.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -508,6 +511,10 @@ async function persistProjectChatHistory(
   projectId: string,
   userContent: string,
   assistantContent: string,
+  options: {
+    existingFiles: readonly StudioFile[];
+    projectName?: string;
+  },
 ): Promise<void> {
   try {
     const project = await db.findProjectById(projectId);
@@ -515,8 +522,19 @@ async function persistProjectChatHistory(
       return;
     }
 
+    const updatedHistory = appendProjectChatHistory(project.chat_history, userContent, assistantContent);
+    const nextChatSummary = shouldRefreshProjectChatSummary(updatedHistory.length)
+      ? await generateProjectChatSummary({
+          appName: options.projectName ?? project.name,
+          existingSummary: typeof project.chat_summary === "string" ? project.chat_summary : null,
+          files: options.existingFiles,
+          history: updatedHistory,
+        })
+      : (typeof project.chat_summary === "string" ? project.chat_summary : null);
+
     await db.updateProject(projectId, {
-      chat_history: appendProjectChatHistory(project.chat_history, userContent, assistantContent),
+      chat_history: updatedHistory,
+      chat_summary: nextChatSummary,
     });
   } catch (err) {
     console.warn("[generate] persistProjectChatHistory failed (non-fatal):", err instanceof Error ? err.message : String(err));
@@ -526,6 +544,8 @@ async function persistProjectChatHistory(
 function buildConversationalSystemPrompt(
   projectName: string | undefined,
   existingFiles: readonly StudioFile[],
+  chatSummary: string | null,
+  chatHistory: readonly ProjectChatHistoryEntry[],
 ): string {
   const basePrompt = [
     "You are Beomz, a warm and sharp senior AI product builder.",
@@ -537,7 +557,12 @@ function buildConversationalSystemPrompt(
   ].join(" ");
 
   if (existingFiles.length > 0) {
-    return `${basePrompt}\n\n${buildProjectMemoryPrompt({ appName: projectName, files: existingFiles })}`;
+    return `${basePrompt}\n\n${buildProjectMemoryPrompt({
+      appName: projectName,
+      chatSummary,
+      files: existingFiles,
+      history: chatHistory,
+    })}`;
   }
 
   return `${basePrompt}\n\nIf there is no existing app yet, help the user with one focused question at a time.`;
@@ -546,6 +571,8 @@ function buildConversationalSystemPrompt(
 function buildClarifyingSystemPrompt(
   projectName: string | undefined,
   existingFiles: readonly StudioFile[],
+  chatSummary: string | null,
+  chatHistory: readonly ProjectChatHistoryEntry[],
 ): string {
   const basePrompt = [
     "You are Beomz.",
@@ -556,7 +583,12 @@ function buildClarifyingSystemPrompt(
   ].join(" ");
 
   if (existingFiles.length > 0) {
-    return `${basePrompt}\n\n${buildProjectMemoryPrompt({ appName: projectName, files: existingFiles })}`;
+    return `${basePrompt}\n\n${buildProjectMemoryPrompt({
+      appName: projectName,
+      chatSummary,
+      files: existingFiles,
+      history: chatHistory,
+    })}`;
   }
 
   return basePrompt;
@@ -601,7 +633,7 @@ function buildAnthropicUserContent(
   }
 
   return [
-    { type: "image", source: { type: "url", url: imageUrl } },
+    buildAnthropicImageBlock(imageUrl),
     { type: "text", text: userMessage },
   ];
 }
@@ -2327,6 +2359,7 @@ Examples: "Building your restaurant POS system." "Building your task management 
 async function generateConversationalAnswer(
   input: {
     chatHistory: readonly ProjectChatHistoryEntry[];
+    chatSummary: string | null;
     currentMessage: string;
     existingFiles: readonly StudioFile[];
     projectName?: string;
@@ -2343,7 +2376,12 @@ async function generateConversationalAnswer(
       {
         model: "claude-sonnet-4-6",
         max_tokens: 600,
-        system: buildConversationalSystemPrompt(input.projectName, input.existingFiles),
+        system: buildConversationalSystemPrompt(
+          input.projectName,
+          input.existingFiles,
+          input.chatSummary,
+          input.chatHistory,
+        ),
         messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },
       { signal: controller.signal },
@@ -2359,6 +2397,7 @@ async function generateConversationalAnswer(
 
 async function generateClarifyingQuestion(input: {
   chatHistory: readonly ProjectChatHistoryEntry[];
+  chatSummary: string | null;
   currentMessage: string;
   existingFiles: readonly StudioFile[];
   projectName?: string;
@@ -2374,7 +2413,12 @@ async function generateClarifyingQuestion(input: {
       {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 60,
-        system: buildClarifyingSystemPrompt(input.projectName, input.existingFiles),
+        system: buildClarifyingSystemPrompt(
+          input.projectName,
+          input.existingFiles,
+          input.chatSummary,
+          input.chatHistory,
+        ),
         messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },
       { signal: controller.signal },
@@ -2483,14 +2527,18 @@ async function _runBuildInBackground(
   const imageConfirmationPending = Boolean(input.imageUrl && !input.confirmedIntent);
   const imageConfirmed = Boolean(input.imageUrl && input.confirmedIntent);
   let projectChatHistory: ProjectChatHistoryEntry[] = [];
+  let projectChatSummary: string | null = null;
 
   try {
     if (typeof db.findProjectById === "function") {
       const currentProject = await db.findProjectById(projectId);
       projectChatHistory = readProjectChatHistory(currentProject?.chat_history);
+      projectChatSummary = typeof currentProject?.chat_summary === "string"
+        ? currentProject.chat_summary
+        : null;
     }
   } catch (err) {
-    console.warn("[generate] failed to load project chat_history (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[generate] failed to load project chat memory (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
   if (!input.phaseOverride && !input.confirmedScope && imageConfirmationPending && input.imageUrl) {
@@ -2645,6 +2693,7 @@ async function _runBuildInBackground(
 
       const answer = await generateConversationalAnswer({
         chatHistory: projectChatHistory,
+        chatSummary: projectChatSummary,
         currentMessage: input.sourcePrompt,
         existingFiles: input.existingFiles,
         projectName: input.projectName,
@@ -2666,7 +2715,10 @@ async function _runBuildInBackground(
       } as unknown as BuilderV3StatusEvent);
       // BEO-370: persist the answer
       await appendSessionEventToDb(db, buildId, { type: "question_answer", content: answer });
-      await persistProjectChatHistory(db, projectId, input.sourcePrompt, answer);
+      await persistProjectChatHistory(db, projectId, input.sourcePrompt, answer, {
+        existingFiles: input.existingFiles,
+        projectName: input.projectName,
+      });
       // BEO-366: emit terminal done so the SSE relay closes cleanly and
       // buildDoneRef resets to true on the frontend (no overlay stuck).
       await appendEventToDb(db, buildId, {
@@ -2694,6 +2746,7 @@ async function _runBuildInBackground(
       await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
       const clarifyingQuestion = await generateClarifyingQuestion({
         chatHistory: projectChatHistory,
+        chatSummary: projectChatSummary,
         currentMessage: input.sourcePrompt,
         existingFiles: input.existingFiles,
         projectName: input.projectName,
@@ -2707,7 +2760,10 @@ async function _runBuildInBackground(
       } as unknown as BuilderV3StatusEvent);
       // BEO-370: persist clarifying question
       await appendSessionEventToDb(db, buildId, { type: "clarifying_question", content: clarifyingQuestion });
-      await persistProjectChatHistory(db, projectId, input.sourcePrompt, clarifyingQuestion);
+      await persistProjectChatHistory(db, projectId, input.sourcePrompt, clarifyingQuestion, {
+        existingFiles: input.existingFiles,
+        projectName: input.projectName,
+      });
       // BEO-366: emit terminal done so the SSE relay closes cleanly.
       await appendEventToDb(db, buildId, {
         type: "done",
@@ -3228,7 +3284,10 @@ async function _runBuildInBackground(
       }).catch(() => undefined);
 
       await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
-      await persistProjectChatHistory(db, projectId, input.sourcePrompt, iterationHistoryReply);
+      await persistProjectChatHistory(db, projectId, input.sourcePrompt, iterationHistoryReply, {
+        existingFiles: iterFinalFiles,
+        projectName: input.projectName,
+      });
       return;
     }
 
@@ -3554,7 +3613,10 @@ async function _runBuildInBackground(
       fallbackUsed,
     });
 
-    await persistProjectChatHistory(db, projectId, input.sourcePrompt, buildHistoryReply);
+    await persistProjectChatHistory(db, projectId, input.sourcePrompt, buildHistoryReply, {
+      existingFiles: finalFiles,
+      projectName: input.projectName,
+    });
 
     // ── 5. Telemetry (non-fatal) ───────────────────────────────────────────
     const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);

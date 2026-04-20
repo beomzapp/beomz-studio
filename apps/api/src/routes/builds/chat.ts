@@ -13,12 +13,23 @@ import {
   normalisePlanningMessages,
 } from "../../lib/chatMode.js";
 import {
-  appendProjectChatHistory,
-  buildConversationMessages,
   buildProjectMemoryPrompt,
   type ProjectChatHistoryEntry,
+  appendProjectChatHistory,
   readProjectChatHistory,
+  shouldRefreshProjectChatSummary,
 } from "../../lib/projectChat.js";
+import {
+  CHAT_IMAGE_ANALYSIS_SURCHARGE,
+  CHAT_MESSAGE_COST_HAIKU,
+  CHAT_MESSAGE_COST_SONNET,
+  isAdminEmail,
+} from "../../lib/credits.js";
+import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
+import {
+  buildAnthropicImageBlock,
+  isSupportedAnthropicImageUrl,
+} from "../../lib/anthropicImages.js";
 import { anthropic } from "../plan/shared.js";
 
 const BASE_CHAT_MODE_SYSTEM_PROMPT = [
@@ -30,14 +41,6 @@ const BASE_CHAT_MODE_SYSTEM_PROMPT = [
   "For greetings or small talk, reply warmly and briefly.",
   "If there is no existing app context yet, guide the user with one focused question at a time and say when you have enough to build.",
 ].join(" ");
-
-function buildChatModeSystemPrompt(projectName?: string | null, files: readonly StudioFile[] = []): string {
-  if (files.length > 0) {
-    return `${BASE_CHAT_MODE_SYSTEM_PROMPT}\n\n${buildProjectMemoryPrompt({ appName: projectName, files })}`;
-  }
-
-  return BASE_CHAT_MODE_SYSTEM_PROMPT;
-}
 
 type ChatAnthropicMessage = Anthropic.MessageParam;
 interface BuildsChatRouteDeps {
@@ -82,7 +85,7 @@ function buildAnthropicUserContent(
 
   const trimmedText = text.trim();
   return [
-    { type: "image", source: { type: "url", url: imageUrl } },
+    buildAnthropicImageBlock(imageUrl),
     {
       type: "text",
       text: trimmedText.length > 0 ? trimmedText : "User attached an image for context.",
@@ -90,34 +93,17 @@ function buildAnthropicUserContent(
   ];
 }
 
-function attachImageToLatestUserMessage(
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
-  imageUrl?: string,
-): ChatAnthropicMessage[] {
-  if (!imageUrl) {
-    return messages;
-  }
-
-  const lastUserIndex = [...messages].reverse().findIndex((message) => message.role === "user");
-  if (lastUserIndex === -1) {
-    return messages;
-  }
-
-  const targetIndex = messages.length - 1 - lastUserIndex;
-  return messages.map((message, index) => {
-    if (index !== targetIndex || message.role !== "user") {
-      return message;
-    }
-
-    return {
-      role: "user",
-      content: buildAnthropicUserContent(message.content, imageUrl),
-    };
-  });
+function calculateChatCreditCharge(model: string, hasImage: boolean): number {
+  const baseCost = model.includes("haiku")
+    ? CHAT_MESSAGE_COST_HAIKU
+    : CHAT_MESSAGE_COST_SONNET;
+  return baseCost + (hasImage ? CHAT_IMAGE_ANALYSIS_SURCHARGE : 0);
 }
 
 const requestSchema = z.object({
-  imageUrl: z.string().trim().url().optional(),
+  imageUrl: z.string().trim().refine(isSupportedAnthropicImageUrl, {
+    message: "imageUrl must be an http(s) URL or a data:image/*;base64 URL.",
+  }).optional(),
   messages: z.array(z.record(z.string(), z.unknown())).min(1),
   projectId: z.string().uuid().optional(),
 });
@@ -139,6 +125,8 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
       }
 
       const { imageUrl, messages: rawMessages, projectId } = parsed.data;
+      const chatModel = "claude-sonnet-4-6";
+      const creditsToDeduct = calculateChatCreditCharge(chatModel, Boolean(imageUrl));
 
       let project: ProjectRow | null = null;
       let projectFiles: readonly StudioFile[] = [];
@@ -167,13 +155,44 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
         return c.json({ error: "No user message found." }, 400);
       }
 
-      const modelMessages = attachImageToLatestUserMessage(
-        projectId
-          ? buildConversationMessages(projectHistory, currentUserMessage.content)
-          : messages.slice(-25),
-        imageUrl,
-      );
-      const systemPrompt = buildChatModeSystemPrompt(project?.name ?? null, projectFiles);
+      if (!isAdminEmail(orgContext.user.email)) {
+        const freshOrg = typeof orgContext.db.getOrgWithBalance === "function"
+          ? await orgContext.db.getOrgWithBalance(orgContext.org.id).catch(() => null)
+          : null;
+        const totalAvailable = Number(freshOrg?.credits ?? orgContext.org.credits ?? 0)
+          + Number(freshOrg?.topup_credits ?? orgContext.org.topup_credits ?? 0);
+
+        if (totalAvailable <= 0) {
+          return c.json({
+            error: "You’re out of credits for chat right now. Top up or upgrade to keep going.",
+            available: totalAvailable,
+            required: creditsToDeduct,
+          }, 402);
+        }
+      }
+
+      const contextHistory = projectId
+        ? projectHistory
+        : messages.slice(0, -1).map((message, index) => ({
+            role: message.role,
+            content: message.content,
+            timestamp: new Date(index).toISOString(),
+          }));
+      const systemPrompt = [
+        BASE_CHAT_MODE_SYSTEM_PROMPT,
+        buildProjectMemoryPrompt({
+          appName: project?.name ?? null,
+          chatSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
+          files: projectFiles,
+          history: contextHistory,
+        }),
+      ].join("\n\n");
+      const modelMessages: ChatAnthropicMessage[] = [
+        {
+          role: "user",
+          content: buildAnthropicUserContent(currentUserMessage.content, imageUrl),
+        },
+      ];
 
       return streamSSE(c, async (sse) => {
         let nextEventId = 1;
@@ -194,7 +213,7 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
         };
 
         const stream = (deps.createMessageStream ?? ((input) => anthropic.messages.stream(input)))({
-          model: "claude-sonnet-4-6",
+          model: chatModel,
           max_tokens: 400,
           system: systemPrompt,
           messages: modelMessages,
@@ -220,12 +239,35 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
             currentUserMessage.content,
             assistantResponse,
           );
+          const nextChatSummary = shouldRefreshProjectChatSummary(updatedHistory.length)
+            ? await generateProjectChatSummary({
+                appName: project?.name ?? null,
+                existingSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
+                files: projectFiles,
+                history: updatedHistory,
+              })
+            : (typeof project?.chat_summary === "string" ? project.chat_summary : null);
 
           await orgContext.db.updateProject(projectId, {
             chat_history: updatedHistory,
+            chat_summary: nextChatSummary,
           }).catch((error: unknown) => {
             console.warn(
-              "[builds/chat] failed to persist chat_history (non-fatal):",
+              "[builds/chat] failed to persist chat memory (non-fatal):",
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+        }
+
+        if (assistantResponse.trim().length > 0 && !isAdminEmail(orgContext.user.email)) {
+          orgContext.db.applyOrgUsageDeduction(
+            orgContext.org.id,
+            creditsToDeduct,
+            undefined,
+            imageUrl ? "Chat response (Sonnet + vision)" : "Chat response",
+          ).catch((error: unknown) => {
+            console.error(
+              "[builds/chat] chat credit deduction failed (non-fatal):",
               error instanceof Error ? error.message : String(error),
             );
           });
