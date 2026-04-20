@@ -216,9 +216,14 @@ export function ChatPanel({
   );
 
   const hasMessages = messages.length > 0;
-  // Show pending shimmer when building hasn't emitted a building message yet
-  const hasBuildingMessage = messages.some(m => m.type === "building");
-  const showPendingShimmer = isBuilding && !hasBuildingMessage;
+  // While a build is in progress, suppress the SSE-driven building message
+  // (BuildingLiveCard with old labels) and show BuildingShimmer for the full
+  // build duration instead. Once isBuilding = false the building message
+  // (now carrying the summary) is released back into the list as normal.
+  const visibleMessages = isBuilding
+    ? messages.filter(m => m.type !== "building")
+    : messages;
+  const showBuildingShimmer = isBuilding;
 
   // Enhance disabled when image attached but no text
   const enhanceDisabled = !!pendingImageFile && !input.trim();
@@ -246,7 +251,7 @@ export function ChatPanel({
 
         {(hasMessages || isBuilding) && (
           <div className="min-w-0 space-y-4">
-            {messages.map(msg => (
+            {visibleMessages.map(msg => (
               <div key={msg.id}>
                 <ChatMessageView
                   message={msg}
@@ -257,8 +262,8 @@ export function ChatPanel({
               </div>
             ))}
 
-            {/* Pending shimmer — covers the gap before first building message arrives */}
-            {showPendingShimmer && <BuildingShimmer />}
+            {/* BuildingShimmer replaces the SSE-driven BuildingLiveCard for the full build */}
+            {showBuildingShimmer && <BuildingShimmer />}
           </div>
         )}
 

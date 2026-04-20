@@ -298,14 +298,17 @@ export function PreviewPane({
   // binds, but Vite still needs a moment to serve initial content.
   // Delay revealing the iframe by 600ms after wcStatus=ready+previewUrl set,
   // so the user sees the loading spinner instead of a transient error page.
+  // BEO-456: also re-trigger when isBuilding transitions true→false (first-build
+  // files arriving) so the scaffold template can't flash before WC hot-reloads.
   const [wcReadyConfirmed, setWcReadyConfirmed] = useState(false);
   useEffect(() => {
-    if (wcStatus === "ready" && previewUrl) {
+    if (!isBuilding && wcStatus === "ready" && previewUrl) {
+      setWcReadyConfirmed(false);
       const t = setTimeout(() => setWcReadyConfirmed(true), 600);
       return () => clearTimeout(t);
     }
     setWcReadyConfirmed(false);
-  }, [wcStatus, previewUrl]);
+  }, [wcStatus, previewUrl, isBuilding]);
 
   // Unified "should hide iframe behind overlay" — true when:
   //  - WC is still booting (not ready yet), OR
