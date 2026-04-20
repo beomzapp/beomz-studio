@@ -123,8 +123,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 `;
 
-// BEO-456: Blank entry used for the minimal shell on a first build.
-// Renders nothing so the preview stays blank until real files arrive via HMR.
+// BEO-456: Blank main used by the first-build shell.
+// Renders nothing so Vite's initial page is a blank white canvas; the real
+// main.tsx is delivered immediately after via wc.mount() + HMR.
 const WORKSPACE_BLANK_MAIN_TSX = `import React from "react";
 import ReactDOM from "react-dom/client";
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -393,11 +394,11 @@ export interface DbEnv {
   nonce: string;
 }
 
-function buildPreviewFlatFiles(
+export function buildPreviewFileTree(
   files: readonly StudioFile[],
   project: Pick<Project, "id" | "name" | "templateId">,
   dbEnv?: DbEnv | null,
-): Array<{ path: string; contents: string }> {
+): FileSystemTree {
   const flatFiles: Array<{ path: string; contents: string }> = [
     { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
     { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
@@ -431,41 +432,15 @@ function buildPreviewFlatFiles(
     flatFiles.push({ path: ".env.local", contents: envLines });
   }
 
-  return flatFiles;
+  return pathsToFileTree(flatFiles);
 }
 
-export function buildPreviewFileTree(
-  files: readonly StudioFile[],
-  project: Pick<Project, "id" | "name" | "templateId">,
-  dbEnv?: DbEnv | null,
-): FileSystemTree {
-  return pathsToFileTree(buildPreviewFlatFiles(files, project, dbEnv));
-}
-
-// BEO-456: Write preview files to a running WebContainer via fs.writeFile()
-// instead of wc.mount(). wc.mount() is not allowed after Vite's dev server has
-// started — it throws "invalid mount point". fs.writeFile() works at any time
-// and triggers Vite's HMR so the preview hot-reloads to the real app.
-export async function writePreviewFilesToWc(
-  wc: WebContainer,
-  files: readonly StudioFile[],
-  project: Pick<Project, "id" | "name" | "templateId">,
-  dbEnv?: DbEnv | null,
-): Promise<void> {
-  const flatFiles = buildPreviewFlatFiles(files, project, dbEnv);
-  for (const { path, contents } of flatFiles) {
-    const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-    if (dir) {
-      await wc.fs.mkdir(dir, { recursive: true });
-    }
-    await wc.fs.writeFile(path, contents);
-  }
-}
-
-// ─── BEO-456: Minimal shell for first-build boot ─────────────────────────────
-// Mounts only what Vite needs to start — no scaffold UI files.
-// Real app files are written after server-ready via HMR so the preview
-// transitions blank → real app in one step, never showing the scaffold template.
+// ─── BEO-456: First-build shell ───────────────────────────────────────────────
+// Mounts only the minimum Vite needs to boot: package.json, tsconfig,
+// vite.config, index.html and a BLANK main.tsx. The preview renders nothing
+// visible. Real app files are delivered via wc.mount(buildPreviewFileTree(...))
+// once Vite's HMR watcher is live — the exact same path the iteration hot-swap
+// uses, which is proven to work reliably with HMR.
 export function buildShellFileTree(): FileSystemTree {
   return pathsToFileTree([
     { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },

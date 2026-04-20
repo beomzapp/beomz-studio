@@ -5,7 +5,6 @@ import type { Project, StudioFile } from "@beomz-studio/contracts";
 import {
   buildPreviewFileTree,
   buildShellFileTree,
-  writePreviewFilesToWc,
   getOrBootWebContainer,
   isWebContainerSupported,
   WORKSPACE_PACKAGE_JSON,
@@ -98,6 +97,18 @@ export function useWebContainerPreview(
   // preventing a bad binary from being written during a partially-settled FS.
   const pendingNmExportRef = useRef(false);
 
+  // BEO-456: server-ready fired (Vite bound its dev port).
+  // deliverFiles waits for this before calling wc.mount() so the HMR watcher
+  // is live. If server-ready hasn't fired yet when files arrive, we set
+  // pendingDeliverRef and the server-ready handler runs deliverFiles.
+  const serverReadyFiredRef = useRef(false);
+  const pendingDeliverRef = useRef(false);
+  // First-build real files have landed in the WC filesystem — from this point
+  // every subsequent files-change goes through the iteration branch (stale
+  // stub cleanup + wc.mount + HMR). Keeps first-build vs iteration semantics
+  // explicit without reusing viteStartedRef for two concerns.
+  const firstBuildDeliveredRef = useRef(false);
+
   // Live refs so the boot closure (which has [] deps and captures stale values)
   // can always read the most-recent files/project at any point in time.
   const filesRef = useRef(files);
@@ -125,9 +136,14 @@ export function useWebContainerPreview(
   const generationIdRef = useRef(generationId);
   generationIdRef.current = generationId;
 
-  // ── Start Vite + hot-reload when files change ─────────────────────────────
-  // Defined before boot so boot() can reference it.
-  const startVite = useCallback(
+  // ── BEO-456: Deliver real files to the WC + signal HMR ────────────────────
+  // Uses the same path the iteration hot-swap uses: wc.mount(previewFileTree)
+  // at root while Vite is running. Vite's file watcher picks up the change and
+  // HMR-reloads. On first build we wait for server-ready (Vite's watcher must
+  // be live) + a short settle delay before mounting so the FS worker doesn't
+  // race with Vite's module-graph init. Iteration calls go through the same
+  // function but skip the server-ready wait (it has long since fired).
+  const deliverFiles = useCallback(
     async (
       instance: WcInstance,
       currentFiles: readonly StudioFile[],
@@ -135,132 +151,18 @@ export function useWebContainerPreview(
     ) => {
       const { wc } = instance;
 
-      if (!viteStartedRef.current) {
-        // ── BEO-456: FIRST BOOT — shell-only mount ────────────────────────────
-        // Mount only the minimal shell (package.json, vite.config, index.html,
-        // blank main.tsx). No scaffold UI files touch the WC filesystem here.
-        // Real app files are written after server-ready via HMR so the preview
-        // goes blank → real app in one transition, never showing the scaffold.
+      // If Vite hasn't finished its initial bind yet, stage the delivery for
+      // the server-ready handler. We read filesRef/projectRef there so we
+      // pick up the freshest values if more arrived while we were waiting.
+      if (!serverReadyFiredRef.current) {
+        pendingDeliverRef.current = true;
+        return;
+      }
 
-        // BEO-375: persist source files to IndexedDB immediately so the next
-        // page load can warm-mount while npm install is in progress.
-        const gId = generationIdRef.current;
-        if (gId) {
-          void wcCacheSetFiles(currentProject.id, gId, currentFiles);
-        }
-
-        await wc.mount(buildShellFileTree());
-
-        viteStartedRef.current = true;
-        setStatus("starting");
-        setProgressMessage("Starting dev server…");
-
-        const devProcess = await wc.spawn("npm", ["run", "dev"]);
-        instance.devProcess = devProcess;
-
-        // ── Listen to dev server output for Vite errors ──────────────────
-        devProcess.output.pipeTo(new WritableStream({
-          write: (chunk: string) => {
-            // 1) Detect Vite oxc parse errors: [plugin:vite:oxc] or [PARSE_ERROR]
-            if (chunk.includes("[plugin:vite:oxc]") || chunk.includes("[PARSE_ERROR]")) {
-              const pathMatch =
-                chunk.match(/\[plugin:vite:oxc\]\s+([^\s:]+\.tsx?):\d+/) ??
-                chunk.match(/File:\s*([^\s:]+\.tsx?):\d+/) ??
-                chunk.match(/at\s+([^\s(]+\.tsx?):\d+/) ??
-                chunk.match(/([^\s:]+\.tsx?):\d+/);
-              const errorLines = chunk.split("\n").filter((l: string) =>
-                l.includes("PARSE_ERROR") || l.includes("Unexpected") || l.includes("Expected") || l.includes("vite:oxc"),
-              ).join(" ").trim();
-
-              if (pathMatch) {
-                const filePath = pathMatch[1];
-                const errorMsg = errorLines || chunk.slice(0, 300);
-                void handleViteError(wc, filePath, errorMsg);
-              }
-            }
-
-            // 2) Detect import resolution errors
-            if (
-              chunk.includes("Failed to resolve import") ||
-              chunk.includes("Could not resolve") ||
-              chunk.includes("[plugin:vite:import-analysis]")
-            ) {
-              const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
-              const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
-              const fileName = fromMatch
-                ? fromMatch[1].replace(/^.*\//, "")
-                : null;
-              const errorMsg = chunk.split("\n").filter((l: string) =>
-                l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
-              ).join(" ").trim() || chunk.slice(0, 300);
-
-              if (fileName) {
-                void handleViteError(wc, fileName, errorMsg);
-              } else if (resolveMatch) {
-                const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
-                if (anyFileMatch) {
-                  void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
-                }
-              }
-            }
-
-            // 3) Detect FS mount failures from a stale cached node_modules binary.
-            if (chunk.includes("[FS]") && chunk.includes("ERROR") && cacheFallbackFnRef.current) {
-              cacheFallbackFnRef.current();
-            }
-          },
-        })).catch(() => { /* stream closed */ });
-
-        wc.on("server-ready", (_port: number, url: string) => {
-          // Cancel any pending stale-cache fallback — server came up cleanly.
-          if (cacheTimeoutIdRef.current !== null) {
-            clearTimeout(cacheTimeoutIdRef.current);
-            cacheTimeoutIdRef.current = null;
-          }
-          cacheFallbackFnRef.current = null;
-
-          // BEO-456: Now write real app files. Vite HMR delivers them so the
-          // preview renders the real app for the first time — never the scaffold.
-          const latestFiles = filesRef.current;
-          const latestProject = projectRef.current;
-
-          const finalize = () => {
-            // Export + cache node_modules only after Vite confirms a healthy start.
-            if (pendingNmExportRef.current) {
-              pendingNmExportRef.current = false;
-              wc.export("node_modules", { format: "binary" })
-                .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
-                .catch((err) => console.warn("[wc-cache] Failed to cache node_modules:", err));
-            }
-            setPreviewUrl(url);
-            setStatus("ready");
-            onFilesWrittenRef.current?.();
-            onServerReadyRef.current?.();
-          };
-
-          if (latestFiles && latestFiles.length > 0 && latestProject) {
-            // BEO-456: use fs.writeFile() per-file instead of wc.mount() —
-            // wc.mount() throws "invalid mount point" after Vite has started.
-            void writePreviewFilesToWc(wc, latestFiles, latestProject, dbEnvRef.current)
-              .then(async () => {
-                // BEO-452: re-inject Neon env after writing files so it survives HMR.
-                if (neonDbUrlRef.current) {
-                  await wc.fs.writeFile(".env.local", [
-                    `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
-                    `VITE_PROJECT_ID=${latestProject.id}`,
-                  ].join("\n"));
-                }
-              })
-              .then(finalize)
-              .catch(finalize);
-          } else {
-            finalize();
-          }
-        });
-
-      } else {
-        // ── ITERATION PATH — Vite is running; hot-swap files via HMR ─────────
-        // BEO-421: delete stale stub files from the previous build before mounting.
+      // BEO-421: delete stale stub files from the previous build before
+      // mounting new ones (iterations only — first delivery has nothing to
+      // clean up).
+      if (firstBuildDeliveredRef.current) {
         const firstFilePath = currentFiles[0]?.path
           .replaceAll("\\", "/")
           .replace(/^\.\//, "")
@@ -271,32 +173,153 @@ export function useWebContainerPreview(
         if (generatedDir) {
           await deleteStaleStubFiles(wc, generatedDir);
         }
-        const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
-        await wc.mount(tree);
-
-        // BEO-452: Re-inject Neon env vars after every hot-swap wc.mount() so they
-        // survive HMR reload. mount() does not preserve files absent from the tree.
-        if (neonDbUrlRef.current) {
-          const envLines = [
-            `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
-            `VITE_PROJECT_ID=${currentProject.id}`,
-          ];
-          await wc.fs.writeFile(".env.local", envLines.join("\n"));
-        }
-
-        // BEO-375: persist source files to IndexedDB.
-        const gId = generationIdRef.current;
-        if (gId) {
-          void wcCacheSetFiles(currentProject.id, gId, currentFiles);
-        }
-
-        // Vite is already running; wc.mount has landed the new files and HMR
-        // will pick them up. Signal the caller so it can reveal the preview
-        // after a short HMR propagation window.
-        onFilesWrittenRef.current?.();
       }
+
+      const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
+      await wc.mount(tree);
+
+      // BEO-452: Re-inject Neon env vars after every hot-swap wc.mount() so
+      // they survive HMR reload. mount() does not preserve files absent from
+      // the tree.
+      if (neonDbUrlRef.current) {
+        const envLines = [
+          `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
+          `VITE_PROJECT_ID=${currentProject.id}`,
+        ];
+        await wc.fs.writeFile(".env.local", envLines.join("\n"));
+      }
+
+      // BEO-375: persist source files to IndexedDB so the next page load can
+      // skip the API round-trip and mount immediately while npm install is warm.
+      const gId = generationIdRef.current;
+      if (gId) {
+        void wcCacheSetFiles(currentProject.id, gId, currentFiles);
+      }
+
+      firstBuildDeliveredRef.current = true;
+      onFilesWrittenRef.current?.();
     },
     [],
+  );
+
+  // ── BEO-456: Start Vite with a BLANK shell — no scaffold UI ───────────────
+  // Mounts package.json/tsconfig/vite.config/index.html/blank main.tsx, spawns
+  // npm run dev, wires the output stream (Vite error → self-heal, [FS] ERROR
+  // → cache bust), and installs the server-ready listener. The real app files
+  // are delivered later via deliverFiles(), either from the boot() finalizer
+  // or from the files-change effect.
+  const startViteShell = useCallback(
+    async (instance: WcInstance) => {
+      const { wc } = instance;
+
+      if (viteStartedRef.current) return;
+      viteStartedRef.current = true;
+
+      await wc.mount(buildShellFileTree());
+
+      setStatus("starting");
+      setProgressMessage("Starting dev server…");
+
+      const devProcess = await wc.spawn("npm", ["run", "dev"]);
+      instance.devProcess = devProcess;
+
+      devProcess.output.pipeTo(new WritableStream({
+        write: (chunk: string) => {
+          // 1) Vite oxc parse errors
+          if (chunk.includes("[plugin:vite:oxc]") || chunk.includes("[PARSE_ERROR]")) {
+            const pathMatch =
+              chunk.match(/\[plugin:vite:oxc\]\s+([^\s:]+\.tsx?):\d+/) ??
+              chunk.match(/File:\s*([^\s:]+\.tsx?):\d+/) ??
+              chunk.match(/at\s+([^\s(]+\.tsx?):\d+/) ??
+              chunk.match(/([^\s:]+\.tsx?):\d+/);
+            const errorLines = chunk.split("\n").filter((l: string) =>
+              l.includes("PARSE_ERROR") || l.includes("Unexpected") || l.includes("Expected") || l.includes("vite:oxc"),
+            ).join(" ").trim();
+
+            if (pathMatch) {
+              const filePath = pathMatch[1];
+              const errorMsg = errorLines || chunk.slice(0, 300);
+              void handleViteError(wc, filePath, errorMsg);
+            }
+          }
+
+          // 2) Import resolution errors
+          if (
+            chunk.includes("Failed to resolve import") ||
+            chunk.includes("Could not resolve") ||
+            chunk.includes("[plugin:vite:import-analysis]")
+          ) {
+            const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
+            const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
+            const fileName = fromMatch
+              ? fromMatch[1].replace(/^.*\//, "")
+              : null;
+            const errorMsg = chunk.split("\n").filter((l: string) =>
+              l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
+            ).join(" ").trim() || chunk.slice(0, 300);
+
+            if (fileName) {
+              void handleViteError(wc, fileName, errorMsg);
+            } else if (resolveMatch) {
+              const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
+              if (anyFileMatch) {
+                void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
+              }
+            }
+          }
+
+          // 3) Stale node_modules cache → bust.
+          if (chunk.includes("[FS]") && chunk.includes("ERROR") && cacheFallbackFnRef.current) {
+            cacheFallbackFnRef.current();
+          }
+        },
+      })).catch(() => { /* stream closed */ });
+
+      wc.on("server-ready", (_port: number, url: string) => {
+        // Cancel any pending stale-cache fallback — server came up cleanly.
+        if (cacheTimeoutIdRef.current !== null) {
+          clearTimeout(cacheTimeoutIdRef.current);
+          cacheTimeoutIdRef.current = null;
+        }
+        cacheFallbackFnRef.current = null;
+
+        // Export + cache node_modules only after Vite confirms a healthy start.
+        if (pendingNmExportRef.current) {
+          pendingNmExportRef.current = false;
+          wc.export("node_modules", { format: "binary" })
+            .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
+            .catch((err) => console.warn("[wc-cache] Failed to cache node_modules:", err));
+        }
+
+        setPreviewUrl(url);
+        setStatus("ready");
+        serverReadyFiredRef.current = true;
+        // BEO-391: fire as soon as Vite binds its port (shell preview is up).
+        onServerReadyRef.current?.();
+
+        // If files are already available (either arrived during Vite boot, or
+        // restored from the IndexedDB cache), deliver them now. Short delay
+        // lets Vite's chokidar watcher settle so the wc.mount() doesn't race
+        // the module-graph init — prior "[FS] ERROR invalid mount point"
+        // failures were caused by mounting too eagerly here.
+        const latestFiles = filesRef.current;
+        const latestProject = projectRef.current;
+        const shouldDeliverNow =
+          pendingDeliverRef.current ||
+          (!firstBuildDeliveredRef.current && !!latestFiles?.length && !!latestProject?.id);
+        if (shouldDeliverNow && latestFiles?.length && latestProject?.id) {
+          pendingDeliverRef.current = false;
+          setTimeout(() => {
+            void deliverFiles(instance, latestFiles, latestProject);
+          }, 400);
+        }
+      });
+    },
+    // handleViteError is referenced only inside async callbacks (output stream
+    // and server-ready) so closure capture resolves at invocation time; listing
+    // it here would trip TDZ at render time since it's declared below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deliverFiles],
   );
 
   // ── Self-healing: fix Vite parse errors via AI ────────────────────────────
@@ -452,12 +475,6 @@ export function useWebContainerPreview(
           }
         }
 
-        // Read from live refs, NOT from the stale closure capture — this is
-        // critical for the page-reload case where files arrive from the API
-        // while npm install is in progress and the closure still sees null.
-        const currentFiles = filesRef.current;
-        const currentProject = projectRef.current;
-
         // BEO-202: Helper to arm the 15s stale-cache fallback after a cached
         // mount. Called once per boot if usedCachedNm is true. If server-ready
         // fires first the timeout is cancelled cleanly.
@@ -476,6 +493,9 @@ export function useWebContainerPreview(
             await wcCacheDeleteNodeModules();
             instance.devProcess?.kill();
             viteStartedRef.current = false;
+            serverReadyFiredRef.current = false;
+            firstBuildDeliveredRef.current = false;
+            pendingDeliverRef.current = false;
             instance.installedAt = null;
             setStatus("installing");
             setProgressMessage("Installing packages…");
@@ -490,10 +510,13 @@ export function useWebContainerPreview(
             instance.installedAt = Date.now();
             // Flag for server-ready to export + cache after Vite confirms healthy.
             pendingNmExportRef.current = true;
+            // Restart Vite from the shell; any live or cached files will be
+            // delivered via the server-ready handler's pendingDeliverRef path.
+            await startViteShell(instance);
             const fbFiles = filesRef.current;
             const fbProject = projectRef.current;
             if (fbFiles && fbFiles.length > 0 && fbProject?.id) {
-              void startVite(instance, fbFiles, fbProject);
+              void deliverFiles(instance, fbFiles, fbProject);
             }
           };
           cacheFallbackFnRef.current = runCacheFallback;
@@ -503,26 +526,33 @@ export function useWebContainerPreview(
         // can't call armCacheFallback() directly (defined inside boot()).
         armCacheFallbackRef.current = armCacheFallback;
 
+        // BEO-456: always start Vite with the BLANK SHELL first so the preview
+        // goes blank → real app in one HMR transition — the scaffold template
+        // never touches the WC filesystem. Real files are delivered next via
+        // deliverFiles(); it stages via pendingDeliverRef if server-ready
+        // hasn't fired yet.
+        await startViteShell(instance);
+        if (cancelled) return;
+        armCacheFallback();
+
+        const currentFiles = filesRef.current;
+        const currentProject = projectRef.current;
+
         if (currentFiles && currentFiles.length > 0 && currentProject?.id) {
-          void startVite(instance, currentFiles, currentProject);
-          armCacheFallback();
+          void deliverFiles(instance, currentFiles, currentProject);
         } else {
-          // No live files yet — check if IndexedDB has a cached build for this project.
-          // BEO-375: this lets the preview warm up before the API responds.
+          // No live files yet — check if IndexedDB has a cached build for this
+          // project. BEO-375: this lets the preview warm up before the API responds.
           const gId = generationIdRef.current;
           const proj = currentProject;
           if (proj?.id && gId) {
             const cached = await wcCacheGetFiles(proj.id, gId);
             if (cancelled) return;
             if (cached && cached.length > 0 && !filesRef.current?.length) {
-              console.log("[wc-cache] Mounting source files from IndexedDB cache");
-              void startVite(instance, cached as StudioFile[], proj);
-              armCacheFallback();
-              return;
+              console.log("[wc-cache] Delivering source files from IndexedDB cache");
+              void deliverFiles(instance, cached as StudioFile[], proj);
             }
           }
-          setStatus("idle");
-          setProgressMessage("Waiting for build…");
         }
       } catch (err) {
         if (cancelled) return;
@@ -562,8 +592,8 @@ export function useWebContainerPreview(
       if (filesRef.current && filesRef.current.length > 0) return; // files arrived in meantime
       const inst = instanceRef.current;
       if (!inst) return;
-      console.log("[wc-cache] Mounting source files from IndexedDB (post-boot)");
-      void startVite(inst, cached as StudioFile[], project);
+      console.log("[wc-cache] Delivering source files from IndexedDB (post-boot)");
+      void deliverFiles(inst, cached as StudioFile[], project);
       // BEO-383: arm the stale-cache fallback — armCacheFallback() was only
       // called inside boot() for paths with live/cached files; this post-boot
       // path bypassed it, leaving the 15s backstop unarmed.
@@ -580,12 +610,18 @@ export function useWebContainerPreview(
 
     const instance = instanceRef.current;
     if (!instance || instance.installedAt === null) {
-      // Boot effect hasn't finished yet — it will call startVite when done.
+      // Boot effect hasn't finished yet — boot() will pick up filesRef.current
+      // and call deliverFiles once install + shell-Vite boot complete.
       return;
     }
 
-    void startVite(instance, files, project);
-  }, [files, project, project?.id, startVite]);
+    // First real-file delivery AND every iteration go through deliverFiles:
+    // it uses the same wc.mount(buildPreviewFileTree(...)) path the iteration
+    // hot-swap has always used. On first build serverReadyFiredRef may still
+    // be false (Vite is booting the shell) — deliverFiles stages via
+    // pendingDeliverRef and the server-ready handler delivers them.
+    void deliverFiles(instance, files, project);
+  }, [files, project, project?.id, deliverFiles]);
 
   return { status, previewUrl, progressMessage, isFixing };
 }
