@@ -129,12 +129,12 @@ export function BuildingShimmer() {
             {SHIMMER_STEPS.map((label, idx) => {
               const isDone = idx < activeStep;
               const isActive = idx === activeStep;
-              const isFuture = idx > activeStep;
+              // BEO-457: only render completed + active steps; hide future ones
+              if (idx > activeStep) return null;
               return (
                 <li
                   key={label}
                   className="flex min-h-[40px] items-center gap-3"
-                  style={{ opacity: isFuture ? 0.3 : 1 }}
                 >
                   <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
                     {isDone ? (

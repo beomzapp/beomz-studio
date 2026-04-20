@@ -216,12 +216,16 @@ export function ChatPanel({
   );
 
   const hasMessages = messages.length > 0;
-  // While a build is in progress, suppress the SSE-driven building message
-  // (BuildingLiveCard with old labels) and show BuildingShimmer for the full
-  // build duration instead. Once isBuilding = false the building message
-  // (now carrying the summary) is released back into the list as normal.
+  // While a build is in progress, suppress only the ACTIVE (in-flight) building
+  // card and replace it with BuildingShimmer. Completed building messages
+  // (those with a .summary) must stay visible — hiding them is what caused all
+  // prior messages to disappear when the user sent a new iteration prompt.
   const visibleMessages = isBuilding
-    ? messages.filter(m => m.type !== "building")
+    ? messages.filter(m => {
+        if (m.type !== "building") return true;
+        // Keep building cards that have already completed (they carry a summary)
+        return !!(m as Extract<ChatMessage, { type: "building" }>).summary;
+      })
     : messages;
   const showBuildingShimmer = isBuilding;
 
