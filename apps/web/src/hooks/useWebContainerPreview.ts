@@ -4,6 +4,7 @@ import type { Project, StudioFile } from "@beomz-studio/contracts";
 
 import {
   buildPreviewFileTree,
+  buildShellFileTree,
   getOrBootWebContainer,
   isWebContainerSupported,
   WORKSPACE_PACKAGE_JSON,
@@ -133,40 +134,22 @@ export function useWebContainerPreview(
     ) => {
       const { wc } = instance;
 
-      // Mount the full file tree (scaffold + generated files + runtime.json + DB env).
-      // BEO-421: delete stale stub files from the previous build before mounting.
-      const firstFilePath = currentFiles[0]?.path
-        .replaceAll("\\", "/")
-        .replace(/^\.\//, "")
-        .replace(/\/+/g, "/") ?? "";
-      const generatedDir = firstFilePath.includes("/")
-        ? firstFilePath.slice(0, firstFilePath.lastIndexOf("/"))
-        : "";
-      if (generatedDir) {
-        await deleteStaleStubFiles(wc, generatedDir);
-      }
-      const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
-      await wc.mount(tree);
-
-      // BEO-452: Re-inject Neon env vars after every hot-swap wc.mount() so they
-      // survive HMR reload. mount() does not preserve files absent from the tree.
-      if (neonDbUrlRef.current) {
-        const envLines = [
-          `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
-          `VITE_PROJECT_ID=${currentProject.id}`,
-        ];
-        await wc.fs.writeFile(".env.local", envLines.join("\n"));
-      }
-
-      // BEO-375: persist source files to IndexedDB so the next page load can
-      // skip the API round-trip and mount immediately while npm install is warm.
-      const gId = generationIdRef.current;
-      if (gId) {
-        void wcCacheSetFiles(currentProject.id, gId, currentFiles);
-      }
-
       if (!viteStartedRef.current) {
-        // First time: start the dev server.
+        // ── BEO-456: FIRST BOOT — shell-only mount ────────────────────────────
+        // Mount only the minimal shell (package.json, vite.config, index.html,
+        // blank main.tsx). No scaffold UI files touch the WC filesystem here.
+        // Real app files are written after server-ready via HMR so the preview
+        // goes blank → real app in one transition, never showing the scaffold.
+
+        // BEO-375: persist source files to IndexedDB immediately so the next
+        // page load can warm-mount while npm install is in progress.
+        const gId = generationIdRef.current;
+        if (gId) {
+          void wcCacheSetFiles(currentProject.id, gId, currentFiles);
+        }
+
+        await wc.mount(buildShellFileTree());
+
         viteStartedRef.current = true;
         setStatus("starting");
         setProgressMessage("Starting dev server…");
@@ -179,10 +162,6 @@ export function useWebContainerPreview(
           write: (chunk: string) => {
             // 1) Detect Vite oxc parse errors: [plugin:vite:oxc] or [PARSE_ERROR]
             if (chunk.includes("[plugin:vite:oxc]") || chunk.includes("[PARSE_ERROR]")) {
-              // Extract the file path — try Vite 8 / OXC format first, then fallbacks.
-              // OXC emits:  [plugin:vite:oxc] apps/web/.../App.tsx:15:3
-              // Vite detail: File: /abs/path/App.tsx:15:3
-              // Stack trace: at /abs/path/App.tsx:15:3
               const pathMatch =
                 chunk.match(/\[plugin:vite:oxc\]\s+([^\s:]+\.tsx?):\d+/) ??
                 chunk.match(/File:\s*([^\s:]+\.tsx?):\d+/) ??
@@ -199,42 +178,35 @@ export function useWebContainerPreview(
               }
             }
 
-              // 2) Detect import resolution errors:
-              //    "Failed to resolve import "X" from "Y.tsx""
-              //    "[plugin:vite:import-analysis] Failed to resolve import"
-              //    "Could not resolve "X""
-              if (
-                chunk.includes("Failed to resolve import") ||
-                chunk.includes("Could not resolve") ||
-                chunk.includes("[plugin:vite:import-analysis]")
-              ) {
-                // Try to extract the source file from 'from "file.tsx"'
-                const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
-                const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
-                const fileName = fromMatch
-                  ? fromMatch[1].replace(/^.*\//, "")
-                  : null;
-                const errorMsg = chunk.split("\n").filter((l: string) =>
-                  l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
-                ).join(" ").trim() || chunk.slice(0, 300);
+            // 2) Detect import resolution errors
+            if (
+              chunk.includes("Failed to resolve import") ||
+              chunk.includes("Could not resolve") ||
+              chunk.includes("[plugin:vite:import-analysis]")
+            ) {
+              const fromMatch = chunk.match(/from\s+"([^"]+\.tsx?)"/);
+              const resolveMatch = chunk.match(/(?:resolve import|resolve)\s+"([^"]+)"/);
+              const fileName = fromMatch
+                ? fromMatch[1].replace(/^.*\//, "")
+                : null;
+              const errorMsg = chunk.split("\n").filter((l: string) =>
+                l.includes("resolve") || l.includes("import") || l.includes("Cannot find"),
+              ).join(" ").trim() || chunk.slice(0, 300);
 
-                if (fileName) {
-                  void handleViteError(wc, fileName, errorMsg);
-                } else if (resolveMatch) {
-                  // No source file found — use the first .tsx file from the chunk
-                  const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
-                  if (anyFileMatch) {
-                    void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
-                  }
+              if (fileName) {
+                void handleViteError(wc, fileName, errorMsg);
+              } else if (resolveMatch) {
+                const anyFileMatch = chunk.match(/(\S+\.tsx?)/);
+                if (anyFileMatch) {
+                  void handleViteError(wc, anyFileMatch[1].replace(/^.*\//, ""), errorMsg);
                 }
               }
+            }
 
-              // 3) Detect FS mount failures from a stale cached node_modules binary.
-              //    If this fires the 15s timeout is also armed; either path triggers
-              //    the same cache-bust fallback.
-              if (chunk.includes("[FS]") && chunk.includes("ERROR") && cacheFallbackFnRef.current) {
-                cacheFallbackFnRef.current();
-              }
+            // 3) Detect FS mount failures from a stale cached node_modules binary.
+            if (chunk.includes("[FS]") && chunk.includes("ERROR") && cacheFallbackFnRef.current) {
+              cacheFallbackFnRef.current();
+            }
           },
         })).catch(() => { /* stream closed */ });
 
@@ -245,28 +217,79 @@ export function useWebContainerPreview(
             cacheTimeoutIdRef.current = null;
           }
           cacheFallbackFnRef.current = null;
-          // Export + cache node_modules only after Vite confirms a healthy start.
-          // This is the only safe point — npm install may have settled but the FS
-          // can still be in a bad state until Vite resolves its module graph.
-          if (pendingNmExportRef.current) {
-            pendingNmExportRef.current = false;
-            wc.export("node_modules", { format: "binary" })
-              .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
-              .catch((err) => console.warn("[wc-cache] Failed to cache node_modules:", err));
+
+          // BEO-456: Now write real app files. Vite HMR delivers them so the
+          // preview renders the real app for the first time — never the scaffold.
+          const latestFiles = filesRef.current;
+          const latestProject = projectRef.current;
+
+          const finalize = () => {
+            // Export + cache node_modules only after Vite confirms a healthy start.
+            if (pendingNmExportRef.current) {
+              pendingNmExportRef.current = false;
+              wc.export("node_modules", { format: "binary" })
+                .then((binary) => wcCacheSetNodeModules(binary as Uint8Array))
+                .catch((err) => console.warn("[wc-cache] Failed to cache node_modules:", err));
+            }
+            setPreviewUrl(url);
+            setStatus("ready");
+            onFilesWrittenRef.current?.();
+            onServerReadyRef.current?.();
+          };
+
+          if (latestFiles && latestFiles.length > 0 && latestProject) {
+            void wc.mount(buildPreviewFileTree(latestFiles, latestProject, dbEnvRef.current))
+              .then(async () => {
+                // BEO-452: re-inject Neon env after mount so it survives HMR.
+                if (neonDbUrlRef.current) {
+                  await wc.fs.writeFile(".env.local", [
+                    `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
+                    `VITE_PROJECT_ID=${latestProject.id}`,
+                  ].join("\n"));
+                }
+              })
+              .then(finalize)
+              .catch(finalize);
+          } else {
+            finalize();
           }
-          setPreviewUrl(url);
-          setStatus("ready");
-          // Signal readiness so callers can run their reveal sequence
-          // (e.g. 400ms delay before making the iframe visible).
-          // Without this, isAiCustomising never clears on new builds
-          // and the iframe flashes errors while Vite is still compiling.
-          onFilesWrittenRef.current?.();
-          onServerReadyRef.current?.();
         });
+
       } else {
-        // Subsequent file write: Vite is already running; wc.mount has landed
-        // the new files and HMR will pick them up. Signal the caller so it can
-        // reveal the preview after a short HMR propagation window.
+        // ── ITERATION PATH — Vite is running; hot-swap files via HMR ─────────
+        // BEO-421: delete stale stub files from the previous build before mounting.
+        const firstFilePath = currentFiles[0]?.path
+          .replaceAll("\\", "/")
+          .replace(/^\.\//, "")
+          .replace(/\/+/g, "/") ?? "";
+        const generatedDir = firstFilePath.includes("/")
+          ? firstFilePath.slice(0, firstFilePath.lastIndexOf("/"))
+          : "";
+        if (generatedDir) {
+          await deleteStaleStubFiles(wc, generatedDir);
+        }
+        const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
+        await wc.mount(tree);
+
+        // BEO-452: Re-inject Neon env vars after every hot-swap wc.mount() so they
+        // survive HMR reload. mount() does not preserve files absent from the tree.
+        if (neonDbUrlRef.current) {
+          const envLines = [
+            `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
+            `VITE_PROJECT_ID=${currentProject.id}`,
+          ];
+          await wc.fs.writeFile(".env.local", envLines.join("\n"));
+        }
+
+        // BEO-375: persist source files to IndexedDB.
+        const gId = generationIdRef.current;
+        if (gId) {
+          void wcCacheSetFiles(currentProject.id, gId, currentFiles);
+        }
+
+        // Vite is already running; wc.mount has landed the new files and HMR
+        // will pick them up. Signal the caller so it can reveal the preview
+        // after a short HMR propagation window.
         onFilesWrittenRef.current?.();
       }
     },

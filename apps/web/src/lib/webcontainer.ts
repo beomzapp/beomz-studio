@@ -123,6 +123,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 `;
 
+// BEO-456: Blank entry used for the minimal shell on a first build.
+// Renders nothing so the preview stays blank until real files arrive via HMR.
+const WORKSPACE_BLANK_MAIN_TSX = `import React from "react";
+import ReactDOM from "react-dom/client";
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode><div /></React.StrictMode>,
+);
+`;
+
 const WORKSPACE_PREVIEW_APP_TSX = `import { useMemo, type ComponentType } from "react";
 
 import runtime from "../.beomz/runtime.json";
@@ -423,6 +432,20 @@ export function buildPreviewFileTree(
   }
 
   return pathsToFileTree(flatFiles);
+}
+
+// ─── BEO-456: Minimal shell for first-build boot ─────────────────────────────
+// Mounts only what Vite needs to start — no scaffold UI files.
+// Real app files are written after server-ready via HMR so the preview
+// transitions blank → real app in one step, never showing the scaffold template.
+export function buildShellFileTree(): FileSystemTree {
+  return pathsToFileTree([
+    { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
+    { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
+    { path: "vite.config.ts", contents: WORKSPACE_VITE_CONFIG },
+    { path: "index.html", contents: WORKSPACE_INDEX_HTML },
+    { path: "apps/web/src/main.tsx", contents: WORKSPACE_BLANK_MAIN_TSX },
+  ]);
 }
 
 // ─── Singleton management ─────────────────────────────────────────────────────
