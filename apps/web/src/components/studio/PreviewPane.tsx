@@ -173,6 +173,15 @@ interface PreviewPaneProps {
   onRetry?: () => void;
   /** BEO-454: Actual credits consumed — replaces estimate once build completes. */
   creditsUsed?: number | null;
+  /**
+   * BEO-456 final: authoritative "build pipeline is still running" from
+   * useBuildChat. Passed through to useWebContainerPreview so the hook can
+   * defer the first wc.mount() until the build is truly done — preventing
+   * the API's early scaffold/prebuilt files (e.g. Kanban Board) from ever
+   * touching the WebContainer filesystem. Not used for visual gating since
+   * iterations keep the iframe live via BEO-449.
+   */
+  isBuildInProgress?: boolean;
 }
 
 export function PreviewPane({
@@ -189,7 +198,10 @@ export function PreviewPane({
   neonDbUrl,
   buildErrorMessage,
   onRetry,
+  isBuildInProgress = false,
 }: PreviewPaneProps) {
+  // Local "no files yet" gate used only for visual overlay/shimmer transitions.
+  // The authoritative "build in flight" signal is `isBuildInProgress` (prop).
   const isBuilding = !!(project?.id && (!files || files.length === 0));
   const wcIframeRef = useRef<HTMLIFrameElement | null>(null);
   const prevRefreshTokenRef = useRef(refreshToken);
@@ -220,6 +232,7 @@ export function PreviewPane({
     generationId,
     onPreviewServerReady,
     neonDbUrl,
+    isBuildInProgress,
   );
 
   // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──

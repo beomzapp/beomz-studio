@@ -454,6 +454,31 @@ export function ProjectPage() {
       setProjectName(status.project.name);
       setProjectIcon(status.project.icon ?? null);
       setProjectId(status.project.id);
+
+      const isActive =
+        status.build.status === "queued" || status.build.status === "running";
+
+      if (isActive) {
+        buildDoneRef.current = false;
+        setIsAiCustomising(true);
+      } else if (status.build.status === "completed") {
+        buildDoneRef.current = true;
+      }
+
+      // BEO-456 final: when the page rehydrates mid-build, `status.result` may
+      // contain the API's prebuilt scaffold (e.g. Kanban Board). Kick off the
+      // stream FIRST (its synchronous head sets isBuilding=true) so React
+      // batches isBuilding=true with setBuildResult(scaffold) — the
+      // useWebContainerPreview scaffold guard then blocks the wc.mount until
+      // real files land via the completed-build status fetch.
+      const streamPromise = isActive
+        ? subscribeToExistingBuild(
+            status.build.id,
+            restoredState?.lastEventId ?? status.trace.lastEventId,
+            controller.signal,
+          )
+        : null;
+
       if (status.result) setBuildResult(status.result);
       setPreviewGenerationId(
         restoredState?.previewGenerationId
@@ -461,19 +486,8 @@ export function ProjectPage() {
       );
       setLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
 
-      if (status.build.status === "queued" || status.build.status === "running") {
-        buildDoneRef.current = false;
-        setIsAiCustomising(true);
-      } else if (status.build.status === "completed") {
-        buildDoneRef.current = true;
-      }
-
-      if (status.build.status === "queued" || status.build.status === "running") {
-        await subscribeToExistingBuild(
-          status.build.id,
-          restoredState?.lastEventId ?? status.trace.lastEventId,
-          controller.signal,
-        );
+      if (streamPromise) {
+        await streamPromise;
       }
     })()
       .catch((error: unknown) => {
@@ -688,6 +702,7 @@ export function ProjectPage() {
             buildErrorMessage={buildErrorMessage}
             onRetry={retryLastBuild}
             creditsUsed={creditsUsed}
+            isBuildInProgress={isBuilding}
           />
         );
       case "code":

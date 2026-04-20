@@ -79,6 +79,14 @@ export function useWebContainerPreview(
   onServerReady?: () => void,
   /** BEO-452: Neon connection string to re-inject after every hot-swap wc.mount(). */
   neonDbUrl?: string | null,
+  /**
+   * BEO-456 final: `true` while the build pipeline is still running (API may be
+   * streaming scaffold/preview files that are NOT the final AI output). When
+   * true, first-build `deliverFiles()` defers the wc.mount — the scaffold is
+   * allowed in memory (for mergeFiles/code view) but must never touch the WC
+   * filesystem. Iterations ignore this flag (firstBuildDeliveredRef gate).
+   */
+  isBuildInProgress?: boolean,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -147,6 +155,12 @@ export function useWebContainerPreview(
   const generationIdRef = useRef(generationId);
   generationIdRef.current = generationId;
 
+  // BEO-456 final: live ref of isBuildInProgress so stable closures
+  // (deliverFiles, server-ready handler, files-change effect) can read the
+  // latest value without being re-created.
+  const isBuildInProgressRef = useRef(isBuildInProgress);
+  isBuildInProgressRef.current = isBuildInProgress;
+
   // ── BEO-456: Deliver real files to the WC + signal HMR ────────────────────
   // Uses the same path the iteration hot-swap uses: wc.mount(previewFileTree)
   // at root while Vite is running. Vite's file watcher picks up the change and
@@ -161,6 +175,19 @@ export function useWebContainerPreview(
       currentProject: Pick<Project, "id" | "name" | "templateId">,
     ) => {
       const { wc } = instance;
+
+      // BEO-456 final: First-build scaffold guard.
+      // The API streams a prebuilt template (e.g. Kanban Board) as an early
+      // buildResult.files before the AI finishes customising. That scaffold
+      // is useful in memory (code view, mergeFiles) but must NEVER be written
+      // to the WC filesystem — once Vite mounts it, the iframe would show the
+      // Kanban preview for the entire build duration. Defer the first mount
+      // until the build is truly done; the isBuildInProgress→false effect
+      // below re-invokes deliverFiles with the real files.
+      if (!firstBuildDeliveredRef.current && isBuildInProgressRef.current) {
+        pendingDeliverRef.current = true;
+        return;
+      }
 
       // If Vite hasn't finished its initial bind yet, stage the delivery for
       // the server-ready handler. We read filesRef/projectRef there so we
@@ -644,6 +671,9 @@ export function useWebContainerPreview(
     // hot-swap has always used. On first build serverReadyFiredRef may still
     // be false (Vite is booting the shell) — deliverFiles stages via
     // pendingDeliverRef and the server-ready handler delivers them.
+    // BEO-456 final: deliverFiles also defers first delivery while the build
+    // pipeline is still running (isBuildInProgress) so scaffold/prebuilt
+    // template files never reach the WC filesystem.
     void deliverFiles(instance, files, project);
   }, [files, project, project?.id, deliverFiles]);
 
