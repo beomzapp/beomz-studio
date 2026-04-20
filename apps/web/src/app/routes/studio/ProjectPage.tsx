@@ -84,6 +84,7 @@ export function ProjectPage() {
     implementWithPlan,
     implementSuggestion,
     dismissImplementSuggestion,
+    isAnalysingImage,
   } = useBuildChat(id, {
     onEvent: handleLegacyEvent,
     onProjectIdResolved: (newId, name, icon) => {
@@ -782,7 +783,8 @@ export function ProjectPage() {
               implementSuggestion={implementSuggestion}
               onImplement={() => { void implementCard(); }}
               onDismissImplement={dismissImplementSuggestion}
-              onImplementPlan={plan => { void implementWithPlan(plan); }}
+              onImplementPlan={(plan, imageUrl) => { void implementWithPlan(plan, imageUrl); }}
+              isAnalysingImage={isAnalysingImage}
             />
           </div>
         </div>

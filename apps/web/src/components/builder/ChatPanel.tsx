@@ -11,6 +11,24 @@ import { BuildingShimmer, ChatMessageView } from "./ChatMessage";
 import { ImplementBar } from "./ImplementBar";
 import { uploadImage } from "../../lib/api";
 
+// ─── Analysing image indicator (BEO-462) ──────────────────────────────────────
+
+function AnalysingImageCard() {
+  return (
+    <div className="flex items-start gap-2 py-1">
+      <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900">
+        <span className="text-[9px] font-bold leading-none text-[#F97316]">B</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="inline-flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
+          <span className="text-sm text-[#6b7280]">Analysing image…</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -48,8 +66,10 @@ interface ChatPanelProps {
   onDismissImplement?: () => void;
   /** BEO-460: When set, uploads go to POST /builds/upload-image; otherwise image is sent on submit (data URL). */
   projectId?: string | null;
-  /** BEO-461: Fires build with the given plan string (from ⚡ Implement button on chat_response). */
-  onImplementPlan?: (plan: string) => void;
+  /** BEO-461/462: Fires build with the given plan string and optional imageUrl. */
+  onImplementPlan?: (plan: string, imageUrl?: string) => void;
+  /** BEO-462: true while the API is analysing a pasted image — shows subtle loading indicator. */
+  isAnalysingImage?: boolean;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -71,6 +91,7 @@ export function ChatPanel({
   onDismissImplement,
   projectId,
   onImplementPlan,
+  isAnalysingImage,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
@@ -318,14 +339,17 @@ export function ChatPanel({
                   message={msg}
                   onRetry={onRetry}
                   onPopulateInput={populateInputWithoutSend}
-                  onConfirmImageIntent={(prompt, imageUrl) => onSendMessage(prompt, imageUrl)}
                   onImplementPlan={onImplementPlan}
                 />
               </div>
             ))}
 
-            {/* BuildingShimmer replaces the SSE-driven BuildingLiveCard for the full build */}
-            {showBuildingShimmer && <BuildingShimmer />}
+            {/* BuildingShimmer or analysing-image indicator */}
+            {isBuilding && isAnalysingImage
+              ? <AnalysingImageCard />
+              : showBuildingShimmer
+                ? <BuildingShimmer />
+                : null}
           </div>
         )}
 

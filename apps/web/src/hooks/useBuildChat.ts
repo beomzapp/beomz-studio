@@ -309,6 +309,8 @@ export interface UseBuildChatOptions {
 export function useBuildChat(projectId: string, options: UseBuildChatOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
+  // BEO-462: true while API is analysing an uploaded image (before image_intent SSE)
+  const [isAnalysingImage, setIsAnalysingImage] = useState(false);
 
   // ─── BEO-396: Chat mode ───────────────────────────────────────────────────
   const [chatModeActive, setChatModeActive] = useState(false);
@@ -569,6 +571,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             clearTimeout(preambleFallbackTimerRef.current);
             preambleFallbackTimerRef.current = null;
           }
+          // BEO-462: a real build is starting — no longer just image analysis
+          setIsAnalysingImage(false);
           setMessages(prev => {
             const idx = findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current);
             if (idx !== -1) {
@@ -607,6 +611,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         case "conversational_response":
           clearPreambleAndStageTimers();
+          setIsAnalysingImage(false);
           setMessages(prev => [
             ...prev.filter(m => m.type !== "thinking"),
             { id: makeId(), type: "question_answer", content: event.message, streaming: false },
@@ -624,6 +629,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         case "image_intent": {
           // BEO-182: classification result — show confirmation card in chat
+          // BEO-462: clear analysing state — the card replaces the loading indicator
+          setIsAnalysingImage(false);
           setMessages(prev => [
             ...prev.filter(m => m.type !== "thinking"),
             {
@@ -818,6 +825,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           if (event.fallbackUsed) {
             buildDoneRef.current = false;
             clearPreambleAndStageTimers();
+            setIsAnalysingImage(false);
             try {
               sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
               sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
@@ -845,6 +853,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           } else {
             buildDoneRef.current = true;
             clearPreambleAndStageTimers();
+            setIsAnalysingImage(false);
             try {
               sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
             } catch { /* ignore */ }
@@ -922,6 +931,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         case "error":
           clearPreambleAndStageTimers();
+          setIsAnalysingImage(false);
           if (event.code === "server_restarting") {
             buildDoneRef.current = false;
             try {
@@ -1377,17 +1387,17 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     sendMessageInternalRef.current?.(prompt);
   }, []);
 
-  // ─── BEO-460/461: Implement a specific plan (⚡ button on chat_response) ───
-  const implementWithPlan = useCallback(async (plan: string) => {
+  // ─── BEO-460/461/462: Implement a specific plan (⚡ button on chat_response or image_intent CTA) ───
+  const implementWithPlan = useCallback(async (plan: string, imageUrl?: string) => {
     setImplementSuggestion(null);
     setChatModeActive(false);
     chatModeRef.current = false;
     await delay(50);
-    sendMessageInternalRef.current?.(plan);
+    sendMessageInternalRef.current?.(plan, imageUrl);
   }, []);
 
   // Ref that points to the raw build sender (set after sendMessage is defined)
-  const sendMessageInternalRef = useRef<((text: string) => void) | null>(null);
+  const sendMessageInternalRef = useRef<((text: string, imageUrl?: string) => void) | null>(null);
 
   const sendMessage = useCallback(
     (text: string, imageUrl?: string, isSystem?: boolean) => {
@@ -1420,6 +1430,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       clearPreambleAndStageTimers();
 
       setIsBuilding(true);
+      // BEO-462: if an image is attached, flag that we're analysing it until
+      // image_intent or a real build stage fires and clears this flag.
+      if (imageUrl) setIsAnalysingImage(true);
       setMessages(prev => [
         ...prev.filter(m => m.type !== "server_restarting"),
         { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date(), isSystem: isSystem || undefined },
@@ -1472,7 +1485,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   // BEO-396: expose the raw build sender to implementCard
   useEffect(() => {
-    sendMessageInternalRef.current = (text: string) => {
+    sendMessageInternalRef.current = (text: string, imageUrl?: string) => {
       // Call without going through chatModeRef check — directly triggers build flow
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -1489,7 +1502,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       setIsBuilding(true);
       setMessages(prev => [
         ...prev.filter(m => m.type !== "server_restarting"),
-        { id: makeId(), type: "user", content: text, timestamp: new Date() },
+        { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date() },
         { id: `thinking-${makeId()}`, type: "thinking" },
       ]);
       void startAndStreamBuild({
@@ -1499,6 +1512,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           model: "claude-sonnet-4-6",
           existingFiles:
             existingFilesRef.current.length > 0 ? existingFilesRef.current : undefined,
+          ...(imageUrl ? { imageUrl } : {}),
         },
         signal: controller.signal,
         onBuildStarted: response => {
@@ -1600,6 +1614,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   return {
     messages,
     isBuilding,
+    isAnalysingImage,
     sendMessage,
     retryLastBuild,
     buildDoneRef,

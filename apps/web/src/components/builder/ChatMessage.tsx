@@ -745,14 +745,13 @@ export function ChatMessageView({
   message,
   onRetry,
   onPopulateInput,
-  onConfirmImageIntent,
   onImplementPlan,
 }: {
   message: ChatMessage;
   onRetry?: () => void;
   onPopulateInput?: (text: string) => void;
-  onConfirmImageIntent?: (prompt: string, imageUrl: string) => void;
-  onImplementPlan?: (plan: string) => void;
+  /** BEO-461/462: handles both chat_response "Implement" and image_intent CTA */
+  onImplementPlan?: (plan: string, imageUrl?: string) => void;
 }) {
   switch (message.type) {
     case "thinking":
@@ -865,7 +864,7 @@ export function ChatMessageView({
       return (
         <ImageIntentCard
           message={message}
-          onConfirm={onConfirmImageIntent}
+          onConfirm={(prompt, imageUrl) => onImplementPlan?.(prompt, imageUrl)}
         />
       );
 
