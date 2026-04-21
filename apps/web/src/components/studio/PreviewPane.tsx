@@ -349,7 +349,9 @@ export function PreviewPane({
     (wcIsLoading || !wcReadyConfirmed);
 
   // ── BEO-454/455: Progress bar only (shimmer checklist moved to chat panel) ─
-  const firstBuildActive = isBuilding && !wcReadyConfirmed;
+  // Only show the top orange progress bar during a real build turn (not while
+  // the user is only chatting on /builds/start with no file pipeline yet).
+  const firstBuildActive = isBuildInProgress && isBuilding && !wcReadyConfirmed;
 
   const [progressPct, setProgressPct] = useState(5);
   const [showProgressBar, setShowProgressBar] = useState(false);
@@ -475,7 +477,12 @@ export function PreviewPane({
               "absolute inset-0 h-full w-full bg-white",
               iframeFadeIn && "preview-fade-in",
             )}
-            style={{ visibility: (showLoadingOverlay || (isBuilding && !wcReadyConfirmed)) ? "hidden" : "visible" }}
+            style={{
+              visibility:
+                (showLoadingOverlay || (isBuildInProgress && isBuilding && !wcReadyConfirmed))
+                  ? "hidden"
+                  : "visible",
+            }}
             referrerPolicy="no-referrer"
             sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
             src={activeFrame.src}
@@ -592,7 +599,10 @@ export function PreviewPane({
                     overflowY: "auto",
                     width: `${vpW}px`,
                     height: `${vpH}px`,
-                    visibility: (showLoadingOverlay || (isBuilding && !wcReadyConfirmed)) ? "hidden" : "visible",
+                    visibility:
+                      (showLoadingOverlay || (isBuildInProgress && isBuilding && !wcReadyConfirmed))
+                        ? "hidden"
+                        : "visible",
                   }}
                   sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
                   title={`${viewMode} preview`}

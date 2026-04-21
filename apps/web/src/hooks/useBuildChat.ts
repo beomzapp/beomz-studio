@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  BuilderV3ConversationalResponseEvent,
   BuilderV3Event,
   ChatChecklistStatus,
   ChatMessage,
@@ -27,6 +28,37 @@ import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
 // Set to `true` to use the local mock (Codex backend not yet live).
 // Flip to `false` once /api/builds/chat and /api/builds/summarise-chat are deployed.
 const MOCK_CHAT_MODE = false;
+
+/** Phrases that mean "go build the plan we discussed" (BEO-197 / BEO-202). */
+const BUILD_CONFIRMATIONS = [
+  "build it",
+  "build this",
+  "let's go",
+  "lets go",
+  "do it",
+  "go ahead",
+  "implement this",
+  "implement it",
+  "yes build",
+  "ready",
+  "go for it",
+  "make it",
+  "create it",
+  "just build it",
+];
+
+function isBuildConfirmation(message: string): boolean {
+  const clean = message.trim().toLowerCase();
+  return (
+    BUILD_CONFIRMATIONS.some(phrase => clean.includes(phrase))
+    || clean === "yes"
+    || clean === "yep"
+    || clean === "sure"
+    || clean === "ok"
+    || clean === "okay"
+    || clean === "go"
+  );
+}
 
 type ChatApiMessage = { role: "user" | "assistant"; content: string };
 
@@ -317,6 +349,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const chatModeRef = useRef(false);
   const activeChatMsgIdRef = useRef<string | null>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
+  /** Latest plan for ⚡ Implement from SSE (chat or /builds/start conversational_response). */
+  const pendingImplementPlanRef = useRef<string | null>(null);
+  const implementWithPlanRef = useRef<((plan: string, imageUrl?: string) => Promise<void>) | null>(null);
 
   // ─── BEO-398: Sticky implement suggestion zone ────────────────────────────
   const [implementSuggestion, setImplementSuggestion] = useState<{ summary: string } | null>(null);
@@ -526,8 +561,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           // BEO-392: record internal state only — NO message pushed to chat.
           // BuildingShimmer will display (isBuilding && !hasBuildingMessage).
           // The first real message card is created when stage_preamble arrives.
-          // BEO-464: also a fallback — ensures isBuilding=true if build_confirmed was missed.
-          setIsBuilding(true);
+          // BEO-464: isBuilding is set only on build_confirmed — avoids preview progress bar
+          // and other "build in flight" UI during conversational / classify-only turns.
           const now = Date.now();
           buildStartedAtRef.current = now;
           try {
@@ -618,15 +653,38 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           break;
         }
 
-        case "conversational_response":
+        case "conversational_response": {
           clearPreambleAndStageTimers();
           setIsAnalysingImage(false);
-          setMessages(prev => [
-            ...prev.filter(m => m.type !== "thinking"),
-            { id: makeId(), type: "question_answer", content: event.message, streaming: false },
-          ]);
+          const e = event as BuilderV3ConversationalResponseEvent & {
+            readyToImplement?: boolean;
+            implementPlan?: string;
+            plan?: string;
+          };
+          const ready =
+            Boolean(e.readyToImplement) && Boolean(e.plan || e.implementPlan);
+          const plan = ready ? String(e.plan ?? e.implementPlan ?? "").trim() : "";
+          if (plan) {
+            pendingImplementPlanRef.current = plan;
+            setMessages(prev => [
+              ...prev.filter(m => m.type !== "thinking"),
+              {
+                id: makeId(),
+                type: "chat_response",
+                content: e.message,
+                streaming: false,
+                implementPlan: plan,
+              },
+            ]);
+          } else {
+            setMessages(prev => [
+              ...prev.filter(m => m.type !== "thinking"),
+              { id: makeId(), type: "question_answer", content: e.message, streaming: false },
+            ]);
+          }
           setIsBuilding(false);
           break;
+        }
 
         case "clarifying_question":
           clearPreambleAndStageTimers();
@@ -1278,6 +1336,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                 ) {
                   const plan = ev.plan ?? ev.implementPlan ?? "";
                   if (plan) {
+                    pendingImplementPlanRef.current = plan;
                     setMessages(prev =>
                       prev.map(m =>
                         m.id === chatMsgId && m.type === "chat_response"
@@ -1292,6 +1351,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                 if (ev.readyToImplement && (ev.plan || ev.implementPlan) && ev.type !== "ready_to_implement") {
                   const plan = ev.plan ?? ev.implementPlan ?? "";
                   if (plan) {
+                    pendingImplementPlanRef.current = plan;
                     setMessages(prev =>
                       prev.map(m =>
                         m.id === chatMsgId && m.type === "chat_response"
@@ -1398,6 +1458,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   // ─── BEO-460/461/462: Implement a specific plan (⚡ button on chat_response or image_intent CTA) ───
   const implementWithPlan = useCallback(async (plan: string, imageUrl?: string) => {
+    pendingImplementPlanRef.current = null;
     setImplementSuggestion(null);
     setChatModeActive(false);
     chatModeRef.current = false;
@@ -1405,11 +1466,23 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     sendMessageInternalRef.current?.(plan, imageUrl);
   }, []);
 
+  useEffect(() => {
+    implementWithPlanRef.current = implementWithPlan;
+  }, [implementWithPlan]);
+
   // Ref that points to the raw build sender (set after sendMessage is defined)
   const sendMessageInternalRef = useRef<((text: string, imageUrl?: string) => void) | null>(null);
 
   const sendMessage = useCallback(
     (text: string, imageUrl?: string, isSystem?: boolean) => {
+      if (!isSystem && isBuildConfirmation(text)) {
+        const plan = pendingImplementPlanRef.current;
+        if (plan && implementWithPlanRef.current) {
+          void implementWithPlanRef.current(plan, imageUrl);
+          return;
+        }
+      }
+
       // BEO-410: hard double-guard — if either ref OR state says chat mode,
       // always route to chat. Prevents stale-closure fallthrough to build.
       if (chatModeRef.current || chatModeActive) {
