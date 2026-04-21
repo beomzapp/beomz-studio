@@ -34,6 +34,7 @@ import {
   shouldRefreshProjectChatSummary,
 } from "../../lib/projectChat.js";
 import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
+import { generatePlanSummary as generatePlanSummaryMessage } from "../../lib/chatPrompts.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -151,6 +152,26 @@ function mapIntentToLegacyBuildIntent(intent: Intent, hasExistingFiles: boolean)
   }
 }
 
+function normalisePromptForComparison(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readPendingImplementPlan(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const implementPlan = (metadata as Record<string, unknown>).implementPlan;
+  return typeof implementPlan === "string" && implementPlan.trim().length > 0
+    ? implementPlan
+    : null;
+}
+
 async function persistConversationalProjectMemory(
   db: OrgContext["db"],
   projectId: string,
@@ -197,10 +218,12 @@ async function persistConversationalProjectMemory(
 
 function buildImmediateTrace(args: {
   buildId: string;
+  implementPlan?: string | null;
   intent: "question" | "edit" | "build" | "ambiguous";
   message: string;
   operation: "initial_build" | "iteration";
   projectId: string;
+  readyToImplement?: boolean;
   requestedAt: string;
   type: "conversational_response" | "clarifying_question";
 }): BuilderV3TraceMetadata {
@@ -219,6 +242,13 @@ function buildImmediateTrace(args: {
         timestamp: args.requestedAt,
         operation: args.operation,
         message: args.message,
+        ...(args.readyToImplement && args.implementPlan
+          ? {
+              readyToImplement: true,
+              implementPlan: args.implementPlan,
+              plan: args.implementPlan,
+            }
+          : {}),
       }
     : {
         type: "clarifying_question",
@@ -236,11 +266,20 @@ function buildImmediateTrace(args: {
     buildId: args.buildId,
     projectId: args.projectId,
     code: "conversational",
-    message: args.type === "conversational_response"
+    message: args.readyToImplement && args.implementPlan
+      ? "Plan summary ready - awaiting build confirmation."
+      : args.type === "conversational_response"
       ? "Question answered - no build started."
       : "Clarifying question sent - awaiting user response.",
     fallbackUsed: false,
     conversational: true,
+    ...(args.readyToImplement && args.implementPlan
+      ? {
+          readyToImplement: true,
+          implementPlan: args.implementPlan,
+          plan: args.implementPlan,
+        }
+      : {}),
   };
 
   return {
@@ -263,6 +302,7 @@ interface BuildsStartRouteDeps {
   classifyIntent?: typeof classifyIntent;
   generateClarifyingQuestion?: typeof generateClarifyingQuestion;
   generateConversationalAnswer?: typeof generateConversationalAnswer;
+  generatePlanSummary?: typeof generatePlanSummaryMessage;
   loadOrgContextMiddleware?: typeof loadOrgContext;
   runBuildInBackground?: typeof runBuildInBackground;
 }
@@ -275,6 +315,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const classifyIntentFn = deps.classifyIntent ?? classifyIntent;
   const generateClarifyingQuestionFn = deps.generateClarifyingQuestion ?? generateClarifyingQuestion;
   const generateConversationalAnswerFn = deps.generateConversationalAnswer ?? generateConversationalAnswer;
+  const generatePlanSummaryFn = deps.generatePlanSummary ?? generatePlanSummaryMessage;
   const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
   const requestBody = await c.req.json().catch(() => null);
   const parsedBody = startBuildRequestSchema.safeParse(requestBody);
@@ -313,9 +354,12 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   if (requestedProjectId && !projectRow) return c.json({ error: "Project not found." }, 404);
   if (projectRow && projectRow.org_id !== orgContext.org.id) return c.json({ error: "Project not found." }, 404);
 
+  let latestGeneration = projectRow
+    ? await orgContext.db.findLatestGenerationByProjectId(projectRow.id)
+    : null;
+
   let existingFiles = parsedBody.data.existingFiles ? [...parsedBody.data.existingFiles] : [];
   if (projectRow && existingFiles.length === 0) {
-    const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectRow.id);
     // BEO-421: strip stale blocked stub files at load time so they are never
     // passed into the build pipeline or returned to the client as existingFiles.
     existingFiles = latestGeneration?.files
@@ -340,6 +384,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   );
   const classifiedIntent = intentDecision.intent;
   const legacyIntent = mapIntentToLegacyBuildIntent(classifiedIntent, existingFiles.length > 0);
+  const storedImplementPlan = normalisePromptForComparison(readPendingImplementPlan(latestGeneration?.metadata));
+  const sourcePromptForComparison = normalisePromptForComparison(sourcePrompt);
+  const isImplementConfirmation = Boolean(
+    storedImplementPlan
+    && sourcePromptForComparison
+    && storedImplementPlan === sourcePromptForComparison,
+  );
 
   const isConversationalIntent = classifiedIntent === "greeting"
     || classifiedIntent === "question"
@@ -357,11 +408,14 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   // happens to score it high, the user's wording said "unclear".
   const needsClarification = classifiedIntent === "ambiguous"
     || (isBuildIshIntent && intentDecision.confidence < 0.9);
+  const shouldOfferPlanSummary = isBuildIshIntent
+    && !needsClarification
+    && !isImplementConfirmation;
   const isNearReady = needsClarification && intentDecision.confidence >= 0.7;
 
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.
-  const isImmediateConversation = isConversationalIntent || needsClarification;
+  const isImmediateConversation = isConversationalIntent || needsClarification || shouldOfferPlanSummary;
 
   // BEO-465: accumulatedContext from the classifier becomes the enhanced
   // build prompt once confidence crosses 0.9.
@@ -373,6 +427,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     reason: intentDecision.reason,
     needsClarification,
     isNearReady,
+    shouldOfferPlanSummary,
+    isImplementConfirmation,
     isIteration,
     hasAccumulatedContext: Boolean(accumulatedBuildContext),
   });
@@ -498,7 +554,12 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     const eventType = (classifiedIntent === "ambiguous" || needsClarification)
       ? "clarifying_question"
       : "conversational_response";
-    const assistantMessage = eventType === "clarifying_question"
+    const implementPlan = shouldOfferPlanSummary
+      ? (accumulatedBuildContext ?? effectivePrompt)
+      : null;
+    const assistantMessage = shouldOfferPlanSummary
+      ? await generatePlanSummaryFn(implementPlan ?? effectivePrompt, projectName)
+      : eventType === "clarifying_question"
       ? await generateClarifyingQuestionFn({
           chatHistory,
           chatSummary,
@@ -521,6 +582,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       message: assistantMessage,
       operation,
       projectId,
+      readyToImplement: Boolean(implementPlan),
+      implementPlan,
       requestedAt,
       type: eventType,
     });
@@ -533,7 +596,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       metadata: {
         ...initialMetadata,
         builderTrace: trace,
+        implementPlan: implementPlan ?? undefined,
         phase: "completed",
+        readyToImplement: Boolean(implementPlan),
         resultSource: "ai",
       },
       operation_id: operationId,
@@ -543,11 +608,18 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       prompt: effectivePrompt,
       session_events: [
         { type: "user", content: sourcePrompt, timestamp: requestedAt },
-        { type: eventType === "clarifying_question" ? "clarifying_question" : "question_answer", content: assistantMessage, timestamp: requestedAt },
+        {
+          type: eventType === "clarifying_question" ? "clarifying_question" : "question_answer",
+          content: assistantMessage,
+          timestamp: requestedAt,
+          ...(implementPlan ? { implementPlan } : {}),
+        },
       ],
       started_at: requestedAt,
       status: "completed",
-      summary: eventType === "clarifying_question"
+      summary: implementPlan
+        ? "Plan summary ready - awaiting build confirmation."
+        : eventType === "clarifying_question"
         ? "Clarifying question sent - awaiting user response."
         : "Question answered - no build started.",
       template_id: selectedTemplateId as TemplateId,

@@ -1,13 +1,28 @@
 import assert from "node:assert/strict";
+import { after } from "node:test";
 import test from "node:test";
 
 import type { StudioFile } from "@beomz-studio/contracts";
 
-import {
+process.env.ANTHROPIC_API_KEY ??= "test-key";
+process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
+process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  throw new Error("Skip outbound Anthropic calls in unit tests.");
+}) as typeof fetch;
+
+after(() => {
+  globalThis.fetch = originalFetch;
+});
+
+const {
   buildClarifyingQuestionSystemPrompt,
   buildStructuredChatSystemPrompt,
+  generatePlanSummary,
   parseStructuredChatResponse,
-} from "./chatPrompts.js";
+} = await import("./chatPrompts.js");
 
 const files: StudioFile[] = [
   {
@@ -77,4 +92,15 @@ test("parseStructuredChatResponse falls back to plain text when JSON is invalid"
   assert.equal(result.message, "**Hello**\n\nPettyCash tracks expenses.");
   assert.equal(result.readyToImplement, false);
   assert.equal(result.implementPlan, null);
+});
+
+test("generatePlanSummary falls back to the required plan format when Haiku is unavailable", async () => {
+  const result = await generatePlanSummary(
+    "Build a playful colorful pet store website with product listings, grooming services, and a kid-centric design.",
+    "PetPals",
+  );
+
+  assert.match(result, /^Here's what I'll build:/);
+  assert.match(result, /\*\*PetPals\*\*/);
+  assert.match(result, /Ready to build this — or type any changes first\./);
 });

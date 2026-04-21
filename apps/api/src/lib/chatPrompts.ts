@@ -1,6 +1,8 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { StudioFile } from "@beomz-studio/contracts";
 
+import { apiConfig } from "../config.js";
 import {
   buildProjectMemoryPrompt,
   type ProjectChatHistoryEntry,
@@ -17,6 +19,8 @@ export interface StructuredChatResponse {
   message: string;
   readyToImplement: boolean;
 }
+
+const PLAN_SUMMARY_TIMEOUT_MS = 4_000;
 
 interface BuildChatPromptInput {
   chatHistory: readonly ProjectChatHistoryEntry[];
@@ -179,6 +183,96 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
   ]
     .filter((section) => section.trim().length > 0)
     .join("\n\n");
+}
+
+function buildPlanSummaryFallback(accumulatedContext: string, projectName?: string | null): string {
+  const brief = accumulatedContext
+    .replace(/\s+/g, " ")
+    .trim();
+  const featureHints = brief
+    .split(/[,.]| with | and /i)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 4)
+    .slice(0, 3)
+    .map((part) => `- ${part.replace(/\.$/, "")}`);
+
+  const appName = projectName?.trim() || "Your app";
+  const bullets = featureHints.length > 0
+    ? featureHints.join("\n")
+    : "- Focused core flow\n- Clear user actions\n- Polished visual direction";
+
+  return [
+    "Here's what I'll build:",
+    `**${appName}**`,
+    bullets,
+    "",
+    "Ready to build this — or type any changes first.",
+  ].join("\n");
+}
+
+export async function generatePlanSummary(
+  accumulatedContext: string,
+  projectName?: string | null,
+): Promise<string> {
+  const brief = accumulatedContext.trim();
+  if (!brief) {
+    return buildPlanSummaryFallback(accumulatedContext, projectName);
+  }
+
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return buildPlanSummaryFallback(brief, projectName);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PLAN_SUMMARY_TIMEOUT_MS);
+
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create(
+      {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 140,
+        system: [
+          "Based on this build brief, write a short friendly plan summary.",
+          "Keep it under 60 words. Be specific. Use markdown.",
+          'Format:',
+          '"Here\'s what I\'ll build:',
+          '[Suggested app name]',
+          '',
+          '[Feature 1]',
+          '[Feature 2]',
+          '[Feature 3]',
+          '[Design style]',
+          '',
+          'Ready to build this — or type any changes first."',
+          'No intro phrases like "Sure!" or "Great!". Just the plan.',
+        ].join("\n"),
+        messages: [
+          {
+            role: "user",
+            content: [
+              `Project name: ${projectName?.trim() || "Infer from the brief."}`,
+              `Brief: ${brief}`,
+            ].join("\n"),
+          },
+        ],
+      },
+      { signal: controller.signal },
+    );
+
+    const text = response.content
+      .filter((block): block is Anthropic.Messages.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+
+    return text || buildPlanSummaryFallback(brief, projectName);
+  } catch {
+    return buildPlanSummaryFallback(brief, projectName);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function extractJsonCandidate(raw: string): string | null {
