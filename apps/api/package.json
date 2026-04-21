@@ -18,7 +18,6 @@
     "@beomz-studio/templates": "workspace:*",
     "@hono/node-server": "^1.13.8",
     "@neondatabase/serverless": "^0.10.4",
-    "@sparticuz/chromium-min": "^126.0.0",
     "@supabase/supabase-js": "^2.101.1",
     "@tavily/core": "^0.7.2",
     "@types/archiver": "^7.0.0",
@@ -30,7 +29,6 @@
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^1.7.0",
     "openai": "^6.34.0",
-    "puppeteer-core": "^24.7.1",
     "stripe": "^22.0.1",
     "zod": "^3.24.1"
   },
