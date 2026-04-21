@@ -136,8 +136,6 @@ export function TopBar({
           <ChevronLeft className="h-3.5 w-3.5" />
         </button>
 
-        <div className="h-4 w-px flex-none bg-[#e5e5e5]" />
-
         {/* Project name — editable */}
         {editingName ? (
           <input
