@@ -102,18 +102,11 @@ export function ProjectPage() {
       setProjectId(response.project.id);
       setProjectName(response.project.name);
       setProjectIcon(response.project.icon ?? null);
-      if (response.trace.previewReady) {
-        void getBuildStatus(response.build.id)
-          .then(status => {
-            if (!status.result) return;
-            setBuild(status.build);
-            setBuildResult(status.result);
-            setPreviewGenerationId(response.build.id);
-          })
-          .catch(() => {
-            setPreviewGenerationId(response.build.id);
-          });
-      }
+      // BEO-474: Do NOT pre-populate buildResult here even when trace.previewReady
+      // is true. onBuildStarted fires before build_confirmed, so isBuildInProgress
+      // is still false — delivering scaffold now would bypass the WC guard and flash
+      // the template before AI finishes. Scaffold and real files both arrive via the
+      // preview_ready / done SSE events after build_confirmed (isBuildInProgress=true).
     },
     onOutOfCredits: (isHardBlock) => {
       setIsHardBlockCredits(isHardBlock);
@@ -253,6 +246,23 @@ export function ProjectPage() {
 
           void getBuildStatus(event.buildId)
             .then(status => {
+              if (status.result) setBuildResult(status.result);
+
+              // BEO-474: if the build "succeeded" but delivered 0 files, treat it as
+              // a failure so the error overlay is shown rather than silently keeping
+              // the scaffold template visible. The API should set fallbackUsed=true in
+              // this case — flag to Codex if this fires unexpectedly.
+              if (!status.result || !status.result.files || status.result.files.length === 0) {
+                if (aiCustomisingTimeoutRef.current) {
+                  clearTimeout(aiCustomisingTimeoutRef.current);
+                  aiCustomisingTimeoutRef.current = null;
+                }
+                setIsAiCustomising(false);
+                setBuildFailed(true);
+                setBuildErrorMessage("Build completed but no files were generated. Please try again.");
+                return;
+              }
+
               if (status.project.name && status.project.name !== "Untitled project") {
                 setProjectName(status.project.name);
               }

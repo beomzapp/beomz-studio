@@ -176,15 +176,21 @@ export function useWebContainerPreview(
     ) => {
       const { wc } = instance;
 
-      // BEO-456 final: First-build scaffold guard.
-      // The API streams a prebuilt template (e.g. Kanban Board) as an early
-      // buildResult.files before the AI finishes customising. That scaffold
-      // is useful in memory (code view, mergeFiles) but must NEVER be written
-      // to the WC filesystem — once Vite mounts it, the iframe would show the
-      // Kanban preview for the entire build duration. Defer the first mount
-      // until the build is truly done; the isBuildInProgress→false effect
-      // below re-invokes deliverFiles with the real files.
-      if (!firstBuildDeliveredRef.current && isBuildInProgressRef.current) {
+      // BEO-474: Universal scaffold guard — applies to BOTH first builds AND
+      // iterations. The API streams a prebuilt template (e.g. Product Catalog)
+      // as an early buildResult.files for EVERY build before AI finishes
+      // generating the real app. If mounted now, Vite/HMR would swap the
+      // running preview to the scaffold template for the entire generation
+      // duration. Block ALL deliveries while a build pipeline is in flight;
+      // the real files arrive via files-change effect when isBuildInProgress
+      // transitions to false (done SSE → getBuildStatus → setBuildResult).
+      //
+      // BEO-456 regression: the old guard was
+      //   `!firstBuildDeliveredRef.current && isBuildInProgressRef.current`
+      // which intentionally skipped the block for iterations. That was safe
+      // when iterations never received scaffold payloads, but the API now
+      // sends scaffold for every build, causing the template to flash in HMR.
+      if (isBuildInProgressRef.current) {
         pendingDeliverRef.current = true;
         return;
       }
@@ -577,11 +583,11 @@ export function useWebContainerPreview(
         // can't call armCacheFallback() directly (defined inside boot()).
         armCacheFallbackRef.current = armCacheFallback;
 
-        // BEO-456: always start Vite with the BLANK SHELL first so the preview
-        // goes blank → real app in one HMR transition — the scaffold template
-        // never touches the WC filesystem. Real files are delivered next via
-        // deliverFiles(); it stages via pendingDeliverRef if server-ready
-        // hasn't fired yet.
+        // BEO-456 / BEO-474: always start Vite with the BLANK SHELL first so
+        // the preview goes blank → real app in one HMR transition — the scaffold
+        // template never touches the WC filesystem. Real files are delivered
+        // later via deliverFiles(); it stages via pendingDeliverRef if
+        // server-ready hasn't fired yet or if isBuildInProgress is true.
         await startViteShell(instance);
         if (cancelled) return;
         armCacheFallback();
