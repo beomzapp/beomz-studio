@@ -661,11 +661,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             implementPlan?: string;
             plan?: string;
           };
+          console.log("[BEO-conversational] conversational_response received:", {
+            readyToImplement: e.readyToImplement,
+            hasPlan: Boolean(e.plan),
+            hasImplementPlan: Boolean(e.implementPlan),
+            planPreview: (e.plan ?? e.implementPlan ?? "").slice(0, 80),
+            messagePreview: e.message?.slice(0, 80),
+          });
           const ready =
             Boolean(e.readyToImplement) && Boolean(e.plan || e.implementPlan);
           const plan = ready ? String(e.plan ?? e.implementPlan ?? "").trim() : "";
+          console.log("[BEO-conversational] ready:", ready, "plan set:", Boolean(plan));
           if (plan) {
             pendingImplementPlanRef.current = plan;
+            console.log("[BEO-conversational] pendingImplementPlanRef set ✓");
             setMessages(prev => [
               ...prev.filter(m => m.type !== "thinking"),
               {
@@ -677,6 +686,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               },
             ]);
           } else {
+            console.warn("[BEO-conversational] plan is empty — rendering question_answer (no ⚡ button)");
             setMessages(prev => [
               ...prev.filter(m => m.type !== "thinking"),
               { id: makeId(), type: "question_answer", content: e.message, streaming: false },
