@@ -15,8 +15,6 @@ import {
   Code2,
   Database,
   Link2,
-  PanelLeftClose,
-  PanelLeftOpen,
   BarChart2,
   BookOpen,
   Briefcase,
@@ -62,8 +60,6 @@ interface TopBarProps {
   onRefreshPreview?: () => void;
   activeView: ActiveView;
   onActiveViewChange: (view: ActiveView) => void;
-  showSidebar?: boolean;
-  onToggleSidebar?: () => void;
   isPublished?: boolean;
   hasUnpublishedChanges?: boolean;
   isPublishing?: boolean;
@@ -103,8 +99,6 @@ export function TopBar({
   onRefreshPreview,
   activeView,
   onActiveViewChange,
-  showSidebar = true,
-  onToggleSidebar,
   isPublished = false,
   hasUnpublishedChanges = false,
   isPublishing = false,
@@ -143,20 +137,6 @@ export function TopBar({
         </button>
 
         <div className="h-4 w-px flex-none bg-[#e5e5e5]" />
-
-        {onToggleSidebar && (
-          <button
-            onClick={onToggleSidebar}
-            className="flex-none rounded-md p-1.5 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
-            aria-label="Toggle sidebar"
-          >
-            {showSidebar ? (
-              <PanelLeftClose className="h-4 w-4" />
-            ) : (
-              <PanelLeftOpen className="h-4 w-4" />
-            )}
-          </button>
-        )}
 
         {/* Project name — editable */}
         {editingName ? (

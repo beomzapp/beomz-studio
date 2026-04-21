@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3Event, TemplateId } from "@beomz-studio/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Copy, Check, Code2 } from "lucide-react";
+import { Copy, Check, Code2, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   TopBar,
   ChatPanel,
@@ -752,8 +752,6 @@ export function ProjectPage() {
         onRefreshPreview={handleRefreshPreview}
         activeView={activeView}
         onActiveViewChange={setActiveView}
-        showSidebar={showChat}
-        onToggleSidebar={() => setShowChat(v => !v)}
         isPublished={isPublished}
         onPublish={() => setShowPublishModal(true)}
         onExportZip={handleExportZip}
@@ -800,7 +798,35 @@ export function ProjectPage() {
             />
           </div>
         </div>
-        {showChat && <ResizeHandle target="chat" />}
+        {/* Chat / main divider — resize when open; collapse/expand control on the line */}
+        <div className="relative z-20 w-1 shrink-0">
+          <div
+            onMouseDown={showChat ? e => startResize("chat", e) : undefined}
+            className={cn(
+              "absolute inset-y-0 left-0 w-full bg-transparent transition-colors",
+              showChat &&
+                "cursor-col-resize hover:bg-[#F97316]/20 active:bg-[#F97316]/30",
+            )}
+            title={showChat ? "Drag to resize" : undefined}
+          />
+          <button
+            type="button"
+            onClick={() => setShowChat(v => !v)}
+            onMouseDown={e => e.stopPropagation()}
+            className={cn(
+              "absolute left-1/2 top-3 z-10 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full",
+              "border border-[#e5e5e5]/90 bg-white/65 text-[#6b7280] shadow-sm backdrop-blur-sm",
+              "transition-colors hover:bg-white/90 hover:text-[#1a1a1a]",
+            )}
+            aria-label={showChat ? "Collapse chat panel" : "Expand chat panel"}
+          >
+            {showChat ? (
+              <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2.25} />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" strokeWidth={2.25} />
+            )}
+          </button>
+        </div>
 
         {/* Main content */}
         <div className="flex min-w-0 flex-1 flex-col">
