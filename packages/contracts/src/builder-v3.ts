@@ -168,6 +168,13 @@ export interface BuilderV3ImplementSuggestionEvent extends BuilderV3BaseEvent {
   summary: string;
 }
 
+// BEO-464: emitted BEFORE any build starts; frontend gates shimmer on this event.
+// For conversational/question responses this event is never sent.
+export interface BuilderV3BuildConfirmedEvent extends BuilderV3BaseEvent {
+  type: "build_confirmed";
+  message?: string;
+}
+
 // BEO-362: focused clarifying question emitted for ambiguous intent.
 // Build is paused; next user message re-runs detectIntent.
 export interface BuilderV3ClarifyingQuestionEvent extends BuilderV3BaseEvent {
@@ -219,7 +226,8 @@ export type BuilderV3Event =
   | BuilderV3BuildSummaryEvent
   | BuilderV3PreambleEvent
   | BuilderV3NextStepsEvent
-  | BuilderV3BuildStageEvent;
+  | BuilderV3BuildStageEvent
+  | BuilderV3BuildConfirmedEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;

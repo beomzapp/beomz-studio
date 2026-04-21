@@ -507,6 +507,13 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         case "intent_detected":
           break;
 
+        // BEO-464: API confirms this is a real build — NOW start the shimmer.
+        // Removes thinking dots so BuildingShimmer takes over cleanly.
+        case "build_confirmed":
+          setIsBuilding(true);
+          setMessages(prev => prev.filter(m => m.type !== "thinking"));
+          break;
+
         case "insufficient_credits": {
           // BEO-439: hard block — build was rejected before starting due to insufficient credits
           setIsBuilding(false);
@@ -519,6 +526,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           // BEO-392: record internal state only — NO message pushed to chat.
           // BuildingShimmer will display (isBuilding && !hasBuildingMessage).
           // The first real message card is created when stage_preamble arrives.
+          // BEO-464: also a fallback — ensures isBuilding=true if build_confirmed was missed.
+          setIsBuilding(true);
           const now = Date.now();
           buildStartedAtRef.current = now;
           try {
@@ -1429,7 +1438,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
       clearPreambleAndStageTimers();
 
-      setIsBuilding(true);
+      // BEO-464: do NOT set isBuilding here — wait for build_confirmed SSE.
+      // Only show thinking dots until the API confirms this is a real build.
       // BEO-462: if an image is attached, flag that we're analysing it until
       // image_intent or a real build stage fires and clears this flag.
       if (imageUrl) setIsAnalysingImage(true);
@@ -1469,12 +1479,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         if (controller.signal.aborted) return;
         if (err instanceof NetworkDisconnectError) {
           setMessages(prev => {
-            if (prev.some(m => m.type === "server_restarting")) return prev;
-            return [...prev, { id: makeId(), type: "server_restarting" }];
+            const filtered = prev.filter(m => m.type !== "thinking");
+            if (filtered.some(m => m.type === "server_restarting")) return filtered;
+            return [...filtered, { id: makeId(), type: "server_restarting" }];
           });
         } else {
           const content = err instanceof Error ? err.message : "Failed to start build.";
-          setMessages(prev => [...prev, { id: makeId(), type: "error", content }]);
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "error", content },
+          ]);
         }
         setIsBuilding(false);
         buildDoneRef.current = false;
@@ -1499,7 +1513,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
       } catch { /* ignore */ }
       clearPreambleAndStageTimers();
-      setIsBuilding(true);
+      // BEO-464: isBuilding is set by build_confirmed SSE, not here
       setMessages(prev => [
         ...prev.filter(m => m.type !== "server_restarting"),
         { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date() },
@@ -1530,14 +1544,17 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       }).catch(err => {
         if (controller.signal.aborted) return;
         if (err instanceof NetworkDisconnectError) {
-          setMessages(prev =>
-            prev.some(m => m.type === "server_restarting")
-              ? prev
-              : [...prev, { id: makeId(), type: "server_restarting" }],
-          );
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.type !== "thinking");
+            if (filtered.some(m => m.type === "server_restarting")) return filtered;
+            return [...filtered, { id: makeId(), type: "server_restarting" }];
+          });
         } else {
           const content = err instanceof Error ? err.message : "Failed to start build.";
-          setMessages(prev => [...prev, { id: makeId(), type: "error", content }]);
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "error", content },
+          ]);
         }
         setIsBuilding(false);
         buildDoneRef.current = false;

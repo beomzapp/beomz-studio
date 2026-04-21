@@ -196,6 +196,16 @@ export function ProjectPage() {
       activeBuildIdRef.current = event.buildId;
     }
 
+    // BEO-464: build confirmed — NOW start the preview overlay.
+    // This only fires for real builds, never for greetings/questions.
+    if (event.type === "build_confirmed") {
+      if (aiCustomisingTimeoutRef.current) {
+        clearTimeout(aiCustomisingTimeoutRef.current);
+        aiCustomisingTimeoutRef.current = null;
+      }
+      setIsAiCustomising(true);
+    }
+
     // Conversational response — clear the building overlay immediately so the
     // preview doesn't flash behind "Building your app…" for question answers.
     // BEO-374 Bug 4.
@@ -335,7 +345,9 @@ export function ProjectPage() {
       // BEO-374 Bug 4: snapshot the current preview ID so conversational done
       // can restore it and avoid reloading the preview for question answers.
       savedPreviewGenerationIdRef.current = previewGenerationIdRef.current;
-      setIsAiCustomising(true);
+      // BEO-464: do NOT set isAiCustomising here — wait for build_confirmed SSE.
+      // For greetings/questions, the overlay should never appear.
+      // Clear any lingering overlay timer from a previous build.
       if (aiCustomisingTimeoutRef.current) {
         clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = null;
