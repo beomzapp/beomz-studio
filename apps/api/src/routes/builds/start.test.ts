@@ -402,7 +402,7 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
       intent: "build_new",
       confidence: 0.95,
       reason: "Complete enough to build.",
-      accumulatedContext: implementPlan,
+      accumulatedContext: "Build a basic generic landing page.",
     }),
     runBuildInBackground: async (input) => {
       runBuildCalls += 1;
@@ -432,6 +432,195 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
   assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
   assert.equal(runBuildCalls, 1);
   assert.equal(capturedBuildPrompt, implementPlan);
+});
+
+test("/builds/start accepts implementPlan as the build prompt alias", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  let capturedBuildPrompt: string | null = null;
+  const implementPlan = "Build a premium PawLux pet care app with boutique grooming, daycare booking, and a polished luxury brand.";
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            id: patch.id ?? "55555555-5555-5555-5555-555555555555",
+            name: patch.name ?? "PawLux",
+            org_id: org.id,
+            status: patch.status ?? "queued",
+            template: patch.template ?? "interactive-tool",
+            icon: "Wrench",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+          createProject: async (input: Record<string, unknown>) => ({
+            id: input.id as string,
+            name: input.name as string,
+            org_id: input.org_id as string,
+            status: input.status as string,
+            template: input.template as string,
+            icon: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.97,
+      reason: "Clear build request.",
+      accumulatedContext: implementPlan,
+    }),
+    runBuildInBackground: async (input) => {
+      runBuildCalls += 1;
+      capturedBuildPrompt = input.prompt;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      implementPlan,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(runBuildCalls, 1);
+  assert.equal(capturedBuildPrompt, implementPlan);
+});
+
+test("/builds/start returns 400 for short build prompts instead of queueing a scaffold fallback", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          getOrgWithBalance: async () => org,
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.97,
+      reason: "Clear build request.",
+      accumulatedContext: "todo app",
+    }),
+    runBuildInBackground: async () => {
+      runBuildCalls += 1;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "todo app",
+    }),
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "Build prompt must be at least 10 characters.",
+  });
+  assert.equal(runBuildCalls, 0);
 });
 
 test("/builds/start forces a plan summary after three clarifying questions even below 0.9 confidence", async () => {

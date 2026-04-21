@@ -56,6 +56,17 @@ test("buildStructuredChatSystemPrompt includes the senior-colleague rules and JS
   assert.match(prompt, /existing app called "PettyCash"/i);
 });
 
+test("buildStructuredChatSystemPrompt includes the exact new-project greeting", () => {
+  const prompt = buildStructuredChatSystemPrompt({
+    projectName: null,
+    existingFiles: [],
+    chatSummary: null,
+    chatHistory: [],
+  });
+
+  assert.match(prompt, /Hey! 👋 Ready to build something awesome\? What's the idea\?/);
+});
+
 test("buildClarifyingQuestionSystemPrompt includes failed website guidance", () => {
   const prompt = buildClarifyingQuestionSystemPrompt({
     projectName: "PettyCash",

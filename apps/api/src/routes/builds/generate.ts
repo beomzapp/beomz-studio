@@ -85,6 +85,7 @@ import {
 } from "../../lib/chatPrompts.js";
 import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
 import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
+import { isBuildPromptTooShort, MIN_BUILD_PROMPT_LENGTH } from "./shared.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2666,6 +2667,10 @@ async function _runBuildInBackground(
   if (imageConfirmed) {
     prompt = buildPromptWithImageIntent(prompt, input.confirmedIntent);
     forcedIntent = input.isIteration ? "edit" : "build";
+  }
+
+  if (isBuildPromptTooShort(prompt)) {
+    throw new Error(`Build prompt must be at least ${MIN_BUILD_PROMPT_LENGTH} characters.`);
   }
 
   // ── BEO-362: 4-way intent detection ─────────────────────────────────────

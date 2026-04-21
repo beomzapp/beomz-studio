@@ -14,6 +14,8 @@ import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import {
+  isBuildPromptTooShort,
+  MIN_BUILD_PROMPT_LENGTH,
   mapProjectRowToProject,
   readBuildMetadata,
   readBuildTraceMetadata,
@@ -212,6 +214,48 @@ function buildAccumulatedContextFallback(
   return parts.join(". ").trim();
 }
 
+function readStringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function resolveBuildPromptField(record: Record<string, unknown>): string | undefined {
+  const implementPlan = readStringField(record, "implementPlan");
+  if (implementPlan && implementPlan.trim().length > 0) {
+    return implementPlan;
+  }
+
+  const plan = readStringField(record, "plan");
+  if (plan && plan.trim().length > 0) {
+    return plan;
+  }
+
+  const prompt = readStringField(record, "prompt");
+  if (prompt && prompt.trim().length > 0) {
+    return prompt;
+  }
+
+  return implementPlan ?? plan ?? prompt;
+}
+
+function normaliseStartBuildRequestBody(requestBody: unknown): unknown {
+  if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) {
+    return requestBody;
+  }
+
+  const record = requestBody as Record<string, unknown>;
+  const prompt = resolveBuildPromptField(record);
+
+  if (typeof prompt !== "string") {
+    return requestBody;
+  }
+
+  return {
+    ...record,
+    prompt,
+  };
+}
+
 async function persistConversationalProjectMemory(
   db: OrgContext["db"],
   projectId: string,
@@ -358,13 +402,15 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const generatePlanSummaryFn = deps.generatePlanSummary ?? generatePlanSummaryMessage;
   const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
   const requestBody = await c.req.json().catch(() => null);
-  const parsedBody = startBuildRequestSchema.safeParse(requestBody);
+  const normalisedRequestBody = normaliseStartBuildRequestBody(requestBody);
+  const parsedBody = startBuildRequestSchema.safeParse(normalisedRequestBody);
 
   if (!parsedBody.success) {
     return c.json({ details: parsedBody.error.flatten(), error: "Invalid build request body." }, 400);
   }
 
   const prompt = parsedBody.data.prompt.trim();
+  console.log("[implementPlan]", prompt.slice(0, 100));
   const sourcePrompt = prompt;
   const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
   const confirmedIntent = parsedBody.data.confirmedIntent;
@@ -462,6 +508,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && !isImplementConfirmation;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
 
+  if (isBuildPromptTooShort(prompt) && (isBuildIshIntent || isImplementConfirmation)) {
+    return c.json(
+      { error: `Build prompt must be at least ${MIN_BUILD_PROMPT_LENGTH} characters.` },
+      400,
+    );
+  }
+
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.
   const isImmediateConversation = isConversationalIntent || needsClarification || shouldOfferPlanSummary;
@@ -506,7 +559,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const projectName =
     (isIteration ? projectRow?.name : parsedBody.data.projectName?.trim())
     || projectRow?.name
-    || buildProjectNameFromPrompt(prompt, "Untitled project");
+    || buildProjectNameFromPrompt(prompt, "New Project");
 
   // ── Credit balance snapshot ───────────────────────────────────────────────
   // Admins bypass. The actual soft/hard block happens after the generation row
@@ -738,15 +791,20 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   // IS the build prompt. It's more specific than the user's original short
   // line ("im thinking of a website") so the build pipeline has enough to
   // go on without asking further questions downstream.
-  const buildPrompt = (!planSummary && accumulatedBuildContext)
-    ? accumulatedBuildContext
-    : effectivePrompt;
+  const explicitBuildPrompt = isImplementConfirmation
+    ? (storedImplementPlan ?? prompt)
+    : null;
+  const buildPrompt = explicitBuildPrompt
+    ?? ((!planSummary && accumulatedBuildContext)
+      ? accumulatedBuildContext
+      : effectivePrompt);
 
   console.log("[BEO-210] Build queued.", {
     buildId, operation, prompt: sourcePrompt, projectId,
     templateId: selectedTemplateId, userId: orgContext.user.id,
     confidence: effectiveConfidence,
-    usingAccumulatedContext: buildPrompt !== effectivePrompt,
+    usingAccumulatedContext: !explicitBuildPrompt && buildPrompt !== effectivePrompt,
+    usingStoredImplementPlan: Boolean(explicitBuildPrompt),
   });
 
   const generationRow = await orgContext.db.createGeneration({

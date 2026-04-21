@@ -237,7 +237,7 @@ export function buildProjectMemoryPrompt({
   const greetingRule = hasBuiltApp
     ? "Greeting -> warm, energetic Beomz voice. Reference the app by its real name naturally in 1-2 sentences (e.g. \"Hey! {name} is looking good — what are we working on?\"). Never sound robotic."
         .replace("{name}", namedAppLabel)
-    : "Greeting -> warm, energetic Beomz voice. NEVER name the project or use template placeholder names (e.g. Interactive Tool). 1-2 sentences max. Example: \"Hey! Welcome to Beomz ✨ What are we building today?\"";
+    : "Greeting -> reply with exactly \"Hey! 👋 Ready to build something awesome? What's the idea?\" Never name the project or use template placeholder names.";
 
   const lines = [
     hasBuiltApp
