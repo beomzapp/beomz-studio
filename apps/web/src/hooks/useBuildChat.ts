@@ -1470,7 +1470,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     setChatModeActive(false);
     chatModeRef.current = false;
     await delay(50);
-    sendMessageInternalRef.current?.(plan, imageUrl);
+    // Pass plan as implementPlan so the API's hasExplicitImplementSignal() bypasses detectIntent.
+    sendMessageInternalRef.current?.(plan, imageUrl, plan);
   }, []);
 
   useEffect(() => {
@@ -1478,7 +1479,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   }, [implementWithPlan]);
 
   // Ref that points to the raw build sender (set after sendMessage is defined)
-  const sendMessageInternalRef = useRef<((text: string, imageUrl?: string) => void) | null>(null);
+  // Third arg `implementPlan` is forwarded to the API body to bypass detectIntent.
+  const sendMessageInternalRef = useRef<((text: string, imageUrl?: string, implementPlan?: string) => void) | null>(null);
 
   const sendMessage = useCallback(
     (text: string, imageUrl?: string, isSystem?: boolean) => {
@@ -1579,7 +1581,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   // BEO-396: expose the raw build sender to implementCard
   useEffect(() => {
-    sendMessageInternalRef.current = (text: string, imageUrl?: string) => {
+    sendMessageInternalRef.current = (text: string, imageUrl?: string, implementPlan?: string) => {
       // Call without going through chatModeRef check — directly triggers build flow
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -1607,6 +1609,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           existingFiles:
             existingFilesRef.current.length > 0 ? existingFilesRef.current : undefined,
           ...(imageUrl ? { imageUrl } : {}),
+          ...(implementPlan ? { implementPlan } : {}),
         },
         signal: controller.signal,
         onBuildStarted: response => {

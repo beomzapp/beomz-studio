@@ -801,7 +801,7 @@ export function ProjectPage() {
               chatModeActive={chatModeActive}
               onToggleChatMode={toggleChatMode}
               implementSuggestion={implementSuggestion}
-              onImplement={() => { void implementCard(); }}
+              onImplement={() => { void implementWithPlan(implementSuggestion?.summary ?? ""); }}
               onDismissImplement={dismissImplementSuggestion}
               onImplementPlan={(plan, imageUrl) => { void implementWithPlan(plan, imageUrl); }}
               isAnalysingImage={isAnalysingImage}

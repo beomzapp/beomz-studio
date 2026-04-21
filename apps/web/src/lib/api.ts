@@ -203,6 +203,7 @@ async function requestJson<TResponse>(
 
 export function startBuild(body: {
   existingFiles?: readonly StudioFile[];
+  implementPlan?: string;
   model?: string;
   prompt: string;
   projectId?: string;
