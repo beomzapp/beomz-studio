@@ -23,6 +23,9 @@ export interface StructuredChatResponse {
 }
 
 const PLAN_SUMMARY_TIMEOUT_MS = 4_000;
+const STRICT_URL_CLARIFYING_RULE = `The website content has been fetched and provided to you as context.
+You MUST NOT ask about anything that can be clearly determined from this content — including industry, sector, purpose, target audience, or type of application. Only ask about implementation decisions the user must make that cannot be inferred from the URL content, such as:
+which specific features to include/exclude, whether users need to sign up/log in, and whether to keep or change the visual style.`;
 
 interface BuildChatPromptInput {
   chatHistory: readonly ProjectChatHistoryEntry[];
@@ -200,6 +203,9 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
         "Keep it tight and optimistic — the user knows they are close.",
       ].join(" ")
     : "";
+  const strictUrlClarifyingRule = hasUrlGrounding
+    ? STRICT_URL_CLARIFYING_RULE
+    : "";
 
   return [
     "You are Beomz, a senior developer teammate gathering information to build an app.",
@@ -209,6 +215,7 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     "Never ask setup questions when an app already exists.",
     "If a website fetch failed, ask for the key feature or flow to replicate.",
     urlGroundingRule,
+    strictUrlClarifyingRule,
     nearReadyHint,
     "",
     questionPriority,

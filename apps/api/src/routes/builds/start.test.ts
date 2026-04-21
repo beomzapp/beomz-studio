@@ -805,7 +805,6 @@ test("/builds/start accepts short non-empty build prompts", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
-  let capturedBuildPrompt: string | null = null;
   const org = {
     id: "org-1",
     owner_id: "user-1",
@@ -833,6 +832,11 @@ test("/builds/start accepts short non-empty build prompts", async () => {
     loadOrgContextMiddleware: async (c, next) => {
       c.set("orgContext", {
         db: {
+          applyOrgUsageDeduction: async () => ({
+            deducted: 1,
+            credits: 9,
+            topup_credits: 0,
+          }),
           createGeneration: async (input: Record<string, unknown>) => ({
             completed_at: input.completed_at as string | null,
             error: input.error as string | null,
@@ -862,6 +866,7 @@ test("/builds/start accepts short non-empty build prompts", async () => {
             chat_history: [],
             chat_summary: null,
           }),
+          findProjectById: async () => null,
           getOrgWithBalance: async () => org,
           updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
             id: patch.id ?? "88888888-8888-8888-8888-888888888888",
@@ -894,9 +899,9 @@ test("/builds/start accepts short non-empty build prompts", async () => {
       reason: "Clear build request.",
       accumulatedContext: "todo app",
     }),
+    generatePlanSummary: async () => "Here's what I'll do:\n- Build the core todo flow\n- Keep it simple",
     runBuildInBackground: async (input) => {
       runBuildCalls += 1;
-      capturedBuildPrompt = input.prompt;
     },
   });
 
@@ -911,8 +916,17 @@ test("/builds/start accepts short non-empty build prompts", async () => {
   });
 
   assert.equal(response.status, 202);
-  assert.equal(runBuildCalls, 1);
-  assert.equal(capturedBuildPrompt, "todo app");
+  const payload = await response.json() as {
+    trace: {
+      events: Array<{ type: string; readyToImplement?: boolean }>;
+      lastEventId: string | null;
+    };
+  };
+
+  assert.equal(payload.trace.lastEventId, null);
+  assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), true);
+  assert.equal(payload.trace.events.some((event) => event.readyToImplement === true), true);
+  assert.equal(runBuildCalls, 0);
 });
 
 test("/builds/start forces a plan summary after four clarifying questions even below 0.8 confidence", async () => {
@@ -1244,4 +1258,283 @@ test("/builds/start injects Tavily research context for research intent without 
   } finally {
     resetTavilyClientFactoryForTests();
   }
+});
+
+test("/builds/start includes a reference_screenshot event when URL-backed plan summary capture succeeds", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          applyOrgUsageDeduction: async () => ({
+            deducted: 1,
+            credits: 9,
+            topup_credits: 0,
+          }),
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: (input.output_paths as string[] | undefined) ?? [],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: (input.session_events as Record<string, unknown>[] | undefined) ?? [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: (input.warnings as string[] | undefined) ?? [],
+          }),
+          createProject: async (input: Record<string, unknown>) => ({
+            id: input.id as string,
+            name: input.name as string,
+            org_id: input.org_id as string,
+            status: input.status as string,
+            template: input.template as string,
+            icon: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+          findLatestGenerationByProjectId: async () => null,
+          findPlanSessionById: async () => null,
+          findProjectById: async () => null,
+          findProjectsByOrgId: async () => [],
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            id: "77777777-7777-7777-7777-777777777777",
+            name: patch.name ?? "New Project",
+            org_id: org.id,
+            status: patch.status ?? "ready",
+            template: patch.template ?? "interactive-tool",
+            icon: "Wrench",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.92,
+      reason: "Clear new build request.",
+    }),
+    generatePlanSummary: async () => "Here's what I'll do:\n- Mirror the core flows\n- Keep it clean",
+    loadUrlContext: async () => ({
+      label: "Source URL: https://mybos.com",
+      sourceType: "url",
+      url: "https://mybos.com",
+      content: "myBOS is a building operations platform for maintenance and property workflows.",
+      fetchFailed: false,
+    }),
+    runBuildInBackground: async () => {
+      runBuildCalls += 1;
+    },
+    screenshotUrl: async () => "ZmFrZS1zY3JlZW5zaG90",
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "build a website like mybos.com",
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  const payload = await response.json() as {
+    trace: {
+      events: Array<{ type: string; domain?: string; imageBase64?: string }>;
+      lastEventId: string | null;
+    };
+  };
+
+  const screenshotEvent = payload.trace.events.find((event) => event.type === "reference_screenshot");
+  assert.equal(payload.trace.lastEventId, null);
+  assert.ok(screenshotEvent);
+  assert.equal(screenshotEvent?.domain, "mybos.com");
+  assert.equal(screenshotEvent?.imageBase64, "ZmFrZS1zY3JlZW5zaG90");
+  assert.equal(runBuildCalls, 0);
+});
+
+test("/builds/start passes fetched URL content into clarifying question generation", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let capturedWebsiteContext: Record<string, unknown> | null = null;
+  let runBuildCalls = 0;
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          applyOrgUsageDeduction: async () => ({
+            deducted: 1,
+            credits: 9,
+            topup_credits: 0,
+          }),
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: (input.output_paths as string[] | undefined) ?? [],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: (input.session_events as Record<string, unknown>[] | undefined) ?? [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: (input.warnings as string[] | undefined) ?? [],
+          }),
+          createProject: async (input: Record<string, unknown>) => ({
+            id: input.id as string,
+            name: input.name as string,
+            org_id: input.org_id as string,
+            status: input.status as string,
+            template: input.template as string,
+            icon: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+          findLatestGenerationByProjectId: async () => null,
+          findPlanSessionById: async () => null,
+          findProjectById: async () => null,
+          findProjectsByOrgId: async () => [],
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            id: "88888888-8888-8888-8888-888888888888",
+            name: patch.name ?? "New Project",
+            org_id: org.id,
+            status: patch.status ?? "ready",
+            template: patch.template ?? "interactive-tool",
+            icon: "Wrench",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.72,
+      reason: "Needs one more scope decision.",
+    }),
+    generateClarifyingQuestion: async (input) => {
+      capturedWebsiteContext = (input.websiteContext as Record<string, unknown> | null) ?? null;
+      return "Keep the same visual style, or should I change it?";
+    },
+    loadUrlContext: async () => ({
+      label: "Source URL: https://mybos.com",
+      sourceType: "url",
+      url: "https://mybos.com",
+      content: "myBOS is a building operations platform for maintenance, property, and tenant workflows.",
+      fetchFailed: false,
+    }),
+    runBuildInBackground: async () => {
+      runBuildCalls += 1;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "build a website like mybos.com",
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  const payload = await response.json() as {
+    trace: { events: Array<{ type: string; message?: string }>; lastEventId: string | null };
+  };
+
+  assert.equal(payload.trace.lastEventId, null);
+  assert.equal(payload.trace.events.some((event) => event.type === "clarifying_question"), true);
+  assert.equal(capturedWebsiteContext?.sourceType, "url");
+  assert.match(String(capturedWebsiteContext?.content ?? ""), /building operations platform/i);
+  assert.equal(runBuildCalls, 0);
 });

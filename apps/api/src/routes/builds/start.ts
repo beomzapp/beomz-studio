@@ -481,8 +481,10 @@ interface BuildsStartRouteDeps {
   generateClarifyingQuestion?: typeof generateClarifyingQuestion;
   generateConversationalAnswer?: typeof generateConversationalAnswer;
   generatePlanSummary?: typeof generatePlanSummaryMessage;
+  loadUrlContext?: typeof loadUrlContext;
   loadOrgContextMiddleware?: typeof loadOrgContext;
   runBuildInBackground?: typeof runBuildInBackground;
+  screenshotUrl?: typeof screenshotUrl;
 }
 
 export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
@@ -494,7 +496,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const generateClarifyingQuestionFn = deps.generateClarifyingQuestion ?? generateClarifyingQuestion;
   const generateConversationalAnswerFn = deps.generateConversationalAnswer ?? generateConversationalAnswer;
   const generatePlanSummaryFn = deps.generatePlanSummary ?? generatePlanSummaryMessage;
+  const loadUrlContextFn = deps.loadUrlContext ?? loadUrlContext;
   const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
+  const screenshotUrlFn = deps.screenshotUrl ?? screenshotUrl;
   const requestBody = await c.req.json().catch(() => null);
   const normalisedRequestBody = normaliseStartBuildRequestBody(requestBody);
   const explicitImplementPrompt = readExplicitImplementPrompt(normalisedRequestBody);
@@ -787,16 +791,24 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     } | null = null;
 
     if (shouldCaptureReferenceScreenshot && detectedUrl) {
-      const [, screenshotBase64] = await Promise.all([
-        loadUrlContext(sourcePrompt),
-        screenshotUrl(detectedUrl),
-      ]);
+      const screenshotBase64 = await screenshotUrlFn(detectedUrl);
+      console.log("[builds/start] reference screenshot capture attempted.", {
+        buildId,
+        returnedBase64: Boolean(screenshotBase64),
+        url: detectedUrl,
+      });
+
       if (screenshotBase64) {
         referenceScreenshot = {
           imageBase64: screenshotBase64,
           url: detectedUrl,
           domain: readDomainFromUrl(detectedUrl),
         };
+      } else {
+        console.warn("[builds/start] reference screenshot capture returned empty result.", {
+          buildId,
+          url: detectedUrl,
+        });
       }
     }
 
@@ -807,8 +819,18 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       : classifiedIntent === "research"
       ? await loadResearchContext(sourcePrompt)
       : hasResearchUrl
-      ? await loadUrlContext(sourcePrompt)
+      ? await loadUrlContextFn(sourcePrompt)
       : null;
+
+    if (eventType === "clarifying_question") {
+      console.log("[builds/start] passing website context to clarifying question.", {
+        buildId,
+        hasWebsiteContext: Boolean(websiteContext),
+        sourceType: websiteContext?.sourceType ?? null,
+        url: websiteContext?.url ?? detectedUrl ?? null,
+        websiteContextHasContent: Boolean(websiteContext?.content),
+      });
+    }
 
     const assistantMessage = shouldOfferPlanSummary
       ? await generatePlanSummaryFn(implementPlan ?? effectivePrompt, projectName)
@@ -843,6 +865,15 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       requestedAt,
       type: eventType,
     });
+
+    if (referenceScreenshot) {
+      console.log("[builds/start] reference_screenshot event emitted.", {
+        buildId,
+        domain: referenceScreenshot.domain,
+        imageBase64Length: referenceScreenshot.imageBase64.length,
+        url: referenceScreenshot.url,
+      });
+    }
 
     const generationRow = await orgContext.db.createGeneration({
       completed_at: requestedAt,

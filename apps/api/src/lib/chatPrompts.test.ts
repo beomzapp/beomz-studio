@@ -89,6 +89,26 @@ test("buildClarifyingQuestionSystemPrompt includes failed website guidance", () 
   assert.match(prompt, /Jina fetch was unavailable or returned no usable content/i);
 });
 
+test("buildClarifyingQuestionSystemPrompt includes the strict URL-grounding rule when website content exists", () => {
+  const prompt = buildClarifyingQuestionSystemPrompt({
+    projectName: "PettyCash",
+    existingFiles: files,
+    chatSummary: null,
+    chatHistory: [],
+    websiteContext: {
+      label: "Source URL: https://mybos.com",
+      sourceType: "url",
+      url: "https://mybos.com",
+      content: "myBOS is a building operations platform for maintenance workflows and tenant communication.",
+      fetchFailed: false,
+    },
+  });
+
+  assert.match(prompt, /The website content has been fetched and provided to you as context\./);
+  assert.match(prompt, /You MUST NOT ask about anything that can be clearly determined from this content/i);
+  assert.match(prompt, /which specific features to include\/exclude, whether users need to sign up\/log in, and whether to keep or change the visual style\./i);
+});
+
 test("parseStructuredChatResponse returns parsed JSON payload", () => {
   const result = parseStructuredChatResponse(JSON.stringify({
     message: "**Plan**\n\nI'll add dark mode.",
@@ -125,7 +145,7 @@ test("generatePlanSummary falls back to the required plan format when Haiku is u
 test("chat prompt source forbids 'building now' phrasing in conversational and plan responses", async () => {
   const chatPromptSource = await readFile(new URL("./chatPrompts.ts", import.meta.url), "utf8");
 
-  assert.match(chatPromptSource, /NEVER say phrases like "Building now", "I'm building this", "Creating now", or "On it, building"/);
+  assert.match(chatPromptSource, /NEVER say phrases like \\"Building now\\", \\"I'm building this\\", \\"Creating now\\", or \\"On it, building\\"/);
   assert.match(chatPromptSource, /Here's what I'll do:/);
   assert.doesNotMatch(chatPromptSource, /Here's what I'll build:/);
 });
