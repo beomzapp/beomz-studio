@@ -24,6 +24,13 @@ interface BuildChatPromptInput {
   existingFiles: readonly StudioFile[];
   projectName?: string | null;
   websiteContext?: WebsiteContext | null;
+  // BEO-465: when present, already-known build context (app type, features,
+  // style, …) accumulated across the chat. Feed it back into the prompt so
+  // the AI doesn't re-ask what the user already answered.
+  accumulatedContext?: string | null;
+  // BEO-465: when true, we have ~0.7–0.89 confidence and only need one last
+  // nudge. The AI should summarise what it knows and ask a final confirmation.
+  nearReady?: boolean;
 }
 
 const structuredChatResponseSchema = z.object({
@@ -129,14 +136,44 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
   });
   const websiteBlock = buildWebsiteContextBlock(input.websiteContext);
 
+  const accumulated = input.accumulatedContext?.trim();
+  const accumulatedBlock = accumulated && accumulated.length > 0
+    ? [
+        "## What you already know",
+        accumulated,
+        "Do NOT repeat these facts back as a question. Build on them.",
+      ].join("\n")
+    : "";
+
+  // BEO-465: priority for choosing the single missing piece to ask about.
+  const questionPriority = [
+    "## Question priority (ask about the FIRST unknown in this list)",
+    "1. App type / category (if unknown)",
+    "2. Key features (if type is known but features are not)",
+    "3. Design style / vibe (if features are known but style is not)",
+    "4. Final confirmation (if style is known) — state the plan in one line and ask \"sound right?\"",
+  ].join("\n");
+
+  const nearReadyHint = input.nearReady
+    ? [
+        "You are almost ready to build — one more answer will unlock it.",
+        "Ask the single most important remaining detail (usually style or a critical missing feature).",
+        "Keep it tight and optimistic — the user knows they are close.",
+      ].join(" ")
+    : "";
+
   return [
-    "You are Beomz, a senior developer teammate.",
-    "Ask exactly one targeted clarifying question that unlocks the next action.",
-    "Keep it under 18 words.",
-    "No filler. No apologies. No preamble.",
+    "You are Beomz, a senior developer teammate gathering information to build an app.",
+    "Ask exactly ONE short, natural question to gather the most important missing information.",
+    "Do NOT use bullet points. Do NOT ask multiple questions. Do NOT repeat what the user already told you.",
+    "Keep it under 20 words. Conversational tone. No filler. No apologies. No preamble.",
     "Never ask setup questions when an app already exists.",
     "If a website fetch failed, ask for the key feature or flow to replicate.",
+    nearReadyHint,
     "",
+    questionPriority,
+    "",
+    accumulatedBlock,
     memoryBlock,
     websiteBlock,
   ]

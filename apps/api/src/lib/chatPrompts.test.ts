@@ -53,7 +53,7 @@ test("buildClarifyingQuestionSystemPrompt includes failed website guidance", () 
     },
   });
 
-  assert.match(prompt, /Ask exactly one targeted clarifying question/i);
+  assert.match(prompt, /Ask exactly ONE short, natural question/i);
   assert.match(prompt, /Jina fetch was unavailable or returned no usable content/i);
 });
 

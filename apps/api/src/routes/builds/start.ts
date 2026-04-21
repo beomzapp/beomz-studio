@@ -324,13 +324,58 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   }
 
   const isIteration = Boolean(projectRow && existingFiles.length > 0);
-  const intentDecision = await classifyIntentFn(sourcePrompt, existingFiles.length > 0, Boolean(imageUrl));
+
+  // BEO-465: feed the classifier the last few turns so it can accumulate
+  // context across the conversation (e.g. user first says "I want a website",
+  // then answers "a portfolio with a blog" — confidence should climb).
+  const recentHistory = projectRow
+    ? readProjectChatHistory(projectRow.chat_history)
+    : [];
+
+  const intentDecision = await classifyIntentFn(
+    sourcePrompt,
+    existingFiles.length > 0,
+    Boolean(imageUrl),
+    recentHistory,
+  );
   const classifiedIntent = intentDecision.intent;
   const legacyIntent = mapIntentToLegacyBuildIntent(classifiedIntent, existingFiles.length > 0);
-  const isImmediateConversation = classifiedIntent === "greeting"
+
+  const isConversationalIntent = classifiedIntent === "greeting"
     || classifiedIntent === "question"
-    || classifiedIntent === "research"
+    || classifiedIntent === "research";
+
+  // BEO-465: build-ish intents (build_new / iteration / image_ref / ambiguous)
+  // are gated on confidence. Below 0.9 we ask a clarifying question instead
+  // of firing the build.
+  const isBuildIshIntent = classifiedIntent === "build_new"
+    || classifiedIntent === "iteration"
+    || classifiedIntent === "image_ref"
     || classifiedIntent === "ambiguous";
+
+  // Ambiguous always asks a question regardless of confidence — even if Haiku
+  // happens to score it high, the user's wording said "unclear".
+  const needsClarification = classifiedIntent === "ambiguous"
+    || (isBuildIshIntent && intentDecision.confidence < 0.9);
+  const isNearReady = needsClarification && intentDecision.confidence >= 0.7;
+
+  // Original "immediate conversation" path now covers greeting/question/research
+  // AND any build-ish intent that still needs clarification.
+  const isImmediateConversation = isConversationalIntent || needsClarification;
+
+  // BEO-465: accumulatedContext from the classifier becomes the enhanced
+  // build prompt once confidence crosses 0.9.
+  const accumulatedBuildContext = intentDecision.accumulatedContext?.trim() || undefined;
+
+  console.log("[BEO-465] intent classification", {
+    intent: classifiedIntent,
+    confidence: intentDecision.confidence,
+    reason: intentDecision.reason,
+    needsClarification,
+    isNearReady,
+    isIteration,
+    hasAccumulatedContext: Boolean(accumulatedBuildContext),
+  });
 
   // ── Template selection (fast; generate.ts picks the best prebuilt later) ───
   let selectedTemplateId: string;
@@ -446,7 +491,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   if (isImmediateConversation) {
     const chatHistory = readProjectChatHistory(projectRow.chat_history);
     const chatSummary = typeof projectRow.chat_summary === "string" ? projectRow.chat_summary : null;
-    const eventType = classifiedIntent === "ambiguous"
+    // BEO-465: when the classifier's confidence is below 0.9 on a build-ish
+    // intent, render a clarifying question even if the raw intent was
+    // build_new / iteration / image_ref. Greetings / questions / research
+    // still render a full conversational response.
+    const eventType = (classifiedIntent === "ambiguous" || needsClarification)
       ? "clarifying_question"
       : "conversational_response";
     const assistantMessage = eventType === "clarifying_question"
@@ -456,6 +505,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
           currentMessage: sourcePrompt,
           existingFiles,
           projectName,
+          accumulatedContext: accumulatedBuildContext ?? null,
+          nearReady: isNearReady,
         })
       : (await generateConversationalAnswerFn({
           chatHistory,
@@ -557,16 +608,26 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     );
   }
 
+  // BEO-465: once confidence >= 0.9 the accumulated conversation summary
+  // IS the build prompt. It's more specific than the user's original short
+  // line ("im thinking of a website") so the build pipeline has enough to
+  // go on without asking further questions downstream.
+  const buildPrompt = (!planSummary && accumulatedBuildContext)
+    ? accumulatedBuildContext
+    : effectivePrompt;
+
   console.log("[BEO-210] Build queued.", {
     buildId, operation, prompt: sourcePrompt, projectId,
     templateId: selectedTemplateId, userId: orgContext.user.id,
+    confidence: intentDecision.confidence,
+    usingAccumulatedContext: buildPrompt !== effectivePrompt,
   });
 
   const generationRow = await orgContext.db.createGeneration({
     completed_at: null, error: null, files: [],
     id: buildId, metadata: initialMetadata, operation_id: operationId,
     output_paths: [], preview_entry_path: "/",
-    project_id: projectId, prompt: effectivePrompt, started_at: requestedAt,
+    project_id: projectId, prompt: buildPrompt, started_at: requestedAt,
     status: "queued",
     summary: isIteration
       ? `Queued requested changes for ${projectName}.`
@@ -646,7 +707,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       orgId: orgContext.org.id,
       userId: orgContext.user.id,
       userEmail: orgContext.user.email,
-      prompt: effectivePrompt, sourcePrompt,
+      prompt: buildPrompt, sourcePrompt,
       templateId: selectedTemplateId,
       model: effectiveModel,
       requestedAt, operationId,

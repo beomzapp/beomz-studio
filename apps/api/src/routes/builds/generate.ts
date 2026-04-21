@@ -591,6 +591,8 @@ function buildClarifyingSystemPrompt(
     fetchFailed: boolean;
     url: string;
   } | null,
+  accumulatedContext?: string | null,
+  nearReady?: boolean,
 ): string {
   return buildClarifyingQuestionSystemPrompt({
     projectName,
@@ -598,6 +600,8 @@ function buildClarifyingSystemPrompt(
     chatSummary,
     chatHistory,
     websiteContext,
+    accumulatedContext,
+    nearReady,
   });
 }
 
@@ -2407,6 +2411,9 @@ export async function generateClarifyingQuestion(input: {
   currentMessage: string;
   existingFiles: readonly StudioFile[];
   projectName?: string;
+  // BEO-465: feed what we already know and whether we're near-ready.
+  accumulatedContext?: string | null;
+  nearReady?: boolean;
 }): Promise<string> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) return "Which specific part should I change?";
@@ -2419,13 +2426,15 @@ export async function generateClarifyingQuestion(input: {
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 60,
+        max_tokens: 80,
         system: buildClarifyingSystemPrompt(
           input.projectName,
           input.existingFiles,
           input.chatSummary,
           input.chatHistory,
           websiteContext,
+          input.accumulatedContext,
+          input.nearReady,
         ),
         messages: buildConversationMessages(input.chatHistory, input.currentMessage),
       },

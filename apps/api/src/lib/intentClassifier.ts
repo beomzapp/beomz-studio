@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
 import { apiConfig } from "../config.js";
+import type { ProjectChatHistoryEntry } from "./projectChat.js";
 
 export type Intent =
   | "greeting"
@@ -12,13 +13,20 @@ export type Intent =
   | "image_ref"
   | "ambiguous";
 
-export interface IntentClassification {
-  confidence: number;
+// BEO-465: return type now carries confidence + accumulatedContext so the
+// build pipeline can gate on completeness rather than intent label alone.
+export interface IntentResult {
   intent: Intent;
+  confidence: number;
   reason: string;
+  accumulatedContext?: string;
 }
 
+// Backward-compat alias for callers that still import IntentClassification.
+export type IntentClassification = IntentResult;
+
 const CLASSIFIER_TIMEOUT_MS = 3_000;
+const RECENT_HISTORY_TURNS = 5;
 
 const exactGreetingPattern = /^(hi|hey|hello|thanks|ok|okay|sure|yes|no|yep|nope|cheers)$/i;
 const ambiguousPattern = /^(help|help me|make it better|improve it|fix it|update it|change it|not sure|unsure|idk|i don't know)$/i;
@@ -35,9 +43,10 @@ const classifierResponseSchema = z.object({
     "ambiguous",
   ]),
   reason: z.string().trim().min(1),
+  accumulatedContext: z.string().trim().optional(),
 });
 
-function buildFallbackIntent(message: string, hasExistingFiles: boolean, hasImage: boolean): IntentClassification {
+function buildFallbackIntent(message: string, hasExistingFiles: boolean, hasImage: boolean): IntentResult {
   const trimmed = message.trim();
   const lower = trimmed.toLowerCase();
 
@@ -54,25 +63,29 @@ function buildFallbackIntent(message: string, hasExistingFiles: boolean, hasImag
   }
 
   if (/\bhttps?:\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/i.test(trimmed)) {
-    return { intent: "research", confidence: 0.75, reason: "URL-like content fallback." };
+    return { intent: "research", confidence: 0.9, reason: "URL-like content fallback." };
   }
 
   if (/[?]$/.test(trimmed) || /^(what|how|why|does|do|can|could|would|is|are|should|where|when)\b/i.test(lower)) {
-    return { intent: "question", confidence: 0.7, reason: "Question wording fallback." };
+    return { intent: "question", confidence: 0.9, reason: "Question wording fallback." };
   }
 
   if (ambiguousPattern.test(lower)) {
-    return { intent: "ambiguous", confidence: 0.65, reason: "Vague request fallback." };
+    return { intent: "ambiguous", confidence: 0.4, reason: "Vague request fallback." };
   }
 
   if (hasExistingFiles) {
-    return { intent: "iteration", confidence: 0.6, reason: "Existing app fallback." };
+    // BEO-465: iterations with specific directions proceed. Haiku normally
+    // scores these — only fall back here when the API is unreachable.
+    return { intent: "iteration", confidence: 0.9, reason: "Existing app fallback." };
   }
 
   if (hasImage) {
-    return { intent: "image_ref", confidence: 0.6, reason: "Image-attached fallback." };
+    return { intent: "image_ref", confidence: 0.9, reason: "Image-attached fallback." };
   }
 
+  // BEO-465: when the fallback fires for a new build we don't know enough to
+  // claim high confidence — force a clarifying question.
   return { intent: "build_new", confidence: 0.55, reason: "New project fallback." };
 }
 
@@ -96,11 +109,23 @@ function extractJsonCandidate(raw: string): string | null {
   return trimmed;
 }
 
+function formatRecentHistory(history: readonly ProjectChatHistoryEntry[] | undefined): string {
+  if (!history || history.length === 0) {
+    return "(no prior turns)";
+  }
+
+  return history
+    .slice(-RECENT_HISTORY_TURNS)
+    .map((entry) => `${entry.role}: ${entry.content}`)
+    .join("\n");
+}
+
 export async function classifyIntent(
   message: string,
   hasExistingFiles: boolean,
   hasImage: boolean,
-): Promise<IntentClassification> {
+  recentHistory?: readonly ProjectChatHistoryEntry[],
+): Promise<IntentResult> {
   const trimmed = message.trim();
 
   if (hasImage && trimmed.length === 0) {
@@ -140,17 +165,29 @@ export async function classifyIntent(
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 120,
-        system: "Classify the user's message into one intent. Reply with JSON only.",
+        max_tokens: 400,
+        system: [
+          "Classify the user's latest message into one intent and score confidence.",
+          "Use the recent conversation to accumulate context — if the user has answered previous questions,",
+          "combine those answers with the latest message before scoring.",
+          "Reply with JSON only.",
+        ].join(" "),
         messages: [
           {
             role: "user",
             content: [
-              "Classify this message into exactly one intent.",
-              `Message: "${message}"`,
+              "Classify the LAST user message into exactly one intent.",
+              "",
+              "## Recent conversation (last 5 turns)",
+              formatRecentHistory(recentHistory),
+              "",
+              `## Latest user message`,
+              `"${message}"`,
+              "",
               `Has existing app: ${hasExistingFiles}`,
               `Has image: ${hasImage}`,
-              "Intents:",
+              "",
+              "## Intents",
               "greeting: casual greeting or acknowledgement",
               "question: asking about the app or how to do something",
               "build_new: requesting to build a new app",
@@ -158,7 +195,32 @@ export async function classifyIntent(
               "research: asking to look up a website or research something",
               "image_ref: user is primarily sending an image as reference",
               "ambiguous: unclear intent",
-              'Reply with JSON only: {"intent":"...","confidence":0.9,"reason":"..."}',
+              "",
+              "## Confidence scoring (0.0–1.0)",
+              "Score how COMPLETE the build request is based on the accumulated",
+              "conversation (recent turns + latest message), not just the latest line.",
+              "- Greeting / single word → confidence irrelevant (hard-coded upstream).",
+              "- Vague build intent (\"I want to build something\") → 0.3–0.4",
+              "- Category known but no details (\"a portfolio website\") → 0.5–0.65",
+              "- Category + features known (\"portfolio with blog and contact\") → 0.7–0.8",
+              "- Full details known (\"dark minimal portfolio with projects, about, contact, blog\") → 0.9+",
+              "Rubric components: app type clear (+0.3) · key features described (+0.3)",
+              "· style/design direction clear (+0.2) · enough detail to build without guessing (+0.2).",
+              "Questions, greetings, and research intents can safely return 0.9+ once the ask is clear.",
+              "Iterations on an existing app: a specific direction (e.g. \"add a contact form\",",
+              "\"make the header dark\") is 0.9+. Vague iterations (\"make it better\") stay below 0.7.",
+              "",
+              "## accumulatedContext",
+              "When intent is build_new / iteration / image_ref, write a single-paragraph",
+              "build brief that SUMMARISES everything learned across the conversation so far",
+              "(app type + features + style + any other specifics). Be concrete. Example:",
+              "\"Build a dark minimal portfolio website with: home page, projects gallery,",
+              "about section, contact form with email, and a blog. Clean typography,",
+              "monochrome color scheme with subtle accent color.\"",
+              "Omit the field entirely for greetings / questions / research.",
+              "",
+              "## Reply format",
+              'Reply with JSON only: {"intent":"...","confidence":0.7,"reason":"...","accumulatedContext":"..."}',
             ].join("\n"),
           },
         ],
@@ -176,7 +238,15 @@ export async function classifyIntent(
       return buildFallbackIntent(message, hasExistingFiles, hasImage);
     }
 
-    return classifierResponseSchema.parse(JSON.parse(candidate));
+    const parsed = classifierResponseSchema.parse(JSON.parse(candidate));
+    return {
+      intent: parsed.intent,
+      confidence: parsed.confidence,
+      reason: parsed.reason,
+      accumulatedContext: parsed.accumulatedContext && parsed.accumulatedContext.length > 0
+        ? parsed.accumulatedContext
+        : undefined,
+    };
   } catch (error) {
     console.warn(
       "[intentClassifier] falling back:",
