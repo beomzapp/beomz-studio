@@ -89,6 +89,20 @@ test("buildClarifyingQuestionSystemPrompt includes failed website guidance", () 
   assert.match(prompt, /Jina fetch was unavailable or returned no usable content/i);
 });
 
+test("buildClarifyingQuestionSystemPrompt includes one-sentence directness rules", () => {
+  const prompt = buildClarifyingQuestionSystemPrompt({
+    projectName: "PettyCash",
+    existingFiles: files,
+    chatSummary: null,
+    chatHistory: [],
+  });
+
+  assert.match(prompt, /Ask ONE question at a time\. Maximum one sentence\./);
+  assert.match(prompt, /No preamble\. Never start with 'I can see\.\.\.', 'Based on\.\.\.', or any context explanation\. Ask the question directly\./);
+  assert.match(prompt, /Never wrap your question in parentheses\./);
+  assert.match(prompt, /Never explain what you already know before asking\./);
+});
+
 test("buildClarifyingQuestionSystemPrompt includes the strict URL-grounding rule when website content exists", () => {
   const prompt = buildClarifyingQuestionSystemPrompt({
     projectName: "PettyCash",
@@ -107,6 +121,13 @@ test("buildClarifyingQuestionSystemPrompt includes the strict URL-grounding rule
   assert.match(prompt, /The website content has been fetched and provided to you as context\./);
   assert.match(prompt, /You MUST NOT ask about anything that can be clearly determined from this content/i);
   assert.match(prompt, /which specific features to include\/exclude, whether users need to sign up\/log in, and whether to keep or change the visual style\./i);
+});
+
+test("clarifying question generation uses Sonnet with a larger max token budget", async () => {
+  const generateSource = await readFile(new URL("../routes/builds/generate.ts", import.meta.url), "utf8");
+
+  assert.match(generateSource, /model: "claude-sonnet-4-6"/);
+  assert.match(generateSource, /max_tokens: 500/);
 });
 
 test("parseStructuredChatResponse returns parsed JSON payload", () => {
