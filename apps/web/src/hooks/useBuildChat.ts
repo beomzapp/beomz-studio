@@ -720,6 +720,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           break;
         }
 
+        case "reference_screenshot": {
+          // BEO-486: URL screenshot captured before build — insert inspiration bubble before plan summary
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            {
+              id: makeId(),
+              type: "reference_screenshot" as const,
+              imageBase64: event.imageBase64,
+              domain: event.domain,
+            },
+          ]);
+          break;
+        }
+
         case "tool_use_started":
         case "tool_use_progress":
         case "status": {

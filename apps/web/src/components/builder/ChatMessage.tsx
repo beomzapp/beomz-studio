@@ -898,6 +898,24 @@ export function ChatMessageView({
         />
       );
 
+    case "reference_screenshot":
+      return (
+        <div className="flex items-start gap-2">
+          <BAvatar />
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="text-sm text-zinc-500">
+              📸 Here&apos;s <span className="font-medium text-[#374151]">{message.domain}</span> — I&apos;ll use this as inspiration:
+            </p>
+            <img
+              src={`data:image/png;base64,${message.imageBase64}`}
+              alt={`Screenshot of ${message.domain}`}
+              className="w-full rounded-xl object-cover"
+              style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+            />
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }

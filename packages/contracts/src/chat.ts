@@ -54,4 +54,11 @@ export type ChatMessage =
       description: string;
       imageUrl: string;
       ctaText?: string;
+    }
+  /** BEO-486: URL screenshot captured before build — shown as inspiration bubble. */
+  | {
+      id: string;
+      type: "reference_screenshot";
+      imageBase64: string;
+      domain: string;
     };

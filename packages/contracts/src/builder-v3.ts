@@ -182,6 +182,15 @@ export interface BuilderV3BuildConfirmedEvent extends BuilderV3BaseEvent {
   message?: string;
 }
 
+// BEO-486: emitted when a URL is detected in the prompt and a screenshot is captured.
+// Frontend renders it as an inspiration image bubble before the plan summary.
+export interface BuilderV3ReferenceScreenshotEvent extends BuilderV3BaseEvent {
+  type: "reference_screenshot";
+  imageBase64: string;
+  url: string;
+  domain: string;
+}
+
 // BEO-362: focused clarifying question emitted for ambiguous intent.
 // Build is paused; next user message re-runs detectIntent.
 export interface BuilderV3ClarifyingQuestionEvent extends BuilderV3BaseEvent {
@@ -234,7 +243,8 @@ export type BuilderV3Event =
   | BuilderV3PreambleEvent
   | BuilderV3NextStepsEvent
   | BuilderV3BuildStageEvent
-  | BuilderV3BuildConfirmedEvent;
+  | BuilderV3BuildConfirmedEvent
+  | BuilderV3ReferenceScreenshotEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;
