@@ -80,7 +80,6 @@ export function ProjectPage() {
     notifyPreviewServerReady,
     chatModeActive,
     toggleChatMode,
-    implementCard,
     implementWithPlan,
     implementSuggestion,
     dismissImplementSuggestion,
