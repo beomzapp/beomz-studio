@@ -24,6 +24,7 @@ import type {
   BuildIntent,
   BuilderImageIntent,
   BuilderV3Event,
+  BuilderV3Operation,
   BuilderV3DoneEvent,
   BuilderV3ErrorEvent,
   BuilderV3ImageIntentEvent,
@@ -82,6 +83,7 @@ import {
   parseStructuredChatResponse,
   type StructuredChatResponse,
 } from "../../lib/chatPrompts.js";
+import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
 import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -2260,32 +2262,24 @@ function pickBestPrebuilt(
 
 // ─── BEO-362: 4-way intent engine ────────────────────────────────────────────
 
-const DETECT_INTENT_TIMEOUT_MS = 4_000;
-
-const DETECT_INTENT_SYSTEM_PROMPT = `You classify a user message into exactly one of four intent categories.
-
-question — user is asking for information, ideas, recommendations, or advice. No code change intended.
-Keywords: what, how, why, explain, does, is, can you tell me, what if, what else, give me, recommend, suggestions, ideas.
-Examples: "What does this component do?" "How do I add auth?" "What features should I add?" "Give me recommendations" "What's missing?" "What else can we add?"
-
-edit — user wants a specific change to the existing app. Refers to something that already exists.
-Keywords: change, update, make, add, remove, fix, adjust, rename, move, replace, switch, darker, lighter, bigger, smaller.
-Examples: "Make the sidebar darker" "Add a delete button" "Fix the navigation" "Change the font size"
-
-build — user wants a brand NEW app from scratch. ONLY when there is NO existing project and the user explicitly requests a new build.
-Keywords: build, create, generate, make me, I want, I need a.
-Examples: "Build me a CRM" "Create a todo app" "Generate a restaurant POS"
-IMPORTANT: When an existing project is open, build intent should almost NEVER fire. Everything is edit or question.
-
-ambiguous — intent unclear. Could be edit or question. Unclear what action to take.
-Examples: "I don't like the layout" "Can you improve this?" "This doesn't look right"
-
-CRITICAL RULES for existing projects (hasExistingProject = true):
-- "what else can we add", "give recommendations", "give me recommendations", "what should I add", "any suggestions", "what's missing", "what can I improve", "what features are missing" → ALWAYS question
-- build intent → almost NEVER (only if user says "build a completely new app" with explicit replacement intent)
-- edit vs question: if user wants a change → edit; if user wants ideas/info → question
-
-Reply with ONLY one word: question, edit, build, or ambiguous.`;
+function mapIntentToBuildIntent(intent: Intent, hasExistingProject: boolean): BuildIntent {
+  switch (intent) {
+    case "greeting":
+    case "question":
+    case "research":
+      return "question";
+    case "ambiguous":
+      return "ambiguous";
+    case "iteration":
+      return "edit";
+    case "image_ref":
+      return hasExistingProject ? "edit" : "build";
+    case "build_new":
+      return "build";
+    default:
+      return hasExistingProject ? "edit" : "build";
+  }
+}
 
 export async function detectIntent(
   prompt: string,
@@ -2293,37 +2287,18 @@ export async function detectIntent(
   projectName?: string,
   originalPrompt?: string,
 ): Promise<BuildIntent> {
-  const apiKey = apiConfig.ANTHROPIC_API_KEY;
-  if (!apiKey) return hasExistingProject ? "edit" : "build";
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DETECT_INTENT_TIMEOUT_MS);
-
   try {
-    const client = new Anthropic({ apiKey });
-    const projectCtx = hasExistingProject
-      ? `Context: The user has an existing project open${projectName ? ` ("${projectName}"${originalPrompt ? `, originally: "${originalPrompt}"` : ""})` : ""}. hasExistingProject = true.`
-      : "Context: No existing project — this is a new build request. hasExistingProject = false.";
-    const response = await client.messages.create(
-      {
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 10,
-        system: DETECT_INTENT_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: `${projectCtx}\n\nUser message: ${prompt}` }],
-      },
-      { signal: controller.signal },
+    const classified = await classifyIntent(
+      projectName && originalPrompt
+        ? `${prompt}\n\nProject: ${projectName}\nOriginal prompt: ${originalPrompt}`
+        : prompt,
+      hasExistingProject,
+      false,
     );
-    const raw = (response.content[0] as { type: string; text?: string })?.text?.trim().toLowerCase() ?? "";
-    if (raw === "question") return "question";
-    if (raw === "edit") return "edit";
-    if (raw === "build") return "build";
-    if (raw === "ambiguous") return "ambiguous";
-    return hasExistingProject ? "edit" : "build";
+    return mapIntentToBuildIntent(classified.intent, hasExistingProject);
   } catch (err) {
     console.warn("[detectIntent] failed, using fallback:", err instanceof Error ? err.message : String(err));
     return hasExistingProject ? "edit" : "build";
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -2375,7 +2350,7 @@ Examples: "Building your restaurant POS system." "Building your task management 
   }
 }
 
-async function generateConversationalAnswer(
+export async function generateConversationalAnswer(
   input: {
     chatHistory: readonly ProjectChatHistoryEntry[];
     chatSummary: string | null;
@@ -2426,7 +2401,7 @@ async function generateConversationalAnswer(
   }
 }
 
-async function generateClarifyingQuestion(input: {
+export async function generateClarifyingQuestion(input: {
   chatHistory: readonly ProjectChatHistoryEntry[];
   chatSummary: string | null;
   currentMessage: string;
@@ -2463,6 +2438,25 @@ async function generateClarifyingQuestion(input: {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function emitBuildConfirmed(
+  db: StudioDbClient,
+  buildId: string,
+  nextId: () => string,
+  operation: BuilderV3Operation,
+  message: string,
+  projectId: string,
+): Promise<void> {
+  await appendEventToDb(db, buildId, {
+    type: "build_confirmed",
+    id: nextId(),
+    timestamp: ts(),
+    operation,
+    buildId,
+    projectId,
+    message,
+  } as unknown as BuilderV3StatusEvent);
 }
 
 async function generateBuildSummary(prompt: string, changedFiles: string[]): Promise<NarrationTextResult> {
@@ -3059,6 +3053,7 @@ async function _runBuildInBackground(
           preBuildAckEmitted = true;
           const ack = await generatePreBuildAck(prompt, "edit");
           narrationUsage = addTokenUsage(narrationUsage, ack.usage);
+          await emitBuildConfirmed(db, buildId, nextId, op, ack.message, projectId);
           await appendEventToDb(db, buildId, {
             type: "pre_build_ack",
             id: nextId(),
@@ -3390,6 +3385,7 @@ async function _runBuildInBackground(
         const ackIntent = detectedIntent === "edit" ? "edit" : "build";
         const ack = await generatePreBuildAck(prompt, ackIntent);
         narrationUsage = addTokenUsage(narrationUsage, ack.usage);
+        await emitBuildConfirmed(db, buildId, nextId, op, ack.message, projectId);
         await appendEventToDb(db, buildId, {
           type: "pre_build_ack",
           id: nextId(),

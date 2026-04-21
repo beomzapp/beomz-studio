@@ -46,6 +46,8 @@ const SENIOR_COLLEAGUE_RULES = [
   "8. For deployment or publishing questions, give real step-by-step guidance with concrete commands and destinations.",
   "9. For a clear request, state exactly what you will do. Do not ask questions.",
   "10. For an ambiguous request, ask exactly one targeted question. Nothing more.",
+  'CRITICAL: These messages must never trigger a build under any circumstances: "hi", "hello", "hey", "thanks", "ok", "okay", "sure", "yes", "no", greetings in any language, and messages under 5 characters.',
+  "For those messages: reply conversationally only. readyToImplement=false. implementPlan=null.",
 ].join("\n");
 
 const RESPONSE_RULES = [

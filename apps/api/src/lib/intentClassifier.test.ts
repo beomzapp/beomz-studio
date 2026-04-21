@@ -1,0 +1,69 @@
+import assert from "node:assert/strict";
+import { after } from "node:test";
+import test from "node:test";
+
+process.env.ANTHROPIC_API_KEY = "test-key";
+process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
+process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  throw new Error("Skip outbound Anthropic calls in unit tests.");
+}) as typeof fetch;
+
+after(() => {
+  globalThis.fetch = originalFetch;
+});
+
+const { classifyIntent } = await import("./intentClassifier.js");
+
+test("classifyIntent hard-blocks short messages as greeting", async () => {
+  const result = await classifyIntent("hi", true, false);
+
+  assert.equal(result.intent, "greeting");
+  assert.match(result.reason, /hard-coded short-message greeting rule/i);
+});
+
+test("classifyIntent hard-blocks acknowledgement words as greeting", async () => {
+  const result = await classifyIntent("thanks", true, false);
+
+  assert.equal(result.intent, "greeting");
+  assert.match(result.reason, /hard-coded/i);
+});
+
+test("classifyIntent treats image-only messages as image_ref", async () => {
+  const result = await classifyIntent("", true, true);
+
+  assert.equal(result.intent, "image_ref");
+  assert.match(result.reason, /image-only/i);
+});
+
+test("classifyIntent fallback detects research from URL-like content", async () => {
+  const result = await classifyIntent("research https://mybos.com", false, false);
+
+  assert.equal(result.intent, "research");
+});
+
+test("classifyIntent fallback detects question wording", async () => {
+  const result = await classifyIntent("what does this app do", false, false);
+
+  assert.equal(result.intent, "question");
+});
+
+test("classifyIntent fallback prefers iteration when existing files are present", async () => {
+  const result = await classifyIntent("change the button color", true, false);
+
+  assert.equal(result.intent, "iteration");
+});
+
+test("classifyIntent fallback detects ambiguous requests", async () => {
+  const result = await classifyIntent("make it better", true, false);
+
+  assert.equal(result.intent, "ambiguous");
+});
+
+test("classifyIntent fallback prefers build_new when no files exist", async () => {
+  const result = await classifyIntent("build a todo app", false, false);
+
+  assert.equal(result.intent, "build_new");
+});

@@ -30,9 +30,11 @@ import {
   isSupportedAnthropicImageUrl,
 } from "../../lib/anthropicImages.js";
 import {
+  buildClarifyingQuestionSystemPrompt,
   buildStructuredChatSystemPrompt,
   parseStructuredChatResponse,
 } from "../../lib/chatPrompts.js";
+import { classifyIntent } from "../../lib/intentClassifier.js";
 import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
 import { anthropic } from "../plan/shared.js";
 
@@ -163,6 +165,12 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
         return c.json({ error: "No user message found." }, 400);
       }
 
+      const intentDecision = await classifyIntent(
+        currentUserMessage.content,
+        projectFiles.length > 0,
+        Boolean(imageUrl),
+      );
+
       if (!isAdminEmail(orgContext.user.email)) {
         const freshOrg = typeof orgContext.db.getOrgWithBalance === "function"
           ? await orgContext.db.getOrgWithBalance(orgContext.org.id).catch(() => null)
@@ -187,13 +195,21 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
             timestamp: new Date(index).toISOString(),
           }));
       const websiteContext = await loadWebsiteContext(currentUserMessage.content);
-      const systemPrompt = buildStructuredChatSystemPrompt({
-        projectName: project?.name ?? null,
-        chatSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
-        existingFiles: projectFiles,
-        chatHistory: contextHistory,
-        websiteContext,
-      });
+      const systemPrompt = intentDecision.intent === "ambiguous"
+        ? buildClarifyingQuestionSystemPrompt({
+            projectName: project?.name ?? null,
+            chatSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
+            existingFiles: projectFiles,
+            chatHistory: contextHistory,
+            websiteContext,
+          })
+        : buildStructuredChatSystemPrompt({
+            projectName: project?.name ?? null,
+            chatSummary: typeof project?.chat_summary === "string" ? project.chat_summary : null,
+            existingFiles: projectFiles,
+            chatHistory: contextHistory,
+            websiteContext,
+          });
       const modelMessages: ChatAnthropicMessage[] = [
         {
           role: "user",
@@ -236,7 +252,13 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
           }
         }
 
-        const assistantResponse = parseStructuredChatResponse(rawAssistantResponse);
+        const assistantResponse = intentDecision.intent === "ambiguous"
+          ? {
+              message: rawAssistantResponse.trim(),
+              readyToImplement: false,
+              implementPlan: null,
+            }
+          : parseStructuredChatResponse(rawAssistantResponse);
         if (assistantResponse.message.trim().length > 0) {
           await writeEvent("chat_response", {
             type: "chat_response",
