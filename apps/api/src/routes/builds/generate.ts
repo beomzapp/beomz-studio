@@ -85,7 +85,7 @@ import {
   type WebsiteContext,
 } from "../../lib/chatPrompts.js";
 import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
-import { loadUrlContext } from "../../lib/webFetch.js";
+import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2862,7 +2862,10 @@ async function _runBuildInBackground(
     }
   }
 
-  // ── Domain enrichment (initial builds only) ───────────────────────────────
+  // ── URL reference grounding + domain enrichment ───────────────────────────
+  // When a build prompt includes a URL, fetch Jina reader content first and
+  // prepend it as grounding so both enrichPrompt() and Sonnet see the real
+  // website description before any model inference happens.
   // For confirmedScope builds the workingPrompt is pre-built below.
   // Run a fast Haiku + web-search call before template selection and Sonnet
   // generation. Adds domain context for niche/regional/industry prompts.
@@ -2877,7 +2880,11 @@ async function _runBuildInBackground(
       : input.confirmedScope.enrichedPrompt;
     console.log("[generate] resuming with confirmedScope:", input.confirmedScope.features.length, "features");
   } else {
-    workingPrompt = input.isIteration ? prompt : await enrichPrompt(prompt);
+    const promptWithUrlGrounding = await injectUrlContextIntoBuildPrompt(prompt);
+    if (promptWithUrlGrounding !== prompt) {
+      console.log("[generate] URL reference grounded into build prompt.", { buildId });
+    }
+    workingPrompt = input.isIteration ? promptWithUrlGrounding : await enrichPrompt(promptWithUrlGrounding);
   }
   const imageContextBlock = input.confirmedIntent
     ? buildImageIntentContext(input.confirmedIntent)

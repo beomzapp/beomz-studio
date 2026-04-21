@@ -5,6 +5,7 @@ import { apiConfig } from "../config.js";
 
 const JINA_FETCH_TIMEOUT_MS = 8_000;
 const MAX_WEBSITE_CONTENT_LENGTH = 8_000;
+const MAX_BUILD_REFERENCE_CONTENT_LENGTH = 4_000;
 const MAX_TAVILY_RESULTS = 3;
 
 const HTTP_URL_PATTERN = /\bhttps?:\/\/[^\s<>"'`]+/i;
@@ -110,6 +111,39 @@ export async function loadUrlContext(message: string): Promise<WebsiteContext | 
     label: `Source URL: ${url}`,
     sourceType: "url",
   };
+}
+
+export function buildUrlReferenceContextBlock(context: WebsiteContext | null): string | null {
+  if (!context || context.sourceType !== "url" || !context.url || !context.content) {
+    return null;
+  }
+
+  const content = context.content.trim();
+  if (!content) {
+    return null;
+  }
+
+  return [
+    `Reference website: ${context.url}`,
+    "Use the fetched website content below as grounding for colors, layout, theme, and design cues.",
+    "Only use visual details that are explicitly supported by this content. Do not invent missing styling details.",
+    "Website content:",
+    content.slice(0, MAX_BUILD_REFERENCE_CONTENT_LENGTH),
+  ].join("\n");
+}
+
+export async function injectUrlContextIntoBuildPrompt(
+  prompt: string,
+  loadContext: (message: string) => Promise<WebsiteContext | null> = loadUrlContext,
+): Promise<string> {
+  const urlContext = await loadContext(prompt);
+  const referenceBlock = buildUrlReferenceContextBlock(urlContext);
+
+  if (!referenceBlock) {
+    return prompt;
+  }
+
+  return `${referenceBlock}\n\nUser build request:\n${prompt}`;
 }
 
 function formatSearchResults(

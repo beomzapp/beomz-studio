@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
@@ -94,6 +95,14 @@ test("system prompts describe the preview shell icon and logo color mapping", ()
   assert.match(iterationPrompt, /PREVIEW SHELL CONTEXT:/);
   assert.match(iterationPrompt, /Treat short requests like 'change the logo color to orange' as a theme\.ts change targeting theme\.accent/);
   assert.match(iterationPrompt, /Example: 'change logo color to orange' → set accent: '#F97316', accentHover: '#EA580C'/);
+});
+
+test("generate build flow injects URL grounding before enrichPrompt runs", async () => {
+  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(source, /injectUrlContextIntoBuildPrompt/);
+  assert.match(source, /const promptWithUrlGrounding = await injectUrlContextIntoBuildPrompt\(prompt\);/);
+  assert.match(source, /workingPrompt = input\.isIteration \? promptWithUrlGrounding : await enrichPrompt\(promptWithUrlGrounding\);/);
 });
 
 test("isNpmPackage classifies npm and local import paths correctly", () => {
