@@ -90,6 +90,18 @@ test("buildConversationMessages sends only the current turn because memory lives
   assert.equal(messages.at(-1)?.content, "current prompt");
 });
 
+test("buildProjectMemoryPrompt treats no files as greenfield even if DB has a placeholder name", () => {
+  const prompt = buildProjectMemoryPrompt({
+    appName: "Interactive Tool",
+    chatSummary: null,
+    files: [],
+    history: [],
+  });
+  assert.match(prompt, /There is no saved project context yet/i);
+  assert.doesNotMatch(prompt, /existing app called "Interactive Tool"/i);
+  assert.match(prompt, /Welcome to Beomz/i);
+});
+
 test("buildProjectMemoryPrompt injects app name, files, summary, recent conversation, and behavior rules", () => {
   const prompt = buildProjectMemoryPrompt({
     appName: "PettyCash",
@@ -105,7 +117,7 @@ test("buildProjectMemoryPrompt injects app name, files, summary, recent conversa
   assert.match(prompt, /Current files: .*App\.tsx.*ExpensesPage\.tsx.*TopUpsPage\.tsx/i);
   assert.match(prompt, /## Project Memory[\s\S]*PettyCash is a dark dashboard/i);
   assert.match(prompt, /## Recent conversation[\s\S]*user: hi[\s\S]*assistant: Everything is set up\./i);
-  assert.match(prompt, /Greeting -> respond warmly, briefly describe what the app does/i);
+  assert.match(prompt, /Greeting -> warm, energetic Beomz voice\. Reference the app by its real name naturally/i);
   assert.match(prompt, /Likely existing features: Expenses, Top Ups/i);
   assert.match(prompt, /## App\.tsx first 10 lines[\s\S]*import ExpensesPage/);
   assert.match(prompt, /## theme\.ts contents[\s\S]*accent: '#F97316'/);

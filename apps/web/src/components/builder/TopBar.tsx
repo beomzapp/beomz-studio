@@ -53,6 +53,15 @@ function ProjectIconRenderer({ name, size = 14 }: { name: string; size?: number 
   return <Icon size={size} />;
 }
 
+/** Placeholder DB/template names — show a friendly label until the user or AI names the app. */
+const PLACEHOLDER_PROJECT_DISPLAY = new Set(["untitled project", "interactive tool"]);
+
+function displayProjectName(name: string): string {
+  const key = name.trim().toLowerCase();
+  if (PLACEHOLDER_PROJECT_DISPLAY.has(key)) return "New project";
+  return name;
+}
+
 interface TopBarProps {
   projectName: string;
   projectIcon?: string | null;
@@ -167,7 +176,7 @@ export function TopBar({
                 <ProjectIconRenderer name={projectIcon} size={14} />
               </span>
             )}
-            <span className="truncate">{projectName}</span>
+            <span className="truncate">{displayProjectName(projectName)}</span>
           </button>
         )}
 

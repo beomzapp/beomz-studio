@@ -221,7 +221,9 @@ export function buildProjectMemoryPrompt({
   files,
   history = [],
 }: BuildProjectMemoryPromptOptions): string {
-  const hasExistingProjectContext = Boolean((appName && appName.trim().length > 0) || files.length > 0);
+  const hasBuiltApp = files.length > 0;
+  const trimmedName = appName?.trim() ?? "";
+  const namedAppLabel = trimmedName.length > 0 ? trimmedName : "this app";
   const fileNames = uniqueFileNames(files);
   const fileList = fileNames.length > 0
     ? fileNames.slice(0, MAX_FILE_COUNT_IN_PROMPT).join(", ")
@@ -232,16 +234,21 @@ export function buildProjectMemoryPrompt({
   const appSnippet = findFileContent(files, "App.tsx");
   const themeSnippet = findFileContent(files, "theme.ts");
 
+  const greetingRule = hasBuiltApp
+    ? "Greeting -> warm, energetic Beomz voice. Reference the app by its real name naturally in 1-2 sentences (e.g. \"Hey! {name} is looking good — what are we working on?\"). Never sound robotic."
+        .replace("{name}", namedAppLabel)
+    : "Greeting -> warm, energetic Beomz voice. NEVER name the project or use template placeholder names (e.g. Interactive Tool). 1-2 sentences max. Example: \"Hey! Welcome to Beomz ✨ What are we building today?\"";
+
   const lines = [
-    hasExistingProjectContext
-      ? `You are working on an existing app called "${appName?.trim() || "this app"}".`
+    hasBuiltApp
+      ? `You are working on an existing app called "${namedAppLabel}".`
       : "There is no saved project context yet.",
     `Current files: ${fileList}`,
-    hasExistingProjectContext
+    hasBuiltApp
       ? "The app already exists — NEVER ask setup questions like \"who will use this\", \"what industry\", \"what is the purpose\". The app is built."
       : "If the app does not exist yet, gather only the minimum context needed to help.",
     "Behaviour rules:",
-    "Greeting -> respond warmly, briefly describe what the app does",
+    greetingRule,
     "Clear request -> just do it, no questions",
     "Ambiguous request -> ask exactly ONE targeted question, nothing more",
     "Never ask setup/onboarding questions when files already exist",

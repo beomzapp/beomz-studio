@@ -452,7 +452,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const projectName =
     (isIteration ? projectRow?.name : parsedBody.data.projectName?.trim())
     || projectRow?.name
-    || buildProjectNameFromPrompt(prompt, selectedTemplateDef.defaultProjectName);
+    || buildProjectNameFromPrompt(prompt, "Untitled project");
 
   // ── Credit balance snapshot ───────────────────────────────────────────────
   // Admins bypass. The actual soft/hard block happens after the generation row
