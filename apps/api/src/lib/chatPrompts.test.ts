@@ -52,6 +52,7 @@ test("buildStructuredChatSystemPrompt includes the senior-colleague rules and JS
   });
 
   assert.match(prompt, /Never say "I can't" or "I don't have the ability to"/);
+  assert.match(prompt, /NEVER say phrases like "Building now"/);
   assert.match(prompt, /Return valid JSON only/);
   assert.match(prompt, /readyToImplement=true/);
   assert.match(prompt, /## Website context[\s\S]*myBOS is a building operations platform/i);
@@ -116,9 +117,17 @@ test("generatePlanSummary falls back to the required plan format when Haiku is u
     "PetPals",
   );
 
-  assert.match(result, /^Here's what I'll build:/);
+  assert.match(result, /^Here's what I'll do:/);
   assert.match(result, /\*\*PetPals\*\*/);
-  assert.match(result, /Ready to build this — or type any changes first\./);
+  assert.match(result, /Ready when you are — or type any changes first\./);
+});
+
+test("chat prompt source forbids 'building now' phrasing in conversational and plan responses", async () => {
+  const chatPromptSource = await readFile(new URL("./chatPrompts.ts", import.meta.url), "utf8");
+
+  assert.match(chatPromptSource, /NEVER say phrases like "Building now", "I'm building this", "Creating now", or "On it, building"/);
+  assert.match(chatPromptSource, /Here's what I'll do:/);
+  assert.doesNotMatch(chatPromptSource, /Here's what I'll build:/);
 });
 
 test("plan summary and build acknowledgement prompts forbid HTML/CSS/JavaScript copy", async () => {

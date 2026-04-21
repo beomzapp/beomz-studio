@@ -510,16 +510,18 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const effectiveConfidence = forcedPlanSummary
     ? 0.95
     : intentDecision.confidence;
+  const buildConfidenceThreshold = isIteration ? 0.7 : 0.9;
 
   // Ambiguous always asks a question regardless of confidence — even if Haiku
   // happens to score it high, the user's wording said "unclear".
   const needsClarification = !forcedPlanSummary && (
     classifiedIntent === "ambiguous"
-      || (isBuildIshIntent && effectiveConfidence < 0.9)
+      || (isBuildIshIntent && effectiveConfidence < buildConfidenceThreshold)
   );
   const shouldOfferPlanSummary = isBuildIshIntent
     && !needsClarification
-    && !isImplementConfirmation;
+    && !isImplementConfirmation
+    && !isIteration;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
   const hasResearchUrl = Boolean(extractUrlLike(sourcePrompt));
 

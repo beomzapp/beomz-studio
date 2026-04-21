@@ -14,6 +14,8 @@ test("/builds/start defaults generation to claude-sonnet-4-6", async () => {
 
   assert.match(source, /export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6";/);
   assert.match(source, /const effectiveModel = parsedBody\.data\.model \?\? DEFAULT_BUILD_MODEL;/);
+  assert.match(source, /const buildConfidenceThreshold = isIteration \? 0\.7 : 0\.9;/);
+  assert.match(source, /const shouldOfferPlanSummary = isBuildIshIntent[\s\S]*&& !isIteration;/);
 });
 
 test("/builds/start returns a conversational generation for greeting intent and does not queue a build", async () => {
@@ -260,13 +262,13 @@ test("/builds/start returns a plan summary with implementPlan when confidence re
       accumulatedContext: "Build a playful colorful pet store website with product listings, grooming services, and a kid-centric design.",
     }),
     generatePlanSummary: async () => [
-      "Here's what I'll build:",
+      "Here's what I'll do:",
       "**PetPals**",
       "- Product listings",
       "- Grooming services",
       "- Playful colorful kid-centric design",
       "",
-      "Ready to build this — or type any changes first.",
+      "Ready when you are — or type any changes first.",
     ].join("\n"),
     runBuildInBackground: async () => {
       runBuildCalls += 1;
@@ -308,9 +310,147 @@ test("/builds/start returns a plan summary with implementPlan when confidence re
     summaryEvent?.implementPlan,
     "Build a playful colorful pet store website with product listings, grooming services, and a kid-centric design.",
   );
-  assert.match(summaryEvent?.message ?? "", /Here's what I'll build:/);
+  assert.match(summaryEvent?.message ?? "", /Here's what I'll do:/);
   assert.equal(createdGenerationMetadata?.readyToImplement, true);
   assert.equal(runBuildCalls, 0);
+});
+
+test("/builds/start skips plan summaries for iteration intents and queues the build immediately", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  let capturedBuildPrompt: string | null = null;
+  const project = {
+    id: "99999999-9999-9999-9999-999999999999",
+    name: "PettyCash",
+    org_id: "org-1",
+    status: "ready",
+    template: "workspace-task",
+    icon: "CheckSquare",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [],
+    chat_summary: "Expense dashboard",
+  };
+  const existingFiles = [
+    {
+      path: "apps/web/src/app/generated/pettycash/App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: "export default function App() { return <div>PettyCash</div>; }",
+      source: "ai",
+      locked: false,
+    },
+  ];
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
+          findLatestGenerationByProjectId: async () => ({
+            files: existingFiles,
+            metadata: {},
+          }),
+          findProjectById: async () => project,
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            ...project,
+            ...patch,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "iteration",
+      confidence: 0.75,
+      reason: "Clear iteration request.",
+      accumulatedContext: "Update the app to use a red and blue theme throughout.",
+    }),
+    generatePlanSummary: async () => {
+      throw new Error("iteration should not render a plan summary");
+    },
+    generateConversationalAnswer: async () => {
+      throw new Error("iteration should not stay in conversational mode");
+    },
+    runBuildInBackground: async (input) => {
+      runBuildCalls += 1;
+      capturedBuildPrompt = input.prompt;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "make it red and blue theme",
+      projectId: project.id,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  const payload = await response.json() as {
+    build: { status: string; summary: string | null };
+    trace: { events: Array<{ type: string }>; lastEventId: string | null };
+  };
+
+  assert.equal(payload.build.status, "queued");
+  assert.equal(payload.build.summary, "Queued requested changes for PettyCash.");
+  assert.equal(payload.trace.lastEventId, "1");
+  assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
+  assert.equal(runBuildCalls, 1);
+  assert.equal(capturedBuildPrompt, "Update the app to use a red and blue theme throughout.");
 });
 
 test("/builds/start proceeds to build when the implementPlan is sent back unchanged", async () => {

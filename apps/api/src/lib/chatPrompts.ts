@@ -59,6 +59,7 @@ const SENIOR_COLLEAGUE_RULES = [
   "8. For deployment or publishing questions, give real step-by-step guidance with concrete commands and destinations.",
   "9. For a clear request, state exactly what you will do. Do not ask questions.",
   "10. For an ambiguous request, ask exactly one targeted question. Nothing more.",
+  "11. NEVER say phrases like \"Building now\", \"I'm building this\", \"Creating now\", or \"On it, building\" in conversational responses or plan summaries.",
   'CRITICAL: These messages must never trigger a build under any circumstances: "hi", "hello", "hey", "thanks", "ok", "okay", "sure", "yes", "no", greetings in any language, and messages under 5 characters.',
   "For those messages: reply conversationally only. readyToImplement=false. implementPlan=null.",
 ].join("\n");
@@ -68,7 +69,7 @@ const RESPONSE_RULES = [
   "- Greeting when there are no files yet (brand-new project): reply with exactly \"Hey! 👋 Ready to build something awesome? What's the idea?\"",
   "- Greeting when files exist (real app in context): reference the app naturally by its real name in 1-2 sentences, e.g. \"Hey! PettyCash is looking good — what are we working on?\"",
   "- App question: answer directly from the files in context. Use bullets for feature lists.",
-  "- Clear build or change request in chat mode: explain exactly what you'll change in 1-2 sentences. Set readyToImplement=true and provide a concrete implementPlan.",
+  "- Clear build or change request in chat mode: explain exactly what you'll change in 1-2 sentences. Set readyToImplement=true and provide a concrete implementPlan. For readyToImplement replies, start with \"Here's what I'll do:\" and use bullets. Never imply the build has already started.",
   "- Research request: if website content is available, summarise what it does and what is worth borrowing. If website fetch failed, say you can build from the user's description and ask for the key features to replicate.",
   "- Deployment or publishing question: use numbered steps and fenced bash or ts blocks when relevant.",
   "- Ambiguous request: ask one specific question that unlocks the next step.",
@@ -214,11 +215,11 @@ function buildPlanSummaryFallback(accumulatedContext: string, projectName?: stri
     : "- Focused core flow\n- Clear user actions\n- Polished visual direction";
 
   return [
-    "Here's what I'll build:",
+    "Here's what I'll do:",
     `**${appName}**`,
     bullets,
     "",
-    "Ready to build this — or type any changes first.",
+    "Ready when you are — or type any changes first.",
   ].join("\n");
 }
 
@@ -250,8 +251,11 @@ export async function generatePlanSummary(
           "Keep it under 60 words. Be specific. Use markdown.",
           "Do not mention HTML, CSS, or JavaScript.",
           "If you must mention the stack, say React and TypeScript.",
+          "Start with \"Here's what I'll do:\".",
+          "Use short bullet points after the title.",
+          "Never say the build has already started or use phrases like \"Building now\".",
           'Format:',
-          '"Here\'s what I\'ll build:',
+          '"Here\'s what I\'ll do:',
           '[Suggested app name]',
           '',
           '[Feature 1]',
@@ -259,7 +263,7 @@ export async function generatePlanSummary(
           '[Feature 3]',
           '[Design style]',
           '',
-          'Ready to build this — or type any changes first."',
+          'Ready when you are — or type any changes first."',
           'No intro phrases like "Sure!" or "Great!". Just the plan.',
         ].join("\n"),
         messages: [
