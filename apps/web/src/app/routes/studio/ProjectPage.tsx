@@ -35,9 +35,11 @@ import { consumeProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
 import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
 import { useBuildChat } from "../../../hooks/useBuildChat";
+import { useAuth } from "../../../lib/useAuth";
 import { cn } from "../../../lib/cn";
 import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
+import { getApiBaseUrl } from "../../../lib/api";
 
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
@@ -67,6 +69,33 @@ export function ProjectPage() {
 
   const { setLastError, setTransport } = useBuilderSessionHealth();
   const { clearState, restoreState, saveState } = useBuilderPersistence(projectId);
+
+  // ─── BEO-484: user data for chat personalisation ─────────────────────────
+  const { session } = useAuth();
+  const chatUserData = (() => {
+    const user = session?.user;
+    const rawAvatarUrl = user?.user_metadata?.avatar_url as string | undefined;
+    const proxiedAvatarUrl = rawAvatarUrl?.includes("googleusercontent.com")
+      ? `${getApiBaseUrl()}/avatar?url=${encodeURIComponent(rawAvatarUrl)}`
+      : rawAvatarUrl;
+    const fullName =
+      (user?.user_metadata?.full_name as string | undefined)
+      ?? (user?.user_metadata?.display_name as string | undefined)
+      ?? (user?.user_metadata?.name as string | undefined)
+      ?? "";
+    const firstName = fullName.trim().split(" ")[0] ?? "";
+    const initials = fullName
+      .trim()
+      .split(" ")
+      .slice(0, 2)
+      .map((n: string) => n[0]?.toUpperCase() ?? "")
+      .join("");
+    return {
+      userFirstName: firstName || undefined,
+      userAvatarUrl: proxiedAvatarUrl || undefined,
+      userInitials: initials || undefined,
+    };
+  })();
 
   // ─── useBuildChat ────────────────────────────────────────────────────────
 
@@ -809,6 +838,9 @@ export function ProjectPage() {
               onDismissImplement={dismissImplementSuggestion}
               onImplementPlan={(plan, imageUrl) => { void implementWithPlan(plan, imageUrl); }}
               isAnalysingImage={isAnalysingImage}
+              userFirstName={chatUserData.userFirstName}
+              userAvatarUrl={chatUserData.userAvatarUrl}
+              userInitials={chatUserData.userInitials}
             />
           </div>
         </div>

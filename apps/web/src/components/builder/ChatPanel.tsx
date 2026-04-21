@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { ArrowDown, MessageSquare, Paperclip, Send, Sparkles, Square, X } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { BuildingShimmer, ChatMessageView } from "./ChatMessage";
+import { BuildingShimmer, BAvatar, ChatMessageView } from "./ChatMessage";
 import { ImplementBar } from "./ImplementBar";
 import { uploadImage } from "../../lib/api";
 
@@ -70,6 +70,12 @@ interface ChatPanelProps {
   onImplementPlan?: (plan: string, imageUrl?: string) => void;
   /** BEO-462: true while the API is analysing a pasted image — shows subtle loading indicator. */
   isAnalysingImage?: boolean;
+  /** BEO-484: user's first name for greeting personalisation */
+  userFirstName?: string;
+  /** BEO-484: user avatar URL (proxied if needed) */
+  userAvatarUrl?: string;
+  /** BEO-484: user initials fallback for avatar */
+  userInitials?: string;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -92,6 +98,9 @@ export function ChatPanel({
   projectId,
   onImplementPlan,
   isAnalysingImage,
+  userFirstName,
+  userAvatarUrl,
+  userInitials,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
@@ -324,10 +333,15 @@ export function ChatPanel({
         className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4"
       >
         {!hasMessages && !isBuilding && (
-          <div className="flex h-full items-center justify-center">
-            <p className="max-w-[200px] text-center text-sm leading-relaxed text-[#c4c4c4]">
-              Describe what you want to build or change
-            </p>
+          <div className="min-w-0 space-y-4">
+            <div className="flex items-start gap-2 py-1">
+              <BAvatar />
+              <p className="text-sm leading-relaxed text-[#374151]">
+                {userFirstName
+                  ? `Hey ${userFirstName}! 👋 Ready to build something awesome? What's the idea?`
+                  : "Hey! 👋 Ready to build something awesome? What's the idea?"}
+              </p>
+            </div>
           </div>
         )}
 
@@ -340,6 +354,8 @@ export function ChatPanel({
                   onRetry={onRetry}
                   onPopulateInput={populateInputWithoutSend}
                   onImplementPlan={onImplementPlan}
+                  userAvatarUrl={userAvatarUrl}
+                  userInitials={userInitials}
                 />
               </div>
             ))}

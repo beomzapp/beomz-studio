@@ -1,6 +1,7 @@
 /**
- * ChatMessage — BEO-364 / BEO-373 / BEO-378 / BEO-379 / BEO-386 / BEO-391.
+ * ChatMessage — BEO-364 / BEO-373 / BEO-378 / BEO-379 / BEO-386 / BEO-391 / BEO-484.
  * Building state: single evolving card — preamble, checklist + timer, summary + next-steps.
+ * BEO-484: user bubble orange tint, user/AI avatars, first-name personalisation.
  */
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
@@ -8,12 +9,34 @@ import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send } fro
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
 
-// ─── B avatar ─────────────────────────────────────────────────────────────────
+// ─── B avatar (AI / Beomz logo) ───────────────────────────────────────────────
 
-function BAvatar() {
+export function BAvatar() {
   return (
     <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900">
       <span className="text-[9px] font-bold leading-none text-[#F97316]">B</span>
+    </div>
+  );
+}
+
+// ─── User avatar ──────────────────────────────────────────────────────────────
+
+function UserAvatar({ avatarUrl, initials }: { avatarUrl?: string; initials?: string }) {
+  const [imgError, setImgError] = useState(false);
+  if (avatarUrl && !imgError) {
+    return (
+      <img
+        src={avatarUrl}
+        alt="You"
+        className="mt-0.5 h-5 w-5 flex-shrink-0 rounded-full object-cover"
+        referrerPolicy="no-referrer"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+  return (
+    <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316] text-[8px] font-bold text-white">
+      {initials || "U"}
     </div>
   );
 }
@@ -707,34 +730,43 @@ const USER_PREVIEW_LENGTH = 150;
 
 type UserMsg = Extract<ChatMessage, { type: "user" }>;
 
-function CollapsibleUserMessage({ message }: { message: UserMsg }) {
+function CollapsibleUserMessage({
+  message,
+  avatarUrl,
+  initials,
+}: {
+  message: UserMsg;
+  avatarUrl?: string;
+  initials?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const isSystem = message.isSystem === true;
 
   return (
-    <div className="flex flex-col items-end">
+    <div className="flex items-end justify-end gap-2">
       <button
-        className="max-w-[80%] min-w-0 cursor-pointer rounded-2xl rounded-br-sm bg-[#0a0a0a] px-3.5 py-2 text-left shadow-sm"
+        className="max-w-[80%] min-w-0 cursor-pointer rounded-tl-2xl rounded-tr-2xl rounded-bl-2xl rounded-br-[4px] border border-[rgba(255,104,0,0.25)] bg-[rgba(255,104,0,0.18)] px-3.5 py-2 text-left"
         onClick={() => setExpanded(e => !e)}
       >
         {expanded ? (
           <div className="flex items-start gap-2">
-            <span className="min-w-0 flex-1 break-words text-sm leading-relaxed text-white">
+            <span className="min-w-0 flex-1 break-words text-sm leading-relaxed text-[#1a1a1a]">
               {message.content}
             </span>
-            <ChevronUp size={14} className="mt-0.5 flex-shrink-0 text-zinc-400" />
+            <ChevronUp size={14} className="mt-0.5 flex-shrink-0 text-[#6b7280]" />
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm text-zinc-400">
+            <span className="min-w-0 flex-1 truncate text-sm text-[#6b7280]">
               {isSystem
                 ? "System instructions"
                 : `${message.content.slice(0, USER_PREVIEW_LENGTH)}…`}
             </span>
-            <ChevronDown size={14} className="flex-shrink-0 text-zinc-400" />
+            <ChevronDown size={14} className="flex-shrink-0 text-[#6b7280]" />
           </div>
         )}
       </button>
+      <UserAvatar avatarUrl={avatarUrl} initials={initials} />
     </div>
   );
 }
@@ -746,12 +778,18 @@ export function ChatMessageView({
   onRetry,
   onPopulateInput,
   onImplementPlan,
+  userAvatarUrl,
+  userInitials,
 }: {
   message: ChatMessage;
   onRetry?: () => void;
   onPopulateInput?: (text: string) => void;
   /** BEO-461/462: handles both chat_response "Implement" and image_intent CTA */
   onImplementPlan?: (plan: string, imageUrl?: string) => void;
+  /** BEO-484: user avatar URL (proxied if Google) */
+  userAvatarUrl?: string;
+  /** BEO-484: user initials fallback */
+  userInitials?: string;
 }) {
   switch (message.type) {
     case "thinking":
@@ -774,11 +812,11 @@ export function ChatMessageView({
 
     case "user":
       if (message.isSystem || message.content.length > USER_COLLAPSE_THRESHOLD) {
-        return <CollapsibleUserMessage message={message} />;
+        return <CollapsibleUserMessage message={message} avatarUrl={userAvatarUrl} initials={userInitials} />;
       }
       return (
-        <div className="flex flex-col items-end">
-          <div className="max-w-[70%] min-w-0 rounded-2xl rounded-br-sm bg-[#0a0a0a] px-3.5 py-2 text-sm leading-relaxed text-white shadow-sm break-words">
+        <div className="flex items-end justify-end gap-2">
+          <div className="max-w-[70%] min-w-0 rounded-tl-2xl rounded-tr-2xl rounded-bl-2xl rounded-br-[4px] border border-[rgba(255,104,0,0.25)] bg-[rgba(255,104,0,0.18)] px-3.5 py-2 text-sm leading-relaxed text-[#1a1a1a] break-words">
             {message.imageUrl && (
               <img
                 src={message.imageUrl}
@@ -788,6 +826,7 @@ export function ChatMessageView({
             )}
             {message.content}
           </div>
+          <UserAvatar avatarUrl={userAvatarUrl} initials={userInitials} />
         </div>
       );
 
