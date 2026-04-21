@@ -34,7 +34,7 @@ interface BuildChatPromptInput {
   // style, …) accumulated across the chat. Feed it back into the prompt so
   // the AI doesn't re-ask what the user already answered.
   accumulatedContext?: string | null;
-  // BEO-465: when true, we have ~0.7–0.89 confidence and only need one last
+  // BEO-465: when true, we have ~0.7–0.79 confidence and only need one last
   // nudge. The AI should summarise what it knows and ask a final confirmation.
   nearReady?: boolean;
 }

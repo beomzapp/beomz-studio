@@ -34,7 +34,11 @@ import {
   WEB_RESEARCH_SURCHARGE,
   isAdminEmail,
 } from "../../lib/credits.js";
-import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
+import {
+  classifyIntent,
+  MAX_CLARIFYING_QUESTIONS,
+  type Intent,
+} from "../../lib/intentClassifier.js";
 import {
   appendProjectChatHistory,
   readProjectChatHistory,
@@ -55,6 +59,8 @@ import {
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
 export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6";
+const NEW_BUILD_PLAN_SUMMARY_CONFIDENCE = 0.8;
+const ITERATION_BUILD_CONFIDENCE = 0.7;
 
 const PROMPT_STOP_WORDS = new Set([
   "a", "an", "and", "app", "build", "create", "for", "from",
@@ -270,6 +276,42 @@ function normaliseStartBuildRequestBody(requestBody: unknown): unknown {
   };
 }
 
+function readExplicitImplementPrompt(requestBody: unknown): string | null {
+  if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) {
+    return null;
+  }
+
+  const record = requestBody as Record<string, unknown>;
+  const implementPlan = readStringField(record, "implementPlan");
+  if (implementPlan && implementPlan.trim().length > 0) {
+    return implementPlan.trim();
+  }
+
+  const plan = readStringField(record, "plan");
+  if (plan && plan.trim().length > 0) {
+    return plan.trim();
+  }
+
+  return null;
+}
+
+function hasExplicitImplementSignal(requestBody: unknown): boolean {
+  if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) {
+    return false;
+  }
+
+  if (readExplicitImplementPrompt(requestBody)) {
+    return true;
+  }
+
+  const record = requestBody as Record<string, unknown>;
+  const action = readStringField(record, "action")?.trim().toLowerCase();
+
+  return record.build_confirmed === true
+    || record.buildConfirmed === true
+    || action === "build_confirmed";
+}
+
 async function persistConversationalProjectMemory(
   db: OrgContext["db"],
   projectId: string,
@@ -417,6 +459,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
   const requestBody = await c.req.json().catch(() => null);
   const normalisedRequestBody = normaliseStartBuildRequestBody(requestBody);
+  const explicitImplementPrompt = readExplicitImplementPrompt(normalisedRequestBody);
+  const explicitImplementSignal = hasExplicitImplementSignal(normalisedRequestBody);
   const parsedBody = startBuildRequestSchema.safeParse(normalisedRequestBody);
 
   if (!parsedBody.success) {
@@ -476,29 +520,42 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     ? readProjectChatHistory(projectRow.chat_history)
     : [];
   const clarifyingQuestionCount = countRecentClarifyingQuestions(recentHistory);
-
-  const intentDecision = await classifyIntentFn(
-    sourcePrompt,
-    existingFiles.length > 0,
-    Boolean(imageUrl),
-    recentHistory,
-  );
-  const classifiedIntent = intentDecision.intent;
-  const legacyIntent = mapIntentToLegacyBuildIntent(classifiedIntent, existingFiles.length > 0);
   const storedImplementPlan = normalisePromptForComparison(readPendingImplementPlan(latestGeneration?.metadata));
   const sourcePromptForComparison = normalisePromptForComparison(sourcePrompt);
-  const isImplementConfirmation = Boolean(
+  const matchingStoredImplementPlan = Boolean(
     storedImplementPlan
     && sourcePromptForComparison
     && storedImplementPlan === sourcePromptForComparison,
   );
+  const isImplementConfirmation = explicitImplementSignal || matchingStoredImplementPlan;
+  const confirmedBuildPrompt = explicitImplementPrompt
+    ?? (matchingStoredImplementPlan ? storedImplementPlan : null)
+    ?? (explicitImplementSignal ? sourcePromptForComparison : null);
+  const implementConfirmationIntent: Intent = isIteration ? "iteration" : "build_new";
+  const intentDecision = isImplementConfirmation
+    ? {
+        intent: implementConfirmationIntent,
+        confidence: 1,
+        reason: matchingStoredImplementPlan
+          ? "Stored implement plan confirmed."
+          : "Explicit implement confirmation request.",
+        accumulatedContext: confirmedBuildPrompt ?? sourcePrompt,
+      }
+    : await classifyIntentFn(
+        sourcePrompt,
+        existingFiles.length > 0,
+        Boolean(imageUrl),
+        recentHistory,
+      );
+  const classifiedIntent = intentDecision.intent;
+  const legacyIntent = mapIntentToLegacyBuildIntent(classifiedIntent, existingFiles.length > 0);
 
   const isConversationalIntent = classifiedIntent === "greeting"
     || classifiedIntent === "question"
     || classifiedIntent === "research";
 
   // BEO-465: build-ish intents (build_new / iteration / image_ref / ambiguous)
-  // are gated on confidence. Below 0.9 we ask a clarifying question instead
+  // are gated on confidence. Below 0.8 we ask a clarifying question instead
   // of firing the build.
   const isBuildIshIntent = classifiedIntent === "build_new"
     || classifiedIntent === "iteration"
@@ -506,11 +563,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     || classifiedIntent === "ambiguous";
   const forcedPlanSummary = isBuildIshIntent
     && !isImplementConfirmation
-    && clarifyingQuestionCount >= 3;
+    && clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS;
   const effectiveConfidence = forcedPlanSummary
     ? 0.95
     : intentDecision.confidence;
-  const buildConfidenceThreshold = isIteration ? 0.7 : 0.9;
+  const buildConfidenceThreshold = isIteration
+    ? ITERATION_BUILD_CONFIDENCE
+    : NEW_BUILD_PLAN_SUMMARY_CONFIDENCE;
 
   // Ambiguous always asks a question regardless of confidence — even if Haiku
   // happens to score it high, the user's wording said "unclear".
@@ -541,7 +600,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const conversationalCreditsRequired = CONVERSATIONAL_COST + (shouldUseResearchLookup ? WEB_RESEARCH_SURCHARGE : 0);
 
   // BEO-465: accumulatedContext from the classifier becomes the enhanced
-  // build prompt once confidence crosses 0.9.
+  // build prompt once confidence crosses 0.8.
   const accumulatedBuildContext = intentDecision.accumulatedContext?.trim()
     || buildAccumulatedContextFallback(sourcePrompt, recentHistory)
     || undefined;
@@ -557,6 +616,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     isNearReady,
     shouldOfferPlanSummary,
     isImplementConfirmation,
+    explicitImplementSignal,
     isIteration,
     hasAccumulatedContext: Boolean(accumulatedBuildContext),
   });
@@ -675,7 +735,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   if (isImmediateConversation) {
     const chatHistory = readProjectChatHistory(projectRow.chat_history);
     const chatSummary = typeof projectRow.chat_summary === "string" ? projectRow.chat_summary : null;
-    // BEO-465: when the classifier's confidence is below 0.9 on a build-ish
+    // BEO-465: when the classifier's confidence is below 0.8 on a build-ish
     // intent, render a clarifying question even if the raw intent was
     // build_new / iteration / image_ref. Greetings / questions / research
     // still render a full conversational response.
@@ -817,12 +877,12 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     );
   }
 
-  // BEO-465: once confidence >= 0.9 the accumulated conversation summary
+  // BEO-465: once confidence >= 0.8 the accumulated conversation summary
   // IS the build prompt. It's more specific than the user's original short
   // line ("im thinking of a website") so the build pipeline has enough to
   // go on without asking further questions downstream.
   const explicitBuildPrompt = isImplementConfirmation
-    ? (storedImplementPlan ?? prompt)
+    ? (confirmedBuildPrompt ?? prompt)
     : null;
   const buildPrompt = explicitBuildPrompt
     ?? ((!planSummary && accumulatedBuildContext)

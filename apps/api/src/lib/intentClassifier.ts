@@ -27,6 +27,7 @@ export type IntentClassification = IntentResult;
 
 const CLASSIFIER_TIMEOUT_MS = 3_000;
 const RECENT_HISTORY_TURNS = 5;
+export const MAX_CLARIFYING_QUESTIONS = 4;
 
 const exactGreetingPattern = /^(hi|hey|hello|thanks|ok|okay|sure|yes|no|yep|nope|cheers)$/i;
 const ambiguousPattern = /^(help|help me|make it better|improve it|fix it|update it|change it|not sure|unsure|idk|i don't know)$/i;
@@ -166,8 +167,8 @@ function buildFallbackIntent(
   const questionCount = countClarifyingQuestions(recentHistory);
   return {
     intent: "build_new",
-    confidence: questionCount >= 3 ? 0.95 : estimatedConfidence,
-    reason: questionCount >= 3 ? "Question cap fallback." : "New project fallback.",
+    confidence: questionCount >= MAX_CLARIFYING_QUESTIONS ? 0.95 : estimatedConfidence,
+    reason: questionCount >= MAX_CLARIFYING_QUESTIONS ? "Question cap fallback." : "New project fallback.",
   };
 }
 
@@ -287,7 +288,7 @@ export async function classifyIntent(
               "- Vague build intent (\"I want to build something\") → 0.3–0.4",
               "- Category known but no details (\"a portfolio website\") → 0.5–0.65",
               "- Category + features known (\"portfolio with blog and contact\") → 0.7–0.8",
-              "- Full details known (\"dark minimal portfolio with projects, about, contact, blog\") → 0.9+",
+              "- Full details known (\"dark minimal portfolio with projects, about, contact, blog\") → 0.8+",
               "Rubric components: app type clear (+0.4) · key features or purpose described (+0.25)",
               "· style/design direction clear (+0.2) · enough detail to build without guessing (+0.15).",
               "Example: \"a pet store website with landing page and shop to buy stuff\" → 0.65",
@@ -299,7 +300,7 @@ export async function classifyIntent(
               "Questions, greetings, and research intents can safely return 0.9+ once the ask is clear.",
               "Iterations on an existing app: a specific direction (e.g. \"add a contact form\",",
               "\"make the header dark\") is 0.9+. Vague iterations (\"make it better\") stay below 0.7.",
-              "If clarifying questions already asked >= 3, be generous and return at least 0.9 when any concrete app direction exists.",
+              `If clarifying questions already asked >= ${MAX_CLARIFYING_QUESTIONS}, be generous and return at least 0.95 when any concrete app direction exists.`,
               "",
               "## accumulatedContext",
               "When intent is build_new / iteration / image_ref, write a single-paragraph",
@@ -332,7 +333,7 @@ export async function classifyIntent(
     const parsed = classifierResponseSchema.parse(JSON.parse(candidate));
     return {
       intent: parsed.intent,
-      confidence: clarifyingQuestionCount >= 3 && (parsed.intent === "build_new" || parsed.intent === "iteration" || parsed.intent === "image_ref" || parsed.intent === "ambiguous")
+      confidence: clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS && (parsed.intent === "build_new" || parsed.intent === "iteration" || parsed.intent === "image_ref" || parsed.intent === "ambiguous")
         ? Math.max(parsed.confidence, 0.95)
         : parsed.confidence,
       reason: parsed.reason,

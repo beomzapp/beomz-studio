@@ -14,7 +14,9 @@ test("/builds/start defaults generation to claude-sonnet-4-6", async () => {
 
   assert.match(source, /export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6";/);
   assert.match(source, /const effectiveModel = parsedBody\.data\.model \?\? DEFAULT_BUILD_MODEL;/);
-  assert.match(source, /const buildConfidenceThreshold = isIteration \? 0\.7 : 0\.9;/);
+  assert.match(source, /const NEW_BUILD_PLAN_SUMMARY_CONFIDENCE = 0\.8;/);
+  assert.match(source, /const ITERATION_BUILD_CONFIDENCE = 0\.7;/);
+  assert.match(source, /clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS/);
   assert.match(source, /const shouldOfferPlanSummary = isBuildIshIntent[\s\S]*&& !isIteration;/);
 });
 
@@ -158,7 +160,7 @@ test("/builds/start returns a conversational generation for greeting intent and 
   assert.equal(runBuildCalls, 0);
 });
 
-test("/builds/start returns a plan summary with implementPlan when confidence reaches 0.9", async () => {
+test("/builds/start returns a plan summary with implementPlan when confidence reaches 0.8", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
@@ -257,7 +259,7 @@ test("/builds/start returns a plan summary with implementPlan when confidence re
     },
     classifyIntent: async () => ({
       intent: "build_new",
-      confidence: 0.95,
+      confidence: 0.82,
       reason: "Complete enough to build.",
       accumulatedContext: "Build a playful colorful pet store website with product listings, grooming services, and a kid-centric design.",
     }),
@@ -539,12 +541,9 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
       });
       await next();
     },
-    classifyIntent: async () => ({
-      intent: "build_new",
-      confidence: 0.95,
-      reason: "Complete enough to build.",
-      accumulatedContext: "Build a basic generic landing page.",
-    }),
+    classifyIntent: async () => {
+      throw new Error("implement confirmation should bypass intent detection");
+    },
     runBuildInBackground: async (input) => {
       runBuildCalls += 1;
       capturedBuildPrompt = input.prompt;
@@ -664,12 +663,9 @@ test("/builds/start accepts implementPlan as the build prompt alias", async () =
       });
       await next();
     },
-    classifyIntent: async () => ({
-      intent: "build_new",
-      confidence: 0.97,
-      reason: "Clear build request.",
-      accumulatedContext: implementPlan,
-    }),
+    classifyIntent: async () => {
+      throw new Error("explicit implement signal should bypass intent detection");
+    },
     runBuildInBackground: async (input) => {
       runBuildCalls += 1;
       capturedBuildPrompt = input.prompt;
@@ -683,6 +679,120 @@ test("/builds/start accepts implementPlan as the build prompt alias", async () =
     },
     body: JSON.stringify({
       implementPlan,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(runBuildCalls, 1);
+  assert.equal(capturedBuildPrompt, implementPlan);
+});
+
+test("/builds/start bypasses intent detection when build_confirmed is posted", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  let capturedBuildPrompt: string | null = null;
+  const implementPlan = "Build a polished PawLux site with premium pet services, bookings, and a red and blue visual refresh.";
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
+          createProject: async (input: Record<string, unknown>) => ({
+            id: input.id as string,
+            name: input.name as string,
+            org_id: input.org_id as string,
+            status: input.status as string,
+            template: input.template as string,
+            icon: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            id: patch.id ?? "77777777-7777-7777-7777-777777777777",
+            name: patch.name ?? "PawLux",
+            org_id: org.id,
+            status: patch.status ?? "queued",
+            template: patch.template ?? "interactive-tool",
+            icon: "Wrench",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => {
+      throw new Error("build_confirmed should bypass intent detection");
+    },
+    runBuildInBackground: async (input) => {
+      runBuildCalls += 1;
+      capturedBuildPrompt = input.prompt;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      build_confirmed: true,
+      prompt: implementPlan,
     }),
   });
 
@@ -764,7 +874,7 @@ test("/builds/start returns 400 for short build prompts instead of queueing a sc
   assert.equal(runBuildCalls, 0);
 });
 
-test("/builds/start forces a plan summary after three clarifying questions even below 0.9 confidence", async () => {
+test("/builds/start forces a plan summary after four clarifying questions even below 0.8 confidence", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
@@ -784,6 +894,8 @@ test("/builds/start forces a plan summary after three clarifying questions even 
       { role: "user", content: "landing page and shop", timestamp: new Date().toISOString() },
       { role: "assistant", content: "What style do you want?", timestamp: new Date().toISOString() },
       { role: "user", content: "not sure yet", timestamp: new Date().toISOString() },
+      { role: "assistant", content: "Should it feel playful or premium?", timestamp: new Date().toISOString() },
+      { role: "user", content: "playful", timestamp: new Date().toISOString() },
     ],
     chat_summary: "Pet store discovery.",
   };
