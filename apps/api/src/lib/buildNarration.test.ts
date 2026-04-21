@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -57,4 +58,12 @@ test("iteration path returns a short preamble and skips next_steps", async () =>
   assert.equal(preamble.restatement, "Got it — updating the buttons now.");
   assert.deepEqual(preamble.bullets, []);
   assert.equal(nextSteps, null);
+});
+
+test("stage preamble prompt enforces user-facing bullets and forbids technical detail", async () => {
+  const source = await readFile(new URL("./buildNarration.ts", import.meta.url), "utf8");
+
+  assert.match(source, /bullets: max 4 items naming user-facing features only/);
+  assert.match(source, /No filenames, no component names, and no route\/file\/folder names\./);
+  assert.match(source, /No technical implementation detail or file architecture breakdowns\./);
 });

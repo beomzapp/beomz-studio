@@ -135,6 +135,10 @@ test("plan summary and build acknowledgement prompts forbid HTML/CSS/JavaScript 
   const generateSource = await readFile(new URL("../routes/builds/generate.ts", import.meta.url), "utf8");
 
   assert.match(chatPromptSource, /Do not mention HTML, CSS, or JavaScript\./);
+  assert.match(chatPromptSource, /Use at most 4 bullet points\./);
+  assert.match(chatPromptSource, /Bullets must be user-facing features only/);
+  assert.match(chatPromptSource, /No filenames, no component names/);
+  assert.match(chatPromptSource, /No technical implementation details\./);
   assert.match(generateSource, /Do not mention HTML, CSS, or JavaScript\./);
   assert.match(generateSource, /React and TypeScript/);
 });

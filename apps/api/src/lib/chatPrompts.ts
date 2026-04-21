@@ -202,17 +202,19 @@ function buildPlanSummaryFallback(accumulatedContext: string, projectName?: stri
   const brief = accumulatedContext
     .replace(/\s+/g, " ")
     .trim();
+  const isTechnicalDetail = (part: string): boolean => /(\b[\w-]+\.(?:tsx?|jsx?|css|scss|json|md)\b|\/|\\|\b(component|components|file|files|folder|folders|directory|architecture|implementation)\b)/i.test(part);
   const featureHints = brief
     .split(/[,.]| with | and /i)
     .map((part) => part.trim())
     .filter((part) => part.length >= 4)
-    .slice(0, 3)
+    .filter((part) => !isTechnicalDetail(part))
+    .slice(0, 4)
     .map((part) => `- ${part.replace(/\.$/, "")}`);
 
   const appName = projectName?.trim() || "Your app";
   const bullets = featureHints.length > 0
     ? featureHints.join("\n")
-    : "- Focused core flow\n- Clear user actions\n- Polished visual direction";
+    : "- Focused core flow\n- Clear user actions\n- Polished visual direction\n- Practical feature set";
 
   return [
     "Here's what I'll do:",
@@ -252,7 +254,10 @@ export async function generatePlanSummary(
           "Do not mention HTML, CSS, or JavaScript.",
           "If you must mention the stack, say React and TypeScript.",
           "Start with \"Here's what I'll do:\".",
-          "Use short bullet points after the title.",
+          "Use short bullet points after the title. Use at most 4 bullet points.",
+          "Bullets must be user-facing features only (what the app does).",
+          "No filenames, no component names, no route names, and no file architecture breakdowns.",
+          "No technical implementation details.",
           "Never say the build has already started or use phrases like \"Building now\".",
           'Format:',
           '"Here\'s what I\'ll do:',

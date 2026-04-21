@@ -36,9 +36,9 @@ export interface NextStepsResult {
 export const PREAMBLE_FALLBACK: StagePreamblePayload = {
   restatement: "Got it — building this now.",
   bullets: [
-    "Setting up the structure",
-    "Picking sensible defaults",
-    "Writing the components",
+    "Core app flow users can complete quickly",
+    "Key features matching your request",
+    "Visual style aligned to your direction",
   ],
 };
 
@@ -186,7 +186,9 @@ const PREAMBLE_SYSTEM_PROMPT = [
   '{ "restatement": "...", "bullets": ["...", "...", "..."] }',
   "Rules:",
   "- restatement: one short sentence naming what they asked for. Peer-level tone. No servile language. Max 12 words.",
-  "- bullets: 3-4 items naming concrete pieces the app needs. Each max 10 words. Focus on user-visible features, not implementation.",
+  "- bullets: max 4 items naming user-facing features only (what the app does).",
+  "- No filenames, no component names, and no route/file/folder names.",
+  "- No technical implementation detail or file architecture breakdowns.",
   "- Show understanding without echoing the prompt word-for-word.",
   "- No promises. No 'I will'. No buzzwords like 'clean UI'.",
   "- Do not output anything outside the JSON.",
