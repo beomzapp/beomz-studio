@@ -14,8 +14,6 @@ import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import {
-  isBuildPromptTooShort,
-  MIN_BUILD_PROMPT_LENGTH,
   mapProjectRowToProject,
   readBuildMetadata,
   readBuildTraceMetadata,
@@ -583,13 +581,6 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && !isIteration;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
   const hasResearchUrl = Boolean(extractUrlLike(sourcePrompt));
-
-  if (isBuildPromptTooShort(prompt) && (isBuildIshIntent || isImplementConfirmation)) {
-    return c.json(
-      { error: `Build prompt must be at least ${MIN_BUILD_PROMPT_LENGTH} characters.` },
-      400,
-    );
-  }
 
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.

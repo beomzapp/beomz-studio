@@ -27,12 +27,6 @@ export const FAILURE_REASONS = [
 
 export type FailureReasonCode = (typeof FAILURE_REASONS)[number];
 
-export const MIN_BUILD_PROMPT_LENGTH = 10;
-
-export function isBuildPromptTooShort(prompt: string): boolean {
-  return prompt.trim().length < MIN_BUILD_PROMPT_LENGTH;
-}
-
 const studioFileKindSchema = z.enum([
   "route",
   "component",

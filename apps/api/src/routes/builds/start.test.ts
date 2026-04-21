@@ -801,10 +801,11 @@ test("/builds/start bypasses intent detection when build_confirmed is posted", a
   assert.equal(capturedBuildPrompt, implementPlan);
 });
 
-test("/builds/start returns 400 for short build prompts instead of queueing a scaffold fallback", async () => {
+test("/builds/start accepts short non-empty build prompts", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
+  let capturedBuildPrompt: string | null = null;
   const org = {
     id: "org-1",
     owner_id: "user-1",
@@ -832,7 +833,48 @@ test("/builds/start returns 400 for short build prompts instead of queueing a sc
     loadOrgContextMiddleware: async (c, next) => {
       c.set("orgContext", {
         db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
+          createProject: async (input: Record<string, unknown>) => ({
+            id: input.id as string,
+            name: input.name as string,
+            org_id: input.org_id as string,
+            status: input.status as string,
+            template: input.template as string,
+            icon: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
           getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            id: patch.id ?? "88888888-8888-8888-8888-888888888888",
+            name: patch.name ?? "New Project",
+            org_id: org.id,
+            status: patch.status ?? "queued",
+            template: patch.template ?? "interactive-tool",
+            icon: "Wrench",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
         } as OrgContext["db"],
         jwt: { sub: "platform-user" },
         membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
@@ -852,8 +894,9 @@ test("/builds/start returns 400 for short build prompts instead of queueing a sc
       reason: "Clear build request.",
       accumulatedContext: "todo app",
     }),
-    runBuildInBackground: async () => {
+    runBuildInBackground: async (input) => {
       runBuildCalls += 1;
+      capturedBuildPrompt = input.prompt;
     },
   });
 
@@ -863,15 +906,13 @@ test("/builds/start returns 400 for short build prompts instead of queueing a sc
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      prompt: "todo app",
+      prompt: "a",
     }),
   });
 
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), {
-    error: "Build prompt must be at least 10 characters.",
-  });
-  assert.equal(runBuildCalls, 0);
+  assert.equal(response.status, 202);
+  assert.equal(runBuildCalls, 1);
+  assert.equal(capturedBuildPrompt, "todo app");
 });
 
 test("/builds/start forces a plan summary after four clarifying questions even below 0.8 confidence", async () => {
