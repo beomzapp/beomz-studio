@@ -364,10 +364,6 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     setChatModeActive(prev => {
       const next = !prev;
       chatModeRef.current = next;
-      if (!next) {
-        // Deactivating chat mode → clear the implement zone
-        setImplementSuggestion(null);
-      }
       return next;
     });
   }, []);
@@ -544,8 +540,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         // BEO-464: API confirms this is a real build — NOW start the shimmer.
         // Removes thinking dots so BuildingShimmer takes over cleanly.
+        // BEO-478: clear the floating ImplementBar — build has started.
         case "build_confirmed":
           setIsBuilding(true);
+          setImplementSuggestion(null);
           setMessages(prev => prev.filter(m => m.type !== "thinking"));
           break;
 
@@ -671,6 +669,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           if (plan) {
             pendingImplementPlanRef.current = plan;
             console.log("[BEO-conversational] pendingImplementPlanRef set ✓");
+            // BEO-478: surface plan in the floating ImplementBar so it persists
+            // even when the user sends follow-up messages before clicking Implement.
+            setImplementSuggestion({ summary: plan });
             setMessages(prev => [
               ...prev.filter(m => m.type !== "thinking"),
               {
