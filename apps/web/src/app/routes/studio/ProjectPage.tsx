@@ -251,12 +251,17 @@ export function ProjectPage() {
               // a failure so the error overlay is shown rather than silently keeping
               // the scaffold template visible. The API should set fallbackUsed=true in
               // this case — flag to Codex if this fires unexpectedly.
+              //
+              // BEO-482 NUCLEAR Fix 4: also clear buildResult so the WC hook receives
+              // null files — the zero-files state must render as a React error overlay
+              // only, never via wc.mount() or IndexedDB.
               if (!status.result || !status.result.files || status.result.files.length === 0) {
                 if (aiCustomisingTimeoutRef.current) {
                   clearTimeout(aiCustomisingTimeoutRef.current);
                   aiCustomisingTimeoutRef.current = null;
                 }
                 setIsAiCustomising(false);
+                setBuildResult(null);
                 setBuildFailed(true);
                 setBuildErrorMessage("Build completed but no files were generated. Please try again.");
                 return;

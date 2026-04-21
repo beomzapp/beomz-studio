@@ -198,6 +198,18 @@ export function useWebContainerPreview(
     ) => {
       const { wc } = instance;
 
+      // BEO-482 NUCLEAR: Hard scaffold eviction — the absolute last line of
+      // defence. Scaffold files (e.g. Product Catalog) MUST NEVER reach
+      // wc.mount() under ANY circumstance, regardless of isBuildInProgress
+      // timing or any other upstream guard. This catches the race where
+      // preview_ready's getBuildStatus resolves AFTER done has set
+      // isBuilding=false, which would otherwise slip past the isBuildInProgress
+      // ref and deliver scaffold via the files-change effect.
+      if (isScaffoldContaminated(currentFiles)) {
+        console.warn("[BEO-482] NUCLEAR: scaffold files blocked from wc.mount() — discarding");
+        return;
+      }
+
       // BEO-474: Universal scaffold guard — applies to BOTH first builds AND
       // iterations. The API streams a prebuilt template (e.g. Product Catalog)
       // as an early buildResult.files for EVERY build before AI finishes
@@ -257,8 +269,11 @@ export function useWebContainerPreview(
 
       // BEO-375: persist source files to IndexedDB so the next page load can
       // skip the API round-trip and mount immediately while npm install is warm.
+      // BEO-482 NUCLEAR: never cache scaffold-contaminated files — belt and
+      // suspenders so the cache can never be written with scaffold content even
+      // if a future code path bypasses the isScaffoldContaminated guard above.
       const gId = generationIdRef.current;
-      if (gId) {
+      if (gId && !isScaffoldContaminated(currentFiles)) {
         void wcCacheSetFiles(currentProject.id, gId, currentFiles);
       }
 

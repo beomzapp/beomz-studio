@@ -2,7 +2,7 @@
  * BEO-375: IndexedDB cache for WebContainer state.
  *
  * Two stores:
- *   files-v1       — source file list keyed by wc-{projectId}-{generationId}
+ *   files-v3        — source file list keyed by wc-{projectId}-{generationId}
  *   node-modules-v2 — node_modules binary snapshot (fixed key "v2")
  *
  * DB_VERSION bumped to 2 (BEO-202): old "node-modules-v1" binaries were
@@ -10,14 +10,21 @@
  * Bumping the key guarantees a cache miss for all existing users, forcing a
  * clean npm install that exports a correct v2 binary.
  *
+ * DB_VERSION bumped to 3 (BEO-482 NUCLEAR): renamed files store from
+ * "files-v1" to "files-v3" to evict ALL existing file cache entries for every
+ * user. Any stale "Product Catalog" scaffold entries that survived the Fix 1
+ * (skip if build in progress) and Fix 2 (poison-pill signature check) guards
+ * are permanently unreachable — the old "files-v1" store is deleted on
+ * upgrade and the new "files-v3" store starts empty. No stale entries survive.
+ *
  * All errors are swallowed — cache is best-effort and never blocks the boot path.
  */
 
 import type { StudioFile } from "@beomz-studio/contracts";
 
 const DB_NAME = "beomz-wc-cache";
-const DB_VERSION = 2;
-const STORE_FILES = "files-v1";
+const DB_VERSION = 3;
+const STORE_FILES = "files-v3";
 const STORE_NM = "node-modules-v2";
 const NM_KEY = "v2";
 
@@ -30,6 +37,9 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
+      // BEO-482 NUCLEAR: delete the old files-v1 store so no scaffold entries
+      // survive the version bump. The new files-v3 store starts completely empty.
+      if (db.objectStoreNames.contains("files-v1")) db.deleteObjectStore("files-v1");
       if (!db.objectStoreNames.contains(STORE_FILES)) db.createObjectStore(STORE_FILES);
       if (!db.objectStoreNames.contains(STORE_NM)) db.createObjectStore(STORE_NM);
     };
