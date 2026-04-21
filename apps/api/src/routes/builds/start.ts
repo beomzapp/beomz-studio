@@ -97,8 +97,18 @@ const TEMPLATE_ICONS: Record<string, string> = {
   "interactive-tool": "Wrench",
 };
 
+const DISABLED_TEMPLATE_IDS = new Set<string>([
+  // BEO-483: retired from the prebuilt pipeline.
+  "product-catalog",
+]);
+
 function getProjectIcon(templateId: string): string {
   return TEMPLATE_ICONS[templateId] ?? "Sparkles";
+}
+
+function sanitiseSelectedTemplateId(templateId: string): string {
+  if (!DISABLED_TEMPLATE_IDS.has(templateId)) return templateId;
+  return "interactive-tool";
 }
 
 function toErrorMessage(error: unknown): string {
@@ -626,6 +636,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       selectedTemplateId = "interactive-tool"; // safe fallback
     }
   }
+  selectedTemplateId = sanitiseSelectedTemplateId(selectedTemplateId);
 
   const selectedTemplateDef = getTemplateDefinitionSafe(selectedTemplateId);
   const projectName =

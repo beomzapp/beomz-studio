@@ -58,8 +58,6 @@ import { manifest as readingListManifest } from "../reading-list/manifest.js";
 import { files as readingListFiles } from "../reading-list/files.js";
 import { manifest as jobBoardManifest } from "../job-board/manifest.js";
 import { files as jobBoardFiles } from "../job-board/files.js";
-import { manifest as productCatalogManifest } from "../product-catalog/manifest.js";
-import { files as productCatalogFiles } from "../product-catalog/files.js";
 import { manifest as bookingSystemManifest } from "../booking-system/manifest.js";
 import { files as bookingSystemFiles } from "../booking-system/files.js";
 import { manifest as mealPlannerManifest } from "../meal-planner/manifest.js";
@@ -241,7 +239,6 @@ export const PREBUILT_REGISTRY: readonly PrebuiltTemplate[] = [
   { manifest: sleepTrackerManifest, files: sleepTrackerFiles },
   { manifest: readingListManifest, files: readingListFiles },
   { manifest: jobBoardManifest, files: jobBoardFiles },
-  { manifest: productCatalogManifest, files: productCatalogFiles },
   { manifest: bookingSystemManifest, files: bookingSystemFiles },
   { manifest: mealPlannerManifest, files: mealPlannerFiles },
   { manifest: goalTrackerManifest, files: goalTrackerFiles },

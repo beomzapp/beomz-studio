@@ -6,8 +6,7 @@
  * them up and delivers to the frontend in real time.
  *
  * Flow:
- *   1. Load prebuilt template → emit scaffold_ready (preview_ready)
- *      Frontend mounts template in WebContainer immediately (~1-2s).
+ *   1. Load prebuilt template files in memory as generation context.
  *   2. Call Anthropic once: "customise this template for: {prompt}"
  *      Uses tool_use so the response is structured JSON, not markdown.
  *   3. Merge customised files → emit done
@@ -30,7 +29,6 @@ import type {
   BuilderV3ImageIntentEvent,
   BuilderV3NextStepsEvent,
   BuilderV3PreambleEvent,
-  BuilderV3PreviewReadyEvent,
   BuilderV3StatusEvent,
   BuilderV3TraceMetadata,
   PrebuiltTemplate,
@@ -2965,7 +2963,6 @@ async function _runBuildInBackground(
   // "workspace-task") which is also stored in generationRow.template_id and
   // used as project.templateId in the frontend → must be consistent.
   const templateFiles = templateFilesToStudioFiles(prebuilt.files, templateId);
-  const previewEntryPath = "/";
 
   let paletteId = "professional-blue";
   try {
@@ -3020,28 +3017,6 @@ async function _runBuildInBackground(
         statusEvent("ai_iterating", "Applying changes…", "customising"),
         { status: "running" },
       );
-
-      // scaffold_ready with existing files so preview shows current app state
-      // while AI applies the change in the background.
-      const iterScaffoldEvent: BuilderV3PreviewReadyEvent = {
-        type: "preview_ready",
-        id: nextId(),
-        timestamp: ts(),
-        operation: op,
-        code: "scaffold_ready",
-        message: "Loading existing app…",
-        buildId,
-        projectId,
-        previewEntryPath: "/",
-        fallbackUsed: false,
-      };
-      await appendEventToDb(db, buildId, iterScaffoldEvent, {
-        files: [...existingFiles],
-        preview_entry_path: "/",
-        template_id: templateId as TemplateId,
-      });
-
-      console.log("[generate] iteration scaffold_ready emitted.", { buildId, existingFilesCount: existingFiles.length });
 
       await appendEventToDb(
         db, buildId,
@@ -3328,28 +3303,6 @@ async function _runBuildInBackground(
       { status: "running" },
     );
 
-    // ── 2. scaffold_ready → mount template in WebContainer immediately ──────
-    const scaffoldEventId = nextId();
-    const scaffoldEvent: BuilderV3PreviewReadyEvent = {
-      type: "preview_ready",
-      id: scaffoldEventId,
-      timestamp: ts(),
-      operation: op,
-      code: "scaffold_ready",
-      message: "Template ready. Customising for your prompt…",
-      buildId,
-      projectId,
-      previewEntryPath,
-      fallbackUsed: false,
-    };
-    await appendEventToDb(db, buildId, scaffoldEvent, {
-      files: templateFiles,
-      preview_entry_path: previewEntryPath,
-      template_id: templateId as TemplateId,
-    });
-
-    console.log("[generate] scaffold_ready emitted.", { buildId, templateId: prebuilt.manifest.id });
-
     // ── phases_planned SSE event (if phases were just planned) ─────────────
     if (activePhasesData && activeCurrentPhase === 1 && !input.phaseOverride) {
       // Emit a friendly heads-up BEFORE the phases card
@@ -3373,7 +3326,7 @@ async function _runBuildInBackground(
       await appendEventToDb(db, buildId, phasesPlannedEvent as unknown as BuilderV3StatusEvent);
     }
 
-    // ── 3. Anthropic customisation ──────────────────────────────────────────
+    // ── 2. Anthropic customisation ──────────────────────────────────────────
     await appendEventToDb(
       db, buildId,
       statusEvent("ai_customising", "Customising with AI…", "customising"),
