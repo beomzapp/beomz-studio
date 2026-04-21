@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send, Zap } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
 import { NextStepsCard } from "./NextStepsCard";
 
@@ -844,16 +844,7 @@ export function ChatMessageView({
             )}
           </div>
           {!message.streaming && message.content && (
-            <div className="mt-1.5 flex items-center justify-between">
-              {message.implementPlan ? (
-                <button
-                  onClick={() => onImplementPlan?.(message.implementPlan!)}
-                  className="flex items-center gap-1.5 rounded-full bg-[#F97316] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10]"
-                >
-                  <Zap size={11} />
-                  Implement
-                </button>
-              ) : <span />}
+            <div className="mt-1.5 flex justify-end">
               <CopyButton content={message.content} />
             </div>
           )}
