@@ -172,6 +172,46 @@ function readPendingImplementPlan(metadata: unknown): string | null {
     : null;
 }
 
+function countRecentClarifyingQuestions(history: readonly ReturnType<typeof readProjectChatHistory>[number][]): number {
+  if (!history || history.length === 0) {
+    return 0;
+  }
+
+  let count = 0;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry.role !== "assistant") {
+      continue;
+    }
+
+    if (entry.content.trim().endsWith("?")) {
+      count += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return count;
+}
+
+function buildAccumulatedContextFallback(
+  currentMessage: string,
+  history: readonly ReturnType<typeof readProjectChatHistory>[number][],
+): string {
+  const parts = history
+    .filter((entry) => entry.role === "user")
+    .map((entry) => entry.content.trim())
+    .filter((content) => content.length > 0);
+
+  const current = currentMessage.trim();
+  if (current.length > 0 && parts.at(-1) !== current) {
+    parts.push(current);
+  }
+
+  return parts.join(". ").trim();
+}
+
 async function persistConversationalProjectMemory(
   db: OrgContext["db"],
   projectId: string,
@@ -375,6 +415,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const recentHistory = projectRow
     ? readProjectChatHistory(projectRow.chat_history)
     : [];
+  const clarifyingQuestionCount = countRecentClarifyingQuestions(recentHistory);
 
   const intentDecision = await classifyIntentFn(
     sourcePrompt,
@@ -403,15 +444,23 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     || classifiedIntent === "iteration"
     || classifiedIntent === "image_ref"
     || classifiedIntent === "ambiguous";
+  const forcedPlanSummary = isBuildIshIntent
+    && !isImplementConfirmation
+    && clarifyingQuestionCount >= 3;
+  const effectiveConfidence = forcedPlanSummary
+    ? 0.95
+    : intentDecision.confidence;
 
   // Ambiguous always asks a question regardless of confidence — even if Haiku
   // happens to score it high, the user's wording said "unclear".
-  const needsClarification = classifiedIntent === "ambiguous"
-    || (isBuildIshIntent && intentDecision.confidence < 0.9);
+  const needsClarification = !forcedPlanSummary && (
+    classifiedIntent === "ambiguous"
+      || (isBuildIshIntent && effectiveConfidence < 0.9)
+  );
   const shouldOfferPlanSummary = isBuildIshIntent
     && !needsClarification
     && !isImplementConfirmation;
-  const isNearReady = needsClarification && intentDecision.confidence >= 0.7;
+  const isNearReady = needsClarification && effectiveConfidence >= 0.7;
 
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.
@@ -419,12 +468,17 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
 
   // BEO-465: accumulatedContext from the classifier becomes the enhanced
   // build prompt once confidence crosses 0.9.
-  const accumulatedBuildContext = intentDecision.accumulatedContext?.trim() || undefined;
+  const accumulatedBuildContext = intentDecision.accumulatedContext?.trim()
+    || buildAccumulatedContextFallback(sourcePrompt, recentHistory)
+    || undefined;
 
   console.log("[BEO-465] intent classification", {
     intent: classifiedIntent,
-    confidence: intentDecision.confidence,
+    confidence: effectiveConfidence,
+    originalConfidence: intentDecision.confidence,
     reason: intentDecision.reason,
+    clarifyingQuestionCount,
+    forcedPlanSummary,
     needsClarification,
     isNearReady,
     shouldOfferPlanSummary,
@@ -691,7 +745,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   console.log("[BEO-210] Build queued.", {
     buildId, operation, prompt: sourcePrompt, projectId,
     templateId: selectedTemplateId, userId: orgContext.user.id,
-    confidence: intentDecision.confidence,
+    confidence: effectiveConfidence,
     usingAccumulatedContext: buildPrompt !== effectivePrompt,
   });
 

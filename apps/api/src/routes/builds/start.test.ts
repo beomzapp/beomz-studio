@@ -433,3 +433,141 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
   assert.equal(runBuildCalls, 1);
   assert.equal(capturedBuildPrompt, implementPlan);
 });
+
+test("/builds/start forces a plan summary after three clarifying questions even below 0.9 confidence", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  const project = {
+    id: "44444444-4444-4444-4444-444444444444",
+    name: "Pet Store",
+    org_id: "org-1",
+    status: "ready",
+    template: "marketing-website",
+    icon: "Globe",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [
+      { role: "assistant", content: "What kind of website are you thinking of?", timestamp: new Date().toISOString() },
+      { role: "user", content: "pet store", timestamp: new Date().toISOString() },
+      { role: "assistant", content: "Which pages should it include?", timestamp: new Date().toISOString() },
+      { role: "user", content: "landing page and shop", timestamp: new Date().toISOString() },
+      { role: "assistant", content: "What style do you want?", timestamp: new Date().toISOString() },
+      { role: "user", content: "not sure yet", timestamp: new Date().toISOString() },
+    ],
+    chat_summary: "Pet store discovery.",
+  };
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          applyOrgUsageDeduction: async () => ({
+            deducted: 1,
+            credits: 9,
+            topup_credits: 0,
+          }),
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: (input.session_events as Record<string, unknown>[] | undefined) ?? [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: (input.warnings as string[] | undefined) ?? [],
+          }),
+          findLatestGenerationByProjectId: async () => ({
+            files: [],
+            metadata: {},
+          }),
+          findProjectById: async () => project,
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            ...project,
+            ...patch,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.55,
+      reason: "Still incomplete.",
+      accumulatedContext: "Build a pet store website with a landing page and a shop to buy products.",
+    }),
+    generatePlanSummary: async () => "Here's what I'll build:\n**Pet Store**\n- Landing page\n- Shop\n- Friendly visual direction\n\nReady to build this — or type any changes first.",
+    runBuildInBackground: async () => {
+      runBuildCalls += 1;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "maybe playful",
+      projectId: project.id,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  const payload = await response.json() as {
+    build: { status: string; summary: string | null };
+    trace: {
+      events: Array<{
+        type: string;
+        message?: string;
+        readyToImplement?: boolean;
+      }>;
+    };
+  };
+
+  assert.equal(payload.build.status, "completed");
+  assert.equal(payload.build.summary, "Plan summary ready - awaiting build confirmation.");
+  assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), true);
+  assert.equal(payload.trace.events.some((event) => event.readyToImplement === true), true);
+  assert.equal(runBuildCalls, 0);
+});

@@ -237,6 +237,8 @@ export async function generatePlanSummary(
         system: [
           "Based on this build brief, write a short friendly plan summary.",
           "Keep it under 60 words. Be specific. Use markdown.",
+          "Do not mention HTML, CSS, or JavaScript.",
+          "If you must mention the stack, say React and TypeScript.",
           'Format:',
           '"Here\'s what I\'ll build:',
           '[Suggested app name]',

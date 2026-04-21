@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { after } from "node:test";
 import test from "node:test";
 
@@ -66,4 +67,34 @@ test("classifyIntent fallback prefers build_new when no files exist", async () =
   const result = await classifyIntent("build a todo app", false, false);
 
   assert.equal(result.intent, "build_new");
+  assert.equal(result.confidence, 0.85);
+});
+
+test("classifyIntent fallback scores store website briefs around 0.65", async () => {
+  const result = await classifyIntent(
+    "a pet store website with landing page and shop to buy stuff",
+    false,
+    false,
+  );
+
+  assert.equal(result.intent, "build_new");
+  assert.equal(result.confidence, 0.65);
+});
+
+test("classifyIntent fallback keeps vague build requests low confidence", async () => {
+  const result = await classifyIntent("i want to build something", false, false);
+
+  assert.equal(result.intent, "build_new");
+  assert.equal(result.confidence, 0.3);
+});
+
+test("intentClassifier prompt includes the more generous rubric examples", async () => {
+  const source = await readFile(new URL("./intentClassifier.ts", import.meta.url), "utf8");
+
+  assert.match(source, /\+0\.4/);
+  assert.match(source, /\+0\.25/);
+  assert.match(source, /\+0\.15/);
+  assert.match(source, /pet store website with landing page and shop to buy stuff/i);
+  assert.match(source, /build me a todo app/i);
+  assert.match(source, /i want to build something/i);
 });

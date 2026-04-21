@@ -2321,6 +2321,7 @@ Format: "I'll [verb] the [target]..." — max 15 words, present tense, no filler
 Examples: "I'll darken the sidebar and update the icon contrast." "I'll add a delete button to the table rows."`
     : `Generate a one-sentence acknowledgement that you're about to build what the user requested.
 Format: "Building your [app type]..." — max 15 words, present tense, no filler.
+Do not mention HTML, CSS, or JavaScript. If you mention the stack, say React and TypeScript.
 Examples: "Building your restaurant POS system." "Building your task management dashboard."`;
 
   const controller = new AbortController();

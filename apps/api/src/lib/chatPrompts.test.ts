@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { after } from "node:test";
 import test from "node:test";
 
@@ -103,4 +104,13 @@ test("generatePlanSummary falls back to the required plan format when Haiku is u
   assert.match(result, /^Here's what I'll build:/);
   assert.match(result, /\*\*PetPals\*\*/);
   assert.match(result, /Ready to build this — or type any changes first\./);
+});
+
+test("plan summary and build acknowledgement prompts forbid HTML/CSS/JavaScript copy", async () => {
+  const chatPromptSource = await readFile(new URL("./chatPrompts.ts", import.meta.url), "utf8");
+  const generateSource = await readFile(new URL("../routes/builds/generate.ts", import.meta.url), "utf8");
+
+  assert.match(chatPromptSource, /Do not mention HTML, CSS, or JavaScript\./);
+  assert.match(generateSource, /Do not mention HTML, CSS, or JavaScript\./);
+  assert.match(generateSource, /React and TypeScript/);
 });
