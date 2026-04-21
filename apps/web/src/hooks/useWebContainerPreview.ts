@@ -15,6 +15,7 @@ import {
 import {
   wcCacheGetFiles,
   wcCacheSetFiles,
+  wcCacheDeleteFiles,
   wcCacheGetNodeModules,
   wcCacheSetNodeModules,
   wcCacheDeleteNodeModules,
@@ -64,6 +65,27 @@ export interface WcPreviewState {
    * Vite is still serving the blank shell.
    */
   firstFilesDelivered: boolean;
+}
+
+// BEO-482 Fix 2: known scaffold content signatures.
+// Any IndexedDB cache entry containing these strings was written during a
+// pre-BEO-474 build (before the scaffold guard existed). Discard immediately
+// so stale "Product Catalog" templates never ghost over a new build.
+const SCAFFOLD_CONTENT_SIGNATURES = [
+  "Product Catalog",
+  "ProductCatalog",
+  "product-catalog",
+];
+
+function isScaffoldContaminated(files: readonly unknown[]): boolean {
+  return files.some((file) => {
+    if (!file || typeof file !== "object") return false;
+    const content = (file as Record<string, unknown>).content;
+    return (
+      typeof content === "string" &&
+      SCAFFOLD_CONTENT_SIGNATURES.some((sig) => content.includes(sig))
+    );
+  });
 }
 
 // Eagerly kick off the WebContainer boot + npm install as soon as the hook
@@ -606,8 +628,20 @@ export function useWebContainerPreview(
             const cached = await wcCacheGetFiles(proj.id, gId);
             if (cancelled) return;
             if (cached && cached.length > 0 && !filesRef.current?.length) {
-              console.log("[wc-cache] Delivering source files from IndexedDB cache");
-              void deliverFiles(instance, cached as StudioFile[], proj);
+              // BEO-482 Fix 1: skip cache restore if a build is already running.
+              // The real files will be delivered by the files-change effect once
+              // isBuildInProgress transitions to false (done SSE).
+              if (isBuildInProgressRef.current) {
+                console.log("[wc-cache] Skipping boot cache restore — build in progress");
+              // BEO-482 Fix 2: discard poisoned scaffold entries written before
+              // the BEO-474 guard existed (e.g. cached "Product Catalog" templates).
+              } else if (isScaffoldContaminated(cached)) {
+                console.warn("[wc-cache] Discarding scaffold-contaminated cache entry");
+                void wcCacheDeleteFiles(proj.id, gId);
+              } else {
+                console.log("[wc-cache] Delivering source files from IndexedDB cache");
+                void deliverFiles(instance, cached as StudioFile[], proj);
+              }
             }
           }
         }
@@ -647,6 +681,17 @@ export function useWebContainerPreview(
     void wcCacheGetFiles(project.id, generationId).then((cached) => {
       if (!cached || cached.length === 0) return;
       if (filesRef.current && filesRef.current.length > 0) return; // files arrived in meantime
+      // BEO-482 Fix 1: skip cache restore if a build is in progress.
+      if (isBuildInProgressRef.current) {
+        console.log("[wc-cache] Skipping post-boot cache restore — build in progress");
+        return;
+      }
+      // BEO-482 Fix 2: discard poisoned scaffold entries.
+      if (isScaffoldContaminated(cached)) {
+        console.warn("[wc-cache] Discarding scaffold-contaminated cache entry (post-boot)");
+        void wcCacheDeleteFiles(project.id, generationId);
+        return;
+      }
       const inst = instanceRef.current;
       if (!inst) return;
       console.log("[wc-cache] Delivering source files from IndexedDB (post-boot)");

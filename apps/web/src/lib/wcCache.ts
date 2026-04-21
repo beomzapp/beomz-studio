@@ -110,6 +110,23 @@ export async function wcCacheSetNodeModules(data: Uint8Array): Promise<void> {
   }
 }
 
+export async function wcCacheDeleteFiles(
+  projectId: string,
+  generationId: string,
+): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_FILES, "readwrite");
+      tx.objectStore(STORE_FILES).delete(`wc-${projectId}-${generationId}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // non-fatal
+  }
+}
+
 export async function wcCacheDeleteNodeModules(): Promise<void> {
   try {
     const db = await openDb();
