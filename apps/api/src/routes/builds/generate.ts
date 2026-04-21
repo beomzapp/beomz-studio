@@ -2394,6 +2394,7 @@ export async function generateClarifyingQuestion(input: {
   currentMessage: string;
   existingFiles: readonly StudioFile[];
   projectName?: string;
+  websiteContext?: WebsiteContext | null;
   // BEO-465: feed what we already know and whether we're near-ready.
   accumulatedContext?: string | null;
   nearReady?: boolean;
@@ -2405,7 +2406,7 @@ export async function generateClarifyingQuestion(input: {
   const timeoutId = setTimeout(() => controller.abort(), 4_000);
   try {
     const client = new Anthropic({ apiKey });
-    const websiteContext = await loadWebsiteContext(input.currentMessage);
+    const websiteContext = input.websiteContext ?? await loadWebsiteContext(input.currentMessage);
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",

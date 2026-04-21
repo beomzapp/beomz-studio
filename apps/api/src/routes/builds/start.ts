@@ -747,7 +747,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     const implementPlan = shouldOfferPlanSummary
       ? (accumulatedBuildContext ?? effectivePrompt)
       : null;
-    const websiteContext: WebsiteContext | null = shouldOfferPlanSummary || eventType === "clarifying_question"
+    // BEO-485: URL context must be fetched before clarifying questions so the
+    // model does not ask redundant "what does this site do?" questions.
+    const websiteContext: WebsiteContext | null = shouldOfferPlanSummary
       ? null
       : classifiedIntent === "research"
       ? await loadResearchContext(sourcePrompt)
@@ -763,6 +765,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
           currentMessage: sourcePrompt,
           existingFiles,
           projectName,
+          websiteContext,
           accumulatedContext: accumulatedBuildContext ?? null,
           nearReady: isNearReady,
         })

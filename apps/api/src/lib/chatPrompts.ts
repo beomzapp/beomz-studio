@@ -152,6 +152,12 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     history: input.chatHistory,
   });
   const websiteBlock = buildWebsiteContextBlock(input.websiteContext);
+  const hasUrlGrounding = Boolean(
+    input.websiteContext
+      && input.websiteContext.sourceType === "url"
+      && input.websiteContext.content
+      && input.websiteContext.content.trim().length > 0,
+  );
 
   const accumulated = input.accumulatedContext?.trim();
   const accumulatedBlock = accumulated && accumulated.length > 0
@@ -163,13 +169,29 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     : "";
 
   // BEO-465: priority for choosing the single missing piece to ask about.
-  const questionPriority = [
-    "## Question priority (ask about the FIRST unknown in this list)",
-    "1. App type / category (if unknown)",
-    "2. Key features (if type is known but features are not)",
-    "3. Design style / vibe (if features are known but style is not)",
-    "4. Final confirmation (if style is known) — state the plan in one line and ask \"sound right?\"",
-  ].join("\n");
+  const questionPriority = hasUrlGrounding
+    ? [
+        "## Question priority (URL already provides context — ask about the FIRST unknown in this list)",
+        "1. Keep vs change: what should stay the same from the reference, and what should differ?",
+        "2. Access model: should users sign up/log in, or is it public-only?",
+        "3. Feature scope: specific features or flows to add/remove from the reference?",
+        "4. Visual direction: keep the same palette/style or change it?",
+      ].join("\n")
+    : [
+        "## Question priority (ask about the FIRST unknown in this list)",
+        "1. App type / category (if unknown)",
+        "2. Key features (if type is known but features are not)",
+        "3. Design style / vibe (if features are known but style is not)",
+        "4. Final confirmation (if style is known) — state the plan in one line and ask \"sound right?\"",
+      ].join("\n");
+
+  const urlGroundingRule = hasUrlGrounding
+    ? [
+        "A reference URL was fetched successfully.",
+        "Treat the website context as known facts, not unknowns.",
+        "Do NOT ask what the website's purpose, industry, or basic type is if the fetched content already shows it.",
+      ].join(" ")
+    : "";
 
   const nearReadyHint = input.nearReady
     ? [
@@ -186,6 +208,7 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     "Keep it under 20 words. Conversational tone. No filler. No apologies. No preamble.",
     "Never ask setup questions when an app already exists.",
     "If a website fetch failed, ask for the key feature or flow to replicate.",
+    urlGroundingRule,
     nearReadyHint,
     "",
     questionPriority,
