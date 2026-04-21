@@ -722,6 +722,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         case "reference_screenshot": {
           // BEO-486: URL screenshot captured before build — insert inspiration bubble before plan summary
+          // BEO-489: debug log — confirm event reaches the client
+          console.log("[BEO-489] reference_screenshot received:", {
+            domain: event.domain,
+            imageBase64Length: (event.imageBase64 ?? "").length,
+            imageBase64First100: (event.imageBase64 ?? "").slice(0, 100),
+          });
           setMessages(prev => [
             ...prev.filter(m => m.type !== "thinking"),
             {

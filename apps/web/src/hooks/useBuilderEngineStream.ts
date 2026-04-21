@@ -258,23 +258,33 @@ export function useBuilderEngineStream() {
     const response = await startBuild(body);
     onBuildStarted?.(response);
 
-    // BEO-conversational: if the trace already contains a terminal event the build
-    // resolved synchronously (conversational plan summary, clarifying question, etc.).
-    // Replay the events directly from the initial response so pendingImplementPlanRef
-    // is set immediately — no SSE round-trip needed and no risk of the connection
-    // failing before the conversational_response event is processed.
+    // BEO-489 / BEO-conversational: replay ALL events already in the initial trace.
+    //
+    // The API may emit events synchronously before responding to POST /builds/start
+    // (e.g. reference_screenshot is taken inline before the HTTP 200 is sent).
+    // Those events land in response.trace.events but — without this loop — were
+    // silently dropped for non-terminal builds because subscribeToBuild starts at
+    // lastEventId (which is already past them).
+    //
+    // For terminal builds (conversational / clarifying question) we return early;
+    // for real builds we fall through to subscribeToBuild which picks up where the
+    // initial trace left off, so there are no duplicates.
     const traceEvents = response.trace.events;
     const hasTerminalEvent = traceEvents.some(e => e.type === "done" || e.type === "error");
 
-    if (hasTerminalEvent) {
-      console.log("[startAndStreamBuild] Terminal event in initial trace — replaying directly.", {
+    if (traceEvents.length > 0) {
+      console.log("[startAndStreamBuild] Replaying initial trace events.", {
         eventCount: traceEvents.length,
         types: traceEvents.map(e => e.type),
+        hasTerminalEvent,
         buildStatus: response.build.status,
       });
       for (const event of traceEvents) {
         onEvent?.(event);
       }
+    }
+
+    if (hasTerminalEvent) {
       return response;
     }
 

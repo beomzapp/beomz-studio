@@ -899,6 +899,12 @@ export function ChatMessageView({
       );
 
     case "reference_screenshot":
+      // BEO-489: debug log — confirm render path is reached and imageBase64 is valid
+      console.log("[BEO-489] Rendering reference_screenshot bubble:", {
+        domain: message.domain,
+        imageBase64Length: message.imageBase64.length,
+        imageBase64First100: message.imageBase64.slice(0, 100),
+      });
       return (
         <div className="flex items-start gap-2">
           <BAvatar />
