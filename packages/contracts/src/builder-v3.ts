@@ -78,6 +78,10 @@ export interface BuilderV3DoneEvent extends BuilderV3BaseEvent {
   payload?: Record<string, unknown> | null;
   /** True when the stream terminated due to a conversational/clarifying response (no build was run). */
   conversational?: boolean;
+  /** Present when the server signals implement-from-plan alongside terminal done. */
+  readyToImplement?: boolean;
+  implementPlan?: string;
+  plan?: string;
 }
 
 export interface BuilderV3ErrorEvent extends BuilderV3BaseEvent {
@@ -105,6 +109,9 @@ export interface BuilderV3ScopeConfirmationEvent extends BuilderV3BaseEvent {
 export interface BuilderV3ConversationalResponseEvent extends BuilderV3BaseEvent {
   type: "conversational_response";
   message: string;
+  readyToImplement?: boolean;
+  implementPlan?: string;
+  plan?: string;
 }
 
 // BEO-335: emitted when org lacks enough credits to run a complex build.

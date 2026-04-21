@@ -656,11 +656,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         case "conversational_response": {
           clearPreambleAndStageTimers();
           setIsAnalysingImage(false);
-          const e = event as BuilderV3ConversationalResponseEvent & {
-            readyToImplement?: boolean;
-            implementPlan?: string;
-            plan?: string;
-          };
+          const e: BuilderV3ConversationalResponseEvent = event;
           console.log("[BEO-conversational] conversational_response received:", {
             readyToImplement: e.readyToImplement,
             hasPlan: Boolean(e.plan),
