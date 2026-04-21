@@ -53,6 +53,7 @@ import {
   loadResearchContext,
   loadUrlContext,
 } from "../../lib/webFetch.js";
+import { screenshotUrl } from "../../lib/screenshotUrl.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -242,6 +243,14 @@ function buildAccumulatedContextFallback(
   return parts.join(". ").trim();
 }
 
+function readDomainFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return url;
+  }
+}
+
 function readStringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
@@ -371,6 +380,11 @@ function buildImmediateTrace(args: {
   message: string;
   operation: "initial_build" | "iteration";
   projectId: string;
+  referenceScreenshot?: {
+    imageBase64: string;
+    url: string;
+    domain: string;
+  } | null;
   readyToImplement?: boolean;
   requestedAt: string;
   type: "conversational_response" | "clarifying_question";
@@ -383,10 +397,25 @@ function buildImmediateTrace(args: {
     intent: args.intent,
   };
 
+  const screenshotEvent = args.referenceScreenshot
+    ? {
+        type: "reference_screenshot",
+        id: "2",
+        timestamp: args.requestedAt,
+        operation: args.operation,
+        imageBase64: args.referenceScreenshot.imageBase64,
+        url: args.referenceScreenshot.url,
+        domain: args.referenceScreenshot.domain,
+      }
+    : null;
+
+  const mainEventId = screenshotEvent ? "3" : "2";
+  const doneEventId = screenshotEvent ? "4" : "3";
+
   const mainEvent = args.type === "conversational_response"
     ? {
         type: "conversational_response",
-        id: "2",
+        id: mainEventId,
         timestamp: args.requestedAt,
         operation: args.operation,
         message: args.message,
@@ -400,7 +429,7 @@ function buildImmediateTrace(args: {
       }
     : {
         type: "clarifying_question",
-        id: "2",
+        id: mainEventId,
         timestamp: args.requestedAt,
         operation: args.operation,
         message: args.message,
@@ -408,7 +437,7 @@ function buildImmediateTrace(args: {
 
   const doneEvent = {
     type: "done",
-    id: "3",
+    id: doneEventId,
     timestamp: args.requestedAt,
     operation: args.operation,
     buildId: args.buildId,
@@ -433,10 +462,11 @@ function buildImmediateTrace(args: {
   return {
     events: [
       intentEvent,
+      ...(screenshotEvent ? [screenshotEvent] : []),
       mainEvent,
       doneEvent,
     ] as unknown as BuilderV3TraceMetadata["events"],
-    lastEventId: "3",
+    lastEventId: doneEventId,
     previewReady: false,
     fallbackReason: null,
     fallbackUsed: false,
@@ -590,7 +620,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && !isImplementConfirmation
     && !isIteration;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
-  const hasResearchUrl = Boolean(extractUrlLike(sourcePrompt));
+  const detectedUrl = extractUrlLike(sourcePrompt);
+  const hasResearchUrl = Boolean(detectedUrl);
 
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.
@@ -747,6 +778,28 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     const implementPlan = shouldOfferPlanSummary
       ? (accumulatedBuildContext ?? effectivePrompt)
       : null;
+
+    const shouldCaptureReferenceScreenshot = Boolean(shouldOfferPlanSummary && detectedUrl);
+    let referenceScreenshot: {
+      imageBase64: string;
+      url: string;
+      domain: string;
+    } | null = null;
+
+    if (shouldCaptureReferenceScreenshot && detectedUrl) {
+      const [, screenshotBase64] = await Promise.all([
+        loadUrlContext(sourcePrompt),
+        screenshotUrl(detectedUrl),
+      ]);
+      if (screenshotBase64) {
+        referenceScreenshot = {
+          imageBase64: screenshotBase64,
+          url: detectedUrl,
+          domain: readDomainFromUrl(detectedUrl),
+        };
+      }
+    }
+
     // BEO-485: URL context must be fetched before clarifying questions so the
     // model does not ask redundant "what does this site do?" questions.
     const websiteContext: WebsiteContext | null = shouldOfferPlanSummary
@@ -756,6 +809,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       : hasResearchUrl
       ? await loadUrlContext(sourcePrompt)
       : null;
+
     const assistantMessage = shouldOfferPlanSummary
       ? await generatePlanSummaryFn(implementPlan ?? effectivePrompt, projectName)
       : eventType === "clarifying_question"
@@ -783,6 +837,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       message: assistantMessage,
       operation,
       projectId,
+      referenceScreenshot,
       readyToImplement: Boolean(implementPlan),
       implementPlan,
       requestedAt,
