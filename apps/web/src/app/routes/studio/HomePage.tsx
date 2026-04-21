@@ -37,6 +37,7 @@ import { useAuth } from "../../../lib/useAuth";
 import { useCredits } from "../../../lib/CreditsContext";
 import { OnboardingModal, isOnboardingCompleted, markOnboardingCompleted } from "../../../components/studio/OnboardingModal";
 import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
+import { displayProjectName } from "../../../lib/displayProjectName";
 
 interface ProjectCard extends Project {
   generationCount: number;
@@ -449,7 +450,7 @@ export function HomePage() {
                     />
                   ) : (
                     <h3 className="truncate text-sm font-semibold text-[#1a1a1a]">
-                      {project.name}
+                      {displayProjectName(project.name)}
                     </h3>
                   )}
                   <button

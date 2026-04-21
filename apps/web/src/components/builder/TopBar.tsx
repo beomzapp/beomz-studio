@@ -30,6 +30,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
 import { GlobalNav } from "../layout/GlobalNav";
+import { displayProjectName } from "../../lib/displayProjectName";
 
 export type ActiveView = "preview" | "code" | "database" | "integrations";
 
@@ -51,15 +52,6 @@ const PROJECT_ICON_MAP: Record<string, React.ComponentType<{ size?: number; clas
 function ProjectIconRenderer({ name, size = 14 }: { name: string; size?: number }) {
   const Icon = PROJECT_ICON_MAP[name] ?? Sparkles;
   return <Icon size={size} />;
-}
-
-/** Placeholder DB/template names — show a friendly label until the user or AI names the app. */
-const PLACEHOLDER_PROJECT_DISPLAY = new Set(["untitled project", "interactive tool"]);
-
-function displayProjectName(name: string): string {
-  const key = name.trim().toLowerCase();
-  if (PLACEHOLDER_PROJECT_DISPLAY.has(key)) return "New project";
-  return name;
 }
 
 interface TopBarProps {
