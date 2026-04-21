@@ -32,6 +32,7 @@ export const CREDIT_PACKS = [
 ]
 
 export const CONVERSATIONAL_COST = 1
+export const WEB_RESEARCH_SURCHARGE = 1
 export const CHAT_MESSAGE_COST_HAIKU = 1
 export const CHAT_MESSAGE_COST_SONNET = 3
 export const CHAT_IMAGE_ANALYSIS_SURCHARGE = 1

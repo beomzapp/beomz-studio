@@ -15,6 +15,7 @@ module.exports = {
       listen_timeout: 5000,
       env: {
         NODE_ENV: "production",
+        TAVILY_API_KEY: process.env.TAVILY_API_KEY,
       },
     },
   ],

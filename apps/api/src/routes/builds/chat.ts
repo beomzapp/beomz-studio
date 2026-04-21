@@ -22,6 +22,7 @@ import {
   CHAT_IMAGE_ANALYSIS_SURCHARGE,
   CHAT_MESSAGE_COST_HAIKU,
   CHAT_MESSAGE_COST_SONNET,
+  WEB_RESEARCH_SURCHARGE,
   isAdminEmail,
 } from "../../lib/credits.js";
 import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
@@ -35,7 +36,12 @@ import {
   parseStructuredChatResponse,
 } from "../../lib/chatPrompts.js";
 import { classifyIntent } from "../../lib/intentClassifier.js";
-import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
+import {
+  canUseTavilySearch,
+  extractUrlLike,
+  loadResearchContext,
+  loadUrlContext,
+} from "../../lib/webFetch.js";
 import { anthropic } from "../plan/shared.js";
 
 type ChatAnthropicMessage = Anthropic.MessageParam;
@@ -97,17 +103,7 @@ function calculateChatCreditCharge(model: string, hasImage: boolean): number {
 }
 
 async function loadWebsiteContext(message: string) {
-  const url = extractUrlLike(message);
-  if (!url) {
-    return null;
-  }
-
-  const content = await fetchUrlContent(url);
-  return {
-    url,
-    content,
-    fetchFailed: content === null,
-  };
+  return loadUrlContext(message);
 }
 
 const requestSchema = z.object({
@@ -136,7 +132,6 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
 
       const { imageUrl, messages: rawMessages, projectId } = parsed.data;
       const chatModel = "claude-sonnet-4-6";
-      const creditsToDeduct = calculateChatCreditCharge(chatModel, Boolean(imageUrl));
 
       let project: ProjectRow | null = null;
       let projectFiles: readonly StudioFile[] = [];
@@ -170,6 +165,11 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
         projectFiles.length > 0,
         Boolean(imageUrl),
       );
+      const hasResearchUrl = Boolean(extractUrlLike(currentUserMessage.content));
+      const shouldUseResearchLookup = hasResearchUrl
+        || (intentDecision.intent === "research" && canUseTavilySearch(currentUserMessage.content));
+      const creditsToDeduct = calculateChatCreditCharge(chatModel, Boolean(imageUrl))
+        + (shouldUseResearchLookup ? WEB_RESEARCH_SURCHARGE : 0);
 
       if (!isAdminEmail(orgContext.user.email)) {
         const freshOrg = typeof orgContext.db.getOrgWithBalance === "function"
@@ -178,7 +178,7 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
         const totalAvailable = Number(freshOrg?.credits ?? orgContext.org.credits ?? 0)
           + Number(freshOrg?.topup_credits ?? orgContext.org.topup_credits ?? 0);
 
-        if (totalAvailable <= 0) {
+        if (totalAvailable < creditsToDeduct) {
           return c.json({
             error: "You’re out of credits for chat right now. Top up or upgrade to keep going.",
             available: totalAvailable,
@@ -194,7 +194,11 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
             content: message.content,
             timestamp: new Date(index).toISOString(),
           }));
-      const websiteContext = await loadWebsiteContext(currentUserMessage.content);
+      const websiteContext = intentDecision.intent === "research"
+        ? await loadResearchContext(currentUserMessage.content)
+        : hasResearchUrl
+        ? await loadWebsiteContext(currentUserMessage.content)
+        : null;
       const systemPrompt = intentDecision.intent === "ambiguous"
         ? buildClarifyingQuestionSystemPrompt({
             projectName: project?.name ?? null,

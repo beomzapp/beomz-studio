@@ -11,7 +11,9 @@ import {
 export interface WebsiteContext {
   content: string | null;
   fetchFailed: boolean;
-  url: string;
+  label: string;
+  sourceType: "search" | "url";
+  url?: string;
 }
 
 export interface StructuredChatResponse {
@@ -91,16 +93,25 @@ function buildWebsiteContextBlock(websiteContext?: WebsiteContext | null): strin
   if (websiteContext.content) {
     return [
       "## Website context",
-      `Source URL: ${websiteContext.url}`,
-      "Fetched page content:",
+      websiteContext.label,
+      "Website content:",
       websiteContext.content,
     ].join("\n");
   }
 
   if (websiteContext.fetchFailed) {
+    if (websiteContext.sourceType === "search") {
+      return [
+        "## Website context",
+        websiteContext.label,
+        "Web search returned no usable content.",
+        "If the user wants research anyway, answer with what you can infer and say the search results were limited.",
+      ].join("\n");
+    }
+
     return [
       "## Website context",
-      `A website or product reference was mentioned: ${websiteContext.url}`,
+      websiteContext.label,
       "Jina fetch was unavailable or returned no usable content.",
       "If the user wants something similar, ask for the key features or flows to replicate.",
     ].join("\n");

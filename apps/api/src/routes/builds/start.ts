@@ -28,7 +28,12 @@ import {
   generateConversationalAnswer,
   runBuildInBackground,
 } from "./generate.js";
-import { CONVERSATIONAL_COST, NEGATIVE_FLOOR_CONST, isAdminEmail } from "../../lib/credits.js";
+import {
+  CONVERSATIONAL_COST,
+  NEGATIVE_FLOOR_CONST,
+  WEB_RESEARCH_SURCHARGE,
+  isAdminEmail,
+} from "../../lib/credits.js";
 import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
 import {
   appendProjectChatHistory,
@@ -36,7 +41,16 @@ import {
   shouldRefreshProjectChatSummary,
 } from "../../lib/projectChat.js";
 import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
-import { generatePlanSummary as generatePlanSummaryMessage } from "../../lib/chatPrompts.js";
+import {
+  generatePlanSummary as generatePlanSummaryMessage,
+  type WebsiteContext,
+} from "../../lib/chatPrompts.js";
+import {
+  canUseTavilySearch,
+  extractUrlLike,
+  loadResearchContext,
+  loadUrlContext,
+} from "../../lib/webFetch.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -507,6 +521,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && !needsClarification
     && !isImplementConfirmation;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
+  const hasResearchUrl = Boolean(extractUrlLike(sourcePrompt));
 
   if (isBuildPromptTooShort(prompt) && (isBuildIshIntent || isImplementConfirmation)) {
     return c.json(
@@ -518,6 +533,10 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.
   const isImmediateConversation = isConversationalIntent || needsClarification || shouldOfferPlanSummary;
+  const willUseConversationalAnswer = isImmediateConversation && !needsClarification && !shouldOfferPlanSummary;
+  const shouldUseResearchLookup = willUseConversationalAnswer
+    && (hasResearchUrl || (classifiedIntent === "research" && canUseTavilySearch(sourcePrompt)));
+  const conversationalCreditsRequired = CONVERSATIONAL_COST + (shouldUseResearchLookup ? WEB_RESEARCH_SURCHARGE : 0);
 
   // BEO-465: accumulatedContext from the classifier becomes the enhanced
   // build prompt once confidence crosses 0.9.
@@ -596,11 +615,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     }
   }
 
-  if (!isAdminEmail(userEmail) && isImmediateConversation && classifiedIntent !== "ambiguous" && totalAvailable < CONVERSATIONAL_COST) {
+  if (!isAdminEmail(userEmail) && isImmediateConversation && classifiedIntent !== "ambiguous" && totalAvailable < conversationalCreditsRequired) {
     return c.json({
       error: "You are out of credits for chat right now. Top up or upgrade to keep going.",
       available: totalAvailable,
-      required: CONVERSATIONAL_COST,
+      required: conversationalCreditsRequired,
     }, 402);
   }
 
@@ -664,6 +683,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     const implementPlan = shouldOfferPlanSummary
       ? (accumulatedBuildContext ?? effectivePrompt)
       : null;
+    const websiteContext: WebsiteContext | null = shouldOfferPlanSummary || eventType === "clarifying_question"
+      ? null
+      : classifiedIntent === "research"
+      ? await loadResearchContext(sourcePrompt)
+      : hasResearchUrl
+      ? await loadUrlContext(sourcePrompt)
+      : null;
     const assistantMessage = shouldOfferPlanSummary
       ? await generatePlanSummaryFn(implementPlan ?? effectivePrompt, projectName)
       : eventType === "clarifying_question"
@@ -682,6 +708,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
           currentMessage: sourcePrompt,
           existingFiles,
           projectName,
+          websiteContext,
         })).message;
     const trace = buildImmediateTrace({
       buildId,
@@ -743,11 +770,12 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
         projectName,
       );
       if (!isAdminEmail(userEmail)) {
+        const creditsToDeduct = CONVERSATIONAL_COST + (websiteContext ? WEB_RESEARCH_SURCHARGE : 0);
         orgContext.db.applyOrgUsageDeduction(
           orgContext.org.id,
-          CONVERSATIONAL_COST,
+          creditsToDeduct,
           buildId,
-          "Conversational answer",
+          websiteContext ? "Conversational answer + web research" : "Conversational answer",
         ).catch((error: unknown) => {
           console.error("[builds/start] conversational credit deduction failed (non-fatal):", error instanceof Error ? error.message : String(error));
         });

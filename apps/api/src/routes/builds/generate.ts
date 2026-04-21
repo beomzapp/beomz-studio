@@ -82,9 +82,10 @@ import {
   buildStructuredChatSystemPrompt,
   parseStructuredChatResponse,
   type StructuredChatResponse,
+  type WebsiteContext,
 } from "../../lib/chatPrompts.js";
 import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
-import { extractUrlLike, fetchUrlContent } from "../../lib/webFetch.js";
+import { loadUrlContext } from "../../lib/webFetch.js";
 import { isBuildPromptTooShort, MIN_BUILD_PROMPT_LENGTH } from "./shared.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -567,11 +568,7 @@ function buildConversationalSystemPrompt(
   existingFiles: readonly StudioFile[],
   chatSummary: string | null,
   chatHistory: readonly ProjectChatHistoryEntry[],
-  websiteContext?: {
-    content: string | null;
-    fetchFailed: boolean;
-    url: string;
-  } | null,
+  websiteContext?: WebsiteContext | null,
 ): string {
   return buildStructuredChatSystemPrompt({
     projectName,
@@ -587,11 +584,7 @@ function buildClarifyingSystemPrompt(
   existingFiles: readonly StudioFile[],
   chatSummary: string | null,
   chatHistory: readonly ProjectChatHistoryEntry[],
-  websiteContext?: {
-    content: string | null;
-    fetchFailed: boolean;
-    url: string;
-  } | null,
+  websiteContext?: WebsiteContext | null,
   accumulatedContext?: string | null,
   nearReady?: boolean,
 ): string {
@@ -651,17 +644,7 @@ function buildAnthropicUserContent(
 }
 
 async function loadWebsiteContext(message: string) {
-  const url = extractUrlLike(message);
-  if (!url) {
-    return null;
-  }
-
-  const content = await fetchUrlContent(url);
-  return {
-    url,
-    content,
-    fetchFailed: content === null,
-  };
+  return loadUrlContext(message);
 }
 
 // ─── Design system detection + spec injection ─────────────────────────────────
@@ -2363,6 +2346,7 @@ export async function generateConversationalAnswer(
     currentMessage: string;
     existingFiles: readonly StudioFile[];
     projectName?: string;
+    websiteContext?: WebsiteContext | null;
   },
 ): Promise<StructuredChatResponse> {
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
@@ -2378,7 +2362,7 @@ export async function generateConversationalAnswer(
   const timeoutId = setTimeout(() => controller.abort(), 12_000);
   try {
     const client = new Anthropic({ apiKey });
-    const websiteContext = await loadWebsiteContext(input.currentMessage);
+    const websiteContext = input.websiteContext ?? await loadWebsiteContext(input.currentMessage);
     const response = await client.messages.create(
       {
         model: "claude-sonnet-4-6",

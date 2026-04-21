@@ -43,6 +43,8 @@ test("buildStructuredChatSystemPrompt includes the senior-colleague rules and JS
     chatSummary: "Expense dashboard with approvals.",
     chatHistory: [],
     websiteContext: {
+      label: "Source URL: https://mybos.com",
+      sourceType: "url",
       url: "https://mybos.com",
       content: "myBOS is a building operations platform with maintenance workflows.",
       fetchFailed: false,
@@ -74,6 +76,8 @@ test("buildClarifyingQuestionSystemPrompt includes failed website guidance", () 
     chatSummary: null,
     chatHistory: [],
     websiteContext: {
+      label: "Source URL: https://mybos.com",
+      sourceType: "url",
       url: "https://mybos.com",
       content: null,
       fetchFailed: true,

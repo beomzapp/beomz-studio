@@ -7,6 +7,7 @@ import type { OrgContext } from "../../types.js";
 process.env.ANTHROPIC_API_KEY ??= "test-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+process.env.TAVILY_API_KEY ??= "test-tavily-key";
 
 test("/builds/start defaults generation to claude-sonnet-4-6", async () => {
   const source = await readFile(new URL("./start.ts", import.meta.url), "utf8");
@@ -759,4 +760,195 @@ test("/builds/start forces a plan summary after three clarifying questions even 
   assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), true);
   assert.equal(payload.trace.events.some((event) => event.readyToImplement === true), true);
   assert.equal(runBuildCalls, 0);
+});
+
+test("/builds/start injects Tavily research context for research intent without a URL", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+  const {
+    resetTavilyClientFactoryForTests,
+    setTavilyClientFactoryForTests,
+  } = await import("../../lib/webFetch.js");
+
+  let capturedWebsiteContext: Record<string, unknown> | null = null;
+  let deductedCredits: number | null = null;
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          applyOrgUsageDeduction: async (_orgId: string, credits: number) => {
+            deductedCredits = credits;
+            return {
+              deducted: credits,
+              credits: 10 - credits,
+              topup_credits: 0,
+            };
+          },
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: (input.session_events as Record<string, unknown>[] | undefined) ?? [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: (input.warnings as string[] | undefined) ?? [],
+          }),
+          getOrgWithBalance: async () => org,
+          createProject: async (input: Record<string, unknown>) => ({
+            id: input.id as string,
+            name: input.name as string,
+            org_id: input.org_id as string,
+            status: input.status as string,
+            template: input.template as string,
+            icon: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            id: "66666666-6666-6666-6666-666666666666",
+            name: patch.name ?? "New Project",
+            org_id: org.id,
+            status: patch.status ?? "ready",
+            template: patch.template ?? "interactive-tool",
+            icon: "Wrench",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            chat_history: [],
+            chat_summary: null,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "research",
+      confidence: 0.98,
+      reason: "Clear research request.",
+    }),
+    generateConversationalAnswer: async (input) => {
+      capturedWebsiteContext = (input.websiteContext as Record<string, unknown> | null) ?? null;
+      return {
+        message: "Here are the findings.",
+        readyToImplement: false,
+        implementPlan: null,
+      };
+    },
+    runBuildInBackground: async () => {
+      throw new Error("should not start build");
+    },
+  });
+
+  setTavilyClientFactoryForTests(() => ({
+    search: async () => ({
+      query: "lovable pricing",
+      responseTime: 0.2,
+      images: [],
+      results: [
+        {
+          title: "Lovable pricing",
+          url: "https://lovable.dev/pricing",
+          content: "Plans start free and scale with usage.",
+          score: 0.9,
+          publishedDate: "2026-04-01",
+        },
+      ],
+      requestId: "req-1",
+    }),
+    searchContext: async () => "",
+    searchQNA: async () => "",
+    extract: async () => ({
+      failedResults: [],
+      requestId: "extract-1",
+      responseTime: 0.1,
+      results: [],
+    }),
+    crawl: async () => ({
+      baseUrl: "https://example.com",
+      requestId: "crawl-1",
+      responseTime: 0.1,
+      results: [],
+    }),
+    map: async () => ({
+      baseUrl: "https://example.com",
+      requestId: "map-1",
+      responseTime: 0.1,
+      results: [],
+    }),
+    research: async () => ({
+      createdAt: new Date().toISOString(),
+      input: "lovable pricing",
+      model: "auto",
+      requestId: "research-1",
+      responseTime: 0.1,
+      status: "completed",
+    }),
+    getResearch: async () => ({
+      content: "",
+      createdAt: new Date().toISOString(),
+      requestId: "research-1",
+      responseTime: 0.1,
+      sources: [],
+      status: "completed",
+    }),
+  }));
+
+  try {
+    const response = await route.request("http://localhost/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: "research lovable pricing",
+      }),
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(capturedWebsiteContext?.sourceType, "search");
+    assert.match(String(capturedWebsiteContext?.content ?? ""), /Lovable pricing/);
+    assert.equal(deductedCredits, 2);
+  } finally {
+    resetTavilyClientFactoryForTests();
+  }
 });
