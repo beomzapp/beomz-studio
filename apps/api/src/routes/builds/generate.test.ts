@@ -122,6 +122,8 @@ test("iteration path uses a lower Anthropic max token cap and logs isIteration",
   assert.match(source, /const ITERATION_MAX_TOKENS = 32000;/);
   assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
   assert.match(source, /console\.log\("\[generate\] isIteration:", isIteration\);/);
+  assert.match(source, /console\.log\("\[generate\] iteration input files:", existingFiles\?\.length \?\? 0, "files"\);/);
+  assert.match(source, /console\.log\("\[generate\] iteration input tokens \(estimated\):", Math\.round\(JSON\.stringify\(messages\)\.length \/ 4\)\);/);
 });
 
 test("isNpmPackage classifies npm and local import paths correctly", () => {

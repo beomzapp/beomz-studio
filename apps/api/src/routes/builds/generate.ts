@@ -2071,10 +2071,14 @@ async function callModelIterate(
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {
+    const anthropicUserContent = buildAnthropicUserContent(userMessage, imageUrl);
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: anthropicUserContent }];
+    console.log("[generate] iteration input files:", existingFiles?.length ?? 0, "files");
+    console.log("[generate] iteration input tokens (estimated):", Math.round(JSON.stringify(messages).length / 4));
     return callAnthropicWithMessages(
       model,
       systemPrompt,
-      buildAnthropicUserContent(userMessage, imageUrl),
+      anthropicUserContent,
       prompt,
       maxTokens,
       instrumentation,
@@ -2098,10 +2102,14 @@ async function callModelIterate(
 
   // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
   console.warn("[generate] Unknown model for iteration, falling back to claude-sonnet-4-6:", model);
+  const anthropicUserContent = buildAnthropicUserContent(userMessage, imageUrl);
+  const messages: Anthropic.MessageParam[] = [{ role: "user", content: anthropicUserContent }];
+  console.log("[generate] iteration input files:", existingFiles?.length ?? 0, "files");
+  console.log("[generate] iteration input tokens (estimated):", Math.round(JSON.stringify(messages).length / 4));
   return callAnthropicWithMessages(
     "claude-sonnet-4-6",
     systemPrompt,
-    buildAnthropicUserContent(userMessage, imageUrl),
+    anthropicUserContent,
     prompt,
     maxTokens,
   );
