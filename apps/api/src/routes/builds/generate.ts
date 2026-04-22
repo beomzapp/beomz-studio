@@ -146,6 +146,8 @@ interface IterationMetrics {
   toolReadFiles: string[];
   toolSearchQueries: string[];
   changedFiles: string[];
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
 }
 
 interface IterationFileContext {
@@ -300,7 +302,7 @@ const ITERATION_TOOLS: Anthropic.Messages.Tool[] = [
   DELIVER_FILES_TOOL,
 ];
 
-const ITERATION_MAX_TOOL_STEPS = 8;
+const ITERATION_MAX_TOOL_STEPS = 20;
 const ITERATION_MAX_SEED_FILES = 6;
 const ITERATION_MAX_SEARCH_MATCHES = 5;
 
@@ -1776,10 +1778,33 @@ function isNavigationEdit(prompt: string): boolean {
   return /\b(page|route|screen|tab|sidebar|navigation|nav|menu|section)\b/i.test(prompt);
 }
 
+function isPriorityAppearanceBasename(base: string): boolean {
+  return /^(theme\.(ts|js)|styles?\.css|tailwind\.config\.(ts|js|cjs|mjs))$/i.test(base);
+}
+
+function isAppearanceFilename(base: string): boolean {
+  return /\b(theme|color|colour|style|styles)\b/i.test(base);
+}
+
+function hasAppearanceContent(content: string): boolean {
+  return /\b(theme|colors?|palette)\b/i.test(content.slice(0, 5000));
+}
+
+function isAppearanceSeedCandidate(file: IterationFileContext): boolean {
+  return (
+    isPriorityAppearanceBasename(file.basename)
+    || isAppearanceFilename(file.basename)
+    || hasAppearanceContent(file.content)
+    || file.kind === "style"
+  );
+}
+
 function buildIterationFileContexts(existingFiles: readonly StudioFile[], prompt: string): IterationFileContext[] {
   const promptTokens = splitIntoSearchTokens(prompt);
+  const appearanceEdit = isAppearanceEdit(prompt);
 
   return existingFiles.map((file) => {
+    const base = basename(file.path);
     const fileNameTokens = splitIntoSearchTokens(basename(file.path));
     const exportTokens = extractExportsFromContent(file.content).flatMap((value) => splitIntoSearchTokens(value));
     const importTokens = extractImportsFromContent(file.content).flatMap((value) => splitIntoSearchTokens(value));
@@ -1791,8 +1816,22 @@ function buildIterationFileContexts(existingFiles: readonly StudioFile[], prompt
     score += countTokenOverlap(importTokens, promptTokens) * 3;
     score += Math.min(countTokenOverlap(contentTokens, promptTokens), 12);
 
-    const base = basename(file.path);
-    if (base === "theme.ts" && isAppearanceEdit(prompt)) {
+    if (appearanceEdit) {
+      if (isPriorityAppearanceBasename(base)) {
+        score += 90;
+      }
+      if (isAppearanceFilename(base)) {
+        score += 35;
+      }
+      if (hasAppearanceContent(file.content)) {
+        score += 24;
+      }
+      if (file.kind === "style") {
+        score += 18;
+      }
+    }
+
+    if (base === "theme.ts" && appearanceEdit) {
       score += 60;
     }
     if (base === "package.json" && isDependencyEdit(prompt)) {
@@ -1837,7 +1876,29 @@ function expandIterationSeedFiles(
   };
 
   if (appearanceOnly) {
-    add(byBasename.get("theme.ts"));
+    for (const priorityName of [
+      "theme.ts",
+      "theme.js",
+      "styles.css",
+      "tailwind.config.ts",
+      "tailwind.config.js",
+      "tailwind.config.cjs",
+      "tailwind.config.mjs",
+    ]) {
+      add(byBasename.get(priorityName));
+    }
+
+    for (const file of sortedFiles) {
+      if (selected.size >= ITERATION_MAX_SEED_FILES) break;
+      if (isAppearanceSeedCandidate(file)) {
+        add(file);
+      }
+    }
+
+    if (selected.size === 0) {
+      add(byBasename.get("theme.ts") ?? sortedFiles[0]);
+    }
+
     return [...selected.values()];
   }
 
@@ -2260,6 +2321,56 @@ async function callAnthropicIterateWithTools(
     const toolSearchQueries: string[] = [];
     let messages: Anthropic.MessageParam[] = [{ role: "user", content: selection.optimizedUserContent }];
 
+    const buildIterationMetrics = async (
+      changedFiles: string[],
+      fallback?: { reason: string },
+    ): Promise<IterationMetrics> => ({
+      baselineInputTokens: await baselineCountPromise,
+      optimizedInputTokens: await optimizedCountPromise,
+      ttftMs,
+      totalGenerationMs: Date.now() - startedAt,
+      seedFiles: selection.seedFiles.map((file) => file.basename),
+      toolReadFiles: [...toolReadFiles],
+      toolSearchQueries,
+      changedFiles,
+      fallbackUsed: Boolean(fallback),
+      fallbackReason: fallback?.reason,
+    });
+
+    const fallbackToLegacyIteration = async (reason: string): Promise<CustomiseResult> => {
+      console.warn("[generate] WARNING: iteration tool loop fallback triggered", {
+        buildId: instrumentation?.buildId ?? null,
+        model: modelId,
+        reason,
+        maxSteps: ITERATION_MAX_TOOL_STEPS,
+        seedFiles: selection.seedFiles.map((file) => file.basename),
+        toolReadFiles: [...toolReadFiles],
+        toolSearchQueries,
+      });
+
+      const fallbackResult = await callAnthropicWithMessages(
+        modelId,
+        systemPrompt,
+        buildBaselineIterationAnthropicUserContent(prompt, existingFiles, imageUrl),
+        prompt,
+        maxTokens,
+        instrumentation,
+      );
+      const metrics = await buildIterationMetrics(
+        fallbackResult.files.map((file) => file.path),
+        { reason },
+      );
+
+      console.log("[generate] iteration metrics:", metrics);
+
+      return {
+        ...fallbackResult,
+        inputTokens: totalInputTokens + (fallbackResult.inputTokens ?? 0),
+        outputTokens: totalOutputTokens + fallbackResult.outputTokens,
+        iterationMetrics: metrics,
+      };
+    };
+
     for (let step = 0; step < ITERATION_MAX_TOOL_STEPS; step += 1) {
       const stream = client.messages.stream({
         model: modelId,
@@ -2303,23 +2414,13 @@ async function callAnthropicIterateWithTools(
 
       const deliverBlock = toolUses.find((block) => block.name === DELIVER_FILES_TOOL.name);
       if (deliverBlock) {
-        const baselineInputTokens = await baselineCountPromise;
-        const optimizedInputTokens = await optimizedCountPromise;
+        console.log("[generate] tool loop step:", step + 1, "tool:", deliverBlock.name);
+        console.log("[generate] calling tool:", deliverBlock.name, deliverBlock.input ?? {});
         const parsed = parseRawToolOutput(
           deliverBlock.input as { files?: unknown; summary?: unknown; appName?: unknown; migrations?: unknown },
           prompt,
         );
-
-        const metrics: IterationMetrics = {
-          baselineInputTokens,
-          optimizedInputTokens,
-          ttftMs,
-          totalGenerationMs: Date.now() - startedAt,
-          seedFiles: selection.seedFiles.map((file) => file.basename),
-          toolReadFiles: [...toolReadFiles],
-          toolSearchQueries,
-          changedFiles: parsed.files.map((file) => file.path),
-        };
+        const metrics = await buildIterationMetrics(parsed.files.map((file) => file.path));
 
         console.log("[generate] iteration metrics:", metrics);
 
@@ -2332,11 +2433,14 @@ async function callAnthropicIterateWithTools(
       }
 
       if (toolUses.length === 0) {
-        throw new Error("Anthropic iteration did not call a tool.");
+        return fallbackToLegacyIteration("Anthropic iteration did not call a tool.");
       }
 
       const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const toolUse of toolUses) {
+        console.log("[generate] tool loop step:", step + 1, "tool:", toolUse.name);
+        console.log("[generate] calling tool:", toolUse.name, toolUse.input ?? {});
+
         if (toolUse.name === ITERATION_READ_FILE_TOOL.name) {
           const input = (toolUse.input ?? {}) as { path?: unknown; startLine?: unknown; endLine?: unknown };
           const file = typeof input.path === "string" ? resolveIterationFile(contexts, input.path) : null;
@@ -2400,7 +2504,7 @@ async function callAnthropicIterateWithTools(
       ];
     }
 
-    throw new Error(`Iteration tool loop exceeded ${ITERATION_MAX_TOOL_STEPS} steps.`);
+    return fallbackToLegacyIteration(`Iteration tool loop exceeded ${ITERATION_MAX_TOOL_STEPS} steps.`);
   };
 
   const runWithRetry = async (modelId: string): Promise<CustomiseResult> => {

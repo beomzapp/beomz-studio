@@ -133,6 +133,48 @@ test("iteration user message includes a project manifest, seed files, and the ed
   assert.match(prompt, /Edit request: Rename the CTA button\./);
 });
 
+test("appearance edits prioritize theme and style files in the seed context", () => {
+  const prompt = buildIterationUserMessage("Change the theme color to red.", [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: "import { theme } from './theme';\nexport default function App() { return <div style={{ color: theme.textPrimary }}>Hello</div>; }\n",
+      source: "ai",
+      locked: false,
+    },
+    {
+      path: "theme.ts",
+      kind: "config",
+      language: "ts",
+      content: "export const theme = { accent: '#f97316', primary: '#2563eb' };\n",
+      source: "ai",
+      locked: false,
+    },
+    {
+      path: "styles.css",
+      kind: "style",
+      language: "css",
+      content: ":root { --brand-color: #f97316; }\n",
+      source: "ai",
+      locked: false,
+    },
+    {
+      path: "tailwind.config.ts",
+      kind: "config",
+      language: "typescript",
+      content: "export default { theme: { extend: { colors: { brand: '#f97316' } } } };\n",
+      source: "ai",
+      locked: false,
+    },
+  ]);
+
+  assert.match(prompt, /### theme\.ts/);
+  assert.match(prompt, /### styles\.css/);
+  assert.match(prompt, /### tailwind\.config\.ts/);
+  assert.match(prompt, /Edit request: Change the theme color to red\./);
+});
+
 test("system prompts describe the preview shell icon and logo color mapping", () => {
   const initialPrompt = buildSystemPrompt("professional-blue");
   const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);
@@ -158,6 +200,7 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
 test("iteration path uses a lower Anthropic max token cap, enables tool-based file access, and logs iteration metrics", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 
+  assert.match(source, /const ITERATION_MAX_TOOL_STEPS = 20;/);
   assert.match(source, /const ITERATION_MAX_TOKENS = 32000;/);
   assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
   assert.match(source, /system:\s*\[\s*\{\s*type: "text",\s*text: systemPrompt,\s*cache_control: \{ type: "ephemeral" \}/);
@@ -167,6 +210,10 @@ test("iteration path uses a lower Anthropic max token cap, enables tool-based fi
   assert.match(source, /const ITERATION_TOOLS:/);
   assert.match(source, /stream\.on\("streamEvent"/);
   assert.match(source, /console\.log\("\[generate\] iteration tool turn:"/);
+  assert.match(source, /console\.log\("\[generate\] tool loop step:", step \+ 1, "tool:", toolUse\.name\);/);
+  assert.match(source, /console\.log\("\[generate\] calling tool:", toolUse\.name, toolUse\.input \?\? \{\}\);/);
+  assert.match(source, /iteration tool loop fallback triggered/);
+  assert.match(source, /return fallbackToLegacyIteration\(`Iteration tool loop exceeded \$\{ITERATION_MAX_TOOL_STEPS\} steps\.`\);/);
   assert.match(source, /console\.log\("\[generate\] iteration metrics:", metrics\);/);
 });
 
