@@ -83,6 +83,14 @@ test("system prompts include lucide safe icon guidance and banned icon list", ()
   assert.match(iterationPrompt, /Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard/);
 });
 
+test("iteration system prompt forces surgical changed-file responses", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, false);
+
+  assert.match(prompt, /Return ONLY the files you need to modify\. Do not return unchanged files\./);
+  assert.match(prompt, /Make targeted, surgical edits\. Do not rewrite the entire app\./);
+  assert.match(prompt, /If only one file needs changing, return only that file\./);
+});
+
 test("system prompts describe the preview shell icon and logo color mapping", () => {
   const initialPrompt = buildSystemPrompt("professional-blue");
   const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);
@@ -103,6 +111,14 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
   assert.match(source, /injectUrlContextIntoBuildPrompt/);
   assert.match(source, /const promptWithUrlGrounding = await injectUrlContextIntoBuildPrompt\(prompt\);/);
   assert.match(source, /workingPrompt = input\.isIteration \? promptWithUrlGrounding : await enrichPrompt\(promptWithUrlGrounding\);/);
+});
+
+test("iteration path uses a lower Anthropic max token cap and logs isIteration", async () => {
+  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(source, /const ITERATION_MAX_TOKENS = 24000;/);
+  assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
+  assert.match(source, /console\.log\("\[generate\] isIteration:", isIteration\);/);
 });
 
 test("isNpmPackage classifies npm and local import paths correctly", () => {

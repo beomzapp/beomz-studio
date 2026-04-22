@@ -170,9 +170,11 @@ function roundUsd(costUsd: number): number {
 const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
   name: "deliver_customised_files",
   description:
-    "Deliver all generated app files. "
-    + "App.tsx is always required. "
-    + "For multi-page apps (sidebar nav, multiple sections) also include one file per major page — "
+    "Deliver the files needed to fulfill the request. "
+    + "For initial builds, include the full generated app and App.tsx. "
+    + "For iterations, return only changed or new files and omit unchanged files. "
+    + "Only include App.tsx during iterations when it changed or a new page/component needs wiring. "
+    + "For multi-page initial builds (sidebar nav, multiple sections) also include one file per major page — "
     + "e.g. AssetsPage.tsx, WorkOrdersPage.tsx, TeamPage.tsx. "
     + "The summary must be one sentence describing the finished app.",
   input_schema: {
@@ -1608,16 +1610,22 @@ function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?:
 // ─── Anthropic provider ───────────────────────────────────────────────────────
 
 const ANTHROPIC_HAIKU_FALLBACK = "claude-haiku-4-5-20251001";
+const DEFAULT_BUILD_MAX_TOKENS = 64000;
+const ITERATION_MAX_TOKENS = 24000;
 
 async function callAnthropicWithMessages(
   model: string,
   systemPrompt: string,
   userMessage: Anthropic.MessageParam["content"],
   prompt: string,
-  maxTokens = 64000,
+  maxTokens = DEFAULT_BUILD_MAX_TOKENS,
   instrumentation?: { buildId: string; isIteration: boolean },
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
+    const isIteration = Boolean(instrumentation?.isIteration);
+    const tokenWarningThreshold = Math.max(0, maxTokens - 8000);
+    console.log("[generate] isIteration:", isIteration);
+    console.log("[generate] maxTokens:", maxTokens);
     console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
     const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
     const stream = client.messages.stream({
@@ -1632,9 +1640,9 @@ async function callAnthropicWithMessages(
     const inputTokens = message.usage?.input_tokens ?? 0;
     const outputTokens = message.usage?.output_tokens ?? 0;
     console.log("[generate] Anthropic response:", { model: modelId, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
-    // BEO-319: warn when approaching the 64k ceiling so we can monitor token pressure
-    if (outputTokens >= 56000) {
-      console.warn("[generate] WARNING: output tokens approaching 64k limit — consider tightening phase scope:", { outputTokens, model: modelId });
+    // Warn when approaching the configured ceiling so we can monitor token pressure.
+    if (outputTokens >= tokenWarningThreshold) {
+      console.warn("[generate] WARNING: output tokens approaching configured limit — consider tightening scope:", { outputTokens, model: modelId, maxTokens });
     }
     const toolBlock = message.content.find(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
@@ -1946,18 +1954,20 @@ export function buildIterationSystemPrompt(
     imageBlock,
     "",
     "RULES:",
-    "1. Return ONLY files that actually need to change. Do NOT return unchanged files.",
-    "2. Preserve all existing structure, components, navigation, and logic unless the change requires touching them.",
-    "3. For feature additions: add the minimal code in the relevant file(s) only.",
-    "4. For text/copy changes: update only the text content, nothing else.",
-    "5. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
-    "6. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
+    "1. Return ONLY the files you need to modify. Do not return unchanged files.",
+    "2. Make targeted, surgical edits. Do not rewrite the entire app.",
+    "3. If only one file needs changing, return only that file.",
+    "4. Preserve all existing structure, components, navigation, and logic unless the change requires touching them.",
+    "5. For feature additions: add the minimal code in the relevant file(s) only.",
+    "6. For text/copy changes: update only the text content, nothing else.",
+    "7. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
+    "8. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
     "   Do NOT include <script src=\"https://cdn.tailwindcss.com\"> or any cdn.tailwindcss.com link/script tag. Tailwind CSS v4 is already configured in the scaffold.",
-    "7. Keep all existing functionality that the user did NOT ask to change.",
+    "9. Keep all existing functionality that the user did NOT ask to change.",
     ...dbImportRules,
-    "9. Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
-    "10. When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
-    "11. Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
+    "10. Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
+    "11. When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
+    "12. Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
     "",
     PREVIEW_SHELL_ICON_CONTEXT,
     "",
@@ -2016,7 +2026,9 @@ function buildIterationUserMessage(
     "",
     `CHANGE REQUESTED: ${prompt}`,
     "",
-    "Return only the files that need to change with their complete new content.",
+    "Return ONLY the files you need to modify with their complete updated content.",
+    "Make targeted, surgical edits. Do not rewrite the entire app.",
+    "If only one file needs changing, return only that file.",
   ].join("\n");
 }
 
@@ -2035,6 +2047,8 @@ async function callModelIterate(
   neonAuthBaseUrl: string | null = null,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
+  const isIteration = Boolean(instrumentation?.isIteration);
+  const maxTokens = isIteration ? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;
 
   const systemPrompt = buildIterationSystemPrompt(
     schemaSummary,
@@ -2051,7 +2065,7 @@ async function callModelIterate(
       systemPrompt,
       buildAnthropicUserContent(userMessage, imageUrl),
       prompt,
-      64000,
+      maxTokens,
       instrumentation,
     );
   }
@@ -2078,6 +2092,7 @@ async function callModelIterate(
     systemPrompt,
     buildAnthropicUserContent(userMessage, imageUrl),
     prompt,
+    maxTokens,
   );
 }
 
