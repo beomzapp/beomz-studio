@@ -1632,14 +1632,29 @@ async function callAnthropicWithMessages(
     const stream = client.messages.stream({
       model: modelId,
       max_tokens: maxTokens, // BEO-319: raised from 32000; BEO-335: overridable for forcedSimple
-      system: systemPrompt,
+      system: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        } as any,
+      ],
       tools: [DELIVER_FILES_TOOL],
       tool_choice: { type: "tool", name: "deliver_customised_files" },
       messages: [{ role: "user", content: userMessage }],
     });
     const message = await stream.finalMessage();
+    const usage = message.usage as typeof message.usage & {
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
     const inputTokens = message.usage?.input_tokens ?? 0;
     const outputTokens = message.usage?.output_tokens ?? 0;
+    console.log("[generate] cache stats:", {
+      cache_creation_input_tokens: usage?.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: usage?.cache_read_input_tokens ?? 0,
+      input_tokens: usage?.input_tokens ?? 0,
+    });
     console.log("[generate] Anthropic response:", { model: modelId, stop_reason: message.stop_reason, content_blocks: message.content.length, usage: message.usage });
     // Warn when approaching the configured ceiling so we can monitor token pressure.
     if (outputTokens >= tokenWarningThreshold) {
@@ -2013,6 +2028,14 @@ export function buildIterationUserMessage(
   prompt: string,
   existingFiles: readonly StudioFile[],
 ): string {
+  return [
+    buildIterationFilesContext(existingFiles),
+    "",
+    buildIterationEditRequest(prompt),
+  ].join("\n");
+}
+
+function buildIterationFilesContext(existingFiles: readonly StudioFile[]): string {
   const codebase = existingFiles
     .map((file) => `### ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)
     .join("\n\n");
@@ -2021,9 +2044,11 @@ export function buildIterationUserMessage(
     "Here is the current codebase:",
     "",
     codebase,
-    "",
-    `Edit request: ${prompt}`,
   ].join("\n");
+}
+
+function buildIterationEditRequest(prompt: string): string {
+  return `Edit request: ${prompt}`;
 }
 
 // ─── Model dispatch (iteration) ───────────────────────────────────────────────
@@ -2052,10 +2077,31 @@ async function callModelIterate(
     neonAuthBaseUrl,
   );
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
+  const filesContextString = buildIterationFilesContext(existingFiles);
+  const editRequest = buildIterationEditRequest(prompt);
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {
-    const anthropicUserContent = buildAnthropicUserContent(userMessage, imageUrl);
+    const anthropicUserContent = (
+      imageUrl
+        ? [
+            {
+              type: "text",
+              text: filesContextString,
+              cache_control: { type: "ephemeral" },
+            } as any,
+            buildAnthropicImageBlock(imageUrl),
+            { type: "text", text: editRequest },
+          ]
+        : [
+            {
+              type: "text",
+              text: filesContextString,
+              cache_control: { type: "ephemeral" },
+            } as any,
+            { type: "text", text: editRequest },
+          ]
+    ) as Anthropic.MessageParam["content"];
     const messages: Anthropic.MessageParam[] = [{ role: "user", content: anthropicUserContent }];
     console.log("[generate] iteration input files:", existingFiles?.length ?? 0, "files");
     console.log("[generate] iteration input tokens (estimated):", Math.round(JSON.stringify(messages).length / 4));

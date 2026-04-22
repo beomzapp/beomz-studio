@@ -152,15 +152,18 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
   assert.match(source, /workingPrompt = input\.isIteration \? promptWithUrlGrounding : await enrichPrompt\(promptWithUrlGrounding\);/);
 });
 
-test("iteration path uses a lower Anthropic max token cap and logs isIteration", async () => {
+test("iteration path uses a lower Anthropic max token cap, caches large Anthropic prefixes, and logs cache stats", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 
   assert.match(source, /const ITERATION_MAX_TOKENS = 32000;/);
   assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
+  assert.match(source, /system:\s*\[\s*\{\s*type: "text",\s*text: systemPrompt,\s*cache_control: \{ type: "ephemeral" \}/);
   assert.match(source, /console\.log\("\[generate\] isIteration:", isIteration\);/);
   assert.match(source, /console\.log\("\[generate\] existing files fetched:", existingFiles\?\.map\(\(f\) => f\.path\)\);/);
+  assert.match(source, /text: filesContextString,\s*cache_control: \{ type: "ephemeral" \}/);
   assert.match(source, /console\.log\("\[generate\] iteration input files:", existingFiles\?\.length \?\? 0, "files"\);/);
   assert.match(source, /console\.log\("\[generate\] iteration input tokens \(estimated\):", Math\.round\(JSON\.stringify\(messages\)\.length \/ 4\)\);/);
+  assert.match(source, /console\.log\("\[generate\] cache stats:", \{\s*cache_creation_input_tokens: usage\?\.cache_creation_input_tokens \?\? 0,\s*cache_read_input_tokens: usage\?\.cache_read_input_tokens \?\? 0,\s*input_tokens: usage\?\.input_tokens \?\? 0,/);
 });
 
 test("isNpmPackage classifies npm and local import paths correctly", () => {
