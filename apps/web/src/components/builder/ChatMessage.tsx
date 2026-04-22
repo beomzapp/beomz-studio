@@ -898,26 +898,31 @@ export function ChatMessageView({
         />
       );
 
-    case "reference_screenshot":
-      // BEO-489: debug log — confirm render path is reached and imageBase64 is valid
-      console.log("[BEO-489] Rendering reference_screenshot bubble:", {
-        domain: message.domain,
-        imageBase64Length: message.imageBase64.length,
-        imageBase64First100: message.imageBase64.slice(0, 100),
-      });
+    case "url_research":
       return (
         <div className="flex items-start gap-2">
           <BAvatar />
-          <div className="min-w-0 flex-1 space-y-2">
-            <p className="text-sm text-zinc-500">
-              📸 Here&apos;s <span className="font-medium text-[#374151]">{message.domain}</span> — I&apos;ll use this as inspiration:
+          <div
+            className="min-w-0 flex-1 rounded-xl p-3"
+            style={{
+              background: "rgba(255, 104, 0, 0.06)",
+              border: "1px solid rgba(255, 104, 0, 0.15)",
+            }}
+          >
+            <p className="text-sm font-medium text-[#374151]">
+              🔍 Here&apos;s what I found about <span className="font-semibold">{message.domain}</span>:
             </p>
-            <img
-              src={`data:image/png;base64,${message.imageBase64}`}
-              alt={`Screenshot of ${message.domain}`}
-              className="w-full rounded-xl object-cover"
-              style={{ border: "1px solid rgba(255,255,255,0.1)" }}
-            />
+            <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">{message.summary}</p>
+            {message.features.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {message.features.slice(0, 6).map((feature, i) => (
+                  <li key={i} className="flex gap-2 text-sm leading-relaxed text-[#374151]">
+                    <span className="flex-shrink-0 select-none text-zinc-400">•</span>
+                    <span className="min-w-0">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       );

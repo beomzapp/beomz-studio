@@ -182,13 +182,13 @@ export interface BuilderV3BuildConfirmedEvent extends BuilderV3BaseEvent {
   message?: string;
 }
 
-// BEO-486: emitted when a URL is detected in the prompt and a screenshot is captured.
-// Frontend renders it as an inspiration image bubble before the plan summary.
-export interface BuilderV3ReferenceScreenshotEvent extends BuilderV3BaseEvent {
-  type: "reference_screenshot";
-  imageBase64: string;
-  url: string;
+// BEO-493: emitted when a URL is detected in the prompt and researched before build.
+// Frontend renders it as a research card in chat.
+export interface BuilderV3UrlResearchEvent extends BuilderV3BaseEvent {
+  type: "url_research";
   domain: string;
+  summary: string;
+  features: string[];
 }
 
 // BEO-362: focused clarifying question emitted for ambiguous intent.
@@ -244,7 +244,7 @@ export type BuilderV3Event =
   | BuilderV3NextStepsEvent
   | BuilderV3BuildStageEvent
   | BuilderV3BuildConfirmedEvent
-  | BuilderV3ReferenceScreenshotEvent;
+  | BuilderV3UrlResearchEvent;
 
 export interface BuilderV3TranscriptEntry {
   id: string;

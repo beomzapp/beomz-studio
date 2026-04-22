@@ -55,10 +55,11 @@ export type ChatMessage =
       imageUrl: string;
       ctaText?: string;
     }
-  /** BEO-486: URL screenshot captured before build — shown as inspiration bubble. */
+  /** BEO-493: URL research card — domain, summary, and feature list. */
   | {
       id: string;
-      type: "reference_screenshot";
-      imageBase64: string;
+      type: "url_research";
       domain: string;
+      summary: string;
+      features: string[];
     };
