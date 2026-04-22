@@ -4,9 +4,12 @@ import type { TavilyClient, TavilyClientOptions } from "@tavily/core";
 import { apiConfig } from "../config.js";
 
 const JINA_FETCH_TIMEOUT_MS = 8_000;
+const DIRECT_FETCH_TIMEOUT_MS = 8_000;
 const MAX_WEBSITE_CONTENT_LENGTH = 8_000;
 const MAX_BUILD_REFERENCE_CONTENT_LENGTH = 4_000;
+const MAX_DIRECT_FALLBACK_CONTENT_LENGTH = 2_000;
 const MAX_TAVILY_RESULTS = 3;
+const DIRECT_FETCH_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const HTTP_URL_PATTERN = /\bhttps?:\/\/[^\s<>"'`]+/i;
 const DOMAIN_PATTERN = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"'`]*)?/i;
@@ -44,32 +47,210 @@ export function extractUrlLike(text: string): string | null {
   return null;
 }
 
-export async function fetchUrlContent(url: string): Promise<string | null> {
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function normaliseWhitespace(value: string): string {
+  return decodeHtmlEntities(value).replace(/\s+/g, " ").trim();
+}
+
+function readMetaDescription(html: string): string | null {
+  const patterns = [
+    /<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["'][^>]*>/i,
+    /<meta[^>]*content=["']([^"']+)["'][^>]*name=["']description["'][^>]*>/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(html);
+    if (match?.[1]) {
+      const description = normaliseWhitespace(match[1]);
+      if (description.length > 0) {
+        return description;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractTextFromHtml(html: string): string | null {
+  const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  const title = titleMatch?.[1] ? normaliseWhitespace(titleMatch[1]) : null;
+  const description = readMetaDescription(html);
+  const visibleText = normaliseWhitespace(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<[^>]+>/g, " "),
+  );
+
+  const lines: string[] = [];
+  if (title) {
+    lines.push(`Title: ${title}`);
+  }
+  if (description) {
+    lines.push(`Description: ${description}`);
+  }
+  if (visibleText.length > 0) {
+    lines.push(`Content: ${visibleText}`);
+  }
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return lines.join("\n").slice(0, MAX_DIRECT_FALLBACK_CONTENT_LENGTH);
+}
+
+async function fetchUrlContentFromJina(url: string): Promise<string | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), JINA_FETCH_TIMEOUT_MS);
 
   try {
+    console.log("[webFetch] URL context attempt: jina.", { url });
     const response = await fetch(`https://r.jina.ai/${url}`, {
       headers: { Accept: "text/plain" },
       signal: controller.signal,
     });
 
     if (!response.ok) {
+      console.warn("[webFetch] Jina returned non-2xx status.", {
+        status: response.status,
+        statusText: response.statusText,
+        url,
+      });
       return null;
     }
 
     const text = await response.text();
     const trimmed = text.trim();
     if (!trimmed) {
+      console.warn("[webFetch] Jina returned empty content.", { url });
       return null;
     }
 
+    console.log("[webFetch] URL context loaded via jina.", {
+      contentLength: trimmed.length,
+      url,
+    });
+
     return trimmed.slice(0, MAX_WEBSITE_CONTENT_LENGTH);
-  } catch {
+  } catch (error) {
+    console.warn("[webFetch] Jina request failed.", {
+      error: toErrorMessage(error),
+      url,
+    });
     return null;
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function fetchUrlContentFromDirectFetch(url: string): Promise<string | null> {
+  try {
+    console.log("[webFetch] URL context fallback attempt: direct fetch.", { url });
+    const response = await fetch(url, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "User-Agent": DIRECT_FETCH_USER_AGENT,
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(DIRECT_FETCH_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      console.warn("[webFetch] Direct fetch returned non-2xx status.", {
+        status: response.status,
+        statusText: response.statusText,
+        url,
+      });
+      return null;
+    }
+
+    const html = await response.text();
+    const extractedContent = extractTextFromHtml(html);
+
+    if (!extractedContent) {
+      console.warn("[webFetch] Direct fetch produced no usable text content.", { url });
+      return null;
+    }
+
+    console.log("[webFetch] URL context fallback used: direct fetch.", {
+      contentLength: extractedContent.length,
+      url,
+    });
+
+    return extractedContent;
+  } catch (error) {
+    console.warn("[webFetch] Direct fetch fallback failed.", {
+      error: toErrorMessage(error),
+      url,
+    });
+    return null;
+  }
+}
+
+function buildUrlFeaturesQuery(url: string): string {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./i, "");
+    return `${hostname} features`;
+  } catch {
+    return `${url} features`;
+  }
+}
+
+async function fetchUrlContentFromTavilyFallback(url: string): Promise<string | null> {
+  const query = buildUrlFeaturesQuery(url);
+  console.log("[webFetch] URL context fallback attempt: tavily.", { query, url });
+
+  const searchContext = await searchWebContent(query);
+  const fallbackContent = searchContext?.content?.trim();
+
+  if (!fallbackContent) {
+    console.warn("[webFetch] Tavily URL fallback returned empty content.", { query, url });
+    return null;
+  }
+
+  console.log("[webFetch] URL context fallback used: tavily.", {
+    contentLength: fallbackContent.length,
+    query,
+    url,
+  });
+
+  return fallbackContent.slice(0, MAX_WEBSITE_CONTENT_LENGTH);
+}
+
+export async function fetchUrlContent(url: string): Promise<string | null> {
+  const jinaContent = await fetchUrlContentFromJina(url);
+  if (jinaContent) {
+    return jinaContent;
+  }
+
+  const directContent = await fetchUrlContentFromDirectFetch(url);
+  if (directContent) {
+    return directContent;
+  }
+
+  const tavilyContent = await fetchUrlContentFromTavilyFallback(url);
+  if (tavilyContent) {
+    return tavilyContent;
+  }
+
+  console.warn("[webFetch] URL context failed across jina/direct/tavily providers.", { url });
+  return null;
 }
 
 export function extractResearchQuery(text: string): string | null {

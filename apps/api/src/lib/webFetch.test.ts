@@ -11,6 +11,9 @@ import {
   extractResearchQuery,
   extractUrlLike,
   injectUrlContextIntoBuildPrompt,
+  loadUrlContext,
+  resetTavilyClientFactoryForTests,
+  setTavilyClientFactoryForTests,
 } from "./webFetch.js";
 
 test("extractUrlLike returns explicit https URLs", () => {
@@ -44,7 +47,7 @@ test("extractResearchQuery strips common research prefixes", () => {
 test("extractResearchQuery removes embedded URLs before building a search query", () => {
   assert.equal(
     extractResearchQuery("search https://beomz.ai for pricing"),
-    "for pricing",
+    "pricing",
   );
 });
 
@@ -94,4 +97,123 @@ test("injectUrlContextIntoBuildPrompt falls back gracefully when Jina fetch has 
   );
 
   assert.equal(result, prompt);
+});
+
+test("loadUrlContext falls back to direct fetch when Jina returns empty content", async () => {
+  const originalFetch = globalThis.fetch;
+  const calledUrls: string[] = [];
+  let tavilySearchCalled = false;
+
+  setTavilyClientFactoryForTests(() =>
+    ({
+      search: async () => {
+        tavilySearchCalled = true;
+        return { results: [] };
+      },
+    }) as never);
+
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const requestUrl = typeof input === "string" ? input : input.toString();
+    calledUrls.push(requestUrl);
+
+    if (requestUrl === "https://r.jina.ai/https://mybos.com") {
+      return new Response("   ", { status: 200 });
+    }
+
+    if (requestUrl === "https://mybos.com") {
+      const headers = new Headers(init?.headers);
+      assert.equal(
+        headers.get("User-Agent"),
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      );
+      return new Response(
+        "<html><head><title>MYBOS</title><meta name=\"description\" content=\"Building operations platform\"></head><body><main>Manage maintenance workflows and vendor operations at scale.</main></body></html>",
+        {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        },
+      );
+    }
+
+    throw new Error(`Unexpected fetch URL in test: ${requestUrl}`);
+  }) as typeof fetch;
+
+  try {
+    const context = await loadUrlContext("build a website like mybos.com");
+
+    assert.equal(context?.fetchFailed, false);
+    assert.equal(context?.sourceType, "url");
+    assert.equal(context?.url, "https://mybos.com");
+    assert.match(context?.content ?? "", /Title: MYBOS/i);
+    assert.match(context?.content ?? "", /Description: Building operations platform/i);
+    assert.match(context?.content ?? "", /maintenance workflows and vendor operations/i);
+    assert.equal(tavilySearchCalled, false);
+    assert.deepEqual(calledUrls, [
+      "https://r.jina.ai/https://mybos.com",
+      "https://mybos.com",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTavilyClientFactoryForTests();
+  }
+});
+
+test("loadUrlContext falls back to Tavily when Jina and direct fetch both fail", async () => {
+  const originalFetch = globalThis.fetch;
+  const calledUrls: string[] = [];
+  const tavilyQueries: string[] = [];
+
+  setTavilyClientFactoryForTests(() =>
+    ({
+      search: async (query: string) => {
+        tavilyQueries.push(query);
+        return {
+          results: [
+            {
+              title: "MYBOS Features",
+              url: "https://mybos.com/features",
+              content: "MYBOS includes maintenance tracking, vendor workflows, and compliance tooling.",
+            },
+            {
+              title: "MYBOS Product Overview",
+              url: "https://example.com/mybos-overview",
+              content: "Platform for building operations teams with resident communications and reporting.",
+            },
+          ],
+        };
+      },
+    }) as never);
+
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const requestUrl = typeof input === "string" ? input : input.toString();
+    calledUrls.push(requestUrl);
+
+    if (requestUrl === "https://r.jina.ai/https://mybos.com") {
+      return new Response("", { status: 200 });
+    }
+
+    if (requestUrl === "https://mybos.com") {
+      return new Response("blocked", { status: 403 });
+    }
+
+    throw new Error(`Unexpected fetch URL in test: ${requestUrl}`);
+  }) as typeof fetch;
+
+  try {
+    const context = await loadUrlContext("build a website like mybos.com");
+
+    assert.equal(context?.fetchFailed, false);
+    assert.equal(context?.sourceType, "url");
+    assert.equal(context?.url, "https://mybos.com");
+    assert.match(context?.content ?? "", /Search query: mybos\.com features/i);
+    assert.match(context?.content ?? "", /MYBOS includes maintenance tracking/i);
+    assert.deepEqual(calledUrls, [
+      "https://r.jina.ai/https://mybos.com",
+      "https://mybos.com",
+    ]);
+    assert.deepEqual(tavilyQueries, ["mybos.com features"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTavilyClientFactoryForTests();
+  }
 });
