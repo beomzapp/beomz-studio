@@ -952,6 +952,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
             } catch { /* ignore */ }
             buildStartedAtRef.current = null;
+            // BEO-492: high-confidence direct plan path — done event carries readyToImplement
+            // signal without a preceding conversational_response. Wire the ImplementBar here
+            // so it appears even when clarifying questions are bypassed entirely.
+            if (event.readyToImplement && (event.plan || event.implementPlan)) {
+              const plan = String(event.plan ?? event.implementPlan ?? "").trim();
+              if (plan) {
+                pendingImplementPlanRef.current = plan;
+                setImplementSuggestion({ summary: plan });
+              }
+            }
             if (!event.conversational) {
               void getBuildStatus(event.buildId)
                 .then(status => {
@@ -1364,6 +1374,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   const plan = ev.plan ?? ev.implementPlan ?? "";
                   if (plan) {
                     pendingImplementPlanRef.current = plan;
+                    // BEO-492: surface plan in the floating ImplementBar for chat mode too
+                    setImplementSuggestion({ summary: plan });
                     setMessages(prev =>
                       prev.map(m =>
                         m.id === chatMsgId && m.type === "chat_response"
@@ -1379,6 +1391,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   const plan = ev.plan ?? ev.implementPlan ?? "";
                   if (plan) {
                     pendingImplementPlanRef.current = plan;
+                    // BEO-492: ensure ImplementBar appears on any readyToImplement signal
+                    setImplementSuggestion({ summary: plan });
                     setMessages(prev =>
                       prev.map(m =>
                         m.id === chatMsgId && m.type === "chat_response"
