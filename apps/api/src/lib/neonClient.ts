@@ -50,7 +50,8 @@ export async function deleteNeonProject(neonProjectId: string): Promise<void> {
     headers: { Authorization: `Bearer ${getNeonKey()}` },
   });
   if (!res.ok && res.status !== 404) {
-    console.error("[neon] delete failed:", res.status);
+    const body = await res.text().catch(() => "");
+    throw new Error(`Neon delete failed (${res.status})${body ? `: ${body}` : ""}`);
   }
 }
 

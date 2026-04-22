@@ -42,6 +42,12 @@ function wireShutdownSignals(): void {
   process.once("exit", stopWorker);
 }
 
+function assertRequiredStartupEnv(): void {
+  if (!process.env.NEON_API_KEY?.trim()) {
+    throw new Error("NEON_API_KEY is required at startup for managed Neon database operations.");
+  }
+}
+
 async function main(): Promise<void> {
   // Load .env with an explicit path before the dynamic import of server.js.
   // All static imports in bootstrap (node built-ins + dotenv) are leaves with
@@ -50,6 +56,7 @@ async function main(): Promise<void> {
   // correct env values when it evaluates — regardless of pm2's saved env state.
   const _bootstrapDir = dirname(fileURLToPath(import.meta.url));
   dotenvConfig({ path: join(_bootstrapDir, "../.env"), override: true });
+  assertRequiredStartupEnv();
   if (shouldStartEmbeddedTemporalWorker()) {
     const workerEntry = fileURLToPath(
       new URL("../../../workers/temporal/dist/worker.js", import.meta.url),

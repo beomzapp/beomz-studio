@@ -52,8 +52,11 @@ function createOrgContext(project: ProjectRow, dbOverrides: Partial<OrgContext["
       findProjectById: async (id: string) => (id === project.id ? project : null),
       findLatestGenerationByProjectId: async () => null,
       createGeneration: async (input: Record<string, unknown>) => input,
+      updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({ ...project, ...patch }),
       deleteProject: async () => undefined,
       deleteProjectDbLimits: async () => undefined,
+      getProjectDbLimits: async () => null,
+      updateProjectDbConnection: async () => undefined,
       ...dbOverrides,
     } as OrgContext["db"],
     jwt: { sub: "platform-user" },
@@ -371,4 +374,235 @@ test("byo-db delete clears saved Supabase credentials", async () => {
       byo_db_anon_key: null,
     },
   ]);
+});
+
+test("upgrade-to-byo migrates data, deletes Neon, and queues a Supabase rewire", async () => {
+  const project = createProject({
+    db_provider: "neon",
+    db_schema: null,
+  });
+  const existingFiles: StudioFile[] = [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: "export default function App() { return <div>Hello</div>; }\n",
+      source: "ai",
+      locked: false,
+    },
+  ];
+  const updates: Record<string, unknown>[] = [];
+  const connectionUpdates: Record<string, unknown>[] = [];
+  const dumpCalls: string[] = [];
+  const restoreCalls: Array<Record<string, unknown>> = [];
+  const deleteCalls: string[] = [];
+  const createdGenerations: Record<string, unknown>[] = [];
+  const buildRuns: Array<Record<string, unknown>> = [];
+  const dumpTables = [
+    {
+      name: "tasks",
+      columns: [
+        {
+          name: "id",
+          sqlType: "uuid",
+          isNullable: false,
+          defaultExpression: "gen_random_uuid()",
+        },
+      ],
+      primaryKeyColumns: ["id"],
+      sequenceColumns: [],
+      rows: [{ id: "task-1" }],
+    },
+  ];
+  const orgContext = createOrgContext(project, {
+    updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
+      updates.push(patch);
+      return { ...project, ...patch };
+    },
+    updateProjectDbConnection: async (_projectId: string, patch: Record<string, unknown>) => {
+      connectionUpdates.push(patch);
+    },
+    getProjectDbLimits: async () => ({
+      id: "limits-1",
+      project_id: project.id,
+      plan_storage_mb: 200,
+      plan_rows: 0,
+      tables_limit: 0,
+      extra_storage_mb: 0,
+      extra_rows: 0,
+      neon_project_id: "neon-proj-123",
+      neon_branch_id: "branch-1",
+      db_url: "postgresql://user:pass@host/db",
+      neon_auth_base_url: "https://auth.neon.tech/project",
+      neon_auth_pub_key: "pub-key",
+      neon_auth_secret_key: "secret-key",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }),
+    findLatestGenerationByProjectId: async () => ({
+      id: "generation-prev",
+      files: existingFiles,
+    }),
+    createGeneration: async (input: Record<string, unknown>) => {
+      createdGenerations.push(input);
+      return {
+        ...input,
+        project_id: project.id,
+        template_id: project.template,
+      };
+    },
+  });
+  const app = createApp(orgContext, {
+    ensureByoDbAnonKeyColumn: async () => undefined,
+    dumpNeonDatabase: async (connectionString: string) => {
+      dumpCalls.push(connectionString);
+      return dumpTables;
+    },
+    restoreSupabaseDatabase: async (input: Record<string, unknown>) => {
+      restoreCalls.push(input);
+    },
+    deleteNeonProject: async (neonProjectId: string) => {
+      deleteCalls.push(neonProjectId);
+    },
+    runBuildInBackground: async (input: Record<string, unknown>) => {
+      buildRuns.push(input);
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}/upgrade-to-byo`, {
+    method: "POST",
+    body: JSON.stringify({
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { migrating: true });
+  assert.deepEqual(dumpCalls, ["postgresql://user:pass@host/db"]);
+  assert.deepEqual(restoreCalls, [
+    {
+      supabaseUrl: "https://demo-project.supabase.co",
+      supabaseAnonKey: "anon-key",
+      tables: dumpTables,
+    },
+  ]);
+  assert.deepEqual(deleteCalls, ["neon-proj-123"]);
+  assert.deepEqual(updates, [
+    {
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+      database_enabled: true,
+      db_provider: "supabase",
+      db_config: {
+        url: "https://demo-project.supabase.co",
+        anonKey: "anon-key",
+      },
+      db_schema: null,
+      db_nonce: null,
+      db_wired: false,
+    },
+  ]);
+  assert.deepEqual(connectionUpdates, [
+    {
+      neon_project_id: null,
+      neon_branch_id: null,
+      db_url: null,
+      neon_auth_base_url: null,
+      neon_auth_pub_key: null,
+      neon_auth_secret_key: null,
+    },
+  ]);
+  assert.equal(createdGenerations.length, 1);
+  assert.equal(buildRuns.length, 1);
+  assert.equal(createdGenerations[0]?.operation_id, "projectIteration");
+  assert.equal(createdGenerations[0]?.status, "queued");
+  assert.equal(buildRuns[0]?.isIteration, true);
+  assert.equal(buildRuns[0]?.model, "claude-sonnet-4-6");
+  assert.equal(buildRuns[0]?.projectId, project.id);
+  assert.deepEqual(buildRuns[0]?.existingFiles, existingFiles);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /use Supabase instead of Neon\./);
+});
+
+test("upgrade-to-byo continues when Neon deletion fails after a successful migration", async () => {
+  const project = createProject({
+    db_provider: "neon",
+    db_schema: null,
+  });
+  const updates: Record<string, unknown>[] = [];
+  const buildRuns: Array<Record<string, unknown>> = [];
+  const orgContext = createOrgContext(project, {
+    updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
+      updates.push(patch);
+      return { ...project, ...patch };
+    },
+    getProjectDbLimits: async () => ({
+      id: "limits-1",
+      project_id: project.id,
+      plan_storage_mb: 200,
+      plan_rows: 0,
+      tables_limit: 0,
+      extra_storage_mb: 0,
+      extra_rows: 0,
+      neon_project_id: "neon-proj-123",
+      neon_branch_id: null,
+      db_url: "postgresql://user:pass@host/db",
+      neon_auth_base_url: null,
+      neon_auth_pub_key: null,
+      neon_auth_secret_key: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }),
+    findLatestGenerationByProjectId: async () => ({
+      id: "generation-prev",
+      files: [],
+    }),
+  });
+  const app = createApp(orgContext, {
+    ensureByoDbAnonKeyColumn: async () => undefined,
+    dumpNeonDatabase: async () => [],
+    restoreSupabaseDatabase: async () => undefined,
+    deleteNeonProject: async () => {
+      throw new Error("boom");
+    },
+    runBuildInBackground: async (input: Record<string, unknown>) => {
+      buildRuns.push(input);
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}/upgrade-to-byo`, {
+    method: "POST",
+    body: JSON.stringify({
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { migrating: true });
+  assert.equal(updates.length, 1);
+  assert.equal(buildRuns.length, 1);
+  assert.equal(buildRuns[0]?.isIteration, true);
+});
+
+test("upgrade-to-byo requires BYO Supabase credentials", async () => {
+  const project = createProject({
+    db_provider: "neon",
+    db_schema: null,
+  });
+  const orgContext = createOrgContext(project);
+  const app = createApp(orgContext);
+
+  const response = await app.request(`http://localhost/projects/${project.id}/upgrade-to-byo`, {
+    method: "POST",
+    body: JSON.stringify({}),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "byo_db_url is required",
+  });
 });
