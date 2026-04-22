@@ -610,6 +610,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   }
 
   const isIteration = Boolean(projectRow && existingFiles.length > 0);
+  const isImageIntentConfirmation = Boolean(imageUrl && confirmedIntent);
 
   // BEO-465: feed the classifier the last few turns so it can accumulate
   // context across the conversation (e.g. user first says "I want a website",
@@ -625,11 +626,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && sourcePromptForComparison
     && storedImplementPlan === sourcePromptForComparison,
   );
-  const isImplementConfirmation = explicitImplementSignal || matchingStoredImplementPlan;
+  const isImplementConfirmation = explicitImplementSignal || matchingStoredImplementPlan || isImageIntentConfirmation;
   const confirmedBuildPrompt = explicitImplementPrompt
     ?? (matchingStoredImplementPlan ? storedImplementPlan : null)
     ?? (explicitImplementSignal ? sourcePromptForComparison : null);
-  const implementConfirmationIntent: Intent = isIteration ? "iteration" : "build_new";
+  const implementConfirmationIntent: Intent = (isIteration || isImageIntentConfirmation) ? "iteration" : "build_new";
   const intentDecision = isImplementConfirmation
     ? {
         intent: implementConfirmationIntent,
@@ -733,6 +734,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     isImplementConfirmation,
     explicitImplementSignal,
     isIteration,
+    isImageIntentConfirmation,
     hasUserFeaturePreferences,
     hasUrlResearch: Boolean(urlResearchResult),
     hasUrlContextForConfidenceCap: Boolean(urlContextForConfidenceCap),

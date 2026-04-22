@@ -55,9 +55,27 @@ test("iteration path returns a short preamble and skips next_steps", async () =>
     timeoutMs: 50,
   });
 
-  assert.equal(preamble.restatement, "Got it — updating the buttons now.");
+  assert.equal(preamble.restatement, "On it...");
   assert.deepEqual(preamble.bullets, []);
   assert.equal(nextSteps, null);
+});
+
+test("image-confirmed preambles use the image-specific short copy", async () => {
+  const preamble = await generateStagePreamble({
+    imageConfirmed: true,
+    prompt: "Yes, use it in the header and favicon",
+    timeoutMs: 50,
+    invokeModel: async () => JSON.stringify({
+      restatement: "Should be ignored",
+      bullets: ["should be ignored"],
+    }),
+    isIteration: false,
+  });
+
+  assert.deepEqual(preamble, {
+    restatement: "Got it — applying your image...",
+    bullets: [],
+  });
 });
 
 test("stage preamble prompt enforces user-facing bullets and forbids technical detail", async () => {

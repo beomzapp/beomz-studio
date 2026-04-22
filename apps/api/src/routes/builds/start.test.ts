@@ -455,6 +455,127 @@ test("/builds/start skips plan summaries for iteration intents and queues the bu
   assert.equal(capturedBuildPrompt, "Update the app to use a red and blue theme throughout.");
 });
 
+test("/builds/start treats confirmed image intents as immediate build confirmations", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  let capturedConfirmedIntent: string | null = null;
+  let capturedImageUrl: string | null = null;
+  const project = {
+    id: "12121212-1212-1212-1212-121212121212",
+    name: "Brand Refresh",
+    org_id: "org-1",
+    status: "ready",
+    template: "marketing-website",
+    icon: "Globe",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [],
+    chat_summary: null,
+  };
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
+          findLatestGenerationByProjectId: async () => ({
+            files: [],
+            metadata: {},
+          }),
+          findProjectById: async () => project,
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            ...project,
+            ...patch,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => {
+      throw new Error("confirmed image intent should bypass intent detection");
+    },
+    runBuildInBackground: async (input) => {
+      runBuildCalls += 1;
+      capturedConfirmedIntent = input.confirmedIntent ?? null;
+      capturedImageUrl = input.imageUrl ?? null;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "Yes, use it in the header and favicon",
+      projectId: project.id,
+      imageUrl: "https://storage.example.com/signed/logo.png",
+      confirmedIntent: "logo",
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  const payload = await response.json() as {
+    build: { status: string; summary: string | null };
+  };
+
+  assert.equal(payload.build.status, "queued");
+  assert.equal(payload.build.summary, "Queued initial build for Brand Refresh.");
+  assert.equal(runBuildCalls, 1);
+  assert.equal(capturedConfirmedIntent, "logo");
+  assert.equal(capturedImageUrl, "https://storage.example.com/signed/logo.png");
+});
+
 test("/builds/start proceeds to build when the implementPlan is sent back unchanged", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 

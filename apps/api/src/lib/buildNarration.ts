@@ -66,6 +66,7 @@ interface HaikuTextResponse {
 export type HaikuTextInvoker = (request: HaikuTextRequest) => Promise<string | HaikuTextResponse>;
 
 interface GenerateStagePreambleOptions {
+  imageConfirmed?: boolean;
   invokeModel?: HaikuTextInvoker;
   isIteration: boolean;
   prompt: string;
@@ -374,11 +375,16 @@ async function runWithTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T
 }
 
 export async function generateStagePreambleWithUsage({
+  imageConfirmed,
   invokeModel = defaultInvokeHaiku,
   isIteration,
   prompt,
   timeoutMs = PREAMBLE_TIMEOUT_MS,
 }: GenerateStagePreambleOptions): Promise<StagePreambleResult> {
+  if (imageConfirmed) {
+    return { payload: { restatement: "Got it — applying your image...", bullets: [] }, usage: { inputTokens: 0, outputTokens: 0 } };
+  }
+
   if (isIteration) {
     return { payload: { restatement: "On it...", bullets: [] }, usage: { inputTokens: 0, outputTokens: 0 } };
   }

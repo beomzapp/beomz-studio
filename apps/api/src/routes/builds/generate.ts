@@ -2937,8 +2937,13 @@ async function _runBuildInBackground(
     message,
   });
 
-  const emitStagePreamble = async (rawPrompt: string, isIteration: boolean): Promise<void> => {
+  const emitStagePreamble = async (
+    rawPrompt: string,
+    isIteration: boolean,
+    imageConfirmedForPreamble = false,
+  ): Promise<void> => {
     const preamble = await generateStagePreambleWithUsage({
+      imageConfirmed: imageConfirmedForPreamble,
       prompt: rawPrompt,
       isIteration,
     });
@@ -3047,7 +3052,7 @@ async function _runBuildInBackground(
         }
       }
       try {
-        await emitStagePreamble(input.sourcePrompt, true);
+        await emitStagePreamble(input.sourcePrompt, true, imageConfirmed);
       } catch {
         // non-fatal
       }
@@ -3357,7 +3362,7 @@ async function _runBuildInBackground(
       }
     }
     try {
-      await emitStagePreamble(input.sourcePrompt, false);
+      await emitStagePreamble(input.sourcePrompt, false, imageConfirmed);
     } catch {
       // non-fatal
     }

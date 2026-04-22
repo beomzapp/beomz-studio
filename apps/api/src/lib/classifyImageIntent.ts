@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { BuilderImageIntent } from "@beomz-studio/contracts";
 
 import { apiConfig } from "../config.js";
-import { buildAnthropicImageBlock } from "./anthropicImages.js";
+import { resolveAnthropicImageBlock } from "./anthropicImages.js";
 
 const SONNET_MODEL = "claude-sonnet-4-6";
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -190,6 +190,9 @@ async function defaultInvokeModel(request: VisionRequest): Promise<string> {
     : "User text: (none)";
 
   try {
+    const imageBlock = await resolveAnthropicImageBlock(request.imageUrl);
+    console.log("[image-intent] image base64 length:", imageBlock.source.data.length);
+
     const response = await client.messages.create(
       {
         model: SONNET_MODEL,
@@ -200,7 +203,7 @@ async function defaultInvokeModel(request: VisionRequest): Promise<string> {
           {
             role: "user",
             content: [
-              buildAnthropicImageBlock(request.imageUrl),
+              imageBlock,
               { type: "text", text: promptText },
             ],
           },
