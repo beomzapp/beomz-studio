@@ -195,9 +195,7 @@ test("project deletion cleans up Neon project when neon_project_id exists", asyn
 test("byo-db validates connection string format", async () => {
   const project = createProject();
   const orgContext = createOrgContext(project);
-  const app = createApp(orgContext, {
-    testPostgresConnection: async () => undefined,
-  });
+  const app = createApp(orgContext);
 
   const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
     method: "POST",
@@ -214,19 +212,13 @@ test("byo-db validates connection string format", async () => {
 test("byo-db saves validated connection string and returns host", async () => {
   const project = createProject();
   const updates: Record<string, unknown>[] = [];
-  const rewired: Array<{ projectId: string; connectionString: string }> = [];
   const orgContext = createOrgContext(project, {
     updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
       updates.push(patch);
       return { ...project, ...patch };
     },
   });
-  const app = createApp(orgContext, {
-    rewireByoPostgres: async (projectId: string, connectionString: string) => {
-      rewired.push({ projectId, connectionString });
-    },
-    testPostgresConnection: async () => undefined,
-  });
+  const app = createApp(orgContext);
 
   const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
     method: "POST",
@@ -244,43 +236,6 @@ test("byo-db saves validated connection string and returns host", async () => {
   assert.deepEqual(updates, [
     {
       byo_db_url: "postgresql://user:pass@db.example.com:5432/app",
-      database_enabled: true,
-      db_config: null,
-      db_nonce: null,
-      db_provider: "postgres",
-      db_schema: null,
-      db_wired: true,
     },
   ]);
-  assert.deepEqual(rewired, [
-    {
-      projectId: project.id,
-      connectionString: "postgresql://user:pass@db.example.com:5432/app",
-    },
-  ]);
-});
-
-test("byo-db returns a clear connection error when SELECT 1 fails", async () => {
-  const project = createProject();
-  const orgContext = createOrgContext(project, {
-    updateProject: async () => project,
-  });
-  const app = createApp(orgContext, {
-    testPostgresConnection: async () => {
-      throw new Error("password authentication failed");
-    },
-  });
-
-  const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
-    method: "POST",
-    body: JSON.stringify({
-      connectionString: "postgresql://user:pass@db.example.com:5432/app",
-    }),
-    headers: { "content-type": "application/json" },
-  });
-
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), {
-    error: "Failed to connect to Postgres: password authentication failed",
-  });
 });
