@@ -66,6 +66,44 @@ const PROMPT_STOP_WORDS = new Set([
   "in", "make", "of", "the", "to", "with",
 ]);
 
+const URL_FEATURE_PREFERENCE_TERMS = [
+  "maintenance",
+  "workflow",
+  "work order",
+  "vendor",
+  "resident",
+  "tenant",
+  "dashboard",
+  "analytics",
+  "reporting",
+  "login",
+  "signup",
+  "auth",
+  "pricing",
+  "contact form",
+  "contact",
+  "booking",
+  "appointment",
+  "inventory",
+  "checkout",
+  "payment",
+  "billing",
+  "notification",
+  "alert",
+  "search",
+  "filter",
+  "blog",
+  "cms",
+  "api",
+  "integration",
+  "calendar",
+  "task",
+  "todo",
+  "portfolio",
+] as const;
+
+const URL_FEATURE_CONNECTOR_PATTERN = /\b(with|including|include|includes|featuring|features|feature|plus|add|needs?|must have)\b/i;
+
 function buildProjectNameFromPrompt(prompt: string, fallbackName: string): string {
   const tokens = prompt
     .trim()
@@ -80,6 +118,23 @@ function buildProjectNameFromPrompt(prompt: string, fallbackName: string): strin
   return tokens
     .map((s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase())
     .join(" ");
+}
+
+function hasExplicitFeaturePreferences(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  const matchedTerms = URL_FEATURE_PREFERENCE_TERMS
+    .filter((term) => normalized.includes(term))
+    .length;
+
+  if (matchedTerms >= 2) {
+    return true;
+  }
+
+  return matchedTerms >= 1 && URL_FEATURE_CONNECTOR_PATTERN.test(normalized);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -603,12 +658,28 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     || classifiedIntent === "iteration"
     || classifiedIntent === "image_ref"
     || classifiedIntent === "ambiguous";
+  const detectedUrl = extractUrlLike(sourcePrompt);
+  const hasResearchUrl = Boolean(detectedUrl);
+  const hasUserFeaturePreferences = hasExplicitFeaturePreferences(sourcePrompt);
+  const urlContextForConfidenceCap: WebsiteContext | null = !isImplementConfirmation
+    && isBuildIshIntent
+    && hasResearchUrl
+    && !hasUserFeaturePreferences
+    ? await loadUrlContextFn(sourcePrompt)
+    : null;
+  const shouldCapConfidenceForUrlOnlyPrompt = Boolean(
+    urlContextForConfidenceCap
+      && !hasUserFeaturePreferences,
+  );
   const forcedPlanSummary = isBuildIshIntent
     && !isImplementConfirmation
     && clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS;
+  const cappedConfidence = shouldCapConfidenceForUrlOnlyPrompt
+    ? Math.min(intentDecision.confidence, 0.7)
+    : intentDecision.confidence;
   const effectiveConfidence = forcedPlanSummary
     ? 0.95
-    : intentDecision.confidence;
+    : cappedConfidence;
   const buildConfidenceThreshold = isIteration
     ? ITERATION_BUILD_CONFIDENCE
     : NEW_BUILD_PLAN_SUMMARY_CONFIDENCE;
@@ -624,8 +695,6 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && !isImplementConfirmation
     && !isIteration;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
-  const detectedUrl = extractUrlLike(sourcePrompt);
-  const hasResearchUrl = Boolean(detectedUrl);
 
   // Original "immediate conversation" path now covers greeting/question/research
   // AND any build-ish intent that still needs clarification.
@@ -645,6 +714,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     intent: classifiedIntent,
     confidence: effectiveConfidence,
     originalConfidence: intentDecision.confidence,
+    cappedConfidence,
     reason: intentDecision.reason,
     clarifyingQuestionCount,
     forcedPlanSummary,
@@ -654,6 +724,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     isImplementConfirmation,
     explicitImplementSignal,
     isIteration,
+    hasUserFeaturePreferences,
+    hasUrlContextForConfidenceCap: Boolean(urlContextForConfidenceCap),
+    shouldCapConfidenceForUrlOnlyPrompt,
     hasAccumulatedContext: Boolean(accumulatedBuildContext),
   });
 
@@ -819,7 +892,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       : classifiedIntent === "research"
       ? await loadResearchContext(sourcePrompt)
       : hasResearchUrl
-      ? await loadUrlContextFn(sourcePrompt)
+      ? (urlContextForConfidenceCap ?? await loadUrlContextFn(sourcePrompt))
       : null;
 
     if (eventType === "clarifying_question") {
