@@ -206,6 +206,7 @@ export function ProjectPage() {
   const [dbProvider, setDbProvider] = useState<string | null>(null);
   const [dbWired, setDbWired] = useState(false);
   const [neonDbUrl, setNeonDbUrl] = useState<string | null>(null);
+  const [byoDbHost, setByoDbHost] = useState<string | null>(null);
 
   // ─── SSE event handler ─────────────────────────────────────────────────────
   // Handles preview overlay, project-name updates, and suggestion chips.
@@ -427,6 +428,7 @@ export function ProjectPage() {
       setDbEnabled(state.database_enabled);
       setDbProvider(state.db_provider);
       setDbWired(state.db_wired);
+      setByoDbHost(state.byoDbHost ?? null);
       if (state.db_wired && isWebContainerSupported()) {
         try {
           const { wc } = await getOrBootWebContainer();
@@ -774,6 +776,7 @@ export function ProjectPage() {
             dbProvider={dbProvider}
             dbWired={dbWired}
             plan={credits?.plan ?? "free"}
+            byoConnectedHost={byoDbHost}
             onDbStateChange={fetchDbState}
             onWireToDatabase={handleWireToDatabase}
           />

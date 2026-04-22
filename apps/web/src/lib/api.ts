@@ -390,6 +390,8 @@ export interface ProjectDbState {
   schemaName?: string;
   /** BEO-428: Neon connection string — injected as VITE_DATABASE_URL into WC .env.local */
   neonDbUrl?: string | null;
+  /** BEO-445: BYO Postgres host (sanitised — no password) returned by status endpoint */
+  byoDbHost?: string | null;
 }
 
 export async function getProjectDbState(projectId: string): Promise<ProjectDbState> {
@@ -400,6 +402,8 @@ export async function getProjectDbState(projectId: string): Promise<ProjectDbSta
     env?: { url: string; anonKey: string; dbSchema: string } | null;
     /** BEO-428: Neon connection string returned by status endpoint */
     dbUrl?: string | null;
+    /** BEO-445: BYO host returned when provider === 'byo' */
+    byoDbHost?: string | null;
   }>(`/projects/${projectId}/db/status`, { method: "GET" });
   return {
     database_enabled: Boolean(status.enabled),
@@ -409,7 +413,37 @@ export async function getProjectDbState(projectId: string): Promise<ProjectDbSta
     anonKey: status.env?.anonKey,
     schemaName: status.env?.dbSchema,
     neonDbUrl: status.dbUrl ?? null,
+    byoDbHost: status.byoDbHost ?? null,
   };
+}
+
+/** BEO-445: Test a BYO Postgres connection string without saving. */
+export async function testByoDb(
+  projectId: string,
+  connectionString: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return requestJson<{ ok: boolean; error?: string }>(`/projects/${projectId}/byo-db`, {
+    method: "POST",
+    body: JSON.stringify({ connectionString, test: true }),
+  });
+}
+
+/** BEO-445: Save and activate a BYO Postgres connection string. */
+export async function saveByoDb(
+  projectId: string,
+  connectionString: string,
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}/byo-db`, {
+    method: "POST",
+    body: JSON.stringify({ connectionString }),
+  });
+}
+
+/** BEO-445: Remove the BYO Postgres connection from a project. */
+export async function disconnectByoDb(projectId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`/projects/${projectId}/byo-db`, {
+    method: "DELETE",
+  });
 }
 
 export async function enableDatabase(projectId: string): Promise<void> {
