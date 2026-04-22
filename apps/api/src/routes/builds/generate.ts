@@ -1827,6 +1827,7 @@ function expandIterationSeedFiles(
 ): IterationFileContext[] {
   const byBasename = new Map(allFiles.map((file) => [file.basename, file]));
   const selected = new Map<string, IterationFileContext>();
+  const appearanceOnly = isAppearanceEdit(prompt);
 
   const add = (file: IterationFileContext | undefined) => {
     if (!file) return;
@@ -1835,8 +1836,9 @@ function expandIterationSeedFiles(
     }
   };
 
-  if (isAppearanceEdit(prompt)) {
+  if (appearanceOnly) {
     add(byBasename.get("theme.ts"));
+    return [...selected.values()];
   }
 
   if (isDependencyEdit(prompt)) {
