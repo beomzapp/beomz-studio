@@ -12,7 +12,10 @@ import {
   extractUrlLike,
   injectUrlContextIntoBuildPrompt,
   loadUrlContext,
+  researchUrl,
+  resetUrlResearchSynthesisForTests,
   resetTavilyClientFactoryForTests,
+  setUrlResearchSynthesisForTests,
   setTavilyClientFactoryForTests,
 } from "./webFetch.js";
 
@@ -99,18 +102,89 @@ test("injectUrlContextIntoBuildPrompt falls back gracefully when Jina fetch has 
   assert.equal(result, prompt);
 });
 
-test("loadUrlContext falls back to direct fetch when Jina returns empty content", async () => {
+test("researchUrl combines fetched site content with Tavily feature and product queries", async () => {
   const originalFetch = globalThis.fetch;
-  const calledUrls: string[] = [];
-  let tavilySearchCalled = false;
+  const tavilyQueries: string[] = [];
+  let capturedWebsiteContent = "";
+  let capturedSearchContent = "";
 
   setTavilyClientFactoryForTests(() =>
     ({
-      search: async () => {
-        tavilySearchCalled = true;
+      search: async (query: string) => {
+        tavilyQueries.push(query);
+        return {
+          results: [
+            {
+              title: `${query} result`,
+              url: "https://example.com",
+              content: `${query} details`,
+            },
+          ],
+        };
+      },
+    }) as never);
+
+  setUrlResearchSynthesisForTests(async (input) => {
+    capturedWebsiteContent = input.websiteContent ?? "";
+    capturedSearchContent = input.searchContent ?? "";
+    return {
+      summary: "Building operations SaaS for property teams",
+      features: [
+        "Maintenance request tracking",
+        "Vendor workflow management",
+      ],
+    };
+  });
+
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const requestUrl = typeof input === "string" ? input : input.toString();
+
+    if (requestUrl === "https://r.jina.ai/https://mybos.com") {
+      return new Response("myBOS provides maintenance and compliance workflows.", { status: 200 });
+    }
+
+    throw new Error(`Unexpected fetch URL in test: ${requestUrl}`);
+  }) as typeof fetch;
+
+  try {
+    const result = await researchUrl("https://mybos.com", "mybos.com");
+
+    assert.equal(result?.domain, "mybos.com");
+    assert.equal(result?.summary, "Building operations SaaS for property teams");
+    assert.deepEqual(result?.features, [
+      "Maintenance request tracking",
+      "Vendor workflow management",
+    ]);
+    assert.match(capturedWebsiteContent, /maintenance and compliance workflows/i);
+    assert.match(capturedSearchContent, /Search query: mybos\.com features/i);
+    assert.match(capturedSearchContent, /Search query: mybos\.com product/i);
+    assert.deepEqual(tavilyQueries, ["mybos.com features", "mybos.com product"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTavilyClientFactoryForTests();
+    resetUrlResearchSynthesisForTests();
+  }
+});
+
+test("loadUrlContext falls back to direct fetch when Jina returns empty content", async () => {
+  const originalFetch = globalThis.fetch;
+  const calledUrls: string[] = [];
+  const tavilyQueries: string[] = [];
+
+  setTavilyClientFactoryForTests(() =>
+    ({
+      search: async (query: string) => {
+        tavilyQueries.push(query);
         return { results: [] };
       },
     }) as never);
+  setUrlResearchSynthesisForTests(async () => ({
+    summary: "Building operations SaaS for property teams",
+    features: [
+      "Maintenance request tracking",
+      "Vendor workflow management",
+    ],
+  }));
 
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const requestUrl = typeof input === "string" ? input : input.toString();
@@ -144,10 +218,9 @@ test("loadUrlContext falls back to direct fetch when Jina returns empty content"
     assert.equal(context?.fetchFailed, false);
     assert.equal(context?.sourceType, "url");
     assert.equal(context?.url, "https://mybos.com");
-    assert.match(context?.content ?? "", /Title: MYBOS/i);
-    assert.match(context?.content ?? "", /Description: Building operations platform/i);
-    assert.match(context?.content ?? "", /maintenance workflows and vendor operations/i);
-    assert.equal(tavilySearchCalled, false);
+    assert.match(context?.content ?? "", /Research summary: Building operations SaaS for property teams/i);
+    assert.match(context?.content ?? "", /Maintenance request tracking/i);
+    assert.deepEqual(tavilyQueries, ["mybos.com features", "mybos.com product"]);
     assert.deepEqual(calledUrls, [
       "https://r.jina.ai/https://mybos.com",
       "https://mybos.com",
@@ -155,6 +228,7 @@ test("loadUrlContext falls back to direct fetch when Jina returns empty content"
   } finally {
     globalThis.fetch = originalFetch;
     resetTavilyClientFactoryForTests();
+    resetUrlResearchSynthesisForTests();
   }
 });
 
@@ -183,6 +257,13 @@ test("loadUrlContext falls back to Tavily when Jina and direct fetch both fail",
         };
       },
     }) as never);
+  setUrlResearchSynthesisForTests(async () => ({
+    summary: "Building operations SaaS for property teams",
+    features: [
+      "Compliance workflows",
+      "Resident communications",
+    ],
+  }));
 
   globalThis.fetch = (async (input: string | URL | Request) => {
     const requestUrl = typeof input === "string" ? input : input.toString();
@@ -205,15 +286,16 @@ test("loadUrlContext falls back to Tavily when Jina and direct fetch both fail",
     assert.equal(context?.fetchFailed, false);
     assert.equal(context?.sourceType, "url");
     assert.equal(context?.url, "https://mybos.com");
-    assert.match(context?.content ?? "", /Search query: mybos\.com features/i);
-    assert.match(context?.content ?? "", /MYBOS includes maintenance tracking/i);
+    assert.match(context?.content ?? "", /Research summary: Building operations SaaS for property teams/i);
+    assert.match(context?.content ?? "", /Compliance workflows/i);
     assert.deepEqual(calledUrls, [
       "https://r.jina.ai/https://mybos.com",
       "https://mybos.com",
     ]);
-    assert.deepEqual(tavilyQueries, ["mybos.com features"]);
+    assert.deepEqual(tavilyQueries, ["mybos.com features", "mybos.com product"]);
   } finally {
     globalThis.fetch = originalFetch;
     resetTavilyClientFactoryForTests();
+    resetUrlResearchSynthesisForTests();
   }
 });

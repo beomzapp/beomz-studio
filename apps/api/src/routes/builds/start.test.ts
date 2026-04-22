@@ -1260,7 +1260,7 @@ test("/builds/start injects Tavily research context for research intent without 
   }
 });
 
-test("/builds/start includes a reference_screenshot event when URL-backed plan summary capture succeeds", async () => {
+test("/builds/start emits url_research before URL-backed plan summary responses", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
@@ -1361,6 +1361,15 @@ test("/builds/start includes a reference_screenshot event when URL-backed plan s
       reason: "Clear new build request.",
     }),
     generatePlanSummary: async () => "Here's what I'll do:\n- Mirror the core flows\n- Keep it clean",
+    researchUrl: async () => ({
+      domain: "mybos.com",
+      features: [
+        "Maintenance request tracking",
+        "Vendor workflow management",
+      ],
+      summary: "Building operations SaaS for property teams",
+      url: "https://mybos.com",
+    }),
     loadUrlContext: async () => ({
       label: "Source URL: https://mybos.com",
       sourceType: "url",
@@ -1371,7 +1380,6 @@ test("/builds/start includes a reference_screenshot event when URL-backed plan s
     runBuildInBackground: async () => {
       runBuildCalls += 1;
     },
-    screenshotUrl: async () => "ZmFrZS1zY3JlZW5zaG90",
   });
 
   const response = await route.request("http://localhost/", {
@@ -1387,16 +1395,20 @@ test("/builds/start includes a reference_screenshot event when URL-backed plan s
   assert.equal(response.status, 202);
   const payload = await response.json() as {
     trace: {
-      events: Array<{ type: string; domain?: string; imageBase64?: string }>;
+      events: Array<{ type: string; domain?: string; summary?: string; features?: string[] }>;
       lastEventId: string | null;
     };
   };
 
-  const screenshotEvent = payload.trace.events.find((event) => event.type === "reference_screenshot");
+  const urlResearchEvent = payload.trace.events.find((event) => event.type === "url_research");
   assert.equal(payload.trace.lastEventId, null);
-  assert.ok(screenshotEvent);
-  assert.equal(screenshotEvent?.domain, "mybos.com");
-  assert.equal(screenshotEvent?.imageBase64, "ZmFrZS1zY3JlZW5zaG90");
+  assert.ok(urlResearchEvent);
+  assert.equal(urlResearchEvent?.domain, "mybos.com");
+  assert.match(urlResearchEvent?.summary ?? "", /building operations/i);
+  assert.deepEqual(urlResearchEvent?.features ?? [], [
+    "Maintenance request tracking",
+    "Vendor workflow management",
+  ]);
   assert.equal(runBuildCalls, 0);
 });
 
@@ -1505,6 +1517,15 @@ test("/builds/start passes fetched URL content into clarifying question generati
       capturedWebsiteContext = (input.websiteContext as Record<string, unknown> | null) ?? null;
       return "Keep the same visual style, or should I change it?";
     },
+    researchUrl: async () => ({
+      domain: "mybos.com",
+      features: [
+        "Maintenance request tracking",
+        "Vendor workflow management",
+      ],
+      summary: "Building operations SaaS for property teams",
+      url: "https://mybos.com",
+    }),
     loadUrlContext: async () => ({
       label: "Source URL: https://mybos.com",
       sourceType: "url",
@@ -1531,11 +1552,18 @@ test("/builds/start passes fetched URL content into clarifying question generati
   const payload = await response.json() as {
     trace: { events: Array<{ type: string; message?: string }>; lastEventId: string | null };
   };
+  const urlResearchIndex = payload.trace.events.findIndex((event) => event.type === "url_research");
+  const clarifyingIndex = payload.trace.events.findIndex((event) => event.type === "clarifying_question");
 
   assert.equal(payload.trace.lastEventId, null);
+  assert.equal(payload.trace.events.some((event) => event.type === "url_research"), true);
   assert.equal(payload.trace.events.some((event) => event.type === "clarifying_question"), true);
+  assert.equal(urlResearchIndex >= 0, true);
+  assert.equal(clarifyingIndex >= 0, true);
+  assert.equal(urlResearchIndex < clarifyingIndex, true);
   assert.equal(capturedWebsiteContext?.sourceType, "url");
-  assert.match(String(capturedWebsiteContext?.content ?? ""), /building operations platform/i);
+  assert.match(String(capturedWebsiteContext?.content ?? ""), /Research summary: Building operations SaaS for property teams/i);
+  assert.match(String(capturedWebsiteContext?.content ?? ""), /Maintenance request tracking/i);
   assert.equal(runBuildCalls, 0);
 });
 
@@ -1641,6 +1669,14 @@ test("/builds/start caps confidence at 0.7 for URL-only prompts without feature 
       reason: "High confidence from URL context.",
     }),
     generateClarifyingQuestion: async () => "Which features should I prioritize first?",
+    researchUrl: async () => ({
+      domain: "mybos.com",
+      features: [
+        "Maintenance request tracking",
+      ],
+      summary: "Building operations SaaS for property teams",
+      url: "https://mybos.com",
+    }),
     generatePlanSummary: async () => {
       planSummaryCalls += 1;
       return "Here's what I'll do:\n- Placeholder summary";
@@ -1673,6 +1709,7 @@ test("/builds/start caps confidence at 0.7 for URL-only prompts without feature 
   };
 
   assert.equal(payload.trace.lastEventId, null);
+  assert.equal(payload.trace.events.some((event) => event.type === "url_research"), true);
   assert.equal(payload.trace.events.some((event) => event.type === "clarifying_question"), true);
   assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
   assert.equal(planSummaryCalls, 0);
@@ -1784,7 +1821,15 @@ test("/builds/start does not cap confidence when URL prompt includes explicit fe
       planSummaryCalls += 1;
       return "Here's what I'll do:\n- Build core operations flows";
     },
-    screenshotUrl: async () => "ZmFrZS1zY3JlZW5zaG90",
+    researchUrl: async () => ({
+      domain: "mybos.com",
+      features: [
+        "Maintenance request tracking",
+        "Vendor workflow management",
+      ],
+      summary: "Building operations SaaS for property teams",
+      url: "https://mybos.com",
+    }),
     runBuildInBackground: async () => {
       runBuildCalls += 1;
     },
@@ -1806,6 +1851,7 @@ test("/builds/start does not cap confidence when URL prompt includes explicit fe
   };
 
   assert.equal(payload.trace.lastEventId, null);
+  assert.equal(payload.trace.events.some((event) => event.type === "url_research"), true);
   assert.equal(payload.trace.events.some((event) => event.type === "clarifying_question"), false);
   assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), true);
   assert.equal(planSummaryCalls, 1);

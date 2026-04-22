@@ -52,8 +52,9 @@ import {
   extractUrlLike,
   loadResearchContext,
   loadUrlContext,
+  researchUrl,
+  toWebsiteContextFromUrlResearch,
 } from "../../lib/webFetch.js";
-import { screenshotUrl } from "../../lib/screenshotUrl.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -435,10 +436,10 @@ function buildImmediateTrace(args: {
   message: string;
   operation: "initial_build" | "iteration";
   projectId: string;
-  referenceScreenshot?: {
-    imageBase64: string;
-    url: string;
+  urlResearch?: {
     domain: string;
+    features: string[];
+    summary: string;
   } | null;
   readyToImplement?: boolean;
   requestedAt: string;
@@ -452,20 +453,20 @@ function buildImmediateTrace(args: {
     intent: args.intent,
   };
 
-  const screenshotEvent = args.referenceScreenshot
+  const urlResearchEvent = args.urlResearch
     ? {
-        type: "reference_screenshot",
+        type: "url_research",
         id: "2",
         timestamp: args.requestedAt,
         operation: args.operation,
-        imageBase64: args.referenceScreenshot.imageBase64,
-        url: args.referenceScreenshot.url,
-        domain: args.referenceScreenshot.domain,
+        domain: args.urlResearch.domain,
+        summary: args.urlResearch.summary,
+        features: args.urlResearch.features,
       }
     : null;
 
-  const mainEventId = screenshotEvent ? "3" : "2";
-  const doneEventId = screenshotEvent ? "4" : "3";
+  const mainEventId = urlResearchEvent ? "3" : "2";
+  const doneEventId = urlResearchEvent ? "4" : "3";
 
   const mainEvent = args.type === "conversational_response"
     ? {
@@ -517,7 +518,7 @@ function buildImmediateTrace(args: {
   return {
     events: [
       intentEvent,
-      ...(screenshotEvent ? [screenshotEvent] : []),
+      ...(urlResearchEvent ? [urlResearchEvent] : []),
       mainEvent,
       doneEvent,
     ] as unknown as BuilderV3TraceMetadata["events"],
@@ -538,8 +539,8 @@ interface BuildsStartRouteDeps {
   generatePlanSummary?: typeof generatePlanSummaryMessage;
   loadUrlContext?: typeof loadUrlContext;
   loadOrgContextMiddleware?: typeof loadOrgContext;
+  researchUrl?: typeof researchUrl;
   runBuildInBackground?: typeof runBuildInBackground;
-  screenshotUrl?: typeof screenshotUrl;
 }
 
 export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
@@ -552,8 +553,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const generateConversationalAnswerFn = deps.generateConversationalAnswer ?? generateConversationalAnswer;
   const generatePlanSummaryFn = deps.generatePlanSummary ?? generatePlanSummaryMessage;
   const loadUrlContextFn = deps.loadUrlContext ?? loadUrlContext;
+  const researchUrlFn = deps.researchUrl ?? researchUrl;
   const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
-  const screenshotUrlFn = deps.screenshotUrl ?? screenshotUrl;
   const requestBody = await c.req.json().catch(() => null);
   const normalisedRequestBody = normaliseStartBuildRequestBody(requestBody);
   const explicitImplementPrompt = readExplicitImplementPrompt(normalisedRequestBody);
@@ -660,12 +661,20 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     || classifiedIntent === "ambiguous";
   const detectedUrl = extractUrlLike(sourcePrompt);
   const hasResearchUrl = Boolean(detectedUrl);
-  const hasUserFeaturePreferences = hasExplicitFeaturePreferences(sourcePrompt);
-  const urlContextForConfidenceCap: WebsiteContext | null = !isImplementConfirmation
+  const urlResearchResult = !isImplementConfirmation
     && isBuildIshIntent
-    && hasResearchUrl
+    && detectedUrl
+    ? await researchUrlFn(detectedUrl, readDomainFromUrl(detectedUrl))
+    : null;
+  const researchedUrlContext: WebsiteContext | null = detectedUrl && urlResearchResult
+    ? toWebsiteContextFromUrlResearch(detectedUrl, urlResearchResult)
+    : null;
+  const hasUserFeaturePreferences = hasExplicitFeaturePreferences(sourcePrompt);
+  const urlContextForConfidenceCap: WebsiteContext | null = researchedUrlContext
+    && !isImplementConfirmation
+    && isBuildIshIntent
     && !hasUserFeaturePreferences
-    ? await loadUrlContextFn(sourcePrompt)
+    ? researchedUrlContext
     : null;
   const shouldCapConfidenceForUrlOnlyPrompt = Boolean(
     urlContextForConfidenceCap
@@ -725,6 +734,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     explicitImplementSignal,
     isIteration,
     hasUserFeaturePreferences,
+    hasUrlResearch: Boolean(urlResearchResult),
     hasUrlContextForConfidenceCap: Boolean(urlContextForConfidenceCap),
     shouldCapConfidenceForUrlOnlyPrompt,
     hasAccumulatedContext: Boolean(accumulatedBuildContext),
@@ -855,35 +865,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     const implementPlan = shouldOfferPlanSummary
       ? (accumulatedBuildContext ?? effectivePrompt)
       : null;
-
-    const shouldCaptureReferenceScreenshot = Boolean(shouldOfferPlanSummary && detectedUrl);
-    let referenceScreenshot: {
-      imageBase64: string;
-      url: string;
-      domain: string;
-    } | null = null;
-
-    if (shouldCaptureReferenceScreenshot && detectedUrl) {
-      const screenshotBase64 = await screenshotUrlFn(detectedUrl);
-      console.log("[builds/start] reference screenshot capture attempted.", {
-        buildId,
-        returnedBase64: Boolean(screenshotBase64),
-        url: detectedUrl,
-      });
-
-      if (screenshotBase64) {
-        referenceScreenshot = {
-          imageBase64: screenshotBase64,
-          url: detectedUrl,
-          domain: readDomainFromUrl(detectedUrl),
-        };
-      } else {
-        console.warn("[builds/start] reference screenshot capture returned empty result.", {
-          buildId,
-          url: detectedUrl,
-        });
-      }
-    }
+    const urlResearchEventPayload = hasResearchUrl && urlResearchResult
+      ? {
+          domain: urlResearchResult.domain,
+          summary: urlResearchResult.summary,
+          features: urlResearchResult.features,
+        }
+      : null;
 
     // BEO-485: URL context must be fetched before clarifying questions so the
     // model does not ask redundant "what does this site do?" questions.
@@ -892,7 +880,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       : classifiedIntent === "research"
       ? await loadResearchContext(sourcePrompt)
       : hasResearchUrl
-      ? (urlContextForConfidenceCap ?? await loadUrlContextFn(sourcePrompt))
+      ? (urlContextForConfidenceCap ?? researchedUrlContext ?? await loadUrlContextFn(sourcePrompt))
       : null;
 
     if (eventType === "clarifying_question") {
@@ -932,19 +920,19 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       message: assistantMessage,
       operation,
       projectId,
-      referenceScreenshot,
+      urlResearch: urlResearchEventPayload,
       readyToImplement: Boolean(implementPlan),
       implementPlan,
       requestedAt,
       type: eventType,
     });
 
-    if (referenceScreenshot) {
-      console.log("[builds/start] reference_screenshot event emitted.", {
+    if (urlResearchEventPayload) {
+      console.log("[builds/start] url_research event emitted.", {
         buildId,
-        domain: referenceScreenshot.domain,
-        imageBase64Length: referenceScreenshot.imageBase64.length,
-        url: referenceScreenshot.url,
+        domain: urlResearchEventPayload.domain,
+        featureCount: urlResearchEventPayload.features.length,
+        hasSummary: urlResearchEventPayload.summary.trim().length > 0,
       });
     }
 
