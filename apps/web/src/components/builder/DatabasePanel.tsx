@@ -33,8 +33,6 @@ import {
   HardDrive,
   ArrowUpRight,
   Users,
-  Eye,
-  EyeOff,
   CheckCircle,
   XCircle,
   PlugZap,
@@ -147,35 +145,27 @@ function parseHost(connectionString: string): string {
  * Decodes first to avoid double-encoding if the string is already partially encoded.
  * Uses last-@ splitting so passwords that contain @ are handled correctly.
  */
-function encodeConnectionString(raw: string): string {
-  const schemeMatch = raw.match(/^(postgres(?:ql)?:\/\/)/);
-  if (!schemeMatch) return raw;
-  const scheme = schemeMatch[1];
-  const withoutScheme = raw.slice(scheme.length);
-
-  // Split at the last '@' — that's the credential/host separator
-  const lastAt = withoutScheme.lastIndexOf("@");
-  if (lastAt === -1) return raw;
-
-  const credentials = withoutScheme.slice(0, lastAt);
-  const hostPart = withoutScheme.slice(lastAt + 1);
-
-  // Split credentials at first ':' to get user vs password
-  const colonIdx = credentials.indexOf(":");
-  if (colonIdx === -1) return raw;
-
-  const user = credentials.slice(0, colonIdx);
-  const password = credentials.slice(colonIdx + 1);
-
-  // Decode first to avoid double-encoding (%40 → @ → %2540)
-  const safeUser = encodeURIComponent(tryDecode(user));
-  const safePassword = encodeURIComponent(tryDecode(password));
-
-  return `${scheme}${safeUser}:${safePassword}@${hostPart}`;
-}
-
 function tryDecode(s: string): string {
   try { return decodeURIComponent(s); } catch { return s; }
+}
+
+/**
+ * Build the final connection string to send to the API:
+ * - If rawPassword is provided, inject it (encoded) into the URL
+ * - Otherwise encode the credentials already in the URL
+ */
+function getFinalConnectionString(url: string, rawPassword: string): string {
+  const schemeMatch = url.match(/^(postgres(?:ql)?:\/\/)/);
+  if (!schemeMatch) return url;
+  const scheme = schemeMatch[1];
+  const withoutScheme = url.slice(scheme.length);
+  const lastAt = withoutScheme.lastIndexOf("@");
+  const credentials = lastAt !== -1 ? withoutScheme.slice(0, lastAt) : withoutScheme;
+  const hostPart = lastAt !== -1 ? withoutScheme.slice(lastAt + 1) : "";
+  const colonIdx = credentials.indexOf(":");
+  const user = colonIdx !== -1 ? credentials.slice(0, colonIdx) : credentials;
+  const password = rawPassword.trim() || (colonIdx !== -1 ? credentials.slice(colonIdx + 1) : "");
+  return `${scheme}${encodeURIComponent(tryDecode(user))}:${encodeURIComponent(tryDecode(password))}@${hostPart}`;
 }
 
 // ── BYO provider data (BEO-518) ──────────────────────────────────────────────
@@ -276,20 +266,17 @@ export function DatabasePanel({
     if (isByoConnected) setOuterTab("byo");
   }, [isByoConnected]);
 
-  // ── BYO Postgres state (BEO-445) ─────────────────────
+  // ── BYO Postgres state (BEO-445) — wizard ─────────────
+  const [byoStep, setByoStep] = useState<1 | 2 | 3>(1);
   const [byoConnectionString, setByoConnectionString] = useState("");
-  const [byoShowPassword, setByoShowPassword] = useState(true);
+  const [byoRawPassword, setByoRawPassword] = useState("");
   const [byoStatus, setByoStatus] = useState<ByoStatus>("idle");
   const [byoTestError, setByoTestError] = useState<string | null>(null);
   const [byoSaveError, setByoSaveError] = useState<string | null>(null);
-  // Host shown in connected state (derived from the string after save, or from props after reload)
+  const [byoStep2Error, setByoStep2Error] = useState<string | null>(null);
   const [byoSavedHost, setByoSavedHost] = useState<string | null>(byoConnectedHost ?? null);
   const [byoDisconnecting, setByoDisconnecting] = useState(false);
-  // BEO-518: selected provider card drives placeholder + docs link
   const [byoSelectedProvider, setByoSelectedProvider] = useState<string | null>(null);
-  // Password popup helper — lets users enter password in plain text then inject it encoded
-  const [byoPasswordHelper, setByoPasswordHelper] = useState(false);
-  const [byoRawPassword, setByoRawPassword] = useState("");
 
   // ── Managed DB — Connection / wiring state ────────────
   const [enabling, setEnabling] = useState(false);
@@ -535,32 +522,33 @@ export function DatabasePanel({
     setByoTestError(null);
     setByoSaveError(null);
     try {
-      const encoded = encodeConnectionString(byoConnectionString.trim());
-      const result = await testByoDb(projectId, encoded);
+      const final = getFinalConnectionString(byoConnectionString.trim(), byoRawPassword);
+      const result = await testByoDb(projectId, final);
       setByoStatus(result.ok ? "test_ok" : "test_fail");
       if (!result.ok) setByoTestError(result.error ?? "Connection failed.");
     } catch (err) {
       setByoStatus("test_fail");
       setByoTestError(err instanceof Error ? err.message : "Connection failed.");
     }
-  }, [projectId, byoConnectionString]);
+  }, [projectId, byoConnectionString, byoRawPassword]);
 
   const handleSaveByo = useCallback(async () => {
     if (!projectId || !byoConnectionString.trim()) return;
     setByoStatus("saving");
     setByoSaveError(null);
     try {
-      const encoded = encodeConnectionString(byoConnectionString.trim());
-      await saveByoDb(projectId, encoded);
-      setByoSavedHost(parseHost(encoded));
+      const final = getFinalConnectionString(byoConnectionString.trim(), byoRawPassword);
+      await saveByoDb(projectId, final);
+      setByoSavedHost(parseHost(final));
       setByoStatus("saved");
       setByoConnectionString("");
+      setByoRawPassword("");
       onDbStateChange();
     } catch (err) {
-      setByoStatus("test_ok"); // revert to test_ok so Save button stays available
+      setByoStatus("test_ok");
       setByoSaveError(err instanceof Error ? err.message : "Failed to save connection.");
     }
-  }, [projectId, byoConnectionString, onDbStateChange]);
+  }, [projectId, byoConnectionString, byoRawPassword, onDbStateChange]);
 
   const handleDisconnectByo = useCallback(async () => {
     if (!projectId) return;
@@ -569,7 +557,10 @@ export function DatabasePanel({
       await disconnectByoDb(projectId);
       setByoSavedHost(null);
       setByoStatus("idle");
+      setByoStep(1);
       setByoConnectionString("");
+      setByoRawPassword("");
+      setByoSelectedProvider(null);
       onDbStateChange();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to disconnect.");
@@ -578,28 +569,32 @@ export function DatabasePanel({
     }
   }, [projectId, onDbStateChange, showToast]);
 
-  /** Replace the password in the current connection string with the user-typed plain-text password. */
-  const handleInjectPassword = useCallback(() => {
-    if (!byoRawPassword) return;
+  /** Validate step 2 then transition to step 3 and auto-test. */
+  const handleGoTestStep = useCallback(async () => {
     const str = byoConnectionString.trim();
-    const schemeMatch = str.match(/^(postgres(?:ql)?:\/\/)/);
-    if (!schemeMatch) return;
-    const scheme = schemeMatch[1];
-    const withoutScheme = str.slice(scheme.length);
-    const lastAt = withoutScheme.lastIndexOf("@");
-    const credentials = lastAt !== -1 ? withoutScheme.slice(0, lastAt) : withoutScheme;
-    const hostPart = lastAt !== -1 ? withoutScheme.slice(lastAt + 1) : "";
-    const colonIdx = credentials.indexOf(":");
-    const user = colonIdx !== -1 ? credentials.slice(0, colonIdx) : credentials;
-    const encoded = `${scheme}${encodeURIComponent(tryDecode(user))}:${encodeURIComponent(byoRawPassword)}${hostPart ? `@${hostPart}` : ""}`;
-    setByoConnectionString(encoded);
-    setByoPasswordHelper(false);
-    setByoRawPassword("");
-    if (byoStatus !== "idle") {
-      setByoStatus("idle");
-      setByoTestError(null);
+    if (!str) {
+      setByoStep2Error("Please enter a connection string.");
+      return;
     }
-  }, [byoConnectionString, byoRawPassword, byoStatus]);
+    if (!/^postgres(?:ql)?:\/\//i.test(str)) {
+      setByoStep2Error("Must start with postgres:// or postgresql://");
+      return;
+    }
+    setByoStep2Error(null);
+    setByoStep(3);
+    setByoStatus("testing");
+    setByoTestError(null);
+    setByoSaveError(null);
+    try {
+      const final = getFinalConnectionString(str, byoRawPassword);
+      const result = await testByoDb(projectId!, final);
+      setByoStatus(result.ok ? "test_ok" : "test_fail");
+      if (!result.ok) setByoTestError(result.error ?? "Connection failed.");
+    } catch (err) {
+      setByoStatus("test_fail");
+      setByoTestError(err instanceof Error ? err.message : "Connection failed.");
+    }
+  }, [byoConnectionString, byoRawPassword, projectId]);
 
   // ── Side effects ──────────────────────────────────────
 
@@ -1405,16 +1400,15 @@ export function DatabasePanel({
       )}
 
       {/* ══════════════════════════════════════════════════
-          CONNECT YOUR OWN TAB (BEO-445 / BEO-518)
+          CONNECT YOUR OWN TAB — 3-step wizard (BEO-445/518)
       ══════════════════════════════════════════════════ */}
       {outerTab === "byo" && (
-        <div className="flex flex-1 flex-col overflow-y-auto">
+        <div className="flex flex-1 flex-col overflow-hidden">
 
           {/* ── CONNECTED STATE ── */}
           {isByoConnectedState ? (
-            <div className="flex flex-1 flex-col items-center justify-center px-8 py-16">
+            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-8 py-16">
               <div className="w-full max-w-sm space-y-6">
-                {/* Status badge */}
                 <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
                   <PlugZap size={20} className="flex-shrink-0 text-emerald-600" />
                   <div className="min-w-0 flex-1">
@@ -1427,249 +1421,278 @@ export function DatabasePanel({
                   </div>
                   <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
                 </div>
-
                 <p className="text-sm text-[#9ca3af]">
                   Your app is using this Postgres database.{" "}
                   <code className="rounded bg-[#f3f4f6] px-1 py-0.5 text-xs text-[#374151]">VITE_DATABASE_URL</code>{" "}
                   is injected automatically on every page load.
                 </p>
-
                 <button
                   onClick={() => void handleDisconnectByo()}
                   disabled={byoDisconnecting}
                   className="flex items-center gap-2 text-sm text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
                 >
-                  {byoDisconnecting ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <WifiOff size={14} />
-                  )}
+                  {byoDisconnecting ? <Loader2 size={14} className="animate-spin" /> : <WifiOff size={14} />}
                   {byoDisconnecting ? "Disconnecting..." : "Disconnect"}
                 </button>
               </div>
             </div>
           ) : (
-            /* ── FORM STATE (BEO-518 polish) ── */
-            <div className="mx-auto w-full max-w-lg space-y-7 px-7 py-10">
+            <div className="flex flex-1 flex-col overflow-hidden">
 
-              {/* Header */}
-              <div>
-                <h2 className="text-base font-semibold text-[#1a1a1a]">Connect your own database</h2>
-                <p className="mt-1 text-sm text-[#9ca3af]">
-                  Works with any Postgres host. Pick your provider to get started.
-                </p>
+              {/* ── Step indicator ── */}
+              <div className="flex items-center gap-3 border-b border-[#e5e7eb] bg-[#faf9f6] px-6 py-3 flex-shrink-0">
+                {([1, 2, 3] as const).map((n) => (
+                  <div key={n} className="flex items-center gap-2">
+                    <div className={cn(
+                      "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold transition-colors",
+                      byoStep === n
+                        ? "bg-[#F97316] text-white"
+                        : byoStep > n
+                          ? "bg-emerald-500 text-white"
+                          : "bg-[#e5e7eb] text-[#9ca3af]",
+                    )}>
+                      {byoStep > n ? "✓" : n}
+                    </div>
+                    <span className={cn(
+                      "text-xs font-medium",
+                      byoStep === n ? "text-[#1a1a1a]" : "text-[#9ca3af]",
+                    )}>
+                      {n === 1 ? "Provider" : n === 2 ? "Connection" : "Connect"}
+                    </span>
+                    {n < 3 && <span className="text-[#d1d5db]">›</span>}
+                  </div>
+                ))}
               </div>
 
-              {/* Provider cards — 2×3 grid */}
-              <div className="space-y-2.5">
-                <p className="text-xs font-medium text-[#6b7280]">Select your provider</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {BYO_PROVIDERS.map((p) => {
-                    const isSelected = byoSelectedProvider === p.key;
-                    return (
-                      <button
-                        key={p.key}
-                        type="button"
-                        onClick={() => {
-                          setByoSelectedProvider(isSelected ? null : p.key);
-                          if (byoStatus !== "idle") {
-                            setByoStatus("idle");
-                            setByoTestError(null);
-                          }
-                        }}
-                        className={cn(
-                          "flex flex-col items-center gap-2 rounded-xl border px-3 py-3.5 text-center transition-all",
-                          isSelected
-                            ? "border-[#F97316]/40 bg-[#F97316]/5 ring-1 ring-[#F97316]/20"
-                            : "border-[#e5e7eb] bg-white hover:border-[#d1d5db] hover:bg-[#faf9f6]",
-                        )}
-                      >
-                        <div
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
-                          style={{ backgroundColor: p.bg, color: p.dot }}
+              {/* ══ STEP 1: Select provider ══ */}
+              {byoStep === 1 && (
+                <div className="flex-1 overflow-y-auto px-6 py-7 space-y-6">
+                  <div>
+                    <h2 className="text-base font-semibold text-[#1a1a1a]">Where is your database hosted?</h2>
+                    <p className="mt-1 text-sm text-[#9ca3af]">Select your provider — we'll show you exactly where to find your connection string.</p>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {BYO_PROVIDERS.map((p) => {
+                      const isSelected = byoSelectedProvider === p.key;
+                      return (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => {
+                            setByoSelectedProvider(p.key);
+                            setByoStep(2);
+                          }}
+                          className={cn(
+                            "flex flex-col items-center gap-2.5 rounded-xl border px-3 py-4 text-center transition-all",
+                            isSelected
+                              ? "border-[#F97316]/40 bg-[#F97316]/5 ring-1 ring-[#F97316]/20"
+                              : "border-[#e5e7eb] bg-white hover:border-[#F97316]/30 hover:bg-[#faf9f6]",
+                          )}
                         >
-                          {p.initial}
-                        </div>
-                        <span className={cn(
-                          "text-xs font-medium leading-none",
-                          isSelected ? "text-[#F97316]" : "text-[#374151]",
-                        )}>
-                          {p.name}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                          <div
+                            className="flex h-10 w-10 items-center justify-center rounded-xl text-base font-bold"
+                            style={{ backgroundColor: p.bg, color: p.dot }}
+                          >
+                            {p.initial}
+                          </div>
+                          <span className="text-xs font-medium text-[#374151]">{p.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              {/* Connection string input */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-[#6b7280]">
-                  Connection string
-                </label>
-                <div className="relative">
-                  <input
-                    type={byoShowPassword ? "text" : "password"}
-                    value={byoConnectionString}
-                    onChange={(e) => {
-                      setByoConnectionString(e.target.value);
-                      if (byoStatus !== "idle") {
-                        setByoStatus("idle");
-                        setByoTestError(null);
-                      }
-                    }}
-                    placeholder={
-                      BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider)?.placeholder ??
-                      "postgres://user:password@host:5432/dbname"
-                    }
-                    className="h-12 w-full rounded-xl border border-[#e5e7eb] bg-white py-3 pl-4 pr-20 font-mono text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
-                  />
                   <button
                     type="button"
-                    onClick={() => setByoShowPassword((v) => !v)}
-                    className="absolute right-3.5 top-1/2 flex -translate-y-1/2 items-center gap-1 text-[11px] text-[#9ca3af] transition-colors hover:text-[#6b7280]"
-                    tabIndex={-1}
-                  >
-                    {byoShowPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                    <span>{byoShowPassword ? "Hide" : "Show"}</span>
-                  </button>
-                </div>
-
-                {/* Security note */}
-                <p className="text-xs text-[#9ca3af]">
-                  Stored securely — never exposed to your app's users.
-                  Special characters in your password (like <span className="font-mono">@</span>,{" "}
-                  <span className="font-mono">#</span>, <span className="font-mono">!</span>) are
-                  automatically URL-encoded before saving.
-                </p>
-                <p className="text-xs text-[#9ca3af]">
-                  The <span className="font-mono text-[#6b7280]">password</span> in the URL is your{" "}
-                  <strong className="font-medium text-[#6b7280]">database user's password</strong> — not your Beomz account password.
-                  You'll find it in your database provider's dashboard or connection details.
-                </p>
-
-                {/* Password popup helper */}
-                {!byoPasswordHelper ? (
-                  <button
-                    type="button"
-                    onClick={() => setByoPasswordHelper(true)}
+                    onClick={() => { setByoSelectedProvider(null); setByoStep(2); }}
                     className="text-xs text-[#9ca3af] underline underline-offset-2 transition-colors hover:text-[#6b7280]"
                   >
-                    Password contains special characters? Enter it separately →
+                    I'll enter the URL directly →
                   </button>
-                ) : (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
-                    <div>
-                      <p className="text-xs font-semibold text-amber-800">Enter your password in plain text</p>
-                      <p className="mt-0.5 text-xs text-amber-700">
-                        Type your database password below — we'll URL-encode it and insert it into the connection string automatically.
-                      </p>
+                </div>
+              )}
+
+              {/* ══ STEP 2: Enter connection string ══ */}
+              {byoStep === 2 && (() => {
+                const provider = BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider) ?? null;
+                return (
+                  <div className="flex-1 overflow-y-auto px-6 py-7 space-y-5">
+                    {/* Back */}
+                    <button
+                      type="button"
+                      onClick={() => { setByoStep(1); setByoStep2Error(null); }}
+                      className="flex items-center gap-1.5 text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                    >
+                      ← Back
+                    </button>
+
+                    {/* Provider header */}
+                    {provider ? (
+                      <div className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
+                        <div
+                          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold"
+                          style={{ backgroundColor: provider.bg, color: provider.dot }}
+                        >
+                          {provider.initial}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-[#1a1a1a]">{provider.name}</p>
+                          {provider.docsUrl && (
+                            <a
+                              href={provider.docsUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-[#F97316] transition-colors hover:text-[#ea6c10]"
+                            >
+                              {provider.docsLabel ?? "Find your connection string"} →
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <h2 className="text-base font-semibold text-[#1a1a1a]">Enter your connection string</h2>
+                        <p className="mt-0.5 text-sm text-[#9ca3af]">Works with any Postgres host.</p>
+                      </div>
+                    )}
+
+                    {/* Connection string field */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[#6b7280]">Connection string</label>
+                      <textarea
+                        value={byoConnectionString}
+                        onChange={(e) => {
+                          setByoConnectionString(e.target.value);
+                          setByoStep2Error(null);
+                        }}
+                        placeholder={provider?.placeholder ?? "postgres://user:password@host:5432/dbname"}
+                        rows={3}
+                        className="w-full resize-none rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 font-mono text-sm text-[#1a1a1a] outline-none placeholder:font-sans placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                      />
+                      <p className="text-xs text-[#9ca3af]">Stored securely — never exposed to your app's users.</p>
                     </div>
-                    <div className="flex gap-2">
+
+                    {/* Password field — always visible, plain text */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[#6b7280]">
+                        Password{" "}
+                        <span className="font-normal text-[#9ca3af]">(optional — enter in plain text if it contains special characters like @ # !)</span>
+                      </label>
                       <input
                         type="text"
                         value={byoRawPassword}
                         onChange={(e) => setByoRawPassword(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleInjectPassword(); }}
-                        placeholder="Your database password"
-                        autoFocus
-                        className="h-9 flex-1 rounded-lg border border-amber-300 bg-white px-3 text-sm outline-none placeholder:text-[#c4c9d4] focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+                        placeholder="Leave blank if the connection string already has the correct password"
+                        className="h-10 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
                       />
-                      <button
-                        type="button"
-                        onClick={handleInjectPassword}
-                        disabled={!byoRawPassword.trim()}
-                        className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
-                      >
-                        Insert
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setByoPasswordHelper(false); setByoRawPassword(""); }}
-                        className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-700 transition-colors hover:bg-amber-100"
-                      >
-                        Cancel
-                      </button>
+                      <p className="text-xs text-[#9ca3af]">
+                        If filled, this replaces the password in the URL above — special characters are automatically encoded.
+                      </p>
                     </div>
-                  </div>
-                )}
-                {/* Where to find it link */}
-                {(() => {
-                  const provider = BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider);
-                  const url = provider?.docsUrl ?? "https://www.postgresql.org/docs/current/libpq-connect.html";
-                  const label = provider?.docsLabel
-                    ? `${provider.name}: ${provider.docsLabel}`
-                    : "Postgres connection string docs";
-                  return (
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs text-[#F97316] transition-colors hover:text-[#ea6c10]"
+
+                    {/* Validation error */}
+                    {byoStep2Error && (
+                      <div className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                        <XCircle size={14} className="flex-shrink-0" />
+                        {byoStep2Error}
+                      </div>
+                    )}
+
+                    {/* Continue button */}
+                    <button
+                      type="button"
+                      onClick={() => void handleGoTestStep()}
+                      disabled={!byoConnectionString.trim()}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Where do I find this? →
-                      {provider?.docsLabel && (
-                        <span className="text-[#9ca3af]">({label})</span>
+                      Test & Connect →
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* ══ STEP 3: Test & connect ══ */}
+              {byoStep === 3 && (
+                <div className="flex-1 overflow-y-auto px-6 py-7 space-y-5">
+                  {/* Back */}
+                  <button
+                    type="button"
+                    onClick={() => { setByoStep(2); setByoStatus("idle"); setByoTestError(null); setByoSaveError(null); }}
+                    className="flex items-center gap-1.5 text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                  >
+                    ← Back
+                  </button>
+
+                  {/* Connection target */}
+                  <div className="rounded-xl border border-[#e5e7eb] bg-[#faf9f6] px-4 py-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af]">Connecting to</p>
+                    <p className="mt-1 font-mono text-sm text-[#1a1a1a]">
+                      {parseHost(getFinalConnectionString(byoConnectionString, byoRawPassword))}
+                    </p>
+                  </div>
+
+                  {/* Test status */}
+                  {byoStatus === "testing" && (
+                    <div className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white px-4 py-4 text-sm text-[#6b7280]">
+                      <Loader2 size={18} className="animate-spin text-[#F97316]" />
+                      Testing connection…
+                    </div>
+                  )}
+                  {byoStatus === "test_ok" && (
+                    <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm font-medium text-emerald-700">
+                      <CheckCircle size={18} className="flex-shrink-0" />
+                      Connected to {parseHost(getFinalConnectionString(byoConnectionString, byoRawPassword))}
+                    </div>
+                  )}
+                  {byoStatus === "test_fail" && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4">
+                      <div className="flex items-center gap-3 text-sm font-medium text-red-700">
+                        <XCircle size={18} className="flex-shrink-0" />
+                        Connection failed
+                      </div>
+                      {byoTestError && (
+                        <p className="mt-2 pl-7 text-xs text-red-600">{byoTestError}</p>
                       )}
-                    </a>
-                  );
-                })()}
-              </div>
-
-              {/* Test result inline */}
-              {byoStatus === "test_ok" && (
-                <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
-                  <CheckCircle size={15} className="flex-shrink-0" />
-                  Connected to {byoConnectionString.trim() ? parseHost(byoConnectionString.trim()) : "database"}
-                </div>
-              )}
-              {(byoStatus === "test_fail" || byoTestError) && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                  <XCircle size={15} className="mt-0.5 flex-shrink-0" />
-                  <span>{byoTestError ?? "Connection failed."}</span>
-                </div>
-              )}
-              {byoSaveError && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                  <XCircle size={15} className="mt-0.5 flex-shrink-0" />
-                  <span>{byoSaveError}</span>
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => void handleTestByo()}
-                  disabled={!byoConnectionString.trim() || byoStatus === "testing" || byoStatus === "saving"}
-                  className="flex items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#d1d5db] hover:bg-[#faf9f6] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {byoStatus === "testing" ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Database size={14} />
+                    </div>
                   )}
-                  {byoStatus === "testing" ? "Testing..." : "Test Connection"}
-                </button>
-
-                <button
-                  onClick={() => void handleSaveByo()}
-                  disabled={
-                    !byoConnectionString.trim() ||
-                    byoStatus === "testing" ||
-                    byoStatus === "saving" ||
-                    byoStatus === "idle" ||
-                    byoStatus === "test_fail"
-                  }
-                  className="flex items-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {byoStatus === "saving" ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Zap size={14} />
+                  {byoSaveError && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                      <XCircle size={15} className="mt-0.5 flex-shrink-0" />
+                      <span>{byoSaveError}</span>
+                    </div>
                   )}
-                  {byoStatus === "saving" ? "Saving..." : "Save & Connect"}
-                </button>
-              </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-2">
+                    {byoStatus === "test_fail" && (
+                      <button
+                        type="button"
+                        onClick={() => void handleTestByo()}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:bg-[#faf9f6]"
+                      >
+                        <Database size={14} />
+                        Retry Test
+                      </button>
+                    )}
+                    {byoStatus === "test_ok" && (
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveByo()}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+                      >
+                        <Zap size={14} />
+                        Save & Connect
+                      </button>
+                    )}
+                    {byoStatus === "saving" && (
+                      <button disabled className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white opacity-70">
+                        <Loader2 size={14} className="animate-spin" />
+                        Saving…
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
