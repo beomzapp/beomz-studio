@@ -270,7 +270,7 @@ test("/builds/start returns a plan summary with implementPlan when confidence re
       "- Grooming services",
       "- Playful colorful kid-centric design",
       "",
-      "Ready when you are — or type any changes first.",
+      "Just say the word and I'll start building — or type any changes first.",
     ].join("\n"),
     runBuildInBackground: async () => {
       runBuildCalls += 1;

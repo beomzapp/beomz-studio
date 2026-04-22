@@ -255,7 +255,7 @@ function buildPlanSummaryFallback(accumulatedContext: string, projectName?: stri
     `**${appName}**`,
     bullets,
     "",
-    "Ready when you are — or type any changes first.",
+    "Just say the word and I'll start building — or type any changes first.",
   ].join("\n");
 }
 
@@ -302,7 +302,7 @@ export async function generatePlanSummary(
           '[Feature 3]',
           '[Design style]',
           '',
-          'Ready when you are — or type any changes first."',
+          'Just say the word and I\'ll start building — or type any changes first."',
           'No intro phrases like "Sure!" or "Great!". Just the plan.',
         ].join("\n"),
         messages: [
