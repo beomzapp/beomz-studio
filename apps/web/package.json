@@ -13,6 +13,7 @@
     "@beomz-studio/contracts": "workspace:*",
     "@beomz-studio/templates": "workspace:*",
     "@fontsource/geist-sans": "^5.2.5",
+    "@neondatabase/serverless": "^0.10.4",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.1",
     "@tanstack/react-router": "^1.168.10",

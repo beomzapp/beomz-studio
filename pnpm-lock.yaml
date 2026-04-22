@@ -104,6 +104,9 @@ importers:
       '@fontsource/geist-sans':
         specifier: ^5.2.5
         version: 5.2.5
+      '@neondatabase/serverless':
+        specifier: ^0.10.4
+        version: 0.10.4
       '@supabase/ssr':
         specifier: ^0.10.0
         version: 0.10.0(@supabase/supabase-js@2.101.1)

@@ -48,12 +48,12 @@ import {
   getDbUsage,
   getStorageAddons,
   createStorageAddonCheckout,
-  testByoDb,
   saveByoDb,
   disconnectByoDb,
   type DbTable,
   type StorageAddonInfo,
 } from "../../lib/api";
+import { neon } from "@neondatabase/serverless";
 
 type OuterTab = "managed" | "byo";
 type PanelTab = "schema" | "data" | "bindings" | "logs" | "users";
@@ -514,23 +514,28 @@ export function DatabasePanel({
     }
   }, [projectId, showToast]);
 
-  // ── BYO DB actions (BEO-445) ─────────────────────────
+  // ── BYO DB actions (BEO-445 / BEO-520) ───────────────
+
+  /** Browser-side connection test — avoids server IP restrictions. */
+  const runBrowserTest = useCallback(async (connectionString: string) => {
+    const sql = neon(connectionString);
+    await sql`SELECT 1`;
+  }, []);
 
   const handleTestByo = useCallback(async () => {
-    if (!projectId || !byoConnectionString.trim()) return;
+    if (!byoConnectionString.trim()) return;
     setByoStatus("testing");
     setByoTestError(null);
     setByoSaveError(null);
     try {
       const final = getFinalConnectionString(byoConnectionString.trim(), byoRawPassword);
-      const result = await testByoDb(projectId, final);
-      setByoStatus(result.ok ? "test_ok" : "test_fail");
-      if (!result.ok) setByoTestError(result.error ?? "Connection failed.");
+      await runBrowserTest(final);
+      setByoStatus("test_ok");
     } catch (err) {
       setByoStatus("test_fail");
       setByoTestError(err instanceof Error ? err.message : "Connection failed.");
     }
-  }, [projectId, byoConnectionString, byoRawPassword]);
+  }, [byoConnectionString, byoRawPassword, runBrowserTest]);
 
   const handleSaveByo = useCallback(async () => {
     if (!projectId || !byoConnectionString.trim()) return;
@@ -569,7 +574,7 @@ export function DatabasePanel({
     }
   }, [projectId, onDbStateChange, showToast]);
 
-  /** Validate step 2 then transition to step 3 and auto-test. */
+  /** Validate step 2 then transition to step 3 and auto-test (browser-side). */
   const handleGoTestStep = useCallback(async () => {
     const str = byoConnectionString.trim();
     if (!str) {
@@ -587,14 +592,13 @@ export function DatabasePanel({
     setByoSaveError(null);
     try {
       const final = getFinalConnectionString(str, byoRawPassword);
-      const result = await testByoDb(projectId!, final);
-      setByoStatus(result.ok ? "test_ok" : "test_fail");
-      if (!result.ok) setByoTestError(result.error ?? "Connection failed.");
+      await runBrowserTest(final);
+      setByoStatus("test_ok");
     } catch (err) {
       setByoStatus("test_fail");
       setByoTestError(err instanceof Error ? err.message : "Connection failed.");
     }
-  }, [byoConnectionString, byoRawPassword, projectId]);
+  }, [byoConnectionString, byoRawPassword, runBrowserTest]);
 
   // ── Side effects ──────────────────────────────────────
 
