@@ -88,14 +88,15 @@ test("iteration system prompt forces surgical changed-file responses", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, false);
 
   assert.match(prompt, /You are making a surgical edit to an existing React app\./);
-  assert.match(prompt, /Understand the full codebase before editing — read all files carefully/);
+  assert.match(prompt, /Start from the project manifest and seed files already provided\./);
+  assert.match(prompt, /use search_project_code and read_project_file before editing/);
   assert.match(prompt, /Identify the MINIMUM set of files that need to change to fulfil this request/);
   assert.match(prompt, /Only return files you actually modified/);
   assert.match(prompt, /Think step by step:/);
   assert.match(prompt, /What is the minimal change to each file\?/);
 });
 
-test("iteration user message includes every existing file with path and content", () => {
+test("iteration user message includes a project manifest, seed files, and the edit request", () => {
   const prompt = buildIterationUserMessage("Rename the CTA button.", [
     {
       path: "App.tsx",
@@ -123,10 +124,12 @@ test("iteration user message includes every existing file with path and content"
     },
   ]);
 
-  assert.match(prompt, /Here is the current codebase:/);
+  assert.match(prompt, /Project file manifest:/);
+  assert.match(prompt, /- App\.tsx \| kind=route/);
+  assert.match(prompt, /- theme\.ts \| kind=config/);
+  assert.match(prompt, /- package\.json \| kind=config/);
+  assert.match(prompt, /Seed file contents/);
   assert.match(prompt, /### App\.tsx/);
-  assert.match(prompt, /### theme\.ts/);
-  assert.match(prompt, /### package\.json/);
   assert.match(prompt, /Edit request: Rename the CTA button\./);
 });
 
@@ -152,18 +155,19 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
   assert.match(source, /workingPrompt = input\.isIteration \? promptWithUrlGrounding : await enrichPrompt\(promptWithUrlGrounding\);/);
 });
 
-test("iteration path uses a lower Anthropic max token cap, caches large Anthropic prefixes, and logs cache stats", async () => {
+test("iteration path uses a lower Anthropic max token cap, enables tool-based file access, and logs iteration metrics", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 
   assert.match(source, /const ITERATION_MAX_TOKENS = 32000;/);
   assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
   assert.match(source, /system:\s*\[\s*\{\s*type: "text",\s*text: systemPrompt,\s*cache_control: \{ type: "ephemeral" \}/);
-  assert.match(source, /console\.log\("\[generate\] isIteration:", isIteration\);/);
   assert.match(source, /console\.log\("\[generate\] existing files fetched:", existingFiles\?\.map\(\(f\) => f\.path\)\);/);
-  assert.match(source, /text: filesContextString,\s*cache_control: \{ type: "ephemeral" \}/);
-  assert.match(source, /console\.log\("\[generate\] iteration input files:", existingFiles\?\.length \?\? 0, "files"\);/);
-  assert.match(source, /console\.log\("\[generate\] iteration input tokens \(estimated\):", Math\.round\(JSON\.stringify\(messages\)\.length \/ 4\)\);/);
-  assert.match(source, /console\.log\("\[generate\] cache stats:", \{\s*cache_creation_input_tokens: usage\?\.cache_creation_input_tokens \?\? 0,\s*cache_read_input_tokens: usage\?\.cache_read_input_tokens \?\? 0,\s*input_tokens: usage\?\.input_tokens \?\? 0,/);
+  assert.match(source, /name: "read_project_file"/);
+  assert.match(source, /name: "search_project_code"/);
+  assert.match(source, /const ITERATION_TOOLS:/);
+  assert.match(source, /stream\.on\("streamEvent"/);
+  assert.match(source, /console\.log\("\[generate\] iteration tool turn:"/);
+  assert.match(source, /console\.log\("\[generate\] iteration metrics:", metrics\);/);
 });
 
 test("isNpmPackage classifies npm and local import paths correctly", () => {

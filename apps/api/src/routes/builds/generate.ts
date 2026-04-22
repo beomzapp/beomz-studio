@@ -129,11 +129,44 @@ interface CustomiseResult {
   migrations?: string[];
   outputTokens: number;
   inputTokens?: number;
+  iterationMetrics?: IterationMetrics;
 }
 
 interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
+}
+
+interface IterationMetrics {
+  baselineInputTokens: number | null;
+  optimizedInputTokens: number | null;
+  ttftMs: number | null;
+  totalGenerationMs: number;
+  seedFiles: string[];
+  toolReadFiles: string[];
+  toolSearchQueries: string[];
+  changedFiles: string[];
+}
+
+interface IterationFileContext {
+  path: string;
+  basename: string;
+  kind: StudioFile["kind"];
+  language: string;
+  content: string;
+  lines: number;
+  imports: string[];
+  exports: string[];
+  keywords: string[];
+  score: number;
+}
+
+interface IterationSelectionResult {
+  manifest: string;
+  seedFiles: IterationFileContext[];
+  legacyUserMessage: string;
+  optimizedText: string;
+  optimizedUserContent: Anthropic.MessageParam["content"];
 }
 
 interface NarrationTextResult {
@@ -216,6 +249,88 @@ const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
     additionalProperties: false,
   },
 };
+
+const ITERATION_READ_FILE_TOOL: Anthropic.Messages.Tool = {
+  name: "read_project_file",
+  description:
+    "Read a project file by filename when you need more context than the seed files provided. "
+    + "Use this before editing if the relevant implementation is not already visible.",
+  input_schema: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "Filename from the project manifest, e.g. App.tsx or theme.ts.",
+      },
+      startLine: {
+        type: "integer",
+        description: "Optional 1-indexed start line for partial reads.",
+      },
+      endLine: {
+        type: "integer",
+        description: "Optional 1-indexed end line for partial reads. Omit to read to the end.",
+      },
+    },
+    required: ["path"],
+    additionalProperties: false,
+  },
+};
+
+const ITERATION_SEARCH_CODE_TOOL: Anthropic.Messages.Tool = {
+  name: "search_project_code",
+  description:
+    "Search filenames and code for a concept, component, prop, label, or behavior. "
+    + "Use this to quickly find the right file before calling read_project_file.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "A short natural-language or keyword query, e.g. 'CTA button label' or 'sidebar navigation'.",
+      },
+    },
+    required: ["query"],
+    additionalProperties: false,
+  },
+};
+
+const ITERATION_TOOLS: Anthropic.Messages.Tool[] = [
+  ITERATION_READ_FILE_TOOL,
+  ITERATION_SEARCH_CODE_TOOL,
+  DELIVER_FILES_TOOL,
+];
+
+const ITERATION_MAX_TOOL_STEPS = 8;
+const ITERATION_MAX_SEED_FILES = 6;
+const ITERATION_MAX_SEARCH_MATCHES = 5;
+
+const ITERATION_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "app",
+  "button",
+  "change",
+  "create",
+  "for",
+  "from",
+  "in",
+  "into",
+  "it",
+  "make",
+  "new",
+  "of",
+  "on",
+  "page",
+  "screen",
+  "section",
+  "tab",
+  "the",
+  "this",
+  "to",
+  "update",
+  "with",
+]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1608,6 +1723,288 @@ function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?:
   return { files, summary, appName, migrations };
 }
 
+function splitIntoSearchTokens(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9#]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !ITERATION_STOP_WORDS.has(token));
+}
+
+function uniqueTokens(tokens: readonly string[]): string[] {
+  return [...new Set(tokens)];
+}
+
+function extractImportsFromContent(content: string): string[] {
+  return uniqueTokens(
+    [...content.matchAll(/from\s+['"]([^'"]+)['"]/g)]
+      .map((match) => basename(match[1]).replace(/\.(tsx?|jsx?)$/, ""))
+      .filter(Boolean),
+  );
+}
+
+function extractExportsFromContent(content: string): string[] {
+  const exports = [
+    ...content.matchAll(/export\s+default\s+function\s+([A-Za-z0-9_]+)/g),
+    ...content.matchAll(/export\s+function\s+([A-Za-z0-9_]+)/g),
+    ...content.matchAll(/export\s+const\s+([A-Za-z0-9_]+)/g),
+  ].map((match) => match[1]);
+  return uniqueTokens(exports);
+}
+
+function countTokenOverlap(tokens: readonly string[], queryTokens: readonly string[]): number {
+  const querySet = new Set(queryTokens);
+  let score = 0;
+  for (const token of tokens) {
+    if (querySet.has(token)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+
+function isAppearanceEdit(prompt: string): boolean {
+  return /\b(color|colour|theme|accent|logo|icon color|icon|background|font|typography|dark mode|light mode|redesign|brand)\b/i.test(prompt);
+}
+
+function isDependencyEdit(prompt: string): boolean {
+  return /\b(package|dependency|npm|library|install|stripe|supabase|neon|sdk|auth)\b/i.test(prompt);
+}
+
+function isNavigationEdit(prompt: string): boolean {
+  return /\b(page|route|screen|tab|sidebar|navigation|nav|menu|section)\b/i.test(prompt);
+}
+
+function buildIterationFileContexts(existingFiles: readonly StudioFile[], prompt: string): IterationFileContext[] {
+  const promptTokens = splitIntoSearchTokens(prompt);
+
+  return existingFiles.map((file) => {
+    const fileNameTokens = splitIntoSearchTokens(basename(file.path));
+    const exportTokens = extractExportsFromContent(file.content).flatMap((value) => splitIntoSearchTokens(value));
+    const importTokens = extractImportsFromContent(file.content).flatMap((value) => splitIntoSearchTokens(value));
+    const contentTokens = splitIntoSearchTokens(file.content.slice(0, 5000));
+    let score = 0;
+
+    score += countTokenOverlap(fileNameTokens, promptTokens) * 8;
+    score += countTokenOverlap(exportTokens, promptTokens) * 5;
+    score += countTokenOverlap(importTokens, promptTokens) * 3;
+    score += Math.min(countTokenOverlap(contentTokens, promptTokens), 12);
+
+    const base = basename(file.path);
+    if (base === "theme.ts" && isAppearanceEdit(prompt)) {
+      score += 60;
+    }
+    if (base === "package.json" && isDependencyEdit(prompt)) {
+      score += 50;
+    }
+    if (base === "App.tsx" && isNavigationEdit(prompt)) {
+      score += 35;
+    }
+    if (/Page\.(tsx|jsx)$/i.test(base) && isNavigationEdit(prompt)) {
+      score += 15;
+    }
+
+    return {
+      path: file.path,
+      basename: base,
+      kind: file.kind,
+      language: file.language,
+      content: file.content,
+      lines: file.content.split(/\r?\n/).length,
+      imports: extractImportsFromContent(file.content),
+      exports: extractExportsFromContent(file.content),
+      keywords: uniqueTokens([...fileNameTokens, ...exportTokens, ...importTokens, ...contentTokens]).slice(0, 20),
+      score,
+    };
+  });
+}
+
+function expandIterationSeedFiles(
+  sortedFiles: readonly IterationFileContext[],
+  allFiles: readonly IterationFileContext[],
+  prompt: string,
+): IterationFileContext[] {
+  const byBasename = new Map(allFiles.map((file) => [file.basename, file]));
+  const selected = new Map<string, IterationFileContext>();
+
+  const add = (file: IterationFileContext | undefined) => {
+    if (!file) return;
+    if (!selected.has(file.basename) && selected.size < ITERATION_MAX_SEED_FILES) {
+      selected.set(file.basename, file);
+    }
+  };
+
+  if (isAppearanceEdit(prompt)) {
+    add(byBasename.get("theme.ts"));
+  }
+
+  if (isDependencyEdit(prompt)) {
+    add(byBasename.get("package.json"));
+  }
+
+  if (isNavigationEdit(prompt)) {
+    add(byBasename.get("App.tsx"));
+  }
+
+  for (const file of sortedFiles) {
+    if (selected.size >= ITERATION_MAX_SEED_FILES) break;
+    add(file);
+  }
+
+  for (const file of [...selected.values()]) {
+    for (const importName of file.imports) {
+      if (selected.size >= ITERATION_MAX_SEED_FILES) break;
+      add(byBasename.get(`${importName}.tsx`) ?? byBasename.get(`${importName}.ts`) ?? byBasename.get(importName));
+    }
+  }
+
+  if (selected.size === 0) {
+    add(byBasename.get("App.tsx") ?? sortedFiles[0]);
+  }
+
+  return [...selected.values()];
+}
+
+function buildIterationManifest(files: readonly IterationFileContext[]): string {
+  return [
+    "Project file manifest:",
+    ...files.map((file) => {
+      const exportsLabel = file.exports.length > 0 ? file.exports.join(", ") : "none";
+      const importsLabel = file.imports.length > 0 ? file.imports.join(", ") : "none";
+      return `- ${file.basename} | kind=${file.kind} | lang=${file.language} | lines=${file.lines} | exports=${exportsLabel} | imports=${importsLabel}`;
+    }),
+  ].join("\n");
+}
+
+function buildIterationSeedFilesContext(seedFiles: readonly IterationFileContext[]): string {
+  return [
+    "Seed file contents (already selected as the most likely files to inspect first):",
+    "",
+    ...seedFiles.map((file) => `### ${file.basename}\n\`\`\`\n${file.content}\n\`\`\``),
+  ].join("\n");
+}
+
+function buildIterationLegacyFilesContext(existingFiles: readonly StudioFile[]): string {
+  const codebase = existingFiles
+    .map((file) => `### ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)
+    .join("\n\n");
+
+  return [
+    "Here is the current codebase:",
+    "",
+    codebase,
+  ].join("\n");
+}
+
+function formatFileSlice(
+  file: IterationFileContext,
+  startLine?: number,
+  endLine?: number,
+): string {
+  const lines = file.content.split(/\r?\n/);
+  const safeStart = Math.max(1, startLine ?? 1);
+  const safeEnd = Math.min(lines.length, endLine ?? lines.length);
+  const slice = lines
+    .slice(safeStart - 1, safeEnd)
+    .map((line, index) => `${safeStart + index}: ${line}`)
+    .join("\n");
+
+  return [
+    `FILE ${file.basename}`,
+    `RANGE ${safeStart}-${safeEnd}`,
+    "",
+    slice,
+  ].join("\n");
+}
+
+function searchIterationFiles(
+  files: readonly IterationFileContext[],
+  query: string,
+): string {
+  const queryTokens = splitIntoSearchTokens(query);
+  const matches = files
+    .map((file) => {
+      const lines = file.content.split(/\r?\n/);
+      const snippets = lines
+        .map((line, index) => ({ line, lineNumber: index + 1 }))
+        .filter(({ line }) => {
+          const lower = line.toLowerCase();
+          return queryTokens.some((token) => lower.includes(token));
+        })
+        .slice(0, 3)
+        .map(({ line, lineNumber }) => `${lineNumber}: ${line.trim()}`);
+
+      const score = countTokenOverlap(
+        uniqueTokens([
+          ...splitIntoSearchTokens(file.basename),
+          ...splitIntoSearchTokens(file.content.slice(0, 5000)),
+        ]),
+        queryTokens,
+      );
+
+      return { file, score, snippets };
+    })
+    .filter((entry) => entry.score > 0 || entry.snippets.length > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, ITERATION_MAX_SEARCH_MATCHES);
+
+  if (matches.length === 0) {
+    return `No matches found for query: ${query}`;
+  }
+
+  return [
+    `Search query: ${query}`,
+    "",
+    ...matches.map((match) => [
+      `### ${match.file.basename}`,
+      ...match.snippets,
+    ].join("\n")),
+  ].join("\n");
+}
+
+function buildIterationSelection(
+  prompt: string,
+  existingFiles: readonly StudioFile[],
+  imageUrl?: string,
+): IterationSelectionResult {
+  const contexts = buildIterationFileContexts(existingFiles, prompt);
+  const sorted = [...contexts].sort((a, b) => b.score - a.score || a.basename.localeCompare(b.basename));
+  const seedFiles = expandIterationSeedFiles(sorted, contexts, prompt);
+  const manifest = buildIterationManifest(sorted);
+  const editRequest = buildIterationEditRequest(prompt);
+  const legacyUserMessage = [
+    buildIterationLegacyFilesContext(existingFiles),
+    "",
+    editRequest,
+  ].join("\n");
+
+  const optimizedText = [
+    manifest,
+    "",
+    buildIterationSeedFilesContext(seedFiles),
+    "",
+    editRequest,
+  ].join("\n");
+
+  const optimizedUserContent = imageUrl
+    ? [
+        { type: "text", text: optimizedText, cache_control: { type: "ephemeral" } } as any,
+        buildAnthropicImageBlock(imageUrl),
+      ]
+    : [
+        { type: "text", text: optimizedText, cache_control: { type: "ephemeral" } } as any,
+      ];
+
+  return {
+    manifest,
+    seedFiles,
+    legacyUserMessage,
+    optimizedText,
+    optimizedUserContent,
+  };
+}
+
 // ─── Anthropic provider ───────────────────────────────────────────────────────
 
 const ANTHROPIC_HAIKU_FALLBACK = "claude-haiku-4-5-20251001";
@@ -1743,6 +2140,292 @@ async function callAnthropicCustomise(
     maxTokens,
     instrumentation,
   );
+}
+
+async function countAnthropicInputTokens(
+  client: Anthropic,
+  params: {
+    model: string;
+    systemPrompt: string;
+    messages: Anthropic.MessageParam[];
+    tools: Anthropic.Messages.Tool[];
+    toolChoice: Anthropic.Messages.ToolChoice;
+  },
+): Promise<number | null> {
+  try {
+    const count = await client.messages.countTokens({
+      model: params.model,
+      system: [
+        {
+          type: "text",
+          text: params.systemPrompt,
+          cache_control: { type: "ephemeral" },
+        } as any,
+      ],
+      messages: params.messages,
+      tools: params.tools,
+      tool_choice: params.toolChoice,
+    });
+    return count.input_tokens ?? null;
+  } catch (error) {
+    console.warn("[generate] token counting failed (non-fatal):", error instanceof Error ? error.message : String(error));
+    return null;
+  }
+}
+
+function resolveIterationFile(
+  contexts: readonly IterationFileContext[],
+  requestedPath: string,
+): IterationFileContext | null {
+  const cleaned = basename(requestedPath.trim());
+  return contexts.find((file) => file.basename === cleaned || file.path === requestedPath.trim()) ?? null;
+}
+
+function buildBaselineIterationAnthropicUserContent(
+  prompt: string,
+  existingFiles: readonly StudioFile[],
+  imageUrl?: string,
+): Anthropic.MessageParam["content"] {
+  const filesContext = buildIterationLegacyFilesContext(existingFiles);
+  const editRequest = buildIterationEditRequest(prompt);
+
+  if (!imageUrl) {
+    return [
+      {
+        type: "text",
+        text: filesContext,
+        cache_control: { type: "ephemeral" },
+      } as any,
+      { type: "text", text: editRequest },
+    ];
+  }
+
+  return [
+    {
+      type: "text",
+      text: filesContext,
+      cache_control: { type: "ephemeral" },
+    } as any,
+    buildAnthropicImageBlock(imageUrl),
+    { type: "text", text: editRequest },
+  ];
+}
+
+async function callAnthropicIterateWithTools(
+  model: string,
+  systemPrompt: string,
+  prompt: string,
+  existingFiles: readonly StudioFile[],
+  selection: IterationSelectionResult,
+  maxTokens: number,
+  instrumentation?: { buildId: string; isIteration: boolean },
+  imageUrl?: string,
+): Promise<CustomiseResult> {
+  const executeCall = async (modelId: string): Promise<CustomiseResult> => {
+    const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+    const system = [
+      {
+        type: "text",
+        text: systemPrompt,
+        cache_control: { type: "ephemeral" },
+      } as any,
+    ];
+    const toolChoice: Anthropic.Messages.ToolChoice = {
+      type: "auto",
+      disable_parallel_tool_use: true,
+    };
+    const baselineCountPromise = countAnthropicInputTokens(client, {
+      model: modelId,
+      systemPrompt,
+      tools: [DELIVER_FILES_TOOL],
+      toolChoice: { type: "tool", name: "deliver_customised_files" },
+      messages: [{ role: "user", content: buildBaselineIterationAnthropicUserContent(prompt, existingFiles, imageUrl) }],
+    });
+    const optimizedCountPromise = countAnthropicInputTokens(client, {
+      model: modelId,
+      systemPrompt,
+      tools: ITERATION_TOOLS,
+      toolChoice,
+      messages: [{ role: "user", content: selection.optimizedUserContent }],
+    });
+
+    const contexts = buildIterationFileContexts(existingFiles, prompt);
+    const startedAt = Date.now();
+    let ttftMs: number | null = null;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    const toolReadFiles = new Set<string>();
+    const toolSearchQueries: string[] = [];
+    let messages: Anthropic.MessageParam[] = [{ role: "user", content: selection.optimizedUserContent }];
+
+    for (let step = 0; step < ITERATION_MAX_TOOL_STEPS; step += 1) {
+      const stream = client.messages.stream({
+        model: modelId,
+        max_tokens: maxTokens,
+        system,
+        tools: ITERATION_TOOLS,
+        tool_choice: toolChoice,
+        messages,
+      });
+
+      stream.on("streamEvent", (event) => {
+        if (ttftMs !== null) return;
+        if (event.type === "content_block_start" || event.type === "content_block_delta") {
+          ttftMs = Date.now() - startedAt;
+        }
+      });
+
+      const message = await stream.finalMessage();
+      const usage = message.usage as typeof message.usage & {
+        cache_creation_input_tokens?: number;
+        cache_read_input_tokens?: number;
+      };
+
+      totalInputTokens += usage?.input_tokens ?? 0;
+      totalOutputTokens += usage?.output_tokens ?? 0;
+
+      console.log("[generate] iteration tool turn:", {
+        buildId: instrumentation?.buildId ?? null,
+        step: step + 1,
+        stopReason: message.stop_reason,
+        toolUses: message.content.filter((block) => block.type === "tool_use").map((block) => (block as Anthropic.Messages.ToolUseBlock).name),
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0,
+        cacheCreationInputTokens: usage?.cache_creation_input_tokens ?? 0,
+        cacheReadInputTokens: usage?.cache_read_input_tokens ?? 0,
+      });
+
+      const toolUses = message.content.filter(
+        (block): block is Anthropic.Messages.ToolUseBlock => block.type === "tool_use",
+      );
+
+      const deliverBlock = toolUses.find((block) => block.name === DELIVER_FILES_TOOL.name);
+      if (deliverBlock) {
+        const baselineInputTokens = await baselineCountPromise;
+        const optimizedInputTokens = await optimizedCountPromise;
+        const parsed = parseRawToolOutput(
+          deliverBlock.input as { files?: unknown; summary?: unknown; appName?: unknown; migrations?: unknown },
+          prompt,
+        );
+
+        const metrics: IterationMetrics = {
+          baselineInputTokens,
+          optimizedInputTokens,
+          ttftMs,
+          totalGenerationMs: Date.now() - startedAt,
+          seedFiles: selection.seedFiles.map((file) => file.basename),
+          toolReadFiles: [...toolReadFiles],
+          toolSearchQueries,
+          changedFiles: parsed.files.map((file) => file.path),
+        };
+
+        console.log("[generate] iteration metrics:", metrics);
+
+        return {
+          ...parsed,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          iterationMetrics: metrics,
+        };
+      }
+
+      if (toolUses.length === 0) {
+        throw new Error("Anthropic iteration did not call a tool.");
+      }
+
+      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+      for (const toolUse of toolUses) {
+        if (toolUse.name === ITERATION_READ_FILE_TOOL.name) {
+          const input = (toolUse.input ?? {}) as { path?: unknown; startLine?: unknown; endLine?: unknown };
+          const file = typeof input.path === "string" ? resolveIterationFile(contexts, input.path) : null;
+          if (!file) {
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: toolUse.id,
+              is_error: true,
+              content: `File not found: ${String(input.path ?? "")}`,
+            });
+            continue;
+          }
+
+          toolReadFiles.add(file.basename);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: toolUse.id,
+            content: formatFileSlice(
+              file,
+              typeof input.startLine === "number" ? input.startLine : undefined,
+              typeof input.endLine === "number" ? input.endLine : undefined,
+            ),
+          });
+          continue;
+        }
+
+        if (toolUse.name === ITERATION_SEARCH_CODE_TOOL.name) {
+          const input = (toolUse.input ?? {}) as { query?: unknown };
+          const query = typeof input.query === "string" ? input.query.trim() : "";
+          if (!query) {
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: toolUse.id,
+              is_error: true,
+              content: "search_project_code requires a non-empty query.",
+            });
+            continue;
+          }
+
+          toolSearchQueries.push(query);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: toolUse.id,
+            content: searchIterationFiles(contexts, query),
+          });
+          continue;
+        }
+
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolUse.id,
+          is_error: true,
+          content: `Unsupported tool: ${toolUse.name}`,
+        });
+      }
+
+      messages = [
+        ...messages,
+        { role: "assistant", content: message.content as any },
+        { role: "user", content: toolResults as any },
+      ];
+    }
+
+    throw new Error(`Iteration tool loop exceeded ${ITERATION_MAX_TOOL_STEPS} steps.`);
+  };
+
+  const runWithRetry = async (modelId: string): Promise<CustomiseResult> => {
+    const result = await executeCall(modelId);
+    if (result.files.length === 0) {
+      console.warn("[generate] WARNING: empty iteration result after tool loop — retrying once", {
+        outputTokens: result.outputTokens,
+        model: modelId,
+      });
+      const retry = await executeCall(modelId);
+      if (retry.files.length === 0) {
+        throw new Error(`Model returned 0 files on retry (outputTokens: ${retry.outputTokens})`);
+      }
+      return retry;
+    }
+    return result;
+  };
+
+  try {
+    return await runWithRetry(model);
+  } catch (err) {
+    if (err instanceof Anthropic.APIError && err.status === 404 && model !== ANTHROPIC_HAIKU_FALLBACK) {
+      console.error(`[model] ${model} not found for iteration tool loop, falling back to haiku`);
+      return await runWithRetry(ANTHROPIC_HAIKU_FALLBACK);
+    }
+    throw err;
+  }
 }
 
 // ─── OpenAI-compatible provider (GPT-4o and Gemini via Google's OpenAI endpoint) ─
@@ -1972,14 +2655,14 @@ export function buildIterationSystemPrompt(
     imageBlock,
     "",
     "RULES:",
-    "1. Understand the full codebase before editing — read all files carefully",
-    "2. Identify the MINIMUM set of files that need to change to fulfil this request",
-    "3. Make precise, targeted changes — do not rewrite files that don't need changing",
-    "4. Only return files you actually modified",
-    "5. If only one file needs changing, return only that file",
-    "6. If adding a new feature requires a new file, create it and update any imports",
-    "7. Preserve all existing functionality — do not break what already works",
-    "8. Match the existing code style, naming conventions, and patterns exactly",
+    "1. Start from the project manifest and seed files already provided.",
+    "2. If you need more context, use search_project_code and read_project_file before editing.",
+    "3. Identify the MINIMUM set of files that need to change to fulfil this request.",
+    "4. Make precise, targeted changes — do not rewrite files that don't need changing.",
+    "5. Only return files you actually modified.",
+    "6. If adding a new feature requires a new file, create it and update any imports.",
+    "7. Preserve all existing functionality — do not break what already works.",
+    "8. Match the existing code style, naming conventions, and patterns exactly.",
     "",
     "Think step by step:",
     "- What is the user asking for?",
@@ -2019,7 +2702,7 @@ export function buildIterationSystemPrompt(
     "FILE NAMING:",
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
-    "DELIVER: Call deliver_customised_files with the changed + new files and their complete updated content.",
+    "DELIVER: after you have enough context, call deliver_customised_files with the changed + new files and their complete updated content.",
     "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock + neonAuthBlock,
   ].join("\n");
 }
@@ -2028,23 +2711,7 @@ export function buildIterationUserMessage(
   prompt: string,
   existingFiles: readonly StudioFile[],
 ): string {
-  return [
-    buildIterationFilesContext(existingFiles),
-    "",
-    buildIterationEditRequest(prompt),
-  ].join("\n");
-}
-
-function buildIterationFilesContext(existingFiles: readonly StudioFile[]): string {
-  const codebase = existingFiles
-    .map((file) => `### ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)
-    .join("\n\n");
-
-  return [
-    "Here is the current codebase:",
-    "",
-    codebase,
-  ].join("\n");
+  return buildIterationSelection(prompt, existingFiles).optimizedText;
 }
 
 function buildIterationEditRequest(prompt: string): string {
@@ -2076,42 +2743,22 @@ async function callModelIterate(
     dbProvider,
     neonAuthBaseUrl,
   );
+  const selection = buildIterationSelection(prompt, existingFiles, imageUrl);
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
-  const filesContextString = buildIterationFilesContext(existingFiles);
-  const editRequest = buildIterationEditRequest(prompt);
-  const userMessage = buildIterationUserMessage(prompt, existingFiles);
+  const userMessage = selection.legacyUserMessage;
 
   if (model.startsWith("claude-")) {
-    const anthropicUserContent = (
-      imageUrl
-        ? [
-            {
-              type: "text",
-              text: filesContextString,
-              cache_control: { type: "ephemeral" },
-            } as any,
-            buildAnthropicImageBlock(imageUrl),
-            { type: "text", text: editRequest },
-          ]
-        : [
-            {
-              type: "text",
-              text: filesContextString,
-              cache_control: { type: "ephemeral" },
-            } as any,
-            { type: "text", text: editRequest },
-          ]
-    ) as Anthropic.MessageParam["content"];
-    const messages: Anthropic.MessageParam[] = [{ role: "user", content: anthropicUserContent }];
-    console.log("[generate] iteration input files:", existingFiles?.length ?? 0, "files");
-    console.log("[generate] iteration input tokens (estimated):", Math.round(JSON.stringify(messages).length / 4));
-    return callAnthropicWithMessages(
+    console.log("[generate] iteration seed files:", selection.seedFiles.map((file) => file.basename));
+    console.log("[generate] iteration manifest files:", existingFiles?.length ?? 0);
+    return callAnthropicIterateWithTools(
       model,
       systemPrompt,
-      anthropicUserContent,
       prompt,
+      existingFiles,
+      selection,
       maxTokens,
       instrumentation,
+      imageUrl,
     );
   }
 
@@ -2132,16 +2779,16 @@ async function callModelIterate(
 
   // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
   console.warn("[generate] Unknown model for iteration, falling back to claude-sonnet-4-6:", model);
-  const anthropicUserContent = buildAnthropicUserContent(userMessage, imageUrl);
-  const messages: Anthropic.MessageParam[] = [{ role: "user", content: anthropicUserContent }];
-  console.log("[generate] iteration input files:", existingFiles?.length ?? 0, "files");
-  console.log("[generate] iteration input tokens (estimated):", Math.round(JSON.stringify(messages).length / 4));
-  return callAnthropicWithMessages(
+  console.log("[generate] iteration seed files:", selection.seedFiles.map((file) => file.basename));
+  return callAnthropicIterateWithTools(
     "claude-sonnet-4-6",
     systemPrompt,
-    anthropicUserContent,
     prompt,
+    existingFiles,
+    selection,
     maxTokens,
+    instrumentation,
+    imageUrl,
   );
 }
 
