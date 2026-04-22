@@ -242,7 +242,7 @@ export function DatabasePanel({
 
   // ── BYO Postgres state (BEO-445) ─────────────────────
   const [byoConnectionString, setByoConnectionString] = useState("");
-  const [byoShowPassword, setByoShowPassword] = useState(false);
+  const [byoShowPassword, setByoShowPassword] = useState(true);
   const [byoStatus, setByoStatus] = useState<ByoStatus>("idle");
   const [byoTestError, setByoTestError] = useState<string | null>(null);
   const [byoSaveError, setByoSaveError] = useState<string | null>(null);
@@ -1458,21 +1458,27 @@ export function DatabasePanel({
                       BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider)?.placeholder ??
                       "postgres://user:password@host:5432/dbname"
                     }
-                    className="h-12 w-full rounded-xl border border-[#e5e7eb] bg-white py-3 pl-4 pr-11 font-mono text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                    className="h-12 w-full rounded-xl border border-[#e5e7eb] bg-white py-3 pl-4 pr-20 font-mono text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
                   />
                   <button
                     type="button"
                     onClick={() => setByoShowPassword((v) => !v)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                    className="absolute right-3.5 top-1/2 flex -translate-y-1/2 items-center gap-1 text-[11px] text-[#9ca3af] transition-colors hover:text-[#6b7280]"
                     tabIndex={-1}
                   >
-                    {byoShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {byoShowPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    <span>{byoShowPassword ? "Hide" : "Show"}</span>
                   </button>
                 </div>
 
                 {/* Security note */}
                 <p className="text-xs text-[#9ca3af]">
                   Stored securely — never exposed to your app's users.
+                </p>
+                <p className="text-xs text-[#9ca3af]">
+                  The <span className="font-mono text-[#6b7280]">password</span> in the URL is your{" "}
+                  <strong className="font-medium text-[#6b7280]">database user's password</strong> — not your Beomz account password.
+                  You'll find it in your database provider's dashboard or connection details.
                 </p>
 
                 {/* Where to find it link */}
