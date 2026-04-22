@@ -119,7 +119,7 @@ function formatShimmerElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function BuildingShimmer() {
+export function BuildingShimmer({ isIteration = false }: { isIteration?: boolean }) {
   const [activeStep, setActiveStep] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -142,6 +142,33 @@ export function BuildingShimmer() {
       for (const t of timers) clearTimeout(t);
     };
   }, []);
+
+  if (isIteration) {
+    return (
+      <div className="flex items-start gap-2 py-1">
+        <BAvatar />
+        <div className="min-w-0 flex-1">
+          <div className="rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2.5">
+            <ul className="space-y-0">
+              <li className="flex min-h-[40px] items-center gap-3">
+                <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+                  <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+                </span>
+                <span className="build-shimmer-text text-[15px] font-medium">Editing your app...</span>
+              </li>
+            </ul>
+            <div className="mt-1 space-y-0.5">
+              <p className="text-xs text-zinc-400">
+                Usually takes 1–2 min
+                {elapsedSeconds > 0 && ` · ${formatShimmerElapsed(elapsedSeconds)} elapsed`}
+              </p>
+              <p className="text-xs text-zinc-400">~20 credits</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-start gap-2 py-1">

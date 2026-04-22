@@ -70,6 +70,8 @@ interface ChatPanelProps {
   onImplementPlan?: (plan: string, imageUrl?: string) => void;
   /** BEO-462: true while the API is analysing a pasted image — shows subtle loading indicator. */
   isAnalysingImage?: boolean;
+  /** BEO-496: true when the current build was detected as an iteration (short preamble). */
+  isIterationBuild?: boolean;
   /** BEO-484: user's first name for greeting personalisation */
   userFirstName?: string;
   /** BEO-484: user avatar URL (proxied if needed) */
@@ -98,6 +100,7 @@ export function ChatPanel({
   projectId,
   onImplementPlan,
   isAnalysingImage,
+  isIterationBuild,
   userFirstName,
   userAvatarUrl,
   userInitials,
@@ -364,7 +367,7 @@ export function ChatPanel({
             {isBuilding && isAnalysingImage
               ? <AnalysingImageCard />
               : showBuildingShimmer
-                ? <BuildingShimmer />
+                ? <BuildingShimmer isIteration={isIterationBuild} />
                 : null}
           </div>
         )}

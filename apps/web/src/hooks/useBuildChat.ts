@@ -67,6 +67,14 @@ function shouldShowImplementFromAssistantContent(content: string | undefined): b
   return Boolean(content?.toLowerCase().includes(PLAN_TRIGGER_PHRASE));
 }
 
+// ─── BEO-496: Iteration preamble detection ────────────────────────────────────
+const ITERATION_PHRASES = ["on it", "got it", "making that", "fixing that", "updating"] as const;
+
+function isIterationPreamble(restatement: string): boolean {
+  const lower = restatement.toLowerCase();
+  return restatement.length < 60 || ITERATION_PHRASES.some(p => lower.includes(p));
+}
+
 type ChatApiMessage = { role: "user" | "assistant"; content: string };
 
 function buildChatThread(messages: ChatMessage[]): ChatApiMessage[] {
@@ -350,6 +358,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const [isBuilding, setIsBuilding] = useState(false);
   // BEO-462: true while API is analysing an uploaded image (before image_intent SSE)
   const [isAnalysingImage, setIsAnalysingImage] = useState(false);
+  // BEO-496: true when the current build is detected as an iteration (short preamble)
+  const [isIterationBuild, setIsIterationBuild] = useState(false);
+  const isIterationBuildRef = useRef(false);
+  // BEO-496: mirrors isBuilding so event handlers can guard without stale closures
+  const isBuildInProgressRef = useRef(false);
 
   // ─── BEO-396: Chat mode ───────────────────────────────────────────────────
   const [chatModeActive, setChatModeActive] = useState(false);
@@ -408,6 +421,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   useEffect(() => {
     chatModeRef.current = chatModeActive;
   }, [chatModeActive]);
+
+  // BEO-496: keep isBuildInProgressRef in sync so event-handler closures can read it without stale values.
+  useEffect(() => {
+    isBuildInProgressRef.current = isBuilding;
+  }, [isBuilding]);
 
   const clearPreambleAndStageTimers = useCallback(() => {
     if (preambleFallbackTimerRef.current) {
@@ -579,6 +597,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           latestStageChecklistRef.current = null;
           latestStagePhaseRef.current = undefined;
 
+          // BEO-496: reset iteration detection at the start of each build
+          isIterationBuildRef.current = false;
+          setIsIterationBuild(false);
+
           // Pre-allocate ID so stage_preamble can use it without racing
           const pendingBuildId = makeId();
           activeBuildingMsgIdRef.current = pendingBuildId;
@@ -622,6 +644,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           }
           // BEO-462: a real build is starting — no longer just image analysis
           setIsAnalysingImage(false);
+          // BEO-496: detect iteration mode from the preamble restatement
+          const iterationDetected = isIterationPreamble(event.restatement);
+          if (isIterationBuildRef.current !== iterationDetected) {
+            isIterationBuildRef.current = iterationDetected;
+            setIsIterationBuild(iterationDetected);
+          }
+          if (iterationDetected) {
+            // Suppress any ImplementBar that was showing before the iteration started
+            setImplementSuggestion(null);
+          }
           setMessages(prev => {
             const idx = findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current);
             if (idx !== -1) {
@@ -696,7 +728,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               { id: makeId(), type: "question_answer", content: e.message, streaming: false },
             ]);
           }
-          if (shouldShowImplementFromAssistantContent(e.message)) {
+          if (!isBuildInProgressRef.current && shouldShowImplementFromAssistantContent(e.message)) {
             setImplementSuggestion({ summary: e.message });
           }
           setIsBuilding(false);
@@ -709,7 +741,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             ...prev.filter(m => m.type !== "thinking"),
             { id: makeId(), type: "clarifying_question", content: event.message },
           ]);
-          if (shouldShowImplementFromAssistantContent(event.message)) {
+          if (!isBuildInProgressRef.current && shouldShowImplementFromAssistantContent(event.message)) {
             setImplementSuggestion({ summary: event.message });
           }
           break;
@@ -962,7 +994,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             // BEO-492: high-confidence direct plan path — done event carries readyToImplement
             // signal without a preceding conversational_response. Wire the ImplementBar here
             // so it appears even when clarifying questions are bypassed entirely.
-            if (event.readyToImplement && (event.plan || event.implementPlan)) {
+            // BEO-496: skip ImplementBar for iteration builds — they are surgical edits, not new plans.
+            if (!isIterationBuildRef.current && event.readyToImplement && (event.plan || event.implementPlan)) {
               const plan = String(event.plan ?? event.implementPlan ?? "").trim();
               if (plan) {
                 pendingImplementPlanRef.current = plan;
@@ -1808,6 +1841,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     messages,
     isBuilding,
     isAnalysingImage,
+    isIterationBuild,
     sendMessage,
     retryLastBuild,
     buildDoneRef,
