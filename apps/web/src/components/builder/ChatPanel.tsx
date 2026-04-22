@@ -490,18 +490,37 @@ export function ChatPanel({
               >
                 <Sparkles size={15} />
               </button>
-              <button
-                onClick={onToggleChatMode}
-                className={cn(
-                  "rounded p-1.5 transition-colors",
-                  chatModeActive
-                    ? "bg-[#F97316]/10 text-[#F97316]"
-                    : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
-                )}
-                title="Think it through first"
-              >
-                <MessageSquare size={15} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={onToggleChatMode}
+                  aria-pressed={chatModeActive}
+                  aria-label={
+                    chatModeActive
+                      ? "Switch to build mode to create an app"
+                      : "Switch to chat mode to brainstorm or research"
+                  }
+                  title={
+                    chatModeActive
+                      ? "Switch to build mode to create an app"
+                      : "Switch to chat mode to brainstorm or research"
+                  }
+                  className={cn(
+                    "rounded p-1.5 transition-colors",
+                    chatModeActive
+                      ? "bg-[#F97316]/10 text-[#F97316]"
+                      : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
+                  )}
+                >
+                  <MessageSquare size={15} />
+                </button>
+                <span
+                  className="select-none pr-0.5 text-[11px] font-medium text-[#9ca3af]"
+                  aria-hidden
+                >
+                  {chatModeActive ? "Chat" : "Build"}
+                </span>
+              </div>
             </div>
 
             {isBuilding ? (
