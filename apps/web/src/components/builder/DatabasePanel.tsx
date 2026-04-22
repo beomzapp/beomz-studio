@@ -143,41 +143,39 @@ function parseHost(connectionString: string): string {
 }
 
 /**
- * URL-encode the username and password portion of a postgres connection string.
- * Many providers (Supabase, Neon, etc.) issue passwords with special characters
- * (@, #, !, [, ]) that are not valid in a URL without percent-encoding.
- * Returns the original string unchanged if it already parses as a valid URL.
+ * Always encode the username and password portion of a postgres connection string.
+ * Decodes first to avoid double-encoding if the string is already partially encoded.
+ * Uses last-@ splitting so passwords that contain @ are handled correctly.
  */
 function encodeConnectionString(raw: string): string {
-  // Already valid — nothing to do
-  try {
-    new URL(raw.replace(/^postgres:\/\//, "postgresql://"));
-    return raw;
-  } catch {
-    // fall through
-  }
-
-  // Extract scheme prefix (postgres:// or postgresql://)
   const schemeMatch = raw.match(/^(postgres(?:ql)?:\/\/)/);
   if (!schemeMatch) return raw;
   const scheme = schemeMatch[1];
-  const rest = raw.slice(scheme.length);
+  const withoutScheme = raw.slice(scheme.length);
 
-  // Split at the last '@' to separate credentials from host
-  const lastAt = rest.lastIndexOf("@");
+  // Split at the last '@' — that's the credential/host separator
+  const lastAt = withoutScheme.lastIndexOf("@");
   if (lastAt === -1) return raw;
 
-  const credentials = rest.slice(0, lastAt);
-  const hostPart = rest.slice(lastAt + 1);
+  const credentials = withoutScheme.slice(0, lastAt);
+  const hostPart = withoutScheme.slice(lastAt + 1);
 
-  // Split credentials at first ':' to separate user from password
+  // Split credentials at first ':' to get user vs password
   const colonIdx = credentials.indexOf(":");
   if (colonIdx === -1) return raw;
 
   const user = credentials.slice(0, colonIdx);
   const password = credentials.slice(colonIdx + 1);
 
-  return `${scheme}${encodeURIComponent(user)}:${encodeURIComponent(password)}@${hostPart}`;
+  // Decode first to avoid double-encoding (%40 → @ → %2540)
+  const safeUser = encodeURIComponent(tryDecode(user));
+  const safePassword = encodeURIComponent(tryDecode(password));
+
+  return `${scheme}${safeUser}:${safePassword}@${hostPart}`;
+}
+
+function tryDecode(s: string): string {
+  try { return decodeURIComponent(s); } catch { return s; }
 }
 
 // ── BYO provider data (BEO-518) ──────────────────────────────────────────────
@@ -289,6 +287,9 @@ export function DatabasePanel({
   const [byoDisconnecting, setByoDisconnecting] = useState(false);
   // BEO-518: selected provider card drives placeholder + docs link
   const [byoSelectedProvider, setByoSelectedProvider] = useState<string | null>(null);
+  // Password popup helper — lets users enter password in plain text then inject it encoded
+  const [byoPasswordHelper, setByoPasswordHelper] = useState(false);
+  const [byoRawPassword, setByoRawPassword] = useState("");
 
   // ── Managed DB — Connection / wiring state ────────────
   const [enabling, setEnabling] = useState(false);
@@ -576,6 +577,29 @@ export function DatabasePanel({
       setByoDisconnecting(false);
     }
   }, [projectId, onDbStateChange, showToast]);
+
+  /** Replace the password in the current connection string with the user-typed plain-text password. */
+  const handleInjectPassword = useCallback(() => {
+    if (!byoRawPassword) return;
+    const str = byoConnectionString.trim();
+    const schemeMatch = str.match(/^(postgres(?:ql)?:\/\/)/);
+    if (!schemeMatch) return;
+    const scheme = schemeMatch[1];
+    const withoutScheme = str.slice(scheme.length);
+    const lastAt = withoutScheme.lastIndexOf("@");
+    const credentials = lastAt !== -1 ? withoutScheme.slice(0, lastAt) : withoutScheme;
+    const hostPart = lastAt !== -1 ? withoutScheme.slice(lastAt + 1) : "";
+    const colonIdx = credentials.indexOf(":");
+    const user = colonIdx !== -1 ? credentials.slice(0, colonIdx) : credentials;
+    const encoded = `${scheme}${encodeURIComponent(tryDecode(user))}:${encodeURIComponent(byoRawPassword)}${hostPart ? `@${hostPart}` : ""}`;
+    setByoConnectionString(encoded);
+    setByoPasswordHelper(false);
+    setByoRawPassword("");
+    if (byoStatus !== "idle") {
+      setByoStatus("idle");
+      setByoTestError(null);
+    }
+  }, [byoConnectionString, byoRawPassword, byoStatus]);
 
   // ── Side effects ──────────────────────────────────────
 
@@ -1523,6 +1547,52 @@ export function DatabasePanel({
                   <strong className="font-medium text-[#6b7280]">database user's password</strong> — not your Beomz account password.
                   You'll find it in your database provider's dashboard or connection details.
                 </p>
+
+                {/* Password popup helper */}
+                {!byoPasswordHelper ? (
+                  <button
+                    type="button"
+                    onClick={() => setByoPasswordHelper(true)}
+                    className="text-xs text-[#9ca3af] underline underline-offset-2 transition-colors hover:text-[#6b7280]"
+                  >
+                    Password contains special characters? Enter it separately →
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold text-amber-800">Enter your password in plain text</p>
+                      <p className="mt-0.5 text-xs text-amber-700">
+                        Type your database password below — we'll URL-encode it and insert it into the connection string automatically.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={byoRawPassword}
+                        onChange={(e) => setByoRawPassword(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleInjectPassword(); }}
+                        placeholder="Your database password"
+                        autoFocus
+                        className="h-9 flex-1 rounded-lg border border-amber-300 bg-white px-3 text-sm outline-none placeholder:text-[#c4c9d4] focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleInjectPassword}
+                        disabled={!byoRawPassword.trim()}
+                        className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        Insert
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setByoPasswordHelper(false); setByoRawPassword(""); }}
+                        className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-700 transition-colors hover:bg-amber-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {/* Where to find it link */}
                 {(() => {
                   const provider = BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider);
