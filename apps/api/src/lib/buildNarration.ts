@@ -379,6 +379,10 @@ export async function generateStagePreambleWithUsage({
   prompt,
   timeoutMs = PREAMBLE_TIMEOUT_MS,
 }: GenerateStagePreambleOptions): Promise<StagePreambleResult> {
+  if (isIteration) {
+    return { payload: { restatement: "On it...", bullets: [] }, usage: { inputTokens: 0, outputTokens: 0 } };
+  }
+
   try {
     const response = normaliseHaikuResponse(await runWithTimeout(
       invokeModel({
