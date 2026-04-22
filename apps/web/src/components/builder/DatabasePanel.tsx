@@ -142,6 +142,71 @@ function parseHost(connectionString: string): string {
   }
 }
 
+// ── BYO provider data (BEO-518) ──────────────────────────────────────────────
+
+const BYO_PROVIDERS = [
+  {
+    key: "neon",
+    name: "Neon",
+    bg: "#edfdf4",
+    dot: "#00e699",
+    initial: "N",
+    placeholder: "postgres://user:pass@ep-xxx.neon.tech/neondb",
+    docsUrl: "https://neon.tech/docs/connect/connect-from-any-app",
+    docsLabel: "Settings → Connection string",
+  },
+  {
+    key: "supabase",
+    name: "Supabase",
+    bg: "#edfaf4",
+    dot: "#3ecf8e",
+    initial: "S",
+    placeholder: "postgres://postgres:pass@db.xxx.supabase.co:5432/postgres",
+    docsUrl: "https://supabase.com/dashboard",
+    docsLabel: "Project → Settings → Database",
+  },
+  {
+    key: "railway",
+    name: "Railway",
+    bg: "#f3f0ff",
+    dot: "#7c3aed",
+    initial: "R",
+    placeholder: "postgres://postgres:pass@monorail.proxy.rlwy.net:5432/railway",
+    docsUrl: "https://railway.app",
+    docsLabel: "Project → Variables",
+  },
+  {
+    key: "render",
+    name: "Render",
+    bg: "#edfafe",
+    dot: "#46e3b7",
+    initial: "R",
+    placeholder: "postgres://user:pass@dpg-xxx.render.com/dbname",
+    docsUrl: "https://render.com",
+    docsLabel: "Database → Connection",
+  },
+  {
+    key: "flyio",
+    name: "Fly.io",
+    bg: "#f5f0ff",
+    dot: "#8b5cf6",
+    initial: "F",
+    placeholder: "postgres://postgres:pass@xxx.flycast:5432/dbname",
+    docsUrl: "https://fly.io/docs/postgres",
+    docsLabel: "App → Postgres",
+  },
+  {
+    key: "self",
+    name: "Self-hosted",
+    bg: "#f3f4f6",
+    dot: "#9ca3af",
+    initial: "⚙",
+    placeholder: "postgres://user:pass@your-host:5432/dbname",
+    docsUrl: null,
+    docsLabel: null,
+  },
+] as const;
+
 interface DatabasePanelProps {
   className?: string;
   projectId: string | null;
@@ -184,6 +249,8 @@ export function DatabasePanel({
   // Host shown in connected state (derived from the string after save, or from props after reload)
   const [byoSavedHost, setByoSavedHost] = useState<string | null>(byoConnectedHost ?? null);
   const [byoDisconnecting, setByoDisconnecting] = useState(false);
+  // BEO-518: selected provider card drives placeholder + docs link
+  const [byoSelectedProvider, setByoSelectedProvider] = useState<string | null>(null);
 
   // ── Managed DB — Connection / wiring state ────────────
   const [enabling, setEnabling] = useState(false);
@@ -1274,67 +1341,106 @@ export function DatabasePanel({
       )}
 
       {/* ══════════════════════════════════════════════════
-          CONNECT YOUR OWN TAB (BEO-445)
+          CONNECT YOUR OWN TAB (BEO-445 / BEO-518)
       ══════════════════════════════════════════════════ */}
       {outerTab === "byo" && (
         <div className="flex flex-1 flex-col overflow-y-auto">
 
           {/* ── CONNECTED STATE ── */}
           {isByoConnectedState ? (
-            <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
-              <div className="w-full max-w-sm space-y-5">
+            <div className="flex flex-1 flex-col items-center justify-center px-8 py-16">
+              <div className="w-full max-w-sm space-y-6">
                 {/* Status badge */}
-                <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <span className="h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+                  <PlugZap size={20} className="flex-shrink-0 text-emerald-600" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-emerald-700">Connected</p>
+                    <p className="font-semibold text-emerald-700">Connected</p>
                     {(byoSavedHost || byoConnectedHost) && (
-                      <p className="mt-0.5 truncate font-mono text-[11px] text-emerald-600">
+                      <p className="mt-0.5 truncate font-mono text-xs text-emerald-600">
                         {byoSavedHost ?? byoConnectedHost}
                       </p>
                     )}
                   </div>
-                  <PlugZap size={16} className="flex-shrink-0 text-emerald-600" />
+                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
                 </div>
 
-                <p className="text-xs text-[#9ca3af]">
-                  Your app is using this Postgres database. VITE_DATABASE_URL is injected
-                  automatically on every page load.
+                <p className="text-sm text-[#9ca3af]">
+                  Your app is using this Postgres database.{" "}
+                  <code className="rounded bg-[#f3f4f6] px-1 py-0.5 text-xs text-[#374151]">VITE_DATABASE_URL</code>{" "}
+                  is injected automatically on every page load.
                 </p>
 
                 <button
                   onClick={() => void handleDisconnectByo()}
                   disabled={byoDisconnecting}
-                  className="flex items-center gap-1.5 text-xs text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
+                  className="flex items-center gap-2 text-sm text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
                 >
                   {byoDisconnecting ? (
-                    <Loader2 size={12} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin" />
                   ) : (
-                    <WifiOff size={12} />
+                    <WifiOff size={14} />
                   )}
                   {byoDisconnecting ? "Disconnecting..." : "Disconnect"}
                 </button>
               </div>
             </div>
           ) : (
-            /* ── FORM STATE ── */
-            <div className="mx-auto w-full max-w-md space-y-5 px-6 py-8">
+            /* ── FORM STATE (BEO-518 polish) ── */
+            <div className="mx-auto w-full max-w-lg space-y-7 px-7 py-10">
+
               {/* Header */}
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-[#F97316]/10">
-                  <PlugZap size={18} className="text-[#F97316]" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-semibold text-[#1a1a1a]">Connect your own database</h2>
-                  <p className="mt-0.5 text-xs text-[#9ca3af]">
-                    Works with Neon, Supabase, Railway, Render, Fly.io, or any Postgres host.
-                  </p>
+              <div>
+                <h2 className="text-base font-semibold text-[#1a1a1a]">Connect your own database</h2>
+                <p className="mt-1 text-sm text-[#9ca3af]">
+                  Works with any Postgres host. Pick your provider to get started.
+                </p>
+              </div>
+
+              {/* Provider cards — 2×3 grid */}
+              <div className="space-y-2.5">
+                <p className="text-xs font-medium text-[#6b7280]">Select your provider</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {BYO_PROVIDERS.map((p) => {
+                    const isSelected = byoSelectedProvider === p.key;
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => {
+                          setByoSelectedProvider(isSelected ? null : p.key);
+                          if (byoStatus !== "idle") {
+                            setByoStatus("idle");
+                            setByoTestError(null);
+                          }
+                        }}
+                        className={cn(
+                          "flex flex-col items-center gap-2 rounded-xl border px-3 py-3.5 text-center transition-all",
+                          isSelected
+                            ? "border-[#F97316]/40 bg-[#F97316]/5 ring-1 ring-[#F97316]/20"
+                            : "border-[#e5e7eb] bg-white hover:border-[#d1d5db] hover:bg-[#faf9f6]",
+                        )}
+                      >
+                        <div
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold"
+                          style={{ backgroundColor: p.bg, color: p.dot }}
+                        >
+                          {p.initial}
+                        </div>
+                        <span className={cn(
+                          "text-xs font-medium leading-none",
+                          isSelected ? "text-[#F97316]" : "text-[#374151]",
+                        )}>
+                          {p.name}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Connection string input */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-[#6b7280]">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-[#6b7280]">
                   Connection string
                 </label>
                 <div className="relative">
@@ -1343,57 +1449,86 @@ export function DatabasePanel({
                     value={byoConnectionString}
                     onChange={(e) => {
                       setByoConnectionString(e.target.value);
-                      // Reset test status when user edits
                       if (byoStatus !== "idle") {
                         setByoStatus("idle");
                         setByoTestError(null);
                       }
                     }}
-                    placeholder="postgres://user:password@host:5432/dbname"
-                    className="h-10 w-full rounded-lg border border-[#e5e7eb] bg-white py-2 pl-3 pr-10 font-mono text-xs text-[#1a1a1a] outline-none placeholder:font-sans placeholder:text-[#9ca3af] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                    placeholder={
+                      BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider)?.placeholder ??
+                      "postgres://user:password@host:5432/dbname"
+                    }
+                    className="h-12 w-full rounded-xl border border-[#e5e7eb] bg-white py-3 pl-4 pr-11 font-mono text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
                   />
                   <button
                     type="button"
                     onClick={() => setByoShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#9ca3af] transition-colors hover:text-[#6b7280]"
                     tabIndex={-1}
                   >
-                    {byoShowPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {byoShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
+
+                {/* Security note */}
+                <p className="text-xs text-[#9ca3af]">
+                  Stored securely — never exposed to your app's users.
+                </p>
+
+                {/* Where to find it link */}
+                {(() => {
+                  const provider = BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider);
+                  const url = provider?.docsUrl ?? "https://www.postgresql.org/docs/current/libpq-connect.html";
+                  const label = provider?.docsLabel
+                    ? `${provider.name}: ${provider.docsLabel}`
+                    : "Postgres connection string docs";
+                  return (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-[#F97316] transition-colors hover:text-[#ea6c10]"
+                    >
+                      Where do I find this? →
+                      {provider?.docsLabel && (
+                        <span className="text-[#9ca3af]">({label})</span>
+                      )}
+                    </a>
+                  );
+                })()}
               </div>
 
               {/* Test result inline */}
               {byoStatus === "test_ok" && (
-                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
-                  <CheckCircle size={13} />
-                  Connection successful
+                <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                  <CheckCircle size={15} className="flex-shrink-0" />
+                  Connected to {byoConnectionString.trim() ? parseHost(byoConnectionString.trim()) : "database"}
                 </div>
               )}
               {(byoStatus === "test_fail" || byoTestError) && (
-                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                  <XCircle size={13} className="mt-0.5 flex-shrink-0" />
+                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  <XCircle size={15} className="mt-0.5 flex-shrink-0" />
                   <span>{byoTestError ?? "Connection failed."}</span>
                 </div>
               )}
               {byoSaveError && (
-                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                  <XCircle size={13} className="mt-0.5 flex-shrink-0" />
+                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  <XCircle size={15} className="mt-0.5 flex-shrink-0" />
                   <span>{byoSaveError}</span>
                 </div>
               )}
 
               {/* Action buttons */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={() => void handleTestByo()}
                   disabled={!byoConnectionString.trim() || byoStatus === "testing" || byoStatus === "saving"}
-                  className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-2 text-xs font-medium text-[#374151] transition-colors hover:border-[#d1d5db] hover:bg-[#faf9f6] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#d1d5db] hover:bg-[#faf9f6] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {byoStatus === "testing" ? (
-                    <Loader2 size={12} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin" />
                   ) : (
-                    <Database size={12} />
+                    <Database size={14} />
                   )}
                   {byoStatus === "testing" ? "Testing..." : "Test Connection"}
                 </button>
@@ -1407,30 +1542,15 @@ export function DatabasePanel({
                     byoStatus === "idle" ||
                     byoStatus === "test_fail"
                   }
-                  className="flex items-center gap-1.5 rounded-lg bg-[#F97316] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {byoStatus === "saving" ? (
-                    <Loader2 size={12} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin" />
                   ) : (
-                    <Zap size={12} />
+                    <Zap size={14} />
                   )}
                   {byoStatus === "saving" ? "Saving..." : "Save & Connect"}
                 </button>
-              </div>
-
-              {/* Provider hint chips */}
-              <div className="space-y-2">
-                <p className="text-[11px] text-[#9ca3af]">Supported providers</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {["Neon", "Supabase", "Railway", "Render", "Fly.io", "Self-hosted"].map((p) => (
-                    <span
-                      key={p}
-                      className="rounded-md border border-[#e5e7eb] bg-white px-2 py-0.5 text-[11px] text-[#6b7280]"
-                    >
-                      {p}
-                    </span>
-                  ))}
-                </div>
               </div>
             </div>
           )}
