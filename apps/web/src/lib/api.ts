@@ -446,13 +446,14 @@ export async function disconnectByoDb(projectId: string): Promise<void> {
   });
 }
 
-/** BEO-522: Connect a user's own Supabase project (URL + anon key). */
+/** BEO-522: Connect a user's own Supabase project (URL + anon key).
+ *  BEO-524: Returns { wiring: true } when an auto-wire iteration was triggered. */
 export async function connectSupabaseDb(
   projectId: string,
   url: string,
   anonKey: string,
-): Promise<void> {
-  await requestJson<{ host?: string }>(`/projects/${projectId}/byo-db`, {
+): Promise<{ wiring: boolean; host?: string }> {
+  return requestJson<{ wiring: boolean; host?: string }>(`/projects/${projectId}/byo-db`, {
     method: "POST",
     body: JSON.stringify({ supabaseUrl: url, supabaseAnonKey: anonKey }),
   });

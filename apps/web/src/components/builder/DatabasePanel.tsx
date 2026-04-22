@@ -51,6 +51,7 @@ import {
   createStorageAddonCheckout,
   connectSupabaseDb,
   disconnectSupabaseDb,
+  getLatestBuildForProject,
   type DbTable,
   type StorageAddonInfo,
 } from "../../lib/api";
@@ -224,6 +225,12 @@ export function DatabasePanel({
   const [byoSavedHost, setByoSavedHost] = useState<string | null>(byoConnectedHost ?? null);
   const [byoDisconnecting, setByoDisconnecting] = useState(false);
   const [byoSelectedProvider, setByoSelectedProvider] = useState<string | null>(null);
+
+  // ── BYO wiring progress (BEO-524) ────────────────────
+  const [byoWiring, setByoWiring] = useState(false);
+  const [byoWiringDone, setByoWiringDone] = useState(false);
+  const wiringPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wiringStartTimeRef = useRef<number>(0);
 
   // ── Managed DB — Connection / wiring state ────────────
   const [enabling, setEnabling] = useState(false);
@@ -470,10 +477,20 @@ export function DatabasePanel({
     setByoConnecting(true);
     setByoConnectError(null);
     try {
-      await connectSupabaseDb(projectId, url, key);
-      try { setByoSavedHost(new URL(url).hostname); } catch { setByoSavedHost(url); }
-      setByoSaved(true);
-      onDbStateChange();
+      const result = await connectSupabaseDb(projectId, url, key);
+      let host: string;
+      try { host = new URL(url).hostname; } catch { host = url; }
+      setByoSavedHost(host);
+      if (result.wiring) {
+        // BEO-524: auto-wire iteration was triggered — show wiring state, poll for completion
+        wiringStartTimeRef.current = Date.now();
+        setByoWiring(true);
+        onDbStateChange();
+      } else {
+        // No existing app to rewire — go straight to connected state
+        setByoSaved(true);
+        onDbStateChange();
+      }
     } catch (err) {
       setByoConnectError(err instanceof Error ? err.message : "Failed to connect.");
     } finally {
@@ -486,8 +503,11 @@ export function DatabasePanel({
     setByoDisconnecting(true);
     try {
       await disconnectSupabaseDb(projectId);
+      if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
       setByoSavedHost(null);
       setByoSaved(false);
+      setByoWiring(false);
+      setByoWiringDone(false);
       setByoSelectedProvider(null);
       setSupabaseUrl("");
       setSupabaseAnonKey("");
@@ -531,6 +551,61 @@ export function DatabasePanel({
   useEffect(() => {
     if (byoConnectedHost) setByoSavedHost(byoConnectedHost);
   }, [byoConnectedHost]);
+
+  // BEO-524: Poll for wiring build completion
+  useEffect(() => {
+    if (!byoWiring || !projectId) return;
+
+    let cancelled = false;
+    const POLL_INTERVAL_MS = 3000;
+    const MAX_WAIT_MS = 120_000;
+
+    async function poll() {
+      if (cancelled) return;
+      try {
+        const status = await getLatestBuildForProject(projectId!);
+        if (cancelled) return;
+        if (status) {
+          const buildStarted = new Date(status.build.startedAt).getTime();
+          const isNew = buildStarted >= wiringStartTimeRef.current - 5000;
+          if (isNew && (status.build.status === "completed" || status.build.status === "failed")) {
+            setByoWiring(false);
+            setByoWiringDone(true);
+            setByoSaved(true);
+            return;
+          }
+        }
+        // Keep polling if not complete yet and within time limit
+        const elapsed = Date.now() - wiringStartTimeRef.current;
+        if (elapsed < MAX_WAIT_MS) {
+          wiringPollRef.current = setTimeout(() => { void poll(); }, POLL_INTERVAL_MS);
+        } else {
+          // Timed out — show connected state anyway
+          setByoWiring(false);
+          setByoSaved(true);
+        }
+      } catch {
+        if (!cancelled) {
+          const elapsed = Date.now() - wiringStartTimeRef.current;
+          if (elapsed < MAX_WAIT_MS) {
+            wiringPollRef.current = setTimeout(() => { void poll(); }, POLL_INTERVAL_MS);
+          } else {
+            setByoWiring(false);
+            setByoSaved(true);
+          }
+        }
+      }
+    }
+
+    // Start first poll after a short delay to let the iteration kick off
+    wiringPollRef.current = setTimeout(() => { void poll(); }, 2000);
+
+    return () => {
+      cancelled = true;
+      if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [byoWiring, projectId]);
 
   const editableCols = useMemo(
     () => (selectedTableSchema?.columns ?? []).filter(
@@ -1308,22 +1383,49 @@ export function DatabasePanel({
       {outerTab === "byo" && (
         <div className="flex flex-1 flex-col overflow-hidden">
 
-          {/* ── CONNECTED STATE ── */}
-          {isByoConnectedState ? (
+          {/* ── WIRING STATE (BEO-524) ── */}
+          {byoWiring ? (
+            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-8 py-16">
+              <div className="w-full max-w-sm space-y-4">
+                <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-5 py-4">
+                  <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+                    <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-[#F97316]">Connecting your Supabase data...</p>
+                    <p className="mt-0.5 text-xs text-orange-500/80">Rewiring your app to use real data · ~30s</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          ) : isByoConnectedState ? (
+            /* ── CONNECTED STATE ── */
             <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-8 py-16">
               <div className="w-full max-w-sm space-y-6">
-                <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-                  <PlugZap size={20} className="flex-shrink-0 text-emerald-600" />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-emerald-700">Connected</p>
-                    {(byoSavedHost || byoConnectedHost) && (
-                      <p className="mt-0.5 truncate font-mono text-xs text-emerald-600">
-                        {byoSavedHost ?? byoConnectedHost}
+                {byoWiringDone ? (
+                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+                    <span className="text-xl">✅</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-emerald-700">
+                        Connected to {byoSavedHost ?? byoConnectedHost} — your real data is now live
                       </p>
-                    )}
+                    </div>
                   </div>
-                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
-                </div>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
+                    <PlugZap size={20} className="flex-shrink-0 text-emerald-600" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-emerald-700">Connected</p>
+                      {(byoSavedHost || byoConnectedHost) && (
+                        <p className="mt-0.5 truncate font-mono text-xs text-emerald-600">
+                          {byoSavedHost ?? byoConnectedHost}
+                        </p>
+                      )}
+                    </div>
+                    <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
+                  </div>
+                )}
                 <p className="text-sm text-[#9ca3af]">
                   Your app is connected to this Supabase project.{" "}
                   <code className="rounded bg-[#f3f4f6] px-1 py-0.5 text-xs text-[#374151]">VITE_SUPABASE_URL</code>{" "}
