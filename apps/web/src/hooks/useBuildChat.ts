@@ -1,5 +1,5 @@
 /**
- * useBuildChat — BEO-363 / BEO-391 / BEO-392 / BEO-393 / BEO-396
+ * useBuildChat — BEO-363 / BEO-391 / BEO-392 / BEO-393 / BEO-396 / BEO-495
  *
  * Owns all chat state + SSE event handling for the builder.
  * ProjectPage calls this hook and renders the returned messages.
@@ -58,6 +58,13 @@ function isBuildConfirmation(message: string): boolean {
     || clean === "okay"
     || clean === "go"
   );
+}
+
+/** BEO-495: if the model spells out a plan with this lead-in, show ImplementBar (SSE-agnostic). */
+const PLAN_TRIGGER_PHRASE = "here's what i'll do:";
+
+function shouldShowImplementFromAssistantContent(content: string | undefined): boolean {
+  return Boolean(content?.toLowerCase().includes(PLAN_TRIGGER_PHRASE));
 }
 
 type ChatApiMessage = { role: "user" | "assistant"; content: string };
@@ -689,6 +696,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               { id: makeId(), type: "question_answer", content: e.message, streaming: false },
             ]);
           }
+          if (shouldShowImplementFromAssistantContent(e.message)) {
+            setImplementSuggestion({ summary: e.message });
+          }
           setIsBuilding(false);
           break;
         }
@@ -699,6 +709,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             ...prev.filter(m => m.type !== "thinking"),
             { id: makeId(), type: "clarifying_question", content: event.message },
           ]);
+          if (shouldShowImplementFromAssistantContent(event.message)) {
+            setImplementSuggestion({ summary: event.message });
+          }
           break;
 
         case "image_intent": {
@@ -1256,37 +1269,68 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             snapshot,
             delta => {
               if (controller.signal.aborted) return;
-              setMessages(prev =>
-                prev.map(m =>
-                  m.id === chatMsgId && m.type === "chat_response"
-                    ? { ...m, content: m.content + delta }
-                    : m,
-                ),
-              );
+              setMessages(prev => {
+                let phraseSummary: string | null = null;
+                const next = prev.map(m => {
+                  if (m.id === chatMsgId && m.type === "chat_response") {
+                    const nextContent = m.content + delta;
+                    if (shouldShowImplementFromAssistantContent(nextContent)) {
+                      phraseSummary = nextContent;
+                    }
+                    return { ...m, content: nextContent };
+                  }
+                  return m;
+                });
+                if (phraseSummary) {
+                  queueMicrotask(() => {
+                    setImplementSuggestion({ summary: phraseSummary! });
+                  });
+                }
+                return next;
+              });
             },
             summary => {
               if (controller.signal.aborted) return;
               // Finalize the streaming message + show sticky implement zone
-              setMessages(prev =>
-                prev.map(m =>
+              setMessages(prev => {
+                const next = prev.map(m =>
                   m.id === chatMsgId && m.type === "chat_response"
                     ? { ...m, streaming: false }
                     : m,
-                ),
-              );
-              setImplementSuggestion({ summary });
+                );
+                const final = next.find(
+                  m => m.id === chatMsgId && m.type === "chat_response",
+                ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
+                queueMicrotask(() => {
+                  if (shouldShowImplementFromAssistantContent(final?.content)) {
+                    setImplementSuggestion({ summary: final!.content });
+                  } else {
+                    setImplementSuggestion({ summary });
+                  }
+                });
+                return next;
+              });
               activeChatMsgIdRef.current = null;
             },
           );
 
           if (!controller.signal.aborted) {
-            setMessages(prev =>
-              prev.map(m =>
+            setMessages(prev => {
+              const next = prev.map(m =>
                 m.id === chatMsgId && m.type === "chat_response"
                   ? { ...m, streaming: false }
                   : m,
-              ),
-            );
+              );
+              const final = next.find(
+                m => m.id === chatMsgId && m.type === "chat_response",
+              ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
+              if (final && shouldShowImplementFromAssistantContent(final.content)) {
+                queueMicrotask(() => {
+                  setImplementSuggestion({ summary: final.content });
+                });
+              }
+              return next;
+            });
             activeChatMsgIdRef.current = null;
           }
         } else {
@@ -1344,13 +1388,25 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   implementPlan?: string;
                 };
                 if (ev.type === "chat_response" && ev.delta) {
-                  setMessages(prev =>
-                    prev.map(m =>
-                      m.id === chatMsgId && m.type === "chat_response"
-                        ? { ...m, content: m.content + ev.delta! }
-                        : m,
-                    ),
-                  );
+                  setMessages(prev => {
+                    let phraseSummary: string | null = null;
+                    const next = prev.map(m => {
+                      if (m.id === chatMsgId && m.type === "chat_response") {
+                        const nextContent = m.content + ev.delta!;
+                        if (shouldShowImplementFromAssistantContent(nextContent)) {
+                          phraseSummary = nextContent;
+                        }
+                        return { ...m, content: nextContent };
+                      }
+                      return m;
+                    });
+                    if (phraseSummary) {
+                      queueMicrotask(() => {
+                        setImplementSuggestion({ summary: phraseSummary! });
+                      });
+                    }
+                    return next;
+                  });
                 } else if (ev.type === "implement_suggestion" && ev.summary) {
                   setMessages(prev =>
                     prev.map(m =>
@@ -1413,13 +1469,22 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               }
             }
 
-            setMessages(prev =>
-              prev.map(m =>
+            setMessages(prev => {
+              const next = prev.map(m =>
                 m.id === chatMsgId && m.type === "chat_response"
                   ? { ...m, streaming: false }
                   : m,
-              ),
-            );
+              );
+              const final = next.find(
+                m => m.id === chatMsgId && m.type === "chat_response",
+              ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
+              if (final && shouldShowImplementFromAssistantContent(final.content)) {
+                queueMicrotask(() => {
+                  setImplementSuggestion({ summary: final.content });
+                });
+              }
+              return next;
+            });
             activeChatMsgIdRef.current = null;
           } catch (err) {
             if (controller.signal.aborted) return;
