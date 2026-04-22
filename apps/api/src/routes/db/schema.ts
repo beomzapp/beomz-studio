@@ -13,7 +13,7 @@ import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { getSchemaTableList, isUserDataConfigured } from "../../lib/userDataClient.js";
 import { getNeonSchemaTableList } from "../../lib/neonDb.js";
-import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 interface SchemaDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -101,10 +101,10 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
       }
     }
 
-    if (provider === "neon") {
-      const dbUrl = getNeonDbUrl(limits);
+    if (provider === "neon" || provider === "postgres") {
+      const dbUrl = getProjectPostgresUrl(project, limits);
       if (!dbUrl) {
-        return c.json({ error: "Neon connection string missing" }, 400);
+        return c.json({ error: "Postgres connection string missing" }, 400);
       }
       try {
         const tables = await getNeonSchemaTableListFn(dbUrl);

@@ -42,6 +42,7 @@ disableDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   await db.updateProject(projectId, {
+    byo_db_url: null,
     database_enabled: false,
     db_schema: null,
     db_nonce: null,

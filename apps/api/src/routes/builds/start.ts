@@ -32,6 +32,7 @@ import {
   WEB_RESEARCH_SURCHARGE,
   isAdminEmail,
 } from "../../lib/credits.js";
+import { parsePostgresConnectionString } from "../../lib/projectDb.js";
 import {
   classifyIntent,
   MAX_CLARIFYING_QUESTIONS,
@@ -849,6 +850,15 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   }
 
   if (!projectRow) return c.json({ error: "Project not found." }, 404);
+
+  if (typeof projectRow.byo_db_url === "string" && projectRow.byo_db_url.trim().length > 0) {
+    try {
+      const { host } = parsePostgresConnectionString(projectRow.byo_db_url);
+      console.log("[db] using BYO postgres:", host);
+    } catch {
+      // Invalid persisted BYO URL should not block builds.
+    }
+  }
 
   const iconValue = getProjectIcon(selectedTemplateId);
   await orgContext.db.updateProject(projectId, { icon: iconValue }).catch(() => undefined);

@@ -7,6 +7,7 @@
  */
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { neon } from "@neondatabase/serverless";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -19,6 +20,8 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 import { deleteNeonProject } from "../../lib/neonClient.js";
+import { parsePostgresConnectionString } from "../../lib/projectDb.js";
+import { rewireByoPostgres } from "../db/rewire-postgres.js";
 
 interface ProjectsRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -27,6 +30,8 @@ interface ProjectsRouteDeps {
   runSql?: typeof runSql;
   deleteSchemaRegistry?: typeof deleteSchemaRegistry;
   deleteNeonProject?: typeof deleteNeonProject;
+  rewireByoPostgres?: typeof rewireByoPostgres;
+  testPostgresConnection?: (connectionString: string) => Promise<void>;
 }
 
 export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
@@ -37,6 +42,11 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const runSqlFn = deps.runSql ?? runSql;
   const deleteSchemaRegistryFn = deps.deleteSchemaRegistry ?? deleteSchemaRegistry;
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
+  const rewireByoPostgresFn = deps.rewireByoPostgres ?? rewireByoPostgres;
+  const testPostgresConnectionFn = deps.testPostgresConnection ?? (async (connectionString: string) => {
+    const sql = neon(connectionString);
+    await sql`SELECT 1`;
+  });
 
   projectsRoute.get("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
     try {
@@ -181,6 +191,60 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     await orgContext.db.updateProject(projectId, { name: body.name.trim() });
 
     return c.json({ ok: true });
+  });
+
+  projectsRoute.post("/:id/byo-db", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const projectId = c.req.param("id");
+
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const body = await c.req.json().catch(() => null) as { connectionString?: unknown } | null;
+    const rawConnectionString = typeof body?.connectionString === "string"
+      ? body.connectionString
+      : "";
+    if (!rawConnectionString.trim()) {
+      return c.json({ error: "connectionString is required" }, 400);
+    }
+
+    let parsed: { connectionString: string; host: string };
+    try {
+      parsed = parsePostgresConnectionString(rawConnectionString);
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : "Invalid Postgres connection string" },
+        400,
+      );
+    }
+
+    try {
+      await testPostgresConnectionFn(parsed.connectionString);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Connection test failed";
+      return c.json({ error: `Failed to connect to Postgres: ${message}` }, 400);
+    }
+
+    await orgContext.db.updateProject(projectId, {
+      byo_db_url: parsed.connectionString,
+      database_enabled: true,
+      db_config: null,
+      db_nonce: null,
+      db_provider: "postgres",
+      db_schema: null,
+      db_wired: true,
+    });
+
+    await rewireByoPostgresFn(projectId, parsed.connectionString).catch((error: unknown) => {
+      console.warn(
+        "[projects/byo-db] failed to sync latest generation env (non-fatal):",
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+
+    return c.json({ success: true, host: parsed.host });
   });
 
   return projectsRoute;

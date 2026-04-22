@@ -14,7 +14,7 @@ import type { OrgContext } from "../../types.js";
 import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
-import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 // ── Scaffold files required for Vercel to build a Vite + React project ────────
 // Mirrors the WebContainer scaffold in apps/web/src/lib/webcontainer.ts
@@ -261,12 +261,12 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   }
 
   if (usesNeon) {
-    if (provider === "neon") {
-      neonDbUrl = getNeonDbUrl(limits);
+    if (provider === "neon" || provider === "postgres") {
+      neonDbUrl = getProjectPostgresUrl(project, limits);
       if (neonDbUrl) {
-        console.log("[vercel deploy] injecting Neon DB URL into published bundle");
+        console.log("[vercel deploy] injecting Postgres DB URL into published bundle");
       } else {
-        console.warn("[vercel deploy] provider=neon but no db_url found in project_db_limits — leaving VITE_DATABASE_URL unresolved");
+        console.warn(`[vercel deploy] provider=${provider} but no Postgres connection string was resolved — leaving VITE_DATABASE_URL unresolved`);
       }
     } else {
       console.log(`[vercel deploy] app references Neon but resolved provider=${provider ?? "null"} — leaving VITE_DATABASE_URL unresolved`);

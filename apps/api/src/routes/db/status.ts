@@ -13,7 +13,7 @@ import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { getUserDataAnonKey, getUserDataPublicUrl, isUserDataConfigured } from "../../lib/userDataClient.js";
-import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 interface StatusDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -92,14 +92,14 @@ export function createStatusDbRoute(deps: StatusDbRouteDeps = {}) {
           nonce: "",
         };
       }
-    } else if (provider === "neon") {
-      // BEO-428: return the Neon connection string so the frontend can inject
-      // VITE_DATABASE_URL into the WebContainer .env.local on every page load.
+    } else if (provider === "neon" || provider === "postgres") {
+      // BEO-428 / BEO-445: return the Postgres connection string so the
+      // frontend can inject VITE_DATABASE_URL into the WebContainer .env.local.
       return c.json({
         enabled: true,
-        provider: "neon",
+        provider,
         wired: true,
-        dbUrl: getNeonDbUrl(limits),
+        dbUrl: getProjectPostgresUrl(project, limits),
       });
     }
 

@@ -14,7 +14,7 @@ import {
   type NeonProjectUser,
   type NeonProjectUserRow,
 } from "../../lib/neonDb.js";
-import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 const signupSchema = z.object({
   email: z.string().email(),
@@ -34,7 +34,9 @@ interface ProjectAuthTokenPayload {
   type: "project-auth";
 }
 
-type ProjectLookup = Pick<ProjectRow, "id" | "database_enabled" | "db_provider" | "db_wired" | "db_schema" | "db_config">;
+type ProjectLookup = Pick<ProjectRow, "id" | "database_enabled" | "db_provider" | "db_wired" | "db_schema" | "db_config"> & {
+  byo_db_url?: unknown;
+};
 type LimitsLookup = Pick<ProjectDbLimitsRow, "db_url"> | null;
 type StudioDbClientLike = {
   findProjectById: (projectId: string) => Promise<ProjectLookup | null>;
@@ -96,11 +98,11 @@ async function resolveProjectDbUrl(
 
   const limits = await db.getProjectDbLimits(projectId);
   const provider = resolveProjectDbProvider(project, limits);
-  if (provider !== "neon") {
+  if (provider !== "neon" && provider !== "postgres") {
     return null;
   }
 
-  return getNeonDbUrl(limits);
+  return getProjectPostgresUrl(project, limits);
 }
 
 function readBearerToken(authHeader: string | undefined): string | null {

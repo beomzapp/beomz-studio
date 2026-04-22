@@ -66,6 +66,7 @@ connectDbRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   // Store only url + anonKey — never service role key
   await db.updateProject(projectId, {
+    byo_db_url: null,
     database_enabled: true,
     db_provider: "supabase",
     db_config: { url, anonKey },

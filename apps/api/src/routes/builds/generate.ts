@@ -67,6 +67,12 @@ import {
   type ProjectChatHistoryEntry,
 } from "../../lib/projectChat.js";
 import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
+import { upsertEnvFile } from "../../lib/envFile.js";
+import {
+  buildProjectDatabaseEnvVars,
+  parsePostgresConnectionString,
+  resolveProjectDbProvider,
+} from "../../lib/projectDb.js";
 import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
@@ -677,6 +683,46 @@ async function persistProjectChatHistory(
     }
   } catch (err) {
     console.warn("[generate] persistProjectChatHistory failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function injectProjectDatabaseEnv(
+  db: StudioDbClient,
+  projectId: string,
+  files: StudioFile[],
+): Promise<StudioFile[]> {
+  try {
+    const project = await db.findProjectById(projectId);
+    if (!project) {
+      return files;
+    }
+
+    const limits = await db.getProjectDbLimits(projectId).catch(() => null);
+    const provider = resolveProjectDbProvider(project, limits);
+    const envVars = buildProjectDatabaseEnvVars(project, limits);
+    if (!envVars) {
+      return files;
+    }
+
+    if (provider === "postgres") {
+      const databaseUrl = envVars.VITE_DATABASE_URL;
+      if (typeof databaseUrl === "string") {
+        try {
+          const { host } = parsePostgresConnectionString(databaseUrl);
+          console.log("[db] using BYO postgres:", host);
+        } catch {
+          // Ignore malformed persisted values here; the project save path validates them.
+        }
+      }
+    }
+
+    return [...upsertEnvFile(files, envVars)];
+  } catch (error) {
+    console.warn(
+      "[generate] failed to inject project DB env (non-fatal):",
+      error instanceof Error ? error.message : String(error),
+    );
+    return files;
   }
 }
 
@@ -2680,8 +2726,11 @@ export function buildIterationSystemPrompt(
   dbProvider: string | null = null,
   neonAuthBaseUrl: string | null = null,
 ): string {
-  const isNeonWired = hasWiredSupabaseClient && dbProvider === "neon";
-  const hasNeonAuth = isNeonWired && typeof neonAuthBaseUrl === "string" && neonAuthBaseUrl.length > 0;
+  const isPostgresWired = hasWiredSupabaseClient && (dbProvider === "neon" || dbProvider === "postgres");
+  const hasNeonAuth = dbProvider === "neon"
+    && isPostgresWired
+    && typeof neonAuthBaseUrl === "string"
+    && neonAuthBaseUrl.length > 0;
   const dbBlock = schemaSummary
     ? [
         "",
@@ -2697,7 +2746,7 @@ export function buildIterationSystemPrompt(
   const imageBlock = imageContextBlock
     ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
     : "";
-  const existingSupabaseClientBlock = hasWiredSupabaseClient && !isNeonWired
+  const existingSupabaseClientBlock = hasWiredSupabaseClient && !isPostgresWired
     ? [
         "",
         "This project already has Supabase wired. The existing code uses inline createClient() calls — do NOT create or import from a shared supabase.ts or supabase.tsx file.",
@@ -2706,10 +2755,12 @@ export function buildIterationSystemPrompt(
         "Use the Supabase URL and anon key already present in the codebase.",
       ].join("\n")
     : "";
-  const neonDbBlock = isNeonWired
+  const neonDbBlock = isPostgresWired
     ? [
         "",
-        "This project uses a Neon Postgres database. The connection string is available as import.meta.env.VITE_DATABASE_URL.",
+        dbProvider === "postgres"
+          ? "This project uses a BYO Postgres database. The connection string is available as import.meta.env.VITE_DATABASE_URL."
+          : "This project uses a Neon Postgres database. The connection string is available as import.meta.env.VITE_DATABASE_URL.",
         "Use @neondatabase/serverless (browser-safe HTTP) to connect:",
         "  import { neon } from '@neondatabase/serverless';",
         "  const sql = neon(import.meta.env.VITE_DATABASE_URL);",
@@ -2744,7 +2795,7 @@ export function buildIterationSystemPrompt(
         "- Auth includes Google, GitHub, and email/password by default",
       ].join("\n")
     : "";
-  const dbImportRules = isNeonWired
+  const dbImportRules = isPostgresWired
     ? [
         "NEON IMPORTS:",
         "Use: import { neon } from '@neondatabase/serverless' and import.meta.env.VITE_DATABASE_URL.",
@@ -3812,9 +3863,13 @@ async function _runBuildInBackground(
       try {
         iterProject = await db.findProjectById(projectId);
         hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
-        iterDbProvider = iterProject?.db_provider ?? null;
+        const limits = iterProject?.database_enabled
+          ? await db.getProjectDbLimits(projectId).catch(() => null)
+          : null;
+        iterDbProvider = iterProject
+          ? resolveProjectDbProvider(iterProject, limits)
+          : null;
         if (iterDbProvider === "neon") {
-          const limits = await db.getProjectDbLimits(projectId);
           iterNeonAuthBaseUrl =
             typeof limits?.neon_auth_base_url === "string" ? limits.neon_auth_base_url : null;
         }
@@ -3977,10 +4032,11 @@ async function _runBuildInBackground(
 
       // Merge: new files are added, updated files override existing ones
       const mergedIterFiles = mergeFiles([...existingFiles], iterResult.files);
-      const { files: iterFinalFiles, missing: iterMissingImports } = postProcessGeneratedFiles(
+      const { files: iterPostProcessedFiles, missing: iterMissingImports } = postProcessGeneratedFiles(
         mergedIterFiles,
         templateId,
       );
+      const iterFinalFiles = await injectProjectDatabaseEnv(db, projectId, iterPostProcessedFiles);
       if (iterMissingImports.length > 0) {
         console.warn("[generate] WARNING: missing imports detected in iteration:", iterMissingImports);
         console.log("[generate] generating stub files for missing components...", { count: iterMissingImports.length });
@@ -4278,10 +4334,11 @@ async function _runBuildInBackground(
       mergeFiles(templateFiles, [...(input.existingFiles ?? [])]),
       customised.files,
     );
-    const { files: finalFiles, missing: missingImports } = postProcessGeneratedFiles(
+    const { files: postProcessedFiles, missing: missingImports } = postProcessGeneratedFiles(
       mergedFiles,
       templateId,
     );
+    const finalFiles = await injectProjectDatabaseEnv(db, projectId, postProcessedFiles);
     if (missingImports.length > 0) {
       console.warn("[generate] WARNING: missing imports detected:", missingImports);
       console.log("[generate] generating stub files for missing components...", { count: missingImports.length });

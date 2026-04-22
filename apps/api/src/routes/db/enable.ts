@@ -148,6 +148,7 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
 
         // Mark connected immediately; rewire helper finalizes db_wired + env context.
         await db.updateProject(projectId, {
+          byo_db_url: null,
           database_enabled: true,
           db_provider: "neon",
           db_wired: false,
@@ -225,6 +226,7 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
 
       // 5. Persist to project — db_nonce stored server-side only, never returned to client
       await db.updateProject(projectId, {
+        byo_db_url: null,
         database_enabled: true,
         db_schema: schema,
         db_nonce: nonce,

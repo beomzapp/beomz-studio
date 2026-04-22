@@ -10,7 +10,7 @@ import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { fetchTableRows } from "../../lib/neonDb.js";
-import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 interface DataDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -52,13 +52,13 @@ export function createDataDbRoute(deps: DataDbRouteDeps = {}) {
 
     const limits = await db.getProjectDbLimits(projectId);
     const provider = resolveProjectDbProvider(project, limits);
-    if (provider !== "neon") {
-      return c.json({ error: "Data browsing is only supported for Neon projects" }, 400);
+    if (provider !== "neon" && provider !== "postgres") {
+      return c.json({ error: "Data browsing is only supported for Postgres projects" }, 400);
     }
 
-    const dbUrl = getNeonDbUrl(limits);
+    const dbUrl = getProjectPostgresUrl(project, limits);
     if (!dbUrl) {
-      return c.json({ error: "Neon connection string missing" }, 400);
+      return c.json({ error: "Postgres connection string missing" }, 400);
     }
 
     try {

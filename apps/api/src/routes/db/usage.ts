@@ -20,7 +20,7 @@ import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { isUserDataConfigured, runSql } from "../../lib/userDataClient.js";
 import { getNeonUsage } from "../../lib/neonDb.js";
-import { getNeonDbUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 interface UsageDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -145,10 +145,10 @@ export function createUsageDbRoute(deps: UsageDbRouteDeps = {}) {
       );
     }
 
-    if (provider === "neon") {
-      const dbUrl = getNeonDbUrl(limitsRow);
+    if (provider === "neon" || provider === "postgres") {
+      const dbUrl = getProjectPostgresUrl(project, limitsRow);
       if (!dbUrl) {
-        return c.json({ error: "Neon connection string missing" }, 400);
+        return c.json({ error: "Postgres connection string missing" }, 400);
       }
       try {
         const usage = await getNeonUsageFn(dbUrl);
@@ -170,7 +170,7 @@ export function createUsageDbRoute(deps: UsageDbRouteDeps = {}) {
       }
     }
 
-    return c.json({ error: "Built-in database not enabled for this project" }, 400);
+    return c.json({ error: "Database not enabled for this project" }, 400);
   });
 
   return usageDbRoute;
