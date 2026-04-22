@@ -112,14 +112,9 @@ function formatStorageMb(mb: number): string {
   return `${Math.round(mb)}MB`;
 }
 
-function getPlanStorageLimitMb(plan: string): number {
-  const normalized = (plan ?? "free").toLowerCase().replace(/[\s-]+/g, "_");
-  switch (normalized) {
-    case "pro_starter": return 1024;
-    case "pro_builder": return 5120;
-    case "business": return 15360;
-    default: return 200;
-  }
+function getPlanStorageLimitMb(_plan: string): number {
+  // All plans get the same 500MB Neon DB — limit comes from API; this is only a fallback
+  return 500;
 }
 
 interface DatabasePanelProps {
@@ -430,10 +425,6 @@ export function DatabasePanel({
       ? "bg-amber-500"
       : "bg-[#F97316]";
 
-  const normalizedPlan = (plan ?? "free").toLowerCase().replace(/[\s-]+/g, "_");
-  const isFreePlan = normalizedPlan === "free";
-  const storageUrgent = fillPct > 80;
-
   // ── STATE 1: Not connected ──────────────────────────────────
   if (!databaseEnabled) {
     return (
@@ -664,41 +655,6 @@ export function DatabasePanel({
                 )}
               </div>
             </div>
-
-            {/* Upsell card — free plan soft upsell (always) or urgent upsell (>80%) */}
-            {(isFreePlan || storageUrgent) && (
-              <div
-                className={cn(
-                  "flex items-center justify-between rounded-xl border px-3.5 py-3",
-                  storageUrgent
-                    ? "border-amber-200 bg-amber-50"
-                    : "border-[#e5e7eb] bg-white",
-                )}
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Zap
-                    size={14}
-                    className={storageUrgent ? "shrink-0 text-amber-500" : "shrink-0 text-[#F97316]"}
-                  />
-                  <p className={cn("text-[11px] font-medium leading-snug", storageUrgent ? "text-amber-800" : "text-[#374151]")}>
-                    {storageUrgent
-                      ? "Storage almost full — upgrade to avoid data loss"
-                      : "Need more storage? Upgrade to Pro Starter (2,000 credits/mo) or higher"}
-                  </p>
-                </div>
-                <button
-                  onClick={() => window.open("https://beomz.ai/plan", "_blank")}
-                  className={cn(
-                    "ml-3 shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors",
-                    storageUrgent
-                      ? "bg-amber-500 text-white hover:bg-amber-600"
-                      : "bg-[#F97316] text-white hover:bg-[#ea6c10]",
-                  )}
-                >
-                  Upgrade →
-                </button>
-              </div>
-            )}
 
             {/* Storage add-on row */}
             <div>
