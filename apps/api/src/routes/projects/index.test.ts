@@ -5,6 +5,7 @@ import { Hono } from "hono";
 
 import type { OrgContext } from "../../types.js";
 import type { ProjectRow } from "@beomz-studio/studio-db";
+import type { StudioFile } from "@beomz-studio/contracts";
 
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
@@ -49,6 +50,8 @@ function createOrgContext(project: ProjectRow, dbOverrides: Partial<OrgContext["
   return {
     db: {
       findProjectById: async (id: string) => (id === project.id ? project : null),
+      findLatestGenerationByProjectId: async () => null,
+      createGeneration: async (input: Record<string, unknown>) => input,
       deleteProject: async () => undefined,
       deleteProjectDbLimits: async () => undefined,
       ...dbOverrides,
@@ -260,6 +263,7 @@ test("byo-db runs migration, saves Supabase credentials, and returns host", asyn
   assert.deepEqual(await response.json(), {
     success: true,
     host: "demo-project.supabase.co",
+    wiring: false,
   });
   assert.equal(migrationRuns, 1);
   assert.deepEqual(updates, [
@@ -268,6 +272,77 @@ test("byo-db runs migration, saves Supabase credentials, and returns host", asyn
       byo_db_anon_key: "anon-key",
     },
   ]);
+});
+
+test("byo-db queues a silent auto-wire iteration when a previous build exists", async () => {
+  const project = createProject({ template: "workspace-task" });
+  const existingFiles: StudioFile[] = [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: "export default function App() { return <div>Hello</div>; }\n",
+      source: "ai",
+      locked: false,
+    },
+  ];
+  const updates: Record<string, unknown>[] = [];
+  const createdGenerations: Record<string, unknown>[] = [];
+  const buildRuns: Array<Record<string, unknown>> = [];
+  const orgContext = createOrgContext(project, {
+    updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
+      updates.push(patch);
+      return { ...project, ...patch };
+    },
+    findLatestGenerationByProjectId: async () => ({
+      id: "generation-prev",
+      files: existingFiles,
+    }),
+    createGeneration: async (input: Record<string, unknown>) => {
+      createdGenerations.push(input);
+      return {
+        ...input,
+        project_id: project.id,
+        template_id: project.template,
+      };
+    },
+  });
+  const app = createApp(orgContext, {
+    runBuildInBackground: async (input: Record<string, unknown>) => {
+      buildRuns.push(input);
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
+    method: "POST",
+    body: JSON.stringify({
+      supabaseUrl: "https://demo-project.supabase.co",
+      supabaseAnonKey: "anon-key",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    success: true,
+    host: "demo-project.supabase.co",
+    wiring: true,
+  });
+  assert.equal(createdGenerations.length, 1);
+  assert.equal(buildRuns.length, 1);
+  assert.deepEqual(updates, [
+    {
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    },
+  ]);
+  assert.equal(createdGenerations[0]?.operation_id, "projectIteration");
+  assert.equal(createdGenerations[0]?.status, "queued");
+  assert.equal(buildRuns[0]?.isIteration, true);
+  assert.equal(buildRuns[0]?.model, "claude-sonnet-4-6");
+  assert.equal(buildRuns[0]?.projectId, project.id);
+  assert.deepEqual(buildRuns[0]?.existingFiles, existingFiles);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /Rewire the entire app to use Supabase instead of hardcoded data\./);
 });
 
 test("byo-db delete clears saved Supabase credentials", async () => {

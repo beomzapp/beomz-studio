@@ -5,8 +5,11 @@
  * last_opened_at desc (recently opened first) then updated_at desc.
  * Also returns the generation count per project and plan gate metadata.
  */
+import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { projectIterationOperation } from "@beomz-studio/operations";
+import type { StudioFile, TemplateId } from "@beomz-studio/contracts";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
@@ -23,6 +26,7 @@ import {
 } from "../../lib/userDataClient.js";
 import { deleteNeonProject } from "../../lib/neonClient.js";
 import { parseSupabaseProjectUrl } from "../../lib/projectDb.js";
+import { runBuildInBackground } from "../builds/generate.js";
 
 interface ProjectsRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -32,10 +36,19 @@ interface ProjectsRouteDeps {
   deleteSchemaRegistry?: typeof deleteSchemaRegistry;
   deleteNeonProject?: typeof deleteNeonProject;
   ensureByoDbAnonKeyColumn?: () => Promise<void>;
+  runBuildInBackground?: typeof runBuildInBackground;
 }
 
 const SUPABASE_MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
 const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
+const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
+const AUTO_WIRE_ITERATION_PROMPT = [
+  "Rewire the entire app to use Supabase instead of hardcoded data.",
+  "Import createClient from @supabase/supabase-js and use",
+  "import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
+  "Replace all hardcoded arrays and sample data with real Supabase queries.",
+  "Use useEffect + useState for data fetching with loading and error states.",
+].join("\n");
 
 function getStudioProjectRef(): string {
   return new URL(apiConfig.STUDIO_SUPABASE_URL).hostname.split(".")[0] ?? "";
@@ -76,6 +89,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const deleteSchemaRegistryFn = deps.deleteSchemaRegistry ?? deleteSchemaRegistry;
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
   const ensureByoDbAnonKeyColumnFn = deps.ensureByoDbAnonKeyColumn ?? ensureByoDbAnonKeyColumn;
+  const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
 
   projectsRoute.get("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
     try {
@@ -287,7 +301,79 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       await orgContext.db.updateProject(projectId, patch);
     }
 
-    return c.json({ success: true, host: parsed.host });
+    const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectId);
+    const existingFiles = Array.isArray(latestGeneration?.files)
+      ? latestGeneration.files as readonly StudioFile[]
+      : [];
+    const shouldAutoWire = existingFiles.length > 0;
+
+    if (shouldAutoWire) {
+      const buildId = randomUUID();
+      const requestedAt = new Date().toISOString();
+      const operationId = projectIterationOperation.id;
+
+      await orgContext.db.createGeneration({
+        completed_at: null,
+        error: null,
+        files: [],
+        id: buildId,
+        metadata: {
+          sourcePrompt: AUTO_WIRE_ITERATION_PROMPT,
+          autoWire: "byo_supabase",
+          builderTrace: {
+            events: [
+              {
+                code: "build_queued",
+                id: "1",
+                message: "Supabase wiring queued.",
+                operation: "iteration",
+                timestamp: requestedAt,
+                type: "status",
+                phase: "queued",
+              },
+            ],
+            lastEventId: "1",
+            previewReady: false,
+            fallbackReason: null,
+            fallbackUsed: false,
+          },
+        },
+        operation_id: operationId,
+        output_paths: [],
+        preview_entry_path: "/",
+        project_id: projectId,
+        prompt: AUTO_WIRE_ITERATION_PROMPT,
+        started_at: requestedAt,
+        status: "queued",
+        summary: `Queued Supabase wiring for ${project.name}.`,
+        template_id: project.template as TemplateId,
+        warnings: [],
+      });
+
+      runBuildInBackgroundFn(
+        {
+          buildId,
+          projectId,
+          orgId: orgContext.org.id,
+          userId: orgContext.user.id,
+          userEmail: orgContext.user.email,
+          prompt: AUTO_WIRE_ITERATION_PROMPT,
+          sourcePrompt: AUTO_WIRE_ITERATION_PROMPT,
+          templateId: project.template,
+          model: AUTO_WIRE_BUILD_MODEL,
+          requestedAt,
+          operationId,
+          isIteration: true,
+          existingFiles,
+          projectName: project.name,
+        },
+        orgContext.db,
+      ).catch((error: unknown) => {
+        console.error("[projects/byo-db] auto-wire iteration failed:", error);
+      });
+    }
+
+    return c.json({ success: true, host: parsed.host, wiring: shouldAutoWire });
   });
 
   projectsRoute.delete("/:id/byo-db", authMiddleware, loadOrgContextMiddleware, async (c) => {

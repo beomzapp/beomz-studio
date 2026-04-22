@@ -19,6 +19,7 @@ const {
 } = await import("./generate.js");
 
 const INLINE_SUPABASE_RULE = "Continue the same inline createClient() pattern already present in the existing project files.";
+const BYO_SUPABASE_RULE = "This project uses the user's own Supabase database.";
 
 test("iteration system prompt injects the inline Supabase rule when db_wired=true", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, true);
@@ -67,11 +68,31 @@ test("iteration system prompt does not inject the inline Supabase rule when db_w
   assert.equal(prompt.includes(INLINE_SUPABASE_RULE), false);
 });
 
+test("iteration system prompt injects BYO Supabase guidance when BYO credentials are present", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, false, "supabase", null, true);
+
+  assert.equal(prompt.includes(BYO_SUPABASE_RULE), true);
+  assert.match(prompt, /VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are injected automatically\./);
+  assert.match(prompt, /Always use @supabase\/supabase-js for ALL data operations\./);
+  assert.match(prompt, /Never use hardcoded sample data — always query from Supabase\./);
+  assert.match(prompt, /const supabase = createClient\(import\.meta\.env\.VITE_SUPABASE_URL, import\.meta\.env\.VITE_SUPABASE_ANON_KEY\)/);
+});
+
 test("initial build system prompt does not inject the inline Supabase rule", () => {
   const prompt = buildSystemPrompt("professional-blue");
 
   assert.equal(prompt.includes(INLINE_SUPABASE_RULE), false);
   assert.equal(prompt.includes("import { supabase } from"), false);
+});
+
+test("initial build system prompt injects BYO Supabase guidance when credentials are connected", () => {
+  const prompt = buildSystemPrompt("professional-blue", undefined, undefined, undefined, true);
+
+  assert.equal(prompt.includes(BYO_SUPABASE_RULE), true);
+  assert.match(prompt, /VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are injected automatically\./);
+  assert.match(prompt, /Always use @supabase\/supabase-js for ALL data operations\./);
+  assert.match(prompt, /Never use hardcoded sample data — always query from Supabase\./);
+  assert.match(prompt, /const supabase = createClient\(import\.meta\.env\.VITE_SUPABASE_URL, import\.meta\.env\.VITE_SUPABASE_ANON_KEY\)/);
 });
 
 test("system prompts include lucide safe icon guidance and banned icon list", () => {

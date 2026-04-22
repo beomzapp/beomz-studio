@@ -70,6 +70,7 @@ import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
 import { upsertEnvFile } from "../../lib/envFile.js";
 import {
   buildProjectDatabaseEnvVars,
+  getByoSupabaseConfig,
   parsePostgresConnectionString,
   parseSupabaseProjectUrl,
   resolveProjectDbProvider,
@@ -138,6 +139,14 @@ interface CustomiseResult {
   inputTokens?: number;
   iterationMetrics?: IterationMetrics;
 }
+
+const BYO_SUPABASE_SYSTEM_PROMPT_BLOCK = [
+  "This project uses the user's own Supabase database.",
+  "VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are injected automatically.",
+  "Always use @supabase/supabase-js for ALL data operations.",
+  "Never use hardcoded sample data — always query from Supabase.",
+  "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
+].join("\n");
 
 interface TokenUsage {
   inputTokens: number;
@@ -1614,16 +1623,20 @@ export function buildSystemPrompt(
   designSystemSpec?: string,
   phaseContextBlock?: string,
   imageContextBlock?: string,
+  hasByoSupabaseConfig = false,
 ): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
     : "";
   const phaseBlock = phaseContextBlock ? `${phaseContextBlock}\n\n` : "";
   const imageBlock = imageContextBlock ? `${imageContextBlock}\n\n` : "";
+  const byoSupabaseBlock = hasByoSupabaseConfig
+    ? `BYO SUPABASE (highest priority rule):\n${BYO_SUPABASE_SYSTEM_PROMPT_BLOCK}\nThis overrides any generic instruction elsewhere in this prompt about hardcoded arrays, sample data, or seed records.\n\n`
+    : "";
   const themeTsContent = buildThemeTs(paletteId);
   const variationSeed = Math.floor(Math.random() * 9000) + 1000;
   return [
-    designBlock + phaseBlock + imageBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
+    designBlock + phaseBlock + imageBlock + byoSupabaseBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
     "",
     `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
@@ -2251,10 +2264,11 @@ async function callAnthropicCustomise(
   imageUrl?: string,
   phaseScope?: PhaseScope,
   maxTokens?: number,
+  hasByoSupabaseConfig = false,
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
-    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock),
+    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock, hasByoSupabaseConfig),
     buildAnthropicUserContent(buildUserMessage(prompt, phaseScope), imageUrl),
     prompt,
     maxTokens,
@@ -2641,10 +2655,11 @@ async function callOpenAICompatibleCustomise(
   phaseContextBlock?: string,
   imageContextBlock?: string,
   phaseScope?: PhaseScope,
+  hasByoSupabaseConfig = false,
 ): Promise<CustomiseResult> {
   return callOpenAICompatibleWithMessages(
     model, apiKey,
-    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock),
+    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock, hasByoSupabaseConfig),
     buildUserMessage(prompt, phaseScope),
     prompt, baseURL,
   );
@@ -2662,6 +2677,7 @@ async function callModelCustomise(
   imageUrl?: string,
   phaseScope?: PhaseScope,
   maxTokens?: number,
+  hasByoSupabaseConfig = false,
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
@@ -2683,6 +2699,7 @@ async function callModelCustomise(
       imageUrl,
       phaseScope,
       maxTokens,
+      hasByoSupabaseConfig,
     );
   }
 
@@ -2699,6 +2716,7 @@ async function callModelCustomise(
       phaseContextBlock,
       imageContextBlock,
       phaseScope,
+      hasByoSupabaseConfig,
     );
   }
 
@@ -2708,7 +2726,7 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
-      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope,
+      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope, hasByoSupabaseConfig,
     );
   }
 
@@ -2725,6 +2743,7 @@ async function callModelCustomise(
     imageUrl,
     phaseScope,
     maxTokens,
+    hasByoSupabaseConfig,
   );
 }
 
@@ -2736,6 +2755,7 @@ export function buildIterationSystemPrompt(
   hasWiredSupabaseClient = false,
   dbProvider: string | null = null,
   neonAuthBaseUrl: string | null = null,
+  hasByoSupabaseConfig = false,
 ): string {
   const isPostgresWired = hasWiredSupabaseClient && (dbProvider === "neon" || dbProvider === "postgres");
   const hasNeonAuth = dbProvider === "neon"
@@ -2756,6 +2776,13 @@ export function buildIterationSystemPrompt(
     : "";
   const imageBlock = imageContextBlock
     ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
+    : "";
+  const byoSupabaseBlock = hasByoSupabaseConfig
+    ? [
+        "",
+        "BYO SUPABASE (highest priority rule):",
+        BYO_SUPABASE_SYSTEM_PROMPT_BLOCK,
+      ].join("\n")
     : "";
   const existingSupabaseClientBlock = hasWiredSupabaseClient && !isPostgresWired
     ? [
@@ -2821,6 +2848,7 @@ export function buildIterationSystemPrompt(
   return [
     "You are making a surgical edit to an existing React app.",
     imageBlock,
+    byoSupabaseBlock,
     "",
     "RULES:",
     "1. Start from the project manifest and seed files already provided.",
@@ -2899,6 +2927,7 @@ async function callModelIterate(
   hasWiredSupabaseClient = false,
   dbProvider: string | null = null,
   neonAuthBaseUrl: string | null = null,
+  hasByoSupabaseConfig = false,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
   const isIteration = Boolean(instrumentation?.isIteration);
@@ -2910,6 +2939,7 @@ async function callModelIterate(
     hasWiredSupabaseClient,
     dbProvider,
     neonAuthBaseUrl,
+    hasByoSupabaseConfig,
   );
   const selection = buildIterationSelection(prompt, existingFiles, imageUrl);
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
@@ -3427,10 +3457,11 @@ async function _runBuildInBackground(
   const imageConfirmed = Boolean(input.imageUrl && input.confirmedIntent);
   let projectChatHistory: ProjectChatHistoryEntry[] = [];
   let projectChatSummary: string | null = null;
+  let currentProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
 
   try {
     if (typeof db.findProjectById === "function") {
-      const currentProject = await db.findProjectById(projectId);
+      currentProject = await db.findProjectById(projectId);
       projectChatHistory = readProjectChatHistory(currentProject?.chat_history);
       projectChatSummary = typeof currentProject?.chat_summary === "string"
         ? currentProject.chat_summary
@@ -3439,6 +3470,8 @@ async function _runBuildInBackground(
   } catch (err) {
     console.warn("[generate] failed to load project chat memory (non-fatal):", err instanceof Error ? err.message : String(err));
   }
+
+  const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
 
   if (!input.phaseOverride && !input.confirmedScope && imageConfirmationPending && input.imageUrl) {
     await appendSessionEventToDb(db, buildId, {
@@ -3868,12 +3901,14 @@ async function _runBuildInBackground(
       // Load DB schema for this project if database is enabled (BEO-288)
       let iterSchemaSummary: string | undefined;
       let hasWiredSupabaseClient = false;
+      let hasByoSupabaseConfigForIteration = false;
       let iterDbProvider: string | null = null;
       let iterNeonAuthBaseUrl: string | null = null;
       let iterProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
       try {
-        iterProject = await db.findProjectById(projectId);
+        iterProject = currentProject ?? await db.findProjectById(projectId);
         hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
+        hasByoSupabaseConfigForIteration = Boolean(getByoSupabaseConfig(iterProject));
         const limits = iterProject?.database_enabled
           ? await db.getProjectDbLimits(projectId).catch(() => null)
           : null;
@@ -3955,6 +3990,7 @@ async function _runBuildInBackground(
           hasWiredSupabaseClient,
           iterDbProvider,
           iterNeonAuthBaseUrl,
+          hasByoSupabaseConfigForIteration,
         );
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
@@ -4293,6 +4329,7 @@ async function _runBuildInBackground(
         input.imageUrl,
         phaseScope,
         input.forcedSimple ? 32000 : undefined,
+        hasByoSupabaseConfig,
       );
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
