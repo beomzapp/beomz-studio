@@ -148,6 +148,45 @@ test("db status returns 200 + neon dbUrl for wired Neon projects", async () => {
   });
 });
 
+test("db status returns BYO Supabase env + host even when managed DB flags are false", async () => {
+  const project = createProject({
+    database_enabled: false,
+    db_provider: null,
+    db_wired: false,
+    byo_db_url: "https://demo-project.supabase.co",
+    byo_db_anon_key: "anon-key",
+  });
+  const orgContext = createOrgContext(project, null);
+
+  const app = mountRoute(
+    "/projects/:id/db/status",
+    createStatusDbRoute({
+      authMiddleware: async (_c, next) => { await next(); },
+      loadOrgContextMiddleware: async (_c, next) => { await next(); },
+    }),
+    orgContext,
+  );
+
+  const response = await app.request(`http://localhost/projects/${project.id}/db/status`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    enabled: true,
+    provider: "byo",
+    wired: true,
+    supabaseUrl: "https://demo-project.supabase.co",
+    anonKey: "anon-key",
+    schemaName: "public",
+    byoDbHost: "demo-project.supabase.co",
+    env: {
+      url: "https://demo-project.supabase.co",
+      anonKey: "anon-key",
+      dbSchema: "public",
+      nonce: "",
+    },
+  });
+});
+
 test("db status infers neon when legacy project row is missing db_provider but has a neon db_url", async () => {
   const project = createProject({ db_provider: null });
   const limits = createLimits();

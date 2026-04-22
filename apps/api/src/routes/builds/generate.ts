@@ -71,6 +71,7 @@ import { upsertEnvFile } from "../../lib/envFile.js";
 import {
   buildProjectDatabaseEnvVars,
   parsePostgresConnectionString,
+  parseSupabaseProjectUrl,
   resolveProjectDbProvider,
 } from "../../lib/projectDb.js";
 import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
@@ -710,6 +711,16 @@ async function injectProjectDatabaseEnv(
         try {
           const { host } = parsePostgresConnectionString(databaseUrl);
           console.log("[db] using BYO postgres:", host);
+        } catch {
+          // Ignore malformed persisted values here; the project save path validates them.
+        }
+      }
+    } else if (provider === "supabase") {
+      const supabaseUrl = envVars.VITE_SUPABASE_URL;
+      if (typeof supabaseUrl === "string") {
+        try {
+          const { host } = parseSupabaseProjectUrl(supabaseUrl);
+          console.log("[db] using BYO supabase:", host);
         } catch {
           // Ignore malformed persisted values here; the project save path validates them.
         }

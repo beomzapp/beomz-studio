@@ -5,9 +5,12 @@
  * last_opened_at desc (recently opened first) then updated_at desc.
  * Also returns the generation count per project and plan gate metadata.
  */
+import { setTimeout as delay } from "node:timers/promises";
+
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
+import { apiConfig } from "../../config.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -19,7 +22,7 @@ import {
   runSql,
 } from "../../lib/userDataClient.js";
 import { deleteNeonProject } from "../../lib/neonClient.js";
-import { parsePostgresConnectionString } from "../../lib/projectDb.js";
+import { parseSupabaseProjectUrl } from "../../lib/projectDb.js";
 
 interface ProjectsRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -28,6 +31,40 @@ interface ProjectsRouteDeps {
   runSql?: typeof runSql;
   deleteSchemaRegistry?: typeof deleteSchemaRegistry;
   deleteNeonProject?: typeof deleteNeonProject;
+  ensureByoDbAnonKeyColumn?: () => Promise<void>;
+}
+
+const SUPABASE_MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
+const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
+
+function getStudioProjectRef(): string {
+  return new URL(apiConfig.STUDIO_SUPABASE_URL).hostname.split(".")[0] ?? "";
+}
+
+async function ensureByoDbAnonKeyColumn(): Promise<void> {
+  const managementKey = apiConfig.SUPABASE_MANAGEMENT_API_KEY?.trim();
+  if (!managementKey) {
+    return;
+  }
+
+  const response = await fetch(
+    `${SUPABASE_MANAGEMENT_API_BASE}/projects/${getStudioProjectRef()}/database/query`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${managementKey}`,
+      },
+      body: JSON.stringify({
+        query: "ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS byo_db_anon_key TEXT;",
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to migrate projects.byo_db_anon_key (${response.status}): ${body}`);
+  }
 }
 
 export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
@@ -38,6 +75,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const runSqlFn = deps.runSql ?? runSql;
   const deleteSchemaRegistryFn = deps.deleteSchemaRegistry ?? deleteSchemaRegistry;
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
+  const ensureByoDbAnonKeyColumnFn = deps.ensureByoDbAnonKeyColumn ?? ensureByoDbAnonKeyColumn;
 
   projectsRoute.get("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
     try {
@@ -193,29 +231,80 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       return c.json({ error: "Project not found" }, 404);
     }
 
-    const body = await c.req.json().catch(() => null) as { connectionString?: unknown } | null;
-    const rawConnectionString = typeof body?.connectionString === "string"
-      ? body.connectionString
+    const body = await c.req.json().catch(() => null) as {
+      supabaseUrl?: unknown;
+      supabaseAnonKey?: unknown;
+    } | null;
+    const rawSupabaseUrl = typeof body?.supabaseUrl === "string"
+      ? body.supabaseUrl
       : "";
-    if (!rawConnectionString.trim()) {
-      return c.json({ error: "connectionString is required" }, 400);
+    if (!rawSupabaseUrl.trim()) {
+      return c.json({ error: "supabaseUrl is required" }, 400);
     }
 
-    let parsed: { connectionString: string; host: string };
+    const supabaseAnonKey = typeof body?.supabaseAnonKey === "string"
+      ? body.supabaseAnonKey.trim()
+      : "";
+    if (!supabaseAnonKey) {
+      return c.json({ error: "supabaseAnonKey is required" }, 400);
+    }
+
+    let parsed: { supabaseUrl: string; host: string };
     try {
-      parsed = parsePostgresConnectionString(rawConnectionString);
+      parsed = parseSupabaseProjectUrl(rawSupabaseUrl);
     } catch (error) {
       return c.json(
-        { error: error instanceof Error ? error.message : "Invalid Postgres connection string" },
+        { error: error instanceof Error ? error.message : "Invalid Supabase URL" },
         400,
       );
     }
 
-    await orgContext.db.updateProject(projectId, {
-      byo_db_url: parsed.connectionString,
-    });
+    try {
+      await ensureByoDbAnonKeyColumnFn();
+    } catch (error) {
+      console.error("[projects/byo-db] failed ensuring byo_db_anon_key column:", error);
+      return c.json({ error: "Failed to prepare BYO DB storage" }, 500);
+    }
+
+    const patch = {
+      byo_db_url: parsed.supabaseUrl,
+      byo_db_anon_key: supabaseAnonKey,
+    };
+
+    try {
+      await orgContext.db.updateProject(projectId, patch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/byo_db_anon_key|schema cache/i.test(message)) {
+        throw error;
+      }
+
+      const dbWithSchemaReload = orgContext.db as OrgContext["db"] & {
+        notifySchemaReload?: () => Promise<void>;
+      };
+      await dbWithSchemaReload.notifySchemaReload?.().catch(() => undefined);
+      await delay(STUDIO_DB_SCHEMA_RELOAD_DELAY_MS);
+      await orgContext.db.updateProject(projectId, patch);
+    }
 
     return c.json({ success: true, host: parsed.host });
+  });
+
+  projectsRoute.delete("/:id/byo-db", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const projectId = c.req.param("id");
+
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    await orgContext.db.updateProject(projectId, {
+      byo_db_url: null,
+      byo_db_anon_key: null,
+    });
+
+    return c.json({ ok: true });
   });
 
   return projectsRoute;

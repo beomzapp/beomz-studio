@@ -13,6 +13,7 @@ export async function rewireNeonDb(
 
   await studioDb.updateProject(projectId, {
     byo_db_url: null,
+    byo_db_anon_key: null,
     database_enabled: true,
     db_wired: true,
     db_provider: "neon",

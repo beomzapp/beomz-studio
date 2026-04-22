@@ -9,6 +9,7 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 const {
   buildProjectDatabaseEnvVars,
   parsePostgresConnectionString,
+  parseSupabaseProjectUrl,
   resolveProjectDbProvider,
 } = await import("./projectDb.js");
 
@@ -79,7 +80,33 @@ test("parsePostgresConnectionString rejects invalid schemes", () => {
   );
 });
 
-test("resolveProjectDbProvider prefers BYO postgres when byo_db_url is set", () => {
+test("parseSupabaseProjectUrl accepts Supabase project URLs and returns host", () => {
+  const parsed = parseSupabaseProjectUrl("https://demo-project.supabase.co");
+  assert.equal(parsed.host, "demo-project.supabase.co");
+  assert.equal(parsed.supabaseUrl, "https://demo-project.supabase.co");
+});
+
+test("parseSupabaseProjectUrl rejects invalid hosts", () => {
+  assert.throws(
+    () => parseSupabaseProjectUrl("https://example.com"),
+    /must contain \.supabase\.co/,
+  );
+});
+
+test("resolveProjectDbProvider prefers BYO Supabase when BYO credentials are set", () => {
+  const provider = resolveProjectDbProvider(
+    createProject({
+      db_provider: "beomz",
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    }),
+    createLimits(),
+  );
+
+  assert.equal(provider, "supabase");
+});
+
+test("resolveProjectDbProvider prefers legacy BYO postgres when byo_db_url is a connection string", () => {
   const provider = resolveProjectDbProvider(
     createProject({
       db_provider: "beomz",
@@ -91,7 +118,31 @@ test("resolveProjectDbProvider prefers BYO postgres when byo_db_url is set", () 
   assert.equal(provider, "postgres");
 });
 
-test("buildProjectDatabaseEnvVars returns BYO env vars and clears Neon auth vars", () => {
+test("buildProjectDatabaseEnvVars returns BYO Supabase env vars and clears Neon/Postgres vars", () => {
+  const envVars = buildProjectDatabaseEnvVars(
+    createProject({
+      db_provider: "beomz",
+      database_enabled: false,
+      db_wired: false,
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    }),
+    createLimits(),
+  );
+
+  assert.deepEqual(envVars, {
+    VITE_SUPABASE_URL: "https://demo-project.supabase.co",
+    VITE_SUPABASE_ANON_KEY: "anon-key",
+    VITE_BYO_DB: "true",
+    VITE_DATABASE_URL: null,
+    VITE_DB_SCHEMA: null,
+    VITE_NEON_AUTH_URL: null,
+    NEON_AUTH_SECRET: null,
+    NEON_AUTH_PUB_KEY: null,
+  });
+});
+
+test("buildProjectDatabaseEnvVars returns legacy BYO postgres env vars and clears Neon auth vars", () => {
   const envVars = buildProjectDatabaseEnvVars(
     createProject({
       db_provider: "postgres",
@@ -101,8 +152,11 @@ test("buildProjectDatabaseEnvVars returns BYO env vars and clears Neon auth vars
   );
 
   assert.deepEqual(envVars, {
-    VITE_DATABASE_URL: "postgresql://user:pass@db.example.com/app",
     VITE_BYO_DB: "true",
+    VITE_DATABASE_URL: "postgresql://user:pass@db.example.com/app",
+    VITE_DB_SCHEMA: null,
+    VITE_SUPABASE_URL: null,
+    VITE_SUPABASE_ANON_KEY: null,
     VITE_NEON_AUTH_URL: null,
     NEON_AUTH_SECRET: null,
     NEON_AUTH_PUB_KEY: null,
@@ -115,6 +169,9 @@ test("buildProjectDatabaseEnvVars keeps managed Neon auth vars and clears BYO fl
   assert.deepEqual(envVars, {
     VITE_DATABASE_URL: "postgresql://user:pass@managed.neon.tech/neondb",
     VITE_BYO_DB: null,
+    VITE_DB_SCHEMA: null,
+    VITE_SUPABASE_URL: null,
+    VITE_SUPABASE_ANON_KEY: null,
     VITE_NEON_AUTH_URL: "https://auth.example.com",
     NEON_AUTH_SECRET: "secret-key",
     NEON_AUTH_PUB_KEY: "pub-key",

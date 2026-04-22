@@ -32,7 +32,7 @@ import {
   WEB_RESEARCH_SURCHARGE,
   isAdminEmail,
 } from "../../lib/credits.js";
-import { parsePostgresConnectionString } from "../../lib/projectDb.js";
+import { parseSupabaseProjectUrl } from "../../lib/projectDb.js";
 import {
   classifyIntent,
   MAX_CLARIFYING_QUESTIONS,
@@ -853,8 +853,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
 
   if (typeof projectRow.byo_db_url === "string" && projectRow.byo_db_url.trim().length > 0) {
     try {
-      const { host } = parsePostgresConnectionString(projectRow.byo_db_url);
-      console.log("[db] using BYO postgres:", host);
+      const { host } = parseSupabaseProjectUrl(projectRow.byo_db_url);
+      console.log("[db] using BYO supabase:", host);
     } catch {
       // Invalid persisted BYO URL should not block builds.
     }

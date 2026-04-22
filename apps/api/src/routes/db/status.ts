@@ -13,7 +13,7 @@ import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { getUserDataAnonKey, getUserDataPublicUrl, isUserDataConfigured } from "../../lib/userDataClient.js";
-import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getByoSupabaseConfig, getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 interface StatusDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -33,6 +33,25 @@ export function createStatusDbRoute(deps: StatusDbRouteDeps = {}) {
     const project = await db.findProjectById(projectId);
     if (!project || project.org_id !== org.id) {
       return c.json({ error: "Project not found" }, 404);
+    }
+
+    const byoSupabase = getByoSupabaseConfig(project);
+    if (byoSupabase) {
+      return c.json({
+        enabled: true,
+        provider: "byo",
+        wired: true,
+        supabaseUrl: byoSupabase.supabaseUrl,
+        anonKey: byoSupabase.supabaseAnonKey,
+        schemaName: "public",
+        byoDbHost: byoSupabase.host,
+        env: {
+          url: byoSupabase.supabaseUrl,
+          anonKey: byoSupabase.supabaseAnonKey,
+          dbSchema: "public",
+          nonce: "",
+        },
+      });
     }
 
     if (!project.database_enabled) {

@@ -192,25 +192,89 @@ test("project deletion cleans up Neon project when neon_project_id exists", asyn
   assert.deepEqual(neonDeleteCalls, ["neon-proj-123"]);
 });
 
-test("byo-db validates connection string format", async () => {
+test("byo-db validates Supabase URL format", async () => {
   const project = createProject();
   const orgContext = createOrgContext(project);
   const app = createApp(orgContext);
 
   const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
     method: "POST",
-    body: JSON.stringify({ connectionString: "mysql://root@localhost/app" }),
+    body: JSON.stringify({
+      supabaseUrl: "http://demo-project.supabase.co",
+      supabaseAnonKey: "anon-key",
+    }),
     headers: { "content-type": "application/json" },
   });
 
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), {
-    error: "Connection string must start with postgres:// or postgresql://",
+    error: "Supabase URL must start with https://",
   });
 });
 
-test("byo-db saves validated connection string and returns host", async () => {
+test("byo-db requires Supabase anon key", async () => {
   const project = createProject();
+  const orgContext = createOrgContext(project);
+  const app = createApp(orgContext);
+
+  const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
+    method: "POST",
+    body: JSON.stringify({
+      supabaseUrl: "https://demo-project.supabase.co",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "supabaseAnonKey is required",
+  });
+});
+
+test("byo-db runs migration, saves Supabase credentials, and returns host", async () => {
+  const project = createProject();
+  const updates: Record<string, unknown>[] = [];
+  let migrationRuns = 0;
+  const orgContext = createOrgContext(project, {
+    updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
+      updates.push(patch);
+      return { ...project, ...patch };
+    },
+  });
+  const app = createApp(orgContext, {
+    ensureByoDbAnonKeyColumn: async () => {
+      migrationRuns += 1;
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
+    method: "POST",
+    body: JSON.stringify({
+      supabaseUrl: "https://demo-project.supabase.co",
+      supabaseAnonKey: "anon-key",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    success: true,
+    host: "demo-project.supabase.co",
+  });
+  assert.equal(migrationRuns, 1);
+  assert.deepEqual(updates, [
+    {
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    },
+  ]);
+});
+
+test("byo-db delete clears saved Supabase credentials", async () => {
+  const project = createProject({
+    byo_db_url: "https://demo-project.supabase.co",
+    byo_db_anon_key: "anon-key",
+  });
   const updates: Record<string, unknown>[] = [];
   const orgContext = createOrgContext(project, {
     updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
@@ -221,21 +285,15 @@ test("byo-db saves validated connection string and returns host", async () => {
   const app = createApp(orgContext);
 
   const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
-    method: "POST",
-    body: JSON.stringify({
-      connectionString: "postgresql://user:pass@db.example.com:5432/app",
-    }),
-    headers: { "content-type": "application/json" },
+    method: "DELETE",
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), {
-    success: true,
-    host: "db.example.com",
-  });
+  assert.deepEqual(await response.json(), { ok: true });
   assert.deepEqual(updates, [
     {
-      byo_db_url: "postgresql://user:pass@db.example.com:5432/app",
+      byo_db_url: null,
+      byo_db_anon_key: null,
     },
   ]);
 });

@@ -76,6 +76,8 @@ export interface ProjectRow extends Record<string, unknown> {
   db_provider: string | null;
   db_config: Record<string, unknown> | null;
   db_wired: boolean;
+  byo_db_url?: string | null;
+  byo_db_anon_key?: string | null;
   thumbnail_url: string | null;
   // BEO-262: Publish
   published: boolean;
@@ -244,6 +246,8 @@ export interface ProjectUpdate extends Record<string, unknown> {
   db_provider?: string | null;
   db_config?: Record<string, unknown> | null;
   db_wired?: boolean;
+  byo_db_url?: string | null;
+  byo_db_anon_key?: string | null;
   thumbnail_url?: string | null;
   // BEO-262: Publish
   published?: boolean;
@@ -758,6 +762,10 @@ export class StudioDbClient {
       .maybeSingle();
 
     return unwrapMaybeSingle(response);
+  }
+
+  async notifySchemaReload(): Promise<void> {
+    await attemptPostgrestSchemaReload(this.client);
   }
 
   async deleteProject(id: string): Promise<void> {
