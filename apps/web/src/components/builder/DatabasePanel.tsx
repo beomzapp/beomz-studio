@@ -1,19 +1,20 @@
 /**
- * DatabasePanel — V2 database management panel.
+ * DatabasePanel — BEO-527 unified rewrite.
  *
- * Top-level tab structure:
- *   "Managed"           — Beomz-provisioned Neon DB (Add Database → wire → schema/data)
- *   "Connect your own"  — BYO Postgres URL (BEO-445)
+ * One panel, three states, one-way managed → BYO upgrade.
  *
- * Within "Managed", three substates driven by project DB fields:
- *   1. Not connected (database_enabled = false) → Add Database
- *   2. Connected, not wired (database_enabled = true, db_wired = false) → wire CTA
- *   3. Fully wired (db_wired = true) → schema/data/users/storage panel
+ * State 1 — No DB connected      → two side-by-side cards (no tabs)
+ *                                   "Add database"          → inline Neon provision
+ *                                   "Connect Supabase →"    → URL + Anon Key form
+ * State 2 — Managed (Neon)       → header + "Upgrade to BYO →" link + Data tabs
+ * State 3 — BYO (Supabase)       → header + Data tabs (no downgrade)
  *
- * BEO-400: Three-mode layout with upsell surface, storage usage bar, plan badge.
- * BEO-403: Storage bar always visible; Data tab 404 fix; Shared tab cleanup.
- * BEO-289: Schema tab renders table.table_name; Data tab select populated from table_name.
- * BEO-445: "Connect your own" tab — BYO Postgres URL input + test + save.
+ * Upgrade (State 2 → State 3):
+ *   Modal (min-height faux viewport, NOT position:fixed)
+ *   → POST /api/projects/:id/upgrade-to-byo
+ *   → poll getLatestBuildForProject every 3s (up to 120s)
+ *   → Progress A (Migrating…) → B (Rewiring…) → C (✅ Upgraded)
+ *   → Finally shows State 3. No downgrade option, ever.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,25 +25,20 @@ import {
   Trash2,
   RefreshCw,
   Zap,
-  Link2,
-  X,
-  MessageSquare,
+  Plug,
   Table2,
   Layers,
-  ScrollText,
   HardDrive,
-  ArrowUpRight,
   Users,
   Eye,
   EyeOff,
   XCircle,
-  PlugZap,
-  WifiOff,
+  ArrowRight,
+  ArrowLeft,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
   enableDatabase,
-  wireDatabase,
   getDbSchema,
   getDbRows,
   runDbMigration,
@@ -50,14 +46,16 @@ import {
   getStorageAddons,
   createStorageAddonCheckout,
   connectSupabaseDb,
-  disconnectSupabaseDb,
   getLatestBuildForProject,
+  getApiBaseUrl,
+  getAccessToken,
   type DbTable,
   type StorageAddonInfo,
 } from "../../lib/api";
-type OuterTab = "managed" | "byo";
-type PanelTab = "schema" | "data" | "bindings" | "logs" | "users";
-type ModeTab = "shared" | "dedicated";
+
+type PanelTab = "schema" | "data" | "users" | "storage";
+type SubFlow = null | "supabase";
+type UpgradePhase = "idle" | "migrating" | "rewiring" | "done";
 
 const WIRING_PROMPT = `Wire this app to its Postgres database.
 
@@ -124,63 +122,30 @@ function formatStorageMb(mb: number): string {
   return `${Math.round(mb)}MB`;
 }
 
-function getPlanStorageLimitMb(_plan: string): number {
-  return 500;
+function shortProjectId(projectId: string | null): string {
+  if (!projectId) return "";
+  return projectId.slice(0, 8);
 }
 
-/** Extract hostname from a postgres:// connection string, hiding credentials. */
-// ── BYO provider data (BEO-518 / BEO-522) ───────────────────────────────────
-
-const BYO_PROVIDERS = [
-  {
-    key: "supabase",
-    name: "Supabase",
-    bg: "#edfaf4",
-    dot: "#3ecf8e",
-    initial: "S",
-    comingSoon: false,
-  },
-  {
-    key: "neon",
-    name: "Neon",
-    bg: "#edfdf4",
-    dot: "#00e699",
-    initial: "N",
-    comingSoon: true,
-  },
-  {
-    key: "railway",
-    name: "Railway",
-    bg: "#f3f0ff",
-    dot: "#7c3aed",
-    initial: "R",
-    comingSoon: true,
-  },
-  {
-    key: "render",
-    name: "Render",
-    bg: "#edfafe",
-    dot: "#46e3b7",
-    initial: "R",
-    comingSoon: true,
-  },
-  {
-    key: "flyio",
-    name: "Fly.io",
-    bg: "#f5f0ff",
-    dot: "#8b5cf6",
-    initial: "F",
-    comingSoon: true,
-  },
-  {
-    key: "self",
-    name: "Self-hosted",
-    bg: "#f3f4f6",
-    dot: "#9ca3af",
-    initial: "⚙",
-    comingSoon: true,
-  },
-] as const;
+async function upgradeToByo(
+  projectId: string,
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+): Promise<void> {
+  const token = await getAccessToken();
+  const resp = await fetch(`${getApiBaseUrl()}/projects/${projectId}/upgrade-to-byo`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ supabaseUrl, supabaseAnonKey }),
+  });
+  if (!resp.ok) {
+    const body = (await resp.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Upgrade failed with ${resp.status}.`);
+  }
+}
 
 interface DatabasePanelProps {
   className?: string;
@@ -200,76 +165,60 @@ export function DatabasePanel({
   projectId,
   databaseEnabled,
   dbProvider,
-  dbWired,
-  plan,
-  byoConnectedHost,
   onDbStateChange,
   onWireToDatabase,
+  byoConnectedHost,
+  plan: _plan,
 }: DatabasePanelProps) {
-  // ── Outer tabs ───────────────────────────────────────
+  void _plan;
+
+  // ── Top-level state classification ────────────────────
   const isByoConnected = dbProvider === "byo" || dbProvider === "supabase";
-  const [outerTab, setOuterTab] = useState<OuterTab>(isByoConnected ? "byo" : "managed");
+  const isManagedConnected = databaseEnabled && !isByoConnected;
 
-  // Keep outer tab in sync when dbProvider changes (e.g. after page load)
-  useEffect(() => {
-    if (isByoConnected) setOuterTab("byo");
-  }, [isByoConnected]);
+  // ── Sub-flows on State 1 ──────────────────────────────
+  const [subFlow, setSubFlow] = useState<SubFlow>(null);
 
-  // ── BYO Supabase state (BEO-522) ─────────────────────
+  // ── Neon provisioning (State 1 → State 2) ─────────────
+  const [enabling, setEnabling] = useState(false);
+  const [enableError, setEnableError] = useState<string | null>(null);
+
+  // ── Supabase connect form (State 1 → State 3) ─────────
   const [supabaseUrl, setSupabaseUrl] = useState("");
   const [supabaseAnonKey, setSupabaseAnonKey] = useState("");
   const [showAnonKey, setShowAnonKey] = useState(false);
   const [byoConnecting, setByoConnecting] = useState(false);
-  const [byoSaved, setByoSaved] = useState(false);
   const [byoConnectError, setByoConnectError] = useState<string | null>(null);
   const [byoSavedHost, setByoSavedHost] = useState<string | null>(byoConnectedHost ?? null);
-  const [byoDisconnecting, setByoDisconnecting] = useState(false);
-  const [byoSelectedProvider, setByoSelectedProvider] = useState<string | null>(null);
 
-  // ── BYO wiring progress (BEO-524) ────────────────────
+  // ── BYO wiring progress after initial connect (BEO-524) ──
   const [byoWiring, setByoWiring] = useState(false);
   const [byoWiringDone, setByoWiringDone] = useState(false);
   const wiringPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wiringStartTimeRef = useRef<number>(0);
 
-  // ── Managed DB — Connection / wiring state ────────────
-  const [enabling, setEnabling] = useState(false);
-  const [wiringStatus, setWiringStatus] = useState<"idle" | "connected">("idle");
-  const [wiringDb, setWiringDb] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // ── Upgrade modal + progress ──────────────────────────
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeUrl, setUpgradeUrl] = useState("");
+  const [upgradeAnonKey, setUpgradeAnonKey] = useState("");
+  const [upgradeShowKey, setUpgradeShowKey] = useState(false);
+  const [upgradeSubmitting, setUpgradeSubmitting] = useState(false);
+  const [upgradePhase, setUpgradePhase] = useState<UpgradePhase>("idle");
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const upgradePollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const upgradePhaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const upgradeStartRef = useRef<number>(0);
 
-  // ── Managed DB — Mode tabs ────────────────────────────
-  const [modeTab, setModeTab] = useState<ModeTab>("shared");
-
-  // ── Storage usage ─────────────────────────────────────
-  const [dbUsage, setDbUsage] = useState<{ used_mb: number; limits: { storage_mb: number } } | null>(null);
-  const [dbUsageLoading, setDbUsageLoading] = useState(false);
-  const [dbUsageError, setDbUsageError] = useState(false);
-
-  const [addons, setAddons] = useState<StorageAddonInfo[] | null>(null);
-  const [addonsLoading, setAddonsLoading] = useState(true);
-  const [storageLimitReached, setStorageLimitReached] = useState(false);
-
-  // ── Toast ─────────────────────────────────────────────
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
-  }, []);
-
-  // ── Inner panel tabs (managed wired state) ────────────
+  // ── Tabs (State 2 + State 3 data surface) ─────────────
   const [activeTab, setActiveTab] = useState<PanelTab>("schema");
 
-  // Schema
+  // ── Schema ────────────────────────────────────────────
   const [schemaTables, setSchemaTables] = useState<DbTable[]>([]);
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
 
-  // Data
+  // ── Data tab ──────────────────────────────────────────
   const [dataTable, setDataTable] = useState("");
   const [dataRows, setDataRows] = useState<Record<string, unknown>[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
@@ -279,17 +228,89 @@ export function DatabasePanel({
   const [showAddRowModal, setShowAddRowModal] = useState(false);
   const [newRow, setNewRow] = useState<Record<string, string>>({});
 
-  // Users tab
+  // ── Users tab ─────────────────────────────────────────
   const [usersRows, setUsersRows] = useState<Record<string, unknown>[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
+
+  // ── Storage usage (managed only) ──────────────────────
+  const [dbUsage, setDbUsage] = useState<{ used_mb: number; limits: { storage_mb: number } } | null>(null);
+  const [dbUsageLoading, setDbUsageLoading] = useState(false);
+  const [dbUsageError, setDbUsageError] = useState(false);
+  const [addons, setAddons] = useState<StorageAddonInfo[] | null>(null);
+  const [addonsLoading, setAddonsLoading] = useState(true);
+
+  // ── Toast ─────────────────────────────────────────────
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }, []);
 
   const selectedTableSchema = useMemo(
     () => schemaTables.find((t) => t.table_name === dataTable) ?? null,
     [schemaTables, dataTable],
   );
+  const editableCols = useMemo(
+    () =>
+      (selectedTableSchema?.columns ?? []).filter(
+        (c) => c.name !== "id" && c.name !== "created_at" && c.name !== "updated_at",
+      ),
+    [selectedTableSchema],
+  );
 
-  // ── Managed DB API actions ────────────────────────────
+  // ── Sync byoSavedHost when prop changes ───────────────
+  useEffect(() => {
+    if (byoConnectedHost) setByoSavedHost(byoConnectedHost);
+  }, [byoConnectedHost]);
+
+  // ── Data fetchers ─────────────────────────────────────
+  const fetchSchema = useCallback(async () => {
+    if (!projectId) return;
+    setSchemaLoading(true);
+    setSchemaError(null);
+    try {
+      const data = await getDbSchema(projectId);
+      setSchemaTables(data.tables ?? []);
+    } catch (err) {
+      setSchemaError(err instanceof Error ? err.message : "Failed to load schema.");
+    } finally {
+      setSchemaLoading(false);
+    }
+  }, [projectId]);
+
+  const fetchRows = useCallback(
+    async (table: string) => {
+      if (!projectId || !table) return;
+      setDataLoading(true);
+      setDataError(null);
+      try {
+        const data = await getDbRows(projectId, table);
+        setDataRows(data.rows ?? []);
+      } catch (err) {
+        setDataError(err instanceof Error ? err.message : "Failed to load rows.");
+      } finally {
+        setDataLoading(false);
+      }
+    },
+    [projectId],
+  );
+
+  const fetchUsers = useCallback(async () => {
+    if (!projectId) return;
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const data = await getDbRows(projectId, "users");
+      setUsersRows(data.rows ?? []);
+    } catch {
+      setUsersError("Couldn't load users — retry");
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [projectId]);
 
   const fetchDbUsage = useCallback(async () => {
     if (!projectId) return;
@@ -317,93 +338,15 @@ export function DatabasePanel({
     }
   }, []);
 
-  const handleEnable = useCallback(async () => {
-    if (!projectId) return;
-    setEnabling(true);
-    setError(null);
-    try {
-      await enableDatabase(projectId);
-      setEnabling(false);
-      setWiringStatus("connected");
-      onDbStateChange();
-      setTimeout(() => {
-        onWireToDatabase?.(WIRING_PROMPT);
-      }, 1400);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to enable database.");
-      setEnabling(false);
-    }
-  }, [projectId, onDbStateChange, onWireToDatabase]);
-
-  const handleWire = useCallback(async () => {
-    if (!projectId) return;
-    setWiringDb(true);
-    setError(null);
-    try {
-      await wireDatabase(projectId);
-      onDbStateChange();
-      window.location.reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to wire database.");
-    } finally {
-      setWiringDb(false);
-    }
-  }, [projectId, onDbStateChange]);
-
-  const fetchSchema = useCallback(async () => {
-    if (!projectId) return;
-    setSchemaLoading(true);
-    setSchemaError(null);
-    try {
-      const data = await getDbSchema(projectId);
-      setSchemaTables(data.tables ?? []);
-    } catch (err) {
-      setSchemaError(err instanceof Error ? err.message : "Failed to load schema.");
-    } finally {
-      setSchemaLoading(false);
-    }
-  }, [projectId]);
-
-  const fetchRows = useCallback(async (table: string) => {
-    if (!projectId || !table) return;
-    setDataLoading(true);
-    setDataError(null);
-    try {
-      const data = await getDbRows(projectId, table);
-      setDataRows(data.rows ?? []);
-    } catch (err) {
-      setDataError(err instanceof Error ? err.message : "Failed to load rows.");
-    } finally {
-      setDataLoading(false);
-    }
-  }, [projectId]);
-
-  const fetchUsers = useCallback(async () => {
-    if (!projectId) return;
-    setUsersLoading(true);
-    setUsersError(null);
-    try {
-      const data = await getDbRows(projectId, "users");
-      setUsersRows(data.rows ?? []);
-    } catch {
-      setUsersError("Couldn't load users — retry");
-    } finally {
-      setUsersLoading(false);
-    }
-  }, [projectId]);
-
-  const runMigrationSafe = useCallback(async (sql: string) => {
-    if (!projectId) return;
-    try {
+  const runMigrationSafe = useCallback(
+    async (sql: string) => {
+      if (!projectId) return;
       await runDbMigration(projectId, sql);
-    } catch (err) {
-      if (err instanceof Error && err.message === "storage_limit_reached") {
-        setStorageLimitReached(true);
-      }
-      throw err;
-    }
-  }, [projectId]);
+    },
+    [projectId],
+  );
 
+  // ── Row CRUD ──────────────────────────────────────────
   const handleInsertRow = useCallback(async () => {
     if (!projectId || !dataTable) return;
     setDataWriteError(null);
@@ -426,50 +369,76 @@ export function DatabasePanel({
     }
   }, [projectId, dataTable, selectedTableSchema, newRow, fetchRows, runMigrationSafe]);
 
-  const handleUpdateCell = useCallback(async (rowIdx: number, column: string, value: string) => {
-    if (!projectId || !dataTable) return;
-    setDataWriteError(null);
-    const row = dataRows[rowIdx];
-    if (!row) return;
-    const pk = row.id ?? row[Object.keys(row)[0]];
-    const pkCol = "id" in row ? "id" : Object.keys(row)[0];
-    const sql = `UPDATE "${dataTable}" SET "${column}" = '${value.replace(/'/g, "''")}' WHERE "${pkCol}" = '${String(pk).replace(/'/g, "''")}';`;
-    try {
-      await runMigrationSafe(sql);
-      await fetchRows(dataTable);
-    } catch (err) {
-      setDataWriteError(err instanceof Error ? err.message : "Failed to update cell.");
-    }
-  }, [projectId, dataTable, dataRows, fetchRows, runMigrationSafe]);
+  const handleUpdateCell = useCallback(
+    async (rowIdx: number, column: string, value: string) => {
+      if (!projectId || !dataTable) return;
+      setDataWriteError(null);
+      const row = dataRows[rowIdx];
+      if (!row) return;
+      const pk = row.id ?? row[Object.keys(row)[0]];
+      const pkCol = "id" in row ? "id" : Object.keys(row)[0];
+      const sql = `UPDATE "${dataTable}" SET "${column}" = '${value.replace(/'/g, "''")}' WHERE "${pkCol}" = '${String(pk).replace(/'/g, "''")}';`;
+      try {
+        await runMigrationSafe(sql);
+        await fetchRows(dataTable);
+      } catch (err) {
+        setDataWriteError(err instanceof Error ? err.message : "Failed to update cell.");
+      }
+    },
+    [projectId, dataTable, dataRows, fetchRows, runMigrationSafe],
+  );
 
-  const handleDeleteRow = useCallback(async (rowIdx: number) => {
-    if (!projectId || !dataTable) return;
-    const row = dataRows[rowIdx];
-    if (!row) return;
-    const pk = row.id ?? row[Object.keys(row)[0]];
-    const pkCol = "id" in row ? "id" : Object.keys(row)[0];
-    const sql = `DELETE FROM "${dataTable}" WHERE "${pkCol}" = '${String(pk).replace(/'/g, "''")}';`;
-    setDataWriteError(null);
-    try {
-      await runMigrationSafe(sql);
-      await fetchRows(dataTable);
-    } catch (err) {
-      setDataWriteError(err instanceof Error ? err.message : "Failed to delete row.");
-    }
-  }, [projectId, dataTable, dataRows, fetchRows, runMigrationSafe]);
+  const handleDeleteRow = useCallback(
+    async (rowIdx: number) => {
+      if (!projectId || !dataTable) return;
+      const row = dataRows[rowIdx];
+      if (!row) return;
+      const pk = row.id ?? row[Object.keys(row)[0]];
+      const pkCol = "id" in row ? "id" : Object.keys(row)[0];
+      const sql = `DELETE FROM "${dataTable}" WHERE "${pkCol}" = '${String(pk).replace(/'/g, "''")}';`;
+      setDataWriteError(null);
+      try {
+        await runMigrationSafe(sql);
+        await fetchRows(dataTable);
+      } catch (err) {
+        setDataWriteError(err instanceof Error ? err.message : "Failed to delete row.");
+      }
+    },
+    [projectId, dataTable, dataRows, fetchRows, runMigrationSafe],
+  );
 
-  const handleStorageAddon = useCallback(async (priceId: string) => {
+  const handleStorageAddon = useCallback(
+    async (priceId: string) => {
+      if (!projectId) return;
+      try {
+        const { url } = await createStorageAddonCheckout(priceId, projectId);
+        window.location.href = url;
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : "Failed to open checkout.");
+      }
+    },
+    [projectId, showToast],
+  );
+
+  // ── State 1 — "Add database" (Neon provision) ─────────
+  const handleEnable = useCallback(async () => {
     if (!projectId) return;
+    setEnabling(true);
+    setEnableError(null);
     try {
-      const { url } = await createStorageAddonCheckout(priceId, projectId);
-      window.location.href = url;
+      await enableDatabase(projectId);
+      onDbStateChange();
+      setTimeout(() => {
+        onWireToDatabase?.(WIRING_PROMPT);
+      }, 1200);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to open checkout.");
+      setEnableError(err instanceof Error ? err.message : "Failed to provision database.");
+    } finally {
+      setEnabling(false);
     }
-  }, [projectId, showToast]);
+  }, [projectId, onDbStateChange, onWireToDatabase]);
 
-  // ── BYO Supabase actions (BEO-522) ────────────────────
-
+  // ── State 1 — "Connect Supabase →" ────────────────────
   const handleConnectSupabase = useCallback(async () => {
     const url = supabaseUrl.trim();
     const key = supabaseAnonKey.trim();
@@ -479,18 +448,20 @@ export function DatabasePanel({
     try {
       const result = await connectSupabaseDb(projectId, url, key);
       let host: string;
-      try { host = new URL(url).hostname; } catch { host = url; }
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        host = url;
+      }
       setByoSavedHost(host);
       if (result.wiring) {
-        // BEO-524: auto-wire iteration was triggered — show wiring state, poll for completion
         wiringStartTimeRef.current = Date.now();
         setByoWiring(true);
         onDbStateChange();
       } else {
-        // No existing app to rewire — go straight to connected state
-        setByoSaved(true);
         onDbStateChange();
       }
+      setSubFlow(null);
     } catch (err) {
       setByoConnectError(err instanceof Error ? err.message : "Failed to connect.");
     } finally {
@@ -498,68 +469,12 @@ export function DatabasePanel({
     }
   }, [projectId, supabaseUrl, supabaseAnonKey, onDbStateChange]);
 
-  const handleDisconnectByo = useCallback(async () => {
-    if (!projectId) return;
-    setByoDisconnecting(true);
-    try {
-      await disconnectSupabaseDb(projectId);
-      if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
-      setByoSavedHost(null);
-      setByoSaved(false);
-      setByoWiring(false);
-      setByoWiringDone(false);
-      setByoSelectedProvider(null);
-      setSupabaseUrl("");
-      setSupabaseAnonKey("");
-      onDbStateChange();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to disconnect.");
-    } finally {
-      setByoDisconnecting(false);
-    }
-  }, [projectId, onDbStateChange, showToast]);
-
-  // ── Side effects ──────────────────────────────────────
-
-  useEffect(() => {
-    if (dbWired && outerTab === "managed" && modeTab === "shared" &&
-      (activeTab === "schema" || activeTab === "data" || activeTab === "bindings")) {
-      void fetchSchema();
-    }
-  }, [dbWired, outerTab, modeTab, activeTab, fetchSchema]);
-
-  useEffect(() => {
-    if (dbWired && outerTab === "managed" && modeTab === "shared" && activeTab === "data" && dataTable) {
-      void fetchRows(dataTable);
-    }
-  }, [dbWired, outerTab, modeTab, activeTab, dataTable, fetchRows]);
-
-  useEffect(() => {
-    if (dbWired && outerTab === "managed" && modeTab === "shared" && activeTab === "users") {
-      void fetchUsers();
-    }
-  }, [dbWired, outerTab, modeTab, activeTab, fetchUsers]);
-
-  useEffect(() => {
-    if (dbWired && outerTab === "managed" && modeTab === "shared") {
-      void fetchDbUsage();
-      void fetchAddons();
-    }
-  }, [dbWired, outerTab, modeTab, fetchDbUsage, fetchAddons]);
-
-  // Sync byoSavedHost from prop (set after page load when dbProvider === 'byo')
-  useEffect(() => {
-    if (byoConnectedHost) setByoSavedHost(byoConnectedHost);
-  }, [byoConnectedHost]);
-
-  // BEO-524: Poll for wiring build completion
+  // ── Poll BYO initial-connect wiring ───────────────────
   useEffect(() => {
     if (!byoWiring || !projectId) return;
-
     let cancelled = false;
     const POLL_INTERVAL_MS = 3000;
     const MAX_WAIT_MS = 120_000;
-
     async function poll() {
       if (cancelled) return;
       try {
@@ -571,1023 +486,1100 @@ export function DatabasePanel({
           if (isNew && (status.build.status === "completed" || status.build.status === "failed")) {
             setByoWiring(false);
             setByoWiringDone(true);
-            setByoSaved(true);
             return;
           }
         }
-        // Keep polling if not complete yet and within time limit
         const elapsed = Date.now() - wiringStartTimeRef.current;
         if (elapsed < MAX_WAIT_MS) {
-          wiringPollRef.current = setTimeout(() => { void poll(); }, POLL_INTERVAL_MS);
+          wiringPollRef.current = setTimeout(() => {
+            void poll();
+          }, POLL_INTERVAL_MS);
         } else {
-          // Timed out — show connected state anyway
           setByoWiring(false);
-          setByoSaved(true);
         }
       } catch {
         if (!cancelled) {
           const elapsed = Date.now() - wiringStartTimeRef.current;
           if (elapsed < MAX_WAIT_MS) {
-            wiringPollRef.current = setTimeout(() => { void poll(); }, POLL_INTERVAL_MS);
+            wiringPollRef.current = setTimeout(() => {
+              void poll();
+            }, POLL_INTERVAL_MS);
           } else {
             setByoWiring(false);
-            setByoSaved(true);
           }
         }
       }
     }
-
-    // Start first poll after a short delay to let the iteration kick off
-    wiringPollRef.current = setTimeout(() => { void poll(); }, 2000);
-
+    wiringPollRef.current = setTimeout(() => {
+      void poll();
+    }, 2000);
     return () => {
       cancelled = true;
       if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [byoWiring, projectId]);
 
-  const editableCols = useMemo(
-    () => (selectedTableSchema?.columns ?? []).filter(
-      (c) => c.name !== "id" && c.name !== "created_at" && c.name !== "updated_at",
-    ),
-    [selectedTableSchema],
-  );
+  // ── Upgrade submit → POST + poll ──────────────────────
+  const handleConfirmUpgrade = useCallback(async () => {
+    if (!projectId) return;
+    const url = upgradeUrl.trim();
+    const key = upgradeAnonKey.trim();
+    if (!url || !key) {
+      setUpgradeError("Project URL and Anon Key are required.");
+      return;
+    }
+    setUpgradeSubmitting(true);
+    setUpgradeError(null);
+    try {
+      await upgradeToByo(projectId, url, key);
+      upgradeStartRef.current = Date.now();
+      setUpgradePhase("migrating");
+      // Phase A → B after 30s
+      upgradePhaseTimerRef.current = setTimeout(() => {
+        setUpgradePhase((prev) => (prev === "migrating" ? "rewiring" : prev));
+      }, 30_000);
+      // Save new host immediately for post-complete display
+      try {
+        setByoSavedHost(new URL(url).hostname);
+      } catch {
+        setByoSavedHost(url);
+      }
+      onDbStateChange();
+    } catch (err) {
+      setUpgradeError(err instanceof Error ? err.message : "Upgrade failed.");
+      setUpgradePhase("idle");
+    } finally {
+      setUpgradeSubmitting(false);
+    }
+  }, [projectId, upgradeUrl, upgradeAnonKey, onDbStateChange]);
 
-  const planLimitMb = getPlanStorageLimitMb(plan);
+  // ── Poll upgrade wire completion ──────────────────────
+  useEffect(() => {
+    if (upgradePhase !== "migrating" && upgradePhase !== "rewiring") return;
+    if (!projectId) return;
+    let cancelled = false;
+    const POLL_INTERVAL_MS = 3000;
+    const MAX_WAIT_MS = 120_000;
+
+    async function poll() {
+      if (cancelled) return;
+      try {
+        const status = await getLatestBuildForProject(projectId!);
+        if (cancelled) return;
+        if (status) {
+          const buildStarted = new Date(status.build.startedAt).getTime();
+          const isNew = buildStarted >= upgradeStartRef.current - 5000;
+          if (isNew && (status.build.status === "completed" || status.build.status === "failed")) {
+            setUpgradePhase("done");
+            onDbStateChange();
+            return;
+          }
+        }
+        const elapsed = Date.now() - upgradeStartRef.current;
+        if (elapsed < MAX_WAIT_MS) {
+          upgradePollRef.current = setTimeout(() => {
+            void poll();
+          }, POLL_INTERVAL_MS);
+        } else {
+          setUpgradePhase("done");
+          onDbStateChange();
+        }
+      } catch {
+        if (!cancelled) {
+          const elapsed = Date.now() - upgradeStartRef.current;
+          if (elapsed < MAX_WAIT_MS) {
+            upgradePollRef.current = setTimeout(() => {
+              void poll();
+            }, POLL_INTERVAL_MS);
+          } else {
+            setUpgradePhase("done");
+            onDbStateChange();
+          }
+        }
+      }
+    }
+    upgradePollRef.current = setTimeout(() => {
+      void poll();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      if (upgradePollRef.current) clearTimeout(upgradePollRef.current);
+    };
+  }, [upgradePhase, projectId, onDbStateChange]);
+
+  // Cleanup phase timers on unmount
+  useEffect(() => {
+    return () => {
+      if (upgradePhaseTimerRef.current) clearTimeout(upgradePhaseTimerRef.current);
+      if (upgradePollRef.current) clearTimeout(upgradePollRef.current);
+      if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  // After phase becomes "done", auto-close the modal after a short delay so
+  // the user sees State 3 underneath.
+  useEffect(() => {
+    if (upgradePhase !== "done") return;
+    const t = setTimeout(() => {
+      setUpgradeOpen(false);
+      setUpgradePhase("idle");
+      setUpgradeUrl("");
+      setUpgradeAnonKey("");
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [upgradePhase]);
+
+  // ── Tab data-fetch side effects ───────────────────────
+  useEffect(() => {
+    if (!databaseEnabled && !isByoConnected) return;
+    if (activeTab === "schema" || activeTab === "data") {
+      void fetchSchema();
+    }
+  }, [databaseEnabled, isByoConnected, activeTab, fetchSchema]);
+
+  useEffect(() => {
+    if ((databaseEnabled || isByoConnected) && activeTab === "data" && dataTable) {
+      void fetchRows(dataTable);
+    }
+  }, [databaseEnabled, isByoConnected, activeTab, dataTable, fetchRows]);
+
+  useEffect(() => {
+    if ((databaseEnabled || isByoConnected) && activeTab === "users") {
+      void fetchUsers();
+    }
+  }, [databaseEnabled, isByoConnected, activeTab, fetchUsers]);
+
+  useEffect(() => {
+    if (isManagedConnected && activeTab === "storage") {
+      void fetchDbUsage();
+      void fetchAddons();
+    }
+  }, [isManagedConnected, activeTab, fetchDbUsage, fetchAddons]);
+
+  // ── Derived storage stats ─────────────────────────────
   const usedMb = dbUsage?.used_mb ?? 0;
-  const limitMb = dbUsage?.limits.storage_mb ?? planLimitMb;
+  const limitMb = dbUsage?.limits.storage_mb ?? 500;
   const fillPct = limitMb > 0 ? Math.min((usedMb / limitMb) * 100, 100) : 0;
   const barColorClass = fillPct > 90 ? "bg-red-500" : fillPct > 80 ? "bg-amber-500" : "bg-[#F97316]";
 
-  const isByoConnectedState = isByoConnected || byoSaved;
+  const INNER_TAB_ITEMS: { key: PanelTab; icon: typeof Table2; label: string; managedOnly?: boolean }[] = [
+    { key: "schema", icon: Layers, label: "Schema" },
+    { key: "data", icon: Table2, label: "Data" },
+    { key: "users", icon: Users, label: "Users" },
+    { key: "storage", icon: HardDrive, label: "Storage", managedOnly: true },
+  ];
+
+  const visibleTabs = INNER_TAB_ITEMS.filter((t) => !t.managedOnly || isManagedConnected);
 
   // ── RENDER ────────────────────────────────────────────
 
-  const INNER_TAB_ITEMS: { key: PanelTab; icon: typeof Table2; label: string }[] = [
-    { key: "schema", icon: Layers, label: "Schema" },
-    { key: "data", icon: Table2, label: "Data" },
-    { key: "bindings", icon: Link2, label: "Bindings" },
-    { key: "logs", icon: ScrollText, label: "Logs" },
-    { key: "users", icon: Users, label: "Users" },
-  ];
+  // STATE 3 — BYO Supabase connected (also shown after upgrade completes)
+  if (isByoConnected) {
+    return (
+      <div className={cn("flex h-full flex-col overflow-hidden", className)}>
+        {renderByoWiringBanner(byoWiring, byoWiringDone, byoSavedHost ?? byoConnectedHost ?? null)}
+        <ConnectedHeader
+          kind="byo"
+          label={byoSavedHost ?? byoConnectedHost ?? "Supabase"}
+          onUpgradeClick={null}
+        />
+        {renderTabBar(visibleTabs, activeTab, setActiveTab, usersRows.length)}
+        <div className="flex-1 overflow-y-auto p-4">
+          {renderTabContent()}
+        </div>
+        {renderAddRowModal()}
+        {renderToast()}
+      </div>
+    );
+  }
 
+  // STATE 2 — Managed (Neon) connected
+  if (isManagedConnected) {
+    return (
+      <div className={cn("flex h-full flex-col overflow-hidden", className)}>
+        {upgradeOpen ? (
+          renderUpgradeModal()
+        ) : (
+          <>
+            <ConnectedHeader
+              kind="managed"
+              label={`Beomz database · ${shortProjectId(projectId)}`}
+              onUpgradeClick={() => {
+                setUpgradeOpen(true);
+                setUpgradeError(null);
+                setUpgradePhase("idle");
+              }}
+            />
+            {renderTabBar(visibleTabs, activeTab, setActiveTab, usersRows.length)}
+            <div className="flex-1 overflow-y-auto p-4">
+              {renderTabContent()}
+            </div>
+          </>
+        )}
+        {renderAddRowModal()}
+        {renderToast()}
+      </div>
+    );
+  }
+
+  // STATE 1 — No DB connected
   return (
-    <div className={cn("flex h-full flex-col overflow-hidden", className)}>
+    <div className={cn("flex h-full flex-col overflow-hidden bg-[#faf9f6]", className)}>
+      {subFlow === "supabase" ? (
+        renderSupabaseForm()
+      ) : (
+        renderIntroCards()
+      )}
+      {renderToast()}
+    </div>
+  );
 
-      {/* ── Outer tab bar: Managed | Connect your own ───── */}
-      <div className="flex items-center gap-0.5 border-b border-[#e5e7eb] bg-[#faf9f6] px-4 pt-3 pb-0 flex-shrink-0">
-        {(
-          [
-            { key: "managed" as OuterTab, label: "Managed" },
-            { key: "byo" as OuterTab, label: "Connect your own" },
-          ] as { key: OuterTab; label: string }[]
-        ).map(({ key, label }) => (
+  // ═══════════════════════════════════════════════════════
+  // Render helpers
+  // ═══════════════════════════════════════════════════════
+
+  function renderIntroCards() {
+    return (
+      <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+        <div className="grid w-full max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
+          {/* ── Card 1: Beomz database (orange accent) ── */}
+          <div className="flex flex-col rounded-2xl border-2 border-[#F97316]/70 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-start justify-between">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#F97316]/10">
+                <Database size={22} className="text-[#F97316]" />
+              </div>
+              <span className="rounded-full bg-[#F97316]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#F97316]">
+                Included in plan
+              </span>
+            </div>
+            <h3 className="text-base font-semibold text-[#1a1a1a]">Beomz database</h3>
+            <p className="mt-1 text-sm text-[#6b7280]">Instant Postgres — provisioned in seconds</p>
+            <p className="mt-3 text-xs text-[#9ca3af]">Isolated · Auto-scaling · Backed up daily</p>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => void handleEnable()}
+              disabled={enabling || !projectId}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+            >
+              {enabling ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              {enabling ? "Provisioning…" : "Add database"}
+            </button>
+            {enableError && (
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-red-500">
+                <AlertCircle size={12} /> {enableError}
+              </p>
+            )}
+          </div>
+
+          {/* ── Card 2: Connect your own (neutral/outlined) ── */}
+          <div className="flex flex-col rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-start justify-between">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#f3f4f6]">
+                <Plug size={22} className="text-[#374151]" />
+              </div>
+              <span className="flex items-center gap-1.5 rounded-full bg-[#edfaf4] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#3ecf8e]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#3ecf8e]" />
+                Supabase
+              </span>
+            </div>
+            <h3 className="text-base font-semibold text-[#1a1a1a]">Connect your own</h3>
+            <p className="mt-1 text-sm text-[#6b7280]">Bring your existing Supabase project</p>
+            <p className="mt-3 text-xs text-[#9ca3af]">Full control · Your data · Your billing</p>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => setSubFlow("supabase")}
+              disabled={!projectId}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-[#1a1a1a] bg-white px-4 py-3 text-sm font-semibold text-[#1a1a1a] transition-colors hover:bg-[#1a1a1a] hover:text-white disabled:opacity-50"
+            >
+              Connect Supabase
+              <ArrowRight size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderSupabaseForm() {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-7">
+        <div className="mx-auto w-full max-w-lg space-y-5">
+          <button
+            type="button"
+            onClick={() => {
+              setSubFlow(null);
+              setByoConnectError(null);
+            }}
+            className="flex items-center gap-1.5 text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+          >
+            <ArrowLeft size={12} /> Back
+          </button>
+
+          <div className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
+            <div
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold"
+              style={{ backgroundColor: "#edfaf4", color: "#3ecf8e" }}
+            >
+              S
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-[#1a1a1a]">Supabase</p>
+              <a
+                href="https://supabase.com/dashboard"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[#F97316] transition-colors hover:text-[#ea6c10]"
+              >
+                Where to find these? →
+              </a>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-[#6b7280]">Project URL</label>
+            <input
+              type="text"
+              value={supabaseUrl}
+              onChange={(e) => {
+                setSupabaseUrl(e.target.value);
+                setByoConnectError(null);
+              }}
+              placeholder="https://xxxx.supabase.co"
+              className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+            />
+            <p className="text-xs text-[#9ca3af]">Found in Project → Settings → API</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-[#6b7280]">Anon Key</label>
+            <div className="relative">
+              <input
+                type={showAnonKey ? "text" : "password"}
+                value={supabaseAnonKey}
+                onChange={(e) => {
+                  setSupabaseAnonKey(e.target.value);
+                  setByoConnectError(null);
+                }}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowAnonKey((v) => !v)}
+                tabIndex={-1}
+                className="absolute right-3.5 top-1/2 flex -translate-y-1/2 items-center gap-1 text-[11px] text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+              >
+                {showAnonKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                <span>{showAnonKey ? "Hide" : "Show"}</span>
+              </button>
+            </div>
+            <p className="text-xs text-[#9ca3af]">Found in Project → Settings → API → Project API keys</p>
+          </div>
+
+          {byoConnectError && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+              {byoConnectError}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void handleConnectSupabase()}
+            disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || byoConnecting}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {byoConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+            {byoConnecting ? "Connecting…" : "Connect Supabase →"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderUpgradeModal() {
+    // Faux viewport — NOT position:fixed. Fills min-height of the panel.
+    return (
+      <div className="flex min-h-full flex-1 items-center justify-center bg-[#faf9f6] px-6 py-10">
+        <div className="w-full max-w-lg rounded-2xl border border-[#e5e7eb] bg-white p-7 shadow-sm">
+          {upgradePhase === "idle" && (
+            <>
+              <h2 className="text-lg font-semibold text-[#1a1a1a]">Upgrade to your own database</h2>
+              <p className="mt-3 text-sm leading-relaxed text-[#6b7280]">
+                We'll migrate all your data to your Supabase project, then permanently delete your
+                Beomz managed database. This frees up your database slot for another project. This
+                cannot be undone.
+              </p>
+
+              <div className="mt-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#6b7280]">Supabase Project URL</label>
+                  <input
+                    type="text"
+                    value={upgradeUrl}
+                    onChange={(e) => {
+                      setUpgradeUrl(e.target.value);
+                      setUpgradeError(null);
+                    }}
+                    placeholder="https://xxxx.supabase.co"
+                    className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[#6b7280]">Anon Key</label>
+                  <div className="relative">
+                    <input
+                      type={upgradeShowKey ? "text" : "password"}
+                      value={upgradeAnonKey}
+                      onChange={(e) => {
+                        setUpgradeAnonKey(e.target.value);
+                        setUpgradeError(null);
+                      }}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setUpgradeShowKey((v) => !v)}
+                      tabIndex={-1}
+                      className="absolute right-3.5 top-1/2 flex -translate-y-1/2 items-center gap-1 text-[11px] text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                    >
+                      {upgradeShowKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                      <span>{upgradeShowKey ? "Hide" : "Show"}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {upgradeError && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+                  {upgradeError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void handleConfirmUpgrade()}
+                disabled={!upgradeUrl.trim() || !upgradeAnonKey.trim() || upgradeSubmitting}
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {upgradeSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+                {upgradeSubmitting ? "Starting migration…" : "Migrate & Upgrade"}
+              </button>
+
+              <div className="mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUpgradeOpen(false);
+                    setUpgradeError(null);
+                    setUpgradeUrl("");
+                    setUpgradeAnonKey("");
+                  }}
+                  className="text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+
+          {(upgradePhase === "migrating" || upgradePhase === "rewiring") && (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="relative mb-6 flex h-14 w-14 items-center justify-center">
+                <span className="checklist-orb-active h-12 w-12 rounded-full bg-[#F97316]" />
+              </div>
+              <p className="text-base font-semibold text-[#F97316]">
+                {upgradePhase === "migrating"
+                  ? "Migrating your data to Supabase…"
+                  : "Rewiring your app…"}
+              </p>
+              <p className="mt-1 text-xs text-[#9ca3af]">~30s</p>
+            </div>
+          )}
+
+          {upgradePhase === "done" && (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <span className="mb-4 text-4xl">✅</span>
+              <p className="text-base font-semibold text-emerald-700">
+                Upgraded to Supabase — your data is live
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderTabBar(
+    tabs: { key: PanelTab; icon: typeof Table2; label: string }[],
+    active: PanelTab,
+    setActive: (t: PanelTab) => void,
+    usersCount: number,
+  ) {
+    return (
+      <div className="flex flex-shrink-0 items-center gap-1 border-b border-[#e5e7eb] bg-[#faf9f6] px-4 pt-2 pb-0">
+        {tabs.map(({ key, icon: Icon, label }) => (
           <button
             key={key}
-            onClick={() => setOuterTab(key)}
+            onClick={() => setActive(key)}
             className={cn(
-              "rounded-t-lg border border-b-0 px-3 py-1.5 text-xs font-medium transition-colors",
-              outerTab === key
+              "flex items-center gap-1.5 rounded-t-lg border border-b-0 px-3 py-1.5 text-xs font-medium transition-colors",
+              active === key
                 ? "border-[#e5e7eb] bg-white text-[#1a1a1a]"
                 : "border-transparent text-[#9ca3af] hover:text-[#6b7280]",
             )}
           >
-            {label}
+            <Icon size={12} />
+            {key === "users" ? `Users (${usersCount})` : label}
           </button>
         ))}
       </div>
+    );
+  }
 
-      {/* ══════════════════════════════════════════════════
-          MANAGED TAB
-      ══════════════════════════════════════════════════ */}
-      {outerTab === "managed" && (
-        <>
-          {/* STATE 1: Not connected */}
-          {!databaseEnabled && (
-            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto">
-              <div className="mx-auto w-full max-w-md space-y-6 px-6 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#F97316]/10">
-                  <Database size={28} className="text-[#F97316]" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-[#1a1a1a]">Add a database</h2>
-                  <p className="mt-1 text-sm text-[#9ca3af]">
-                    Power your app with live data. Beomz provisions a managed database instantly.
-                  </p>
-                </div>
+  function renderTabContent() {
+    if (activeTab === "schema") return renderSchemaTab();
+    if (activeTab === "data") return renderDataTab();
+    if (activeTab === "users") return renderUsersTab();
+    if (activeTab === "storage") return renderStorageTab();
+    return null;
+  }
 
-                {wiringStatus === "connected" ? (
-                  <div className="flex flex-col items-center gap-3 py-2">
-                    <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700">
-                      <Loader2 size={16} className="animate-spin" />
-                      Connected! Wiring to your app…
-                    </div>
-                    <p className="text-[11px] text-[#9ca3af]">
-                      The build will start in a moment.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => void handleEnable()}
-                      disabled={enabling}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
-                    >
-                      {enabling ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <Zap size={16} />
-                      )}
-                      {enabling ? "Setting up..." : "Add Database"}
-                    </button>
+  function renderSchemaTab() {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-[#1a1a1a]">Tables</p>
+          <button
+            onClick={() => void fetchSchema()}
+            disabled={schemaLoading}
+            className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
+          >
+            <RefreshCw size={12} className={schemaLoading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
 
-                    <p className="text-[11px] text-[#9ca3af]">
-                      Isolated · Auto-scaling · Backed up daily
-                    </p>
-                  </>
-                )}
+        {schemaLoading && schemaTables.length === 0 && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+          </div>
+        )}
+        {schemaError && (
+          <p className="flex items-center gap-1.5 text-xs text-red-500">
+            <AlertCircle size={12} /> {schemaError}
+          </p>
+        )}
+        {!schemaLoading && schemaTables.length === 0 && !schemaError && (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+            <p className="text-sm font-medium text-[#6b7280]">No tables yet</p>
+            <p className="mt-1 text-xs text-[#9ca3af]">Ask Beomz to create tables in the chat panel.</p>
+          </div>
+        )}
 
-                {error && wiringStatus === "idle" && (
-                  <p className="flex items-center justify-center gap-1.5 text-xs text-red-500">
-                    <AlertCircle size={12} /> {error}{" "}
-                    <button
-                      onClick={() => void handleEnable()}
-                      className="underline underline-offset-2 hover:text-red-700"
-                    >
-                      Retry
-                    </button>
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* STATE 2: Connected, not wired */}
-          {databaseEnabled && !dbWired && (
-            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto">
-              <div className="mx-auto w-full max-w-md space-y-6 px-6 text-center">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50">
-                  <Database size={28} className="text-amber-600" />
-                </div>
-                <div>
-                  <div className="mb-2 flex items-center justify-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-amber-500" />
-                    <span className="text-sm font-semibold text-amber-700">Database — Provisioned</span>
-                  </div>
-                  <p className="text-sm text-[#9ca3af]">
-                    {dbProvider === "supabase"
-                      ? "Your Supabase database is connected."
-                      : "A managed database is provisioned for this project."}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 text-left">
-                  <p className="text-sm font-semibold text-[#1a1a1a]">Wire to app</p>
-                  <p className="mt-1 text-xs text-[#9ca3af]">
-                    Beomz will rewrite your app's data layer to use the database.
-                    This generates bindings and updates your components.
-                  </p>
-                  <button
-                    onClick={() => void handleWire()}
-                    disabled={wiringDb}
-                    className="mt-4 flex items-center gap-2 rounded-lg bg-[#1a1a1a] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#333] disabled:opacity-50"
-                  >
-                    {wiringDb ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Zap size={14} />
-                    )}
-                    {wiringDb ? "Wiring..." : "Wire to app"}
-                  </button>
-                </div>
-
-                {error && (
-                  <p className="flex items-center justify-center gap-1.5 text-xs text-red-500">
-                    <AlertCircle size={12} /> {error}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* STATE 3: Fully wired */}
-          {databaseEnabled && dbWired && (
-            <div className="flex flex-1 flex-col overflow-hidden">
-
-              {/* Mode tab bar */}
-              <div className="flex items-center gap-0.5 border-b border-[#e5e7eb] bg-[#faf9f6] px-4 pt-3 pb-0 flex-shrink-0">
-                {(
-                  [
-                    { key: "shared" as ModeTab, label: "Database", locked: false },
-                    { key: "dedicated" as ModeTab, label: "Dedicated", locked: true },
-                  ] as { key: ModeTab; label: string; locked: boolean }[]
-                ).map(({ key, label, locked }) => (
-                  <button
-                    key={key}
-                    onClick={() => !locked && setModeTab(key)}
-                    disabled={locked}
-                    className={cn(
-                      "rounded-t-lg border border-b-0 px-3 py-1.5 text-xs font-medium transition-colors",
-                      locked
-                        ? "cursor-not-allowed border-transparent text-[#d1d5db]"
-                        : modeTab === key
-                          ? "border-[#e5e7eb] bg-white text-[#1a1a1a]"
-                          : "border-transparent text-[#9ca3af] hover:text-[#6b7280]",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-                <div className="ml-auto flex items-center gap-2 pb-1">
-                  <span className="flex items-center gap-1.5 text-[10px] text-emerald-600">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Connected
+        <div className="space-y-2">
+          {schemaTables.map((t) => {
+            const isExpanded = expandedTables.has(t.table_name);
+            return (
+              <div key={t.table_name} className="rounded-xl border border-[#e5e7eb] bg-white">
+                <button
+                  className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  onClick={() =>
+                    setExpandedTables((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(t.table_name)) next.delete(t.table_name);
+                      else next.add(t.table_name);
+                      return next;
+                    })
+                  }
+                >
+                  <span className="text-sm font-medium text-[#1a1a1a]">{t.table_name}</span>
+                  <span className="text-[10px] text-[#9ca3af]">
+                    {t.columns.length} column{t.columns.length !== 1 ? "s" : ""}
                   </span>
-                </div>
-              </div>
-
-              {/* SHARED mode */}
-              {modeTab === "shared" && (
-                <div className="flex flex-1 flex-col overflow-hidden">
-
-                  {/* Storage info card + add-on row */}
-                  <div className="space-y-3 border-b border-[#e5e7eb] px-4 py-3 flex-shrink-0">
-                    <div className="rounded-xl border border-[#e5e7eb] bg-[#faf9f6] p-3.5">
-                      <div className="mb-3 flex items-center gap-2">
-                        <span className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          Managed Postgres
-                        </span>
-                        <span className="rounded-md bg-[#ebebeb] px-2 py-0.5 text-[11px] font-semibold text-[#6b7280]">
-                          Neon
-                        </span>
-                      </div>
-
-                      <p className="mb-2 text-[11px] font-medium text-[#6b7280]">Storage</p>
-
-                      {dbUsageLoading ? (
-                        <div className="h-2 w-full animate-pulse rounded-full bg-[#e5e7eb]" />
-                      ) : (
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-[#e5e7eb]">
-                          <div
-                            className={cn("h-full rounded-full transition-all duration-500", barColorClass)}
-                            style={{ width: `${fillPct}%` }}
-                          />
-                        </div>
-                      )}
-
-                      <div className="mt-1.5 flex items-center justify-between">
-                        {dbUsageLoading ? (
-                          <span className="h-3 w-28 animate-pulse rounded bg-[#e5e7eb]" />
-                        ) : dbUsageError ? (
-                          <span className="flex items-center gap-1 text-[11px] text-[#9ca3af]">
-                            <AlertCircle size={11} />
-                            Couldn't load usage —{" "}
-                            <button
-                              onClick={() => void fetchDbUsage()}
-                              className="underline underline-offset-2 hover:text-[#6b7280]"
-                            >
-                              retry
-                            </button>
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-[#9ca3af]">
-                            {formatStorageMb(usedMb)} / {formatStorageMb(limitMb)}
-                            {limitMb > 0 && (
-                              <span className="ml-1.5 text-[#d1d5db]">·</span>
-                            )}
-                            {limitMb > 0 && (
-                              <span className="ml-1.5">{Math.round(fillPct)}% used</span>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Storage add-on row */}
-                    <div>
-                      <p className="mb-2 text-[11px] text-[#9ca3af]">
-                        Need more storage? Add to this project.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        {addonsLoading || addons === null ? (
-                          ["+500MB", "+2GB", "+10GB"].map((label) => (
-                            <div
-                              key={label}
-                              className="group relative flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2"
-                            >
-                              <span className="text-[11px] font-semibold text-[#d1d5db]">{label}</span>
-                            </div>
-                          ))
-                        ) : addons.length === 0 ? null : (
-                          addons.map((addon) => (
-                            <button
-                              key={addon.price_id}
-                              onClick={() => void handleStorageAddon(addon.price_id!)}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
-                            >
-                              <span className="font-semibold">{addon.label}</span>
-                              <span className="text-[#9ca3af]">${addon.price_usd}</span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Storage limit reached banner */}
-                  {storageLimitReached && (
-                    <div className="border-b border-red-200 bg-red-50 px-4 py-3 flex-shrink-0">
-                      <p className="mb-2 text-xs font-semibold text-red-700">
-                        Storage limit reached — {formatStorageMb(limitMb)} used of {formatStorageMb(limitMb)}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {(addons ?? []).filter((a) => a.price_id).map((addon) => (
-                          <button
-                            key={addon.price_id}
-                            onClick={() => void handleStorageAddon(addon.price_id!)}
-                            className="rounded-lg bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#374151] shadow-sm ring-1 ring-[#e5e7eb] transition-colors hover:ring-[#F97316]/50"
-                          >
-                            {addon.label} ${addon.price_usd}
-                          </button>
-                        ))}
-                        <button
-                          onClick={() => window.open("https://beomz.ai/plan", "_blank")}
-                          className="rounded-lg bg-[#F97316] px-2.5 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#ea6c10]"
-                        >
-                          Upgrade plan →
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Inner tab bar */}
-                  <div className="flex items-center gap-1 border-b border-[#e5e7eb] bg-[#faf9f6] px-4 pt-2 pb-0 flex-shrink-0">
-                    {INNER_TAB_ITEMS.map(({ key, icon: Icon, label }) => (
-                      <button
-                        key={key}
-                        onClick={() => setActiveTab(key)}
-                        className={cn(
-                          "flex items-center gap-1.5 rounded-t-lg border border-b-0 px-3 py-1.5 text-xs font-medium transition-colors",
-                          activeTab === key
-                            ? "border-[#e5e7eb] bg-white text-[#1a1a1a]"
-                            : "border-transparent text-[#9ca3af] hover:text-[#6b7280]",
-                        )}
+                </button>
+                {isExpanded && (
+                  <div className="space-y-1 border-t border-[#e5e7eb] px-4 py-3">
+                    {t.columns.map((c) => (
+                      <div
+                        key={`${t.table_name}-${c.name}`}
+                        className="flex items-center justify-between text-xs"
                       >
-                        <Icon size={12} />
-                        {key === "users" ? `Users (${usersRows.length})` : label}
-                      </button>
+                        <span className="font-medium text-[#374151]">{c.name}</span>
+                        <span className="font-mono text-[10px] text-[#9ca3af]">{c.type}</span>
+                      </div>
                     ))}
                   </div>
-
-                  {/* Inner tab content */}
-                  <div className="flex-1 overflow-y-auto p-4">
-
-                    {/* SCHEMA TAB */}
-                    {activeTab === "schema" && (
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-semibold text-[#1a1a1a]">Tables</p>
-                          <button
-                            onClick={() => void fetchSchema()}
-                            disabled={schemaLoading}
-                            className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
-                          >
-                            <RefreshCw size={12} className={schemaLoading ? "animate-spin" : ""} />
-                            Refresh
-                          </button>
-                        </div>
-
-                        {schemaLoading && schemaTables.length === 0 && (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
-                          </div>
-                        )}
-                        {schemaError && (
-                          <p className="flex items-center gap-1.5 text-xs text-red-500">
-                            <AlertCircle size={12} /> {schemaError}
-                          </p>
-                        )}
-                        {!schemaLoading && schemaTables.length === 0 && !schemaError && (
-                          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-                            <p className="text-sm font-medium text-[#6b7280]">No tables yet</p>
-                            <p className="mt-1 text-xs text-[#9ca3af]">
-                              Ask Beomz to create tables in the chat panel.
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="space-y-2">
-                          {schemaTables.map((t) => {
-                            const isExpanded = expandedTables.has(t.table_name);
-                            return (
-                              <div key={t.table_name} className="rounded-xl border border-[#e5e7eb] bg-white">
-                                <button
-                                  className="flex w-full items-center justify-between px-4 py-3 text-left"
-                                  onClick={() =>
-                                    setExpandedTables((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(t.table_name)) next.delete(t.table_name);
-                                      else next.add(t.table_name);
-                                      return next;
-                                    })
-                                  }
-                                >
-                                  <span className="text-sm font-medium text-[#1a1a1a]">{t.table_name}</span>
-                                  <span className="text-[10px] text-[#9ca3af]">
-                                    {t.columns.length} column{t.columns.length !== 1 ? "s" : ""}
-                                  </span>
-                                </button>
-                                {isExpanded && (
-                                  <div className="border-t border-[#e5e7eb] px-4 py-3 space-y-1">
-                                    {t.columns.map((c) => (
-                                      <div key={`${t.table_name}-${c.name}`} className="flex items-center justify-between text-xs">
-                                        <span className="font-medium text-[#374151]">{c.name}</span>
-                                        <span className="font-mono text-[10px] text-[#9ca3af]">{c.type}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {schemaTables.length > 0 && (
-                          <button className="flex items-center gap-1.5 text-xs font-medium text-[#F97316] transition-colors hover:text-[#ea6c10]">
-                            <MessageSquare size={12} />
-                            Ask Beomz to create or modify tables
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* DATA TAB */}
-                    {activeTab === "data" && (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <select
-                            value={dataTable}
-                            onChange={(e) => setDataTable(e.target.value)}
-                            className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#F97316]/50"
-                          >
-                            <option value="">Select a table...</option>
-                            {schemaTables.map((t) => (
-                              <option key={t.table_name} value={t.table_name}>
-                                {t.table_name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={() => { setNewRow({}); setShowAddRowModal(true); }}
-                            disabled={!dataTable}
-                            className="flex h-9 items-center gap-1.5 rounded-lg bg-[#F97316] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
-                          >
-                            <Plus size={12} />
-                            Add row
-                          </button>
-                          {dataTable && (
-                            <button
-                              onClick={() => void fetchRows(dataTable)}
-                              disabled={dataLoading}
-                              className="flex h-9 items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
-                            >
-                              <RefreshCw size={12} className={dataLoading ? "animate-spin" : ""} />
-                            </button>
-                          )}
-                        </div>
-
-                        {!dataTable && (
-                          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-                            <Table2 size={24} className="mx-auto mb-3 text-[#d1d5db]" />
-                            <p className="text-sm font-medium text-[#6b7280]">Select a table to view its data.</p>
-                          </div>
-                        )}
-                        {dataTable && dataLoading && dataRows.length === 0 && (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
-                          </div>
-                        )}
-                        {dataError && (
-                          <p className="flex items-center gap-1.5 text-xs text-red-500">
-                            <AlertCircle size={12} /> {dataError}
-                          </p>
-                        )}
-                        {dataWriteError && (
-                          <p className="flex items-center gap-1.5 text-xs text-red-500">
-                            <AlertCircle size={12} /> {dataWriteError}
-                          </p>
-                        )}
-                        {!dataLoading && dataTable && dataRows.length === 0 && !dataError && (
-                          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-                            <p className="text-sm font-medium text-[#6b7280]">No rows</p>
-                            <p className="mt-1 text-xs text-[#9ca3af]">Add a row to get started.</p>
-                          </div>
-                        )}
-
-                        {dataRows.length > 0 && selectedTableSchema && (
-                          <div className="overflow-auto rounded-xl border border-[#e5e7eb] bg-white">
-                            <table className="min-w-full text-xs">
-                              <thead>
-                                <tr className="border-b border-[#e5e7eb] bg-[#faf9f6]">
-                                  {selectedTableSchema.columns.map((c) => (
-                                    <th
-                                      key={c.name}
-                                      className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9ca3af]"
-                                    >
-                                      {c.name}
-                                    </th>
-                                  ))}
-                                  <th className="w-10 px-3 py-2" />
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {dataRows.map((row, rowIdx) => (
-                                  <tr key={rowIdx} className="border-b border-[#f3f4f6] last:border-b-0 hover:bg-[#faf9f6]">
-                                    {selectedTableSchema.columns.map((c) => {
-                                      const isEditing =
-                                        editingCell?.rowIdx === rowIdx && editingCell?.column === c.name;
-                                      const value = row[c.name];
-                                      return (
-                                        <td
-                                          key={`${rowIdx}-${c.name}`}
-                                          className="px-3 py-2 cursor-pointer"
-                                          onClick={() => setEditingCell({ rowIdx, column: c.name })}
-                                        >
-                                          {isEditing ? (
-                                            <input
-                                              autoFocus
-                                              defaultValue={value == null ? "" : String(value)}
-                                              className="h-7 w-full rounded border border-[#e5e7eb] px-2 text-xs outline-none focus:border-[#F97316]/50"
-                                              onBlur={(e) => {
-                                                setEditingCell(null);
-                                                if (e.target.value !== (value == null ? "" : String(value))) {
-                                                  void handleUpdateCell(rowIdx, c.name, e.target.value);
-                                                }
-                                              }}
-                                              onKeyDown={(e) => {
-                                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                                if (e.key === "Escape") setEditingCell(null);
-                                              }}
-                                            />
-                                          ) : (
-                                            <span className="text-[#374151]">
-                                              {value == null ? <span className="text-[#d1d5db]">null</span> : String(value)}
-                                            </span>
-                                          )}
-                                        </td>
-                                      );
-                                    })}
-                                    <td className="px-3 py-2">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          void handleDeleteRow(rowIdx);
-                                        }}
-                                        className="rounded p-1 text-[#d1d5db] transition-colors hover:text-red-500"
-                                      >
-                                        <Trash2 size={12} />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-
-                        {/* Add row modal */}
-                        {showAddRowModal && selectedTableSchema && (
-                          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                            <div className="relative w-full max-w-md rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-2xl">
-                              <button
-                                onClick={() => setShowAddRowModal(false)}
-                                className="absolute right-4 top-4 rounded-lg p-1 text-[#9ca3af] transition-colors hover:text-[#1a1a1a]"
-                              >
-                                <X size={16} />
-                              </button>
-                              <h3 className="mb-4 text-base font-semibold text-[#1a1a1a]">
-                                Add row to {dataTable}
-                              </h3>
-                              <div className="space-y-3">
-                                {editableCols.map((c) => (
-                                  <div key={c.name}>
-                                    <label className="mb-1 block text-[11px] font-medium text-[#6b7280]">
-                                      {c.name} <span className="font-mono text-[#9ca3af]">({c.type})</span>
-                                    </label>
-                                    <input
-                                      value={newRow[c.name] ?? ""}
-                                      onChange={(e) => setNewRow((prev) => ({ ...prev, [c.name]: e.target.value }))}
-                                      className="h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#F97316]/50"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                              <button
-                                onClick={() => void handleInsertRow()}
-                                className="mt-5 w-full rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
-                              >
-                                Insert row
-                              </button>
-                              {dataWriteError && (
-                                <p className="mt-3 flex items-center gap-1.5 text-xs text-red-500">
-                                  <AlertCircle size={12} /> {dataWriteError}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* BINDINGS TAB */}
-                    {activeTab === "bindings" && (
-                      <div className="space-y-4">
-                        <p className="text-sm font-semibold text-[#1a1a1a]">Component bindings</p>
-                        <p className="text-xs text-[#9ca3af]">
-                          Shows which components are connected to which tables.
-                        </p>
-                        {schemaLoading && (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
-                          </div>
-                        )}
-                        {!schemaLoading && schemaTables.length === 0 && (
-                          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-                            <p className="text-sm font-medium text-[#6b7280]">No bindings yet</p>
-                            <p className="mt-1 text-xs text-[#9ca3af]">Tables will appear here once created.</p>
-                          </div>
-                        )}
-                        {schemaTables.length > 0 && (
-                          <div className="space-y-2">
-                            {schemaTables.map((t) => (
-                              <div
-                                key={t.table_name}
-                                className="flex items-center justify-between rounded-xl border border-[#e5e7eb] bg-white px-4 py-3"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Table2 size={14} className="text-[#9ca3af]" />
-                                  <span className="text-sm font-medium text-[#1a1a1a]">{t.table_name}</span>
-                                </div>
-                                <span className="text-xs text-[#9ca3af]">
-                                  {t.columns.length} column{t.columns.length !== 1 ? "s" : ""}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* LOGS TAB */}
-                    {activeTab === "logs" && (
-                      <div className="space-y-4">
-                        <p className="text-sm font-semibold text-[#1a1a1a]">Query logs</p>
-                        <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-                          <ScrollText size={28} className="mx-auto mb-3 text-[#d1d5db]" />
-                          <p className="text-sm font-medium text-[#6b7280]">Query logs coming soon</p>
-                          <p className="mt-1 text-xs text-[#9ca3af]">
-                            We're building real-time query logging infrastructure.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* USERS TAB */}
-                    {activeTab === "users" && (
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-semibold text-[#1a1a1a]">Users</p>
-                          <button
-                            onClick={() => void fetchUsers()}
-                            disabled={usersLoading}
-                            className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
-                          >
-                            <RefreshCw size={12} className={usersLoading ? "animate-spin" : ""} />
-                            Refresh
-                          </button>
-                        </div>
-                        {usersLoading && usersRows.length === 0 && (
-                          <div className="flex items-center justify-center py-12">
-                            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
-                          </div>
-                        )}
-                        {usersError && (
-                          <p className="flex items-center gap-1.5 text-xs text-red-500">
-                            <AlertCircle size={12} /> {usersError}{" "}
-                            <button
-                              onClick={() => void fetchUsers()}
-                              className="underline underline-offset-2 hover:text-red-700"
-                            >
-                              retry
-                            </button>
-                          </p>
-                        )}
-                        {!usersLoading && !usersError && usersRows.length === 0 && (
-                          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-                            <Users size={28} className="mx-auto mb-3 text-[#d1d5db]" />
-                            <p className="text-sm font-medium text-[#6b7280]">No users yet</p>
-                            <p className="mt-1 text-xs text-[#9ca3af]">
-                              Add auth to your app to see users here.
-                            </p>
-                          </div>
-                        )}
-                        {usersRows.length > 0 && (
-                          <div className="overflow-auto rounded-xl border border-[#e5e7eb] bg-white">
-                            <table className="min-w-full text-xs">
-                              <thead>
-                                <tr className="border-b border-[#e5e7eb] bg-[#faf9f6]">
-                                  {["id", "email", "name", "created_at"].map((col) => (
-                                    <th
-                                      key={col}
-                                      className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9ca3af]"
-                                    >
-                                      {col}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {[...usersRows]
-                                  .sort((a, b) => {
-                                    const ta = a.created_at ? new Date(String(a.created_at)).getTime() : 0;
-                                    const tb = b.created_at ? new Date(String(b.created_at)).getTime() : 0;
-                                    return tb - ta;
-                                  })
-                                  .map((row, idx) => (
-                                    <tr key={idx} className="border-b border-[#f3f4f6] last:border-b-0 hover:bg-[#faf9f6]">
-                                      {["id", "email", "name", "created_at"].map((col) => {
-                                        const val = row[col];
-                                        let display: string;
-                                        if (val == null) {
-                                          display = "";
-                                        } else if (col === "created_at") {
-                                          display = new Date(String(val)).toLocaleString();
-                                        } else {
-                                          display = String(val);
-                                        }
-                                        return (
-                                          <td key={col} className="px-3 py-2 text-[#374151]">
-                                            {display || <span className="text-[#d1d5db]">—</span>}
-                                          </td>
-                                        );
-                                      })}
-                                    </tr>
-                                  ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* DEDICATED mode */}
-              {modeTab === "dedicated" && (
-                <div className="flex flex-1 items-center justify-center px-8 py-12">
-                  <div className="w-full max-w-xs text-center">
-                    <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1a1a1a]/6">
-                      <HardDrive size={32} className="text-[#1a1a1a]" />
-                    </div>
-                    <h2 className="text-base font-semibold text-[#1a1a1a]">
-                      Your own Postgres instance
-                    </h2>
-                    <div className="mt-3 space-y-1 text-sm text-[#9ca3af]">
-                      <p>Dedicated compute · Daily backups · Direct connection</p>
-                      <p>No shared limits — your data, isolated.</p>
-                    </div>
-                    <p className="mt-4 text-sm font-medium text-[#6b7280]">
-                      $39 <span className="text-[#9ca3af] font-normal">/ month per project</span>
-                    </p>
-                    <button
-                      onClick={() => showToast("Coming soon — dedicated database provisioning")}
-                      className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
-                    >
-                      Add dedicated database
-                      <ArrowUpRight size={15} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ══════════════════════════════════════════════════
-          CONNECT YOUR OWN TAB (BEO-522 — Supabase form)
-      ══════════════════════════════════════════════════ */}
-      {outerTab === "byo" && (
-        <div className="flex flex-1 flex-col overflow-hidden">
-
-          {/* ── WIRING STATE (BEO-524) ── */}
-          {byoWiring ? (
-            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-8 py-16">
-              <div className="w-full max-w-sm space-y-4">
-                <div className="flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 px-5 py-4">
-                  <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
-                    <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-[#F97316]">Connecting your Supabase data...</p>
-                    <p className="mt-0.5 text-xs text-orange-500/80">Rewiring your app to use real data · ~30s</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          ) : isByoConnectedState ? (
-            /* ── CONNECTED STATE ── */
-            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-8 py-16">
-              <div className="w-full max-w-sm space-y-6">
-                {byoWiringDone ? (
-                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-                    <span className="text-xl">✅</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-emerald-700">
-                        Connected to {byoSavedHost ?? byoConnectedHost} — your real data is now live
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-                    <PlugZap size={20} className="flex-shrink-0 text-emerald-600" />
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-emerald-700">Connected</p>
-                      {(byoSavedHost || byoConnectedHost) && (
-                        <p className="mt-0.5 truncate font-mono text-xs text-emerald-600">
-                          {byoSavedHost ?? byoConnectedHost}
-                        </p>
-                      )}
-                    </div>
-                    <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-emerald-500" />
-                  </div>
                 )}
-                <p className="text-sm text-[#9ca3af]">
-                  Your app is connected to this Supabase project.{" "}
-                  <code className="rounded bg-[#f3f4f6] px-1 py-0.5 text-xs text-[#374151]">VITE_SUPABASE_URL</code>{" "}
-                  and{" "}
-                  <code className="rounded bg-[#f3f4f6] px-1 py-0.5 text-xs text-[#374151]">VITE_SUPABASE_ANON_KEY</code>{" "}
-                  are injected automatically.
-                </p>
-                <button
-                  onClick={() => void handleDisconnectByo()}
-                  disabled={byoDisconnecting}
-                  className="flex items-center gap-2 text-sm text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
-                >
-                  {byoDisconnecting ? <Loader2 size={14} className="animate-spin" /> : <WifiOff size={14} />}
-                  {byoDisconnecting ? "Disconnecting..." : "Disconnect"}
-                </button>
               </div>
-            </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
-          ) : byoSelectedProvider === "supabase" ? (
-            /* ── SUPABASE FORM ── */
-            <div className="flex-1 overflow-y-auto px-6 py-7 space-y-5">
-              {/* Back */}
-              <button
-                type="button"
-                onClick={() => { setByoSelectedProvider(null); setByoConnectError(null); }}
-                className="flex items-center gap-1.5 text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
-              >
-                ← Back
-              </button>
-
-              {/* Provider header */}
-              <div className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold" style={{ backgroundColor: "#edfaf4", color: "#3ecf8e" }}>
-                  S
-                </div>
-                <div className="min-w-0">
-                  <p className="font-semibold text-[#1a1a1a]">Supabase</p>
-                  <a
-                    href="https://supabase.com/dashboard"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-[#F97316] transition-colors hover:text-[#ea6c10]"
-                  >
-                    Where to find these? →
-                  </a>
-                </div>
-              </div>
-
-              {/* Project URL */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#6b7280]">Project URL</label>
-                <input
-                  type="text"
-                  value={supabaseUrl}
-                  onChange={(e) => { setSupabaseUrl(e.target.value); setByoConnectError(null); }}
-                  placeholder="https://xxxx.supabase.co"
-                  className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
-                />
-                <p className="text-xs text-[#9ca3af]">Found in Project → Settings → API</p>
-              </div>
-
-              {/* Anon Key */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[#6b7280]">Anon Key</label>
-                <div className="relative">
-                  <input
-                    type={showAnonKey ? "text" : "password"}
-                    value={supabaseAnonKey}
-                    onChange={(e) => { setSupabaseAnonKey(e.target.value); setByoConnectError(null); }}
-                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                    className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowAnonKey((v) => !v)}
-                    tabIndex={-1}
-                    className="absolute right-3.5 top-1/2 flex -translate-y-1/2 items-center gap-1 text-[11px] text-[#9ca3af] transition-colors hover:text-[#6b7280]"
-                  >
-                    {showAnonKey ? <EyeOff size={13} /> : <Eye size={13} />}
-                    <span>{showAnonKey ? "Hide" : "Show"}</span>
-                  </button>
-                </div>
-                <p className="text-xs text-[#9ca3af]">Found in Project → Settings → API → Project API keys</p>
-              </div>
-
-              {/* Error */}
-              {byoConnectError && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                  <XCircle size={14} className="mt-0.5 flex-shrink-0" />
-                  {byoConnectError}
-                </div>
-              )}
-
-              {/* Connect button */}
-              <button
-                type="button"
-                onClick={() => void handleConnectSupabase()}
-                disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || byoConnecting}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {byoConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                {byoConnecting ? "Connecting..." : "Connect Supabase →"}
-              </button>
-            </div>
-
-          ) : (
-            /* ── PROVIDER GRID ── */
-            <div className="flex-1 overflow-y-auto px-6 py-8 space-y-6">
-              <div>
-                <h2 className="text-base font-semibold text-[#1a1a1a]">Connect your own database</h2>
-                <p className="mt-1 text-sm text-[#9ca3af]">
-                  Works with any Postgres host. Pick your provider to get started.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2.5">
-                {BYO_PROVIDERS.map((p) => (
-                  p.comingSoon ? (
-                    <div
-                      key={p.key}
-                      className="relative flex flex-col items-center gap-2.5 rounded-xl border border-[#e5e7eb] bg-[#fafafa] px-3 py-4 text-center opacity-60"
-                    >
-                      <div
-                        className="flex h-10 w-10 items-center justify-center rounded-xl text-base font-bold"
-                        style={{ backgroundColor: p.bg, color: p.dot }}
-                      >
-                        {p.initial}
-                      </div>
-                      <span className="text-xs font-medium text-[#374151]">{p.name}</span>
-                      <span className="absolute -right-1 -top-1 rounded-full bg-[#f3f4f6] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#9ca3af] ring-1 ring-[#e5e7eb]">
-                        Soon
-                      </span>
-                    </div>
-                  ) : (
-                    <button
-                      key={p.key}
-                      type="button"
-                      onClick={() => setByoSelectedProvider(p.key)}
-                      className="flex flex-col items-center gap-2.5 rounded-xl border border-[#e5e7eb] bg-white px-3 py-4 text-center transition-all hover:border-[#F97316]/40 hover:bg-[#fef6f0] hover:shadow-sm"
-                    >
-                      <div
-                        className="flex h-10 w-10 items-center justify-center rounded-xl text-base font-bold"
-                        style={{ backgroundColor: p.bg, color: p.dot }}
-                      >
-                        {p.initial}
-                      </div>
-                      <span className="text-xs font-medium text-[#374151]">{p.name}</span>
-                    </button>
-                  )
-                ))}
-              </div>
-            </div>
+  function renderDataTab() {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <select
+            value={dataTable}
+            onChange={(e) => setDataTable(e.target.value)}
+            className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#F97316]/50"
+          >
+            <option value="">Select a table...</option>
+            {schemaTables.map((t) => (
+              <option key={t.table_name} value={t.table_name}>
+                {t.table_name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              setNewRow({});
+              setShowAddRowModal(true);
+            }}
+            disabled={!dataTable}
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-[#F97316] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+          >
+            <Plus size={12} />
+            Add row
+          </button>
+          {dataTable && (
+            <button
+              onClick={() => void fetchRows(dataTable)}
+              disabled={dataLoading}
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
+            >
+              <RefreshCw size={12} className={dataLoading ? "animate-spin" : ""} />
+            </button>
           )}
         </div>
-      )}
 
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-4 right-4 z-50 rounded-xl border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-lg">
-          {toast}
+        {!dataTable && (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+            <Table2 size={24} className="mx-auto mb-3 text-[#d1d5db]" />
+            <p className="text-sm font-medium text-[#6b7280]">Select a table to view its data.</p>
+          </div>
+        )}
+        {dataTable && dataLoading && dataRows.length === 0 && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+          </div>
+        )}
+        {dataError && (
+          <p className="flex items-center gap-1.5 text-xs text-red-500">
+            <AlertCircle size={12} /> {dataError}
+          </p>
+        )}
+        {dataWriteError && (
+          <p className="flex items-center gap-1.5 text-xs text-red-500">
+            <AlertCircle size={12} /> {dataWriteError}
+          </p>
+        )}
+        {!dataLoading && dataTable && dataRows.length === 0 && !dataError && (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+            <p className="text-sm font-medium text-[#6b7280]">No rows</p>
+            <p className="mt-1 text-xs text-[#9ca3af]">Add a row to get started.</p>
+          </div>
+        )}
+
+        {dataRows.length > 0 && selectedTableSchema && (
+          <div className="overflow-auto rounded-xl border border-[#e5e7eb] bg-white">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="border-b border-[#e5e7eb] bg-[#faf9f6]">
+                  {selectedTableSchema.columns.map((c) => (
+                    <th
+                      key={c.name}
+                      className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9ca3af]"
+                    >
+                      {c.name}
+                    </th>
+                  ))}
+                  <th className="w-10 px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {dataRows.map((row, rowIdx) => (
+                  <tr
+                    key={rowIdx}
+                    className="border-b border-[#f3f4f6] last:border-b-0 hover:bg-[#faf9f6]"
+                  >
+                    {selectedTableSchema.columns.map((c) => {
+                      const isEditing =
+                        editingCell?.rowIdx === rowIdx && editingCell?.column === c.name;
+                      const value = row[c.name];
+                      return (
+                        <td
+                          key={`${rowIdx}-${c.name}`}
+                          className="cursor-pointer px-3 py-2"
+                          onClick={() => setEditingCell({ rowIdx, column: c.name })}
+                        >
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              defaultValue={value == null ? "" : String(value)}
+                              className="h-7 w-full rounded border border-[#e5e7eb] px-2 text-xs outline-none focus:border-[#F97316]/50"
+                              onBlur={(e) => {
+                                setEditingCell(null);
+                                if (e.target.value !== (value == null ? "" : String(value))) {
+                                  void handleUpdateCell(rowIdx, c.name, e.target.value);
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                if (e.key === "Escape") setEditingCell(null);
+                              }}
+                            />
+                          ) : (
+                            <span className="text-[#374151]">
+                              {value == null ? (
+                                <span className="text-[#d1d5db]">null</span>
+                              ) : (
+                                String(value)
+                              )}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteRow(rowIdx);
+                        }}
+                        className="rounded p-1 text-[#d1d5db] transition-colors hover:text-red-500"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderUsersTab() {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-[#1a1a1a]">Users</p>
+          <button
+            onClick={() => void fetchUsers()}
+            disabled={usersLoading}
+            className="flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] px-2.5 py-1.5 text-xs text-[#6b7280] transition-colors hover:bg-white"
+          >
+            <RefreshCw size={12} className={usersLoading ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
+        {usersLoading && usersRows.length === 0 && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+          </div>
+        )}
+        {usersError && (
+          <p className="flex items-center gap-1.5 text-xs text-red-500">
+            <AlertCircle size={12} /> {usersError}{" "}
+            <button
+              onClick={() => void fetchUsers()}
+              className="underline underline-offset-2 hover:text-red-700"
+            >
+              retry
+            </button>
+          </p>
+        )}
+        {!usersLoading && !usersError && usersRows.length === 0 && (
+          <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+            <Users size={28} className="mx-auto mb-3 text-[#d1d5db]" />
+            <p className="text-sm font-medium text-[#6b7280]">No users yet</p>
+            <p className="mt-1 text-xs text-[#9ca3af]">Add auth to your app to see users here.</p>
+          </div>
+        )}
+        {usersRows.length > 0 && (
+          <div className="overflow-auto rounded-xl border border-[#e5e7eb] bg-white">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="border-b border-[#e5e7eb] bg-[#faf9f6]">
+                  {["id", "email", "name", "created_at"].map((col) => (
+                    <th
+                      key={col}
+                      className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9ca3af]"
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[...usersRows]
+                  .sort((a, b) => {
+                    const ta = a.created_at ? new Date(String(a.created_at)).getTime() : 0;
+                    const tb = b.created_at ? new Date(String(b.created_at)).getTime() : 0;
+                    return tb - ta;
+                  })
+                  .map((row, idx) => (
+                    <tr
+                      key={idx}
+                      className="border-b border-[#f3f4f6] last:border-b-0 hover:bg-[#faf9f6]"
+                    >
+                      {["id", "email", "name", "created_at"].map((col) => {
+                        const val = row[col];
+                        let display: string;
+                        if (val == null) {
+                          display = "";
+                        } else if (col === "created_at") {
+                          display = new Date(String(val)).toLocaleString();
+                        } else {
+                          display = String(val);
+                        }
+                        return (
+                          <td key={col} className="px-3 py-2 text-[#374151]">
+                            {display || <span className="text-[#d1d5db]">—</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderStorageTab() {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-[#e5e7eb] bg-[#faf9f6] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Managed Postgres
+            </span>
+            <span className="rounded-md bg-[#ebebeb] px-2 py-0.5 text-[11px] font-semibold text-[#6b7280]">
+              Neon
+            </span>
+          </div>
+          <p className="mb-2 text-[11px] font-medium text-[#6b7280]">Storage</p>
+          {dbUsageLoading ? (
+            <div className="h-2 w-full animate-pulse rounded-full bg-[#e5e7eb]" />
+          ) : (
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[#e5e7eb]">
+              <div
+                className={cn("h-full rounded-full transition-all duration-500", barColorClass)}
+                style={{ width: `${fillPct}%` }}
+              />
+            </div>
+          )}
+          <div className="mt-1.5 flex items-center justify-between">
+            {dbUsageLoading ? (
+              <span className="h-3 w-28 animate-pulse rounded bg-[#e5e7eb]" />
+            ) : dbUsageError ? (
+              <span className="flex items-center gap-1 text-[11px] text-[#9ca3af]">
+                <AlertCircle size={11} />
+                Couldn't load usage —{" "}
+                <button
+                  onClick={() => void fetchDbUsage()}
+                  className="underline underline-offset-2 hover:text-[#6b7280]"
+                >
+                  retry
+                </button>
+              </span>
+            ) : (
+              <span className="text-[11px] text-[#9ca3af]">
+                {formatStorageMb(usedMb)} / {formatStorageMb(limitMb)}
+                {limitMb > 0 && <span className="ml-1.5 text-[#d1d5db]">·</span>}
+                {limitMb > 0 && <span className="ml-1.5">{Math.round(fillPct)}% used</span>}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-[11px] text-[#9ca3af]">
+            Need more storage? Add to this project.
+          </p>
+          <div className="flex items-center gap-2">
+            {addonsLoading || addons === null
+              ? ["+500MB", "+2GB", "+10GB"].map((label) => (
+                  <div
+                    key={label}
+                    className="group relative flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2"
+                  >
+                    <span className="text-[11px] font-semibold text-[#d1d5db]">{label}</span>
+                  </div>
+                ))
+              : addons.length === 0
+                ? null
+                : addons.map((addon) => (
+                    <button
+                      key={addon.price_id}
+                      onClick={() => void handleStorageAddon(addon.price_id!)}
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
+                    >
+                      <span className="font-semibold">{addon.label}</span>
+                      <span className="text-[#9ca3af]">${addon.price_usd}</span>
+                    </button>
+                  ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderAddRowModal() {
+    if (!showAddRowModal || !selectedTableSchema) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        <div className="relative w-full max-w-md rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-2xl">
+          <button
+            onClick={() => setShowAddRowModal(false)}
+            className="absolute right-4 top-4 rounded-lg p-1 text-[#9ca3af] transition-colors hover:text-[#1a1a1a]"
+          >
+            <XCircle size={16} />
+          </button>
+          <h3 className="mb-4 text-base font-semibold text-[#1a1a1a]">Add row to {dataTable}</h3>
+          <div className="space-y-3">
+            {editableCols.map((c) => (
+              <div key={c.name}>
+                <label className="mb-1 block text-[11px] font-medium text-[#6b7280]">
+                  {c.name} <span className="font-mono text-[#9ca3af]">({c.type})</span>
+                </label>
+                <input
+                  value={newRow[c.name] ?? ""}
+                  onChange={(e) => setNewRow((prev) => ({ ...prev, [c.name]: e.target.value }))}
+                  className="h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#F97316]/50"
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => void handleInsertRow()}
+            className="mt-5 w-full rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+          >
+            Insert row
+          </button>
+          {dataWriteError && (
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-red-500">
+              <AlertCircle size={12} /> {dataWriteError}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderToast() {
+    if (!toast) return null;
+    return (
+      <div className="fixed bottom-4 right-4 z-50 rounded-xl border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-lg">
+        {toast}
+      </div>
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Connected header — State 2 (managed) + State 3 (BYO)
+// ═══════════════════════════════════════════════════════════
+
+function ConnectedHeader({
+  kind,
+  label,
+  onUpgradeClick,
+}: {
+  kind: "managed" | "byo";
+  label: string;
+  onUpgradeClick: (() => void) | null;
+}) {
+  return (
+    <div className="flex flex-shrink-0 items-center gap-3 border-b border-[#e5e7eb] bg-white px-4 py-3">
+      <span className="flex h-2.5 w-2.5 flex-shrink-0 items-center justify-center">
+        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-sm font-semibold text-[#1a1a1a]">
+          {kind === "managed" ? "Beomz database" : `Supabase · ${label}`}
+        </span>
+        {kind === "managed" && label.split("· ")[1] && (
+          <span className="truncate font-mono text-[11px] text-[#9ca3af]">
+            {label.split("· ")[1]}
+          </span>
+        )}
+        <span
+          className={cn(
+            "rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            kind === "managed" ? "bg-[#F97316]/10 text-[#F97316]" : "bg-emerald-50 text-emerald-700",
+          )}
+        >
+          {kind === "managed" ? "Managed" : "BYO"}
+        </span>
+      </div>
+      <div className="flex-1" />
+      {kind === "managed" && onUpgradeClick && (
+        <button
+          type="button"
+          onClick={onUpgradeClick}
+          className="flex items-center gap-1 text-xs font-medium text-[#6b7280] transition-colors hover:text-[#F97316]"
+        >
+          Upgrade to BYO
+          <ArrowRight size={12} />
+        </button>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// BYO-connect wiring banner (initial connect progress)
+// ═══════════════════════════════════════════════════════════
+
+function renderByoWiringBanner(
+  byoWiring: boolean,
+  byoWiringDone: boolean,
+  host: string | null,
+) {
+  if (!byoWiring && !byoWiringDone) return null;
+  if (byoWiring) {
+    return (
+      <div className="flex-shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
+            <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[#F97316]">Connecting your Supabase data…</p>
+            <p className="mt-0.5 text-xs text-orange-500/80">
+              Rewiring your app to use real data · ~30s
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex-shrink-0 border-b border-emerald-200 bg-emerald-50 px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span className="text-lg">✅</span>
+        <p className="text-sm font-semibold text-emerald-700">
+          Connected to {host ?? "Supabase"} — your real data is now live
+        </p>
+      </div>
     </div>
   );
 }
