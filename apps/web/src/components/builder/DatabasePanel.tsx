@@ -142,6 +142,44 @@ function parseHost(connectionString: string): string {
   }
 }
 
+/**
+ * URL-encode the username and password portion of a postgres connection string.
+ * Many providers (Supabase, Neon, etc.) issue passwords with special characters
+ * (@, #, !, [, ]) that are not valid in a URL without percent-encoding.
+ * Returns the original string unchanged if it already parses as a valid URL.
+ */
+function encodeConnectionString(raw: string): string {
+  // Already valid — nothing to do
+  try {
+    new URL(raw.replace(/^postgres:\/\//, "postgresql://"));
+    return raw;
+  } catch {
+    // fall through
+  }
+
+  // Extract scheme prefix (postgres:// or postgresql://)
+  const schemeMatch = raw.match(/^(postgres(?:ql)?:\/\/)/);
+  if (!schemeMatch) return raw;
+  const scheme = schemeMatch[1];
+  const rest = raw.slice(scheme.length);
+
+  // Split at the last '@' to separate credentials from host
+  const lastAt = rest.lastIndexOf("@");
+  if (lastAt === -1) return raw;
+
+  const credentials = rest.slice(0, lastAt);
+  const hostPart = rest.slice(lastAt + 1);
+
+  // Split credentials at first ':' to separate user from password
+  const colonIdx = credentials.indexOf(":");
+  if (colonIdx === -1) return raw;
+
+  const user = credentials.slice(0, colonIdx);
+  const password = credentials.slice(colonIdx + 1);
+
+  return `${scheme}${encodeURIComponent(user)}:${encodeURIComponent(password)}@${hostPart}`;
+}
+
 // ── BYO provider data (BEO-518) ──────────────────────────────────────────────
 
 const BYO_PROVIDERS = [
@@ -496,7 +534,8 @@ export function DatabasePanel({
     setByoTestError(null);
     setByoSaveError(null);
     try {
-      const result = await testByoDb(projectId, byoConnectionString.trim());
+      const encoded = encodeConnectionString(byoConnectionString.trim());
+      const result = await testByoDb(projectId, encoded);
       setByoStatus(result.ok ? "test_ok" : "test_fail");
       if (!result.ok) setByoTestError(result.error ?? "Connection failed.");
     } catch (err) {
@@ -510,8 +549,9 @@ export function DatabasePanel({
     setByoStatus("saving");
     setByoSaveError(null);
     try {
-      await saveByoDb(projectId, byoConnectionString.trim());
-      setByoSavedHost(parseHost(byoConnectionString.trim()));
+      const encoded = encodeConnectionString(byoConnectionString.trim());
+      await saveByoDb(projectId, encoded);
+      setByoSavedHost(parseHost(encoded));
       setByoStatus("saved");
       setByoConnectionString("");
       onDbStateChange();
@@ -1474,13 +1514,15 @@ export function DatabasePanel({
                 {/* Security note */}
                 <p className="text-xs text-[#9ca3af]">
                   Stored securely — never exposed to your app's users.
+                  Special characters in your password (like <span className="font-mono">@</span>,{" "}
+                  <span className="font-mono">#</span>, <span className="font-mono">!</span>) are
+                  automatically URL-encoded before saving.
                 </p>
                 <p className="text-xs text-[#9ca3af]">
                   The <span className="font-mono text-[#6b7280]">password</span> in the URL is your{" "}
                   <strong className="font-medium text-[#6b7280]">database user's password</strong> — not your Beomz account password.
                   You'll find it in your database provider's dashboard or connection details.
                 </p>
-
                 {/* Where to find it link */}
                 {(() => {
                   const provider = BYO_PROVIDERS.find((p) => p.key === byoSelectedProvider);
