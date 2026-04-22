@@ -428,7 +428,10 @@ export function ProjectPage() {
       setDbEnabled(state.database_enabled);
       setDbProvider(state.db_provider);
       setDbWired(state.db_wired);
-      setByoDbHost(state.byoDbHost ?? null);
+      const supabaseHost = state.supabaseUrl
+        ? (() => { try { return new URL(state.supabaseUrl!).hostname; } catch { return null; } })()
+        : null;
+      setByoDbHost(state.byoDbHost ?? supabaseHost ?? null);
       if (state.db_wired && isWebContainerSupported()) {
         try {
           const { wc } = await getOrBootWebContainer();

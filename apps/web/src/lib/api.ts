@@ -446,6 +446,25 @@ export async function disconnectByoDb(projectId: string): Promise<void> {
   });
 }
 
+/** BEO-522: Connect a user's own Supabase project (URL + anon key). */
+export async function connectSupabaseDb(
+  projectId: string,
+  url: string,
+  anonKey: string,
+): Promise<void> {
+  await requestJson<{ status: string }>(`/projects/${projectId}/db/connect`, {
+    method: "POST",
+    body: JSON.stringify({ url, anonKey }),
+  });
+}
+
+/** BEO-522: Disconnect a BYO Supabase project (and clear all db_ columns). */
+export async function disconnectSupabaseDb(projectId: string): Promise<void> {
+  await requestJson<{ status: string }>(`/projects/${projectId}/db/disable`, {
+    method: "POST",
+  });
+}
+
 export async function enableDatabase(projectId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/enable`, {
     method: "POST",
