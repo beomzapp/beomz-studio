@@ -2009,37 +2009,20 @@ export function buildIterationSystemPrompt(
   ].join("\n");
 }
 
-function buildIterationUserMessage(
+export function buildIterationUserMessage(
   prompt: string,
   existingFiles: readonly StudioFile[],
 ): string {
-  // Include only source TSX/TS files as context; skip platform manifests/JSON.
-  const MAX_CONTEXT_CHARS = 40_000;
-  const sourceFiles = existingFiles.filter(
-    (f) => /\.(tsx|ts)$/.test(f.path) && f.source !== "platform",
-  );
-
-  let contextChars = 0;
-  const contextParts: string[] = [];
-  for (const f of sourceFiles) {
-    const piece = `// FILE: ${f.path}\n${f.content}`;
-    if (contextChars + piece.length > MAX_CONTEXT_CHARS) break;
-    contextParts.push(piece);
-    contextChars += piece.length;
-  }
+  const codebase = existingFiles
+    .map((file) => `### ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)
+    .join("\n\n");
 
   return [
-    "CURRENT APP FILES:",
+    "Here is the current codebase:",
     "",
-    contextParts.join("\n\n---\n\n"),
+    codebase,
     "",
-    "---",
-    "",
-    `CHANGE REQUESTED: ${prompt}`,
-    "",
-    "Return ONLY the files you need to modify with their complete updated content.",
-    "Make targeted, surgical edits. Do not rewrite the entire app.",
-    "If only one file needs changing, return only that file.",
+    `Edit request: ${prompt}`,
   ].join("\n");
 }
 
@@ -2068,6 +2051,7 @@ async function callModelIterate(
     dbProvider,
     neonAuthBaseUrl,
   );
+  console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
   const userMessage = buildIterationUserMessage(prompt, existingFiles);
 
   if (model.startsWith("claude-")) {

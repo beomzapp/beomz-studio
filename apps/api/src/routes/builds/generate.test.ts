@@ -10,6 +10,7 @@ process.env.PORT ??= "3001";
 const {
   filterBlockedGeneratedFiles,
   isBlockedFile,
+  buildIterationUserMessage,
   buildIterationSystemPrompt,
   buildSystemPrompt,
   isNpmPackage,
@@ -94,6 +95,41 @@ test("iteration system prompt forces surgical changed-file responses", () => {
   assert.match(prompt, /What is the minimal change to each file\?/);
 });
 
+test("iteration user message includes every existing file with path and content", () => {
+  const prompt = buildIterationUserMessage("Rename the CTA button.", [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: "export default function App() { return null; }\n",
+      source: "ai",
+      locked: false,
+    },
+    {
+      path: "theme.ts",
+      kind: "config",
+      language: "ts",
+      content: "export const theme = { accent: '#f97316' };\n",
+      source: "ai",
+      locked: false,
+    },
+    {
+      path: "package.json",
+      kind: "config",
+      language: "json",
+      content: "{ \"name\": \"iteration-log-seed\" }\n",
+      source: "platform",
+      locked: false,
+    },
+  ]);
+
+  assert.match(prompt, /Here is the current codebase:/);
+  assert.match(prompt, /### App\.tsx/);
+  assert.match(prompt, /### theme\.ts/);
+  assert.match(prompt, /### package\.json/);
+  assert.match(prompt, /Edit request: Rename the CTA button\./);
+});
+
 test("system prompts describe the preview shell icon and logo color mapping", () => {
   const initialPrompt = buildSystemPrompt("professional-blue");
   const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);
@@ -122,6 +158,7 @@ test("iteration path uses a lower Anthropic max token cap and logs isIteration",
   assert.match(source, /const ITERATION_MAX_TOKENS = 32000;/);
   assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
   assert.match(source, /console\.log\("\[generate\] isIteration:", isIteration\);/);
+  assert.match(source, /console\.log\("\[generate\] existing files fetched:", existingFiles\?\.map\(\(f\) => f\.path\)\);/);
   assert.match(source, /console\.log\("\[generate\] iteration input files:", existingFiles\?\.length \?\? 0, "files"\);/);
   assert.match(source, /console\.log\("\[generate\] iteration input tokens \(estimated\):", Math\.round\(JSON\.stringify\(messages\)\.length \/ 4\)\);/);
 });
