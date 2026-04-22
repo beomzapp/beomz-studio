@@ -1612,7 +1612,7 @@ function parseRawToolOutput(raw: { files?: unknown; summary?: unknown; appName?:
 
 const ANTHROPIC_HAIKU_FALLBACK = "claude-haiku-4-5-20251001";
 const DEFAULT_BUILD_MAX_TOKENS = 64000;
-const ITERATION_MAX_TOKENS = 24000;
+const ITERATION_MAX_TOKENS = 32000;
 
 async function callAnthropicWithMessages(
   model: string,
@@ -1942,33 +1942,43 @@ export function buildIterationSystemPrompt(
     : "";
   const dbImportRules = isNeonWired
     ? [
-        "8. NEON IMPORTS: Use: import { neon } from '@neondatabase/serverless' and import.meta.env.VITE_DATABASE_URL.",
-        "   Use sql tagged templates (sql`...`) and CREATE TABLE IF NOT EXISTS at startup.",
-        "   Do NOT use pg. Do NOT use @supabase/supabase-js. Do NOT use createClient().",
+        "NEON IMPORTS:",
+        "Use: import { neon } from '@neondatabase/serverless' and import.meta.env.VITE_DATABASE_URL.",
+        "Use sql tagged templates (sql`...`) and CREATE TABLE IF NOT EXISTS at startup.",
+        "Do NOT use pg. Do NOT use @supabase/supabase-js. Do NOT use createClient().",
       ]
     : [
-        "8. SUPABASE IMPORTS: Always use: import { createClient } from '@supabase/supabase-js'",
-        "   NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
+        "SUPABASE IMPORTS:",
+        "Always use: import { createClient } from '@supabase/supabase-js'",
+        "NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
       ];
   return [
-    "You are modifying an existing React application. Apply ONLY the specific change the user requests.",
+    "You are making a surgical edit to an existing React app.",
     imageBlock,
     "",
     "RULES:",
-    "1. Return ONLY the files you need to modify. Do not return unchanged files.",
-    "2. Make targeted, surgical edits. Do not rewrite the entire app.",
-    "3. If only one file needs changing, return only that file.",
-    "4. Preserve all existing structure, components, navigation, and logic unless the change requires touching them.",
-    "5. For feature additions: add the minimal code in the relevant file(s) only.",
-    "6. For text/copy changes: update only the text content, nothing else.",
-    "7. Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
-    "8. Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
-    "   Do NOT include <script src=\"https://cdn.tailwindcss.com\"> or any cdn.tailwindcss.com link/script tag. Tailwind CSS v4 is already configured in the scaffold.",
-    "9. Keep all existing functionality that the user did NOT ask to change.",
+    "1. Understand the full codebase before editing — read all files carefully",
+    "2. Identify the MINIMUM set of files that need to change to fulfil this request",
+    "3. Make precise, targeted changes — do not rewrite files that don't need changing",
+    "4. Only return files you actually modified",
+    "5. If only one file needs changing, return only that file",
+    "6. If adding a new feature requires a new file, create it and update any imports",
+    "7. Preserve all existing functionality — do not break what already works",
+    "8. Match the existing code style, naming conventions, and patterns exactly",
+    "",
+    "Think step by step:",
+    "- What is the user asking for?",
+    "- Which files need to change?",
+    "- What is the minimal change to each file?",
+    "",
+    "Additional constraints:",
+    "Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
+    "Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
+    "Do NOT include <script src=\"https://cdn.tailwindcss.com\"> or any cdn.tailwindcss.com link/script tag. Tailwind CSS v4 is already configured in the scaffold.",
     ...dbImportRules,
-    "10. Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
-    "11. When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
-    "12. Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
+    "Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
+    "When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
+    "Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
     "",
     PREVIEW_SHELL_ICON_CONTEXT,
     "",

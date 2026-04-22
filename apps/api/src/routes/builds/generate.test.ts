@@ -86,9 +86,12 @@ test("system prompts include lucide safe icon guidance and banned icon list", ()
 test("iteration system prompt forces surgical changed-file responses", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, false);
 
-  assert.match(prompt, /Return ONLY the files you need to modify\. Do not return unchanged files\./);
-  assert.match(prompt, /Make targeted, surgical edits\. Do not rewrite the entire app\./);
-  assert.match(prompt, /If only one file needs changing, return only that file\./);
+  assert.match(prompt, /You are making a surgical edit to an existing React app\./);
+  assert.match(prompt, /Understand the full codebase before editing — read all files carefully/);
+  assert.match(prompt, /Identify the MINIMUM set of files that need to change to fulfil this request/);
+  assert.match(prompt, /Only return files you actually modified/);
+  assert.match(prompt, /Think step by step:/);
+  assert.match(prompt, /What is the minimal change to each file\?/);
 });
 
 test("system prompts describe the preview shell icon and logo color mapping", () => {
@@ -116,7 +119,7 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
 test("iteration path uses a lower Anthropic max token cap and logs isIteration", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 
-  assert.match(source, /const ITERATION_MAX_TOKENS = 24000;/);
+  assert.match(source, /const ITERATION_MAX_TOKENS = 32000;/);
   assert.match(source, /const maxTokens = isIteration \? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;/);
   assert.match(source, /console\.log\("\[generate\] isIteration:", isIteration\);/);
 });
