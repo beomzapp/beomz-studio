@@ -452,9 +452,9 @@ export async function connectSupabaseDb(
   url: string,
   anonKey: string,
 ): Promise<void> {
-  await requestJson<{ status: string }>(`/projects/${projectId}/db/connect`, {
+  await requestJson<{ host?: string }>(`/projects/${projectId}/byo-db`, {
     method: "POST",
-    body: JSON.stringify({ url, anonKey }),
+    body: JSON.stringify({ supabaseUrl: url, supabaseAnonKey: anonKey }),
   });
 }
 
@@ -495,9 +495,12 @@ export async function connectDatabase(
   projectId: string,
   body: { url: string; anonKey: string },
 ): Promise<void> {
-  await requestJson<{ ok: boolean }>(`/projects/${projectId}/db/connect`, {
+  await requestJson<{ host?: string }>(`/projects/${projectId}/byo-db`, {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      supabaseUrl: body.url,
+      supabaseAnonKey: body.anonKey,
+    }),
   });
 }
 
