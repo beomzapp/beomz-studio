@@ -183,8 +183,9 @@ const DELIVER_FILES_TOOL: Anthropic.Messages.Tool = {
       files: {
         type: "array",
         description:
-          "All generated files. App.tsx (default export required) is always first. "
-          + "Multi-page apps: App.tsx + one file per major page/section.",
+          "Files required to fulfill the request. "
+          + "Initial builds should return the full app with App.tsx first. "
+          + "Iterations should return only changed or new files; include App.tsx only when it changed or new wiring is needed.",
         items: {
           type: "object",
           properties: {
