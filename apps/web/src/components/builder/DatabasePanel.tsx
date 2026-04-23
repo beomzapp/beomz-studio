@@ -35,6 +35,9 @@ import {
   XCircle,
   ArrowRight,
   ArrowLeft,
+  Check,
+  Copy,
+  X,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
@@ -198,6 +201,12 @@ export function DatabasePanel({
   const [byoWiringPollDeferred, setByoWiringPollDeferred] = useState(false);
   const wiringPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wiringStartTimeRef = useRef<number>(0);
+
+  // ── BEO-532: setup SQL helper after BYO rewire ──
+  const [setupSql, setSetupSql] = useState<string | null>(null);
+  const [setupSqlDismissed, setSetupSqlDismissed] = useState(false);
+  const [setupSqlCopied, setSetupSqlCopied] = useState(false);
+  const setupSqlCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Upgrade modal + progress ──────────────────────────
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -409,6 +418,18 @@ export function DatabasePanel({
     [projectId, dataTable, dataRows, fetchRows, runMigrationSafe],
   );
 
+  const handleCopySetupSql = useCallback(async () => {
+    if (!setupSql) return;
+    try {
+      await navigator.clipboard.writeText(setupSql);
+      setSetupSqlCopied(true);
+      if (setupSqlCopyTimerRef.current) clearTimeout(setupSqlCopyTimerRef.current);
+      setupSqlCopyTimerRef.current = setTimeout(() => setSetupSqlCopied(false), 2000);
+    } catch {
+      showToast("Couldn't copy — select the SQL manually.");
+    }
+  }, [setupSql, showToast]);
+
   const handleStorageAddon = useCallback(
     async (priceId: string) => {
       if (!projectId) return;
@@ -456,6 +477,11 @@ export function DatabasePanel({
         host = url;
       }
       setByoSavedHost(host);
+      if (result.setupSql && result.setupSql.trim()) {
+        setSetupSql(result.setupSql);
+        setSetupSqlDismissed(false);
+        setSetupSqlCopied(false);
+      }
       if (result.wiring) {
         wiringStartTimeRef.current = Date.now();
         setByoWiringPollDeferred(false);
@@ -624,6 +650,7 @@ export function DatabasePanel({
       if (upgradePollRef.current) clearTimeout(upgradePollRef.current);
       if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (setupSqlCopyTimerRef.current) clearTimeout(setupSqlCopyTimerRef.current);
     };
   }, []);
 
@@ -686,6 +713,7 @@ export function DatabasePanel({
 
   // STATE 3 — BYO Supabase connected (also shown after upgrade completes)
   if (isByoConnected) {
+    const showSetupSql = !!setupSql && !setupSqlDismissed;
     return (
       <div className={cn("flex h-full flex-col overflow-hidden", className)}>
         {renderByoWiringBanner(
@@ -694,6 +722,7 @@ export function DatabasePanel({
           byoWiringPollDeferred,
           byoSavedHost ?? byoConnectedHost ?? null,
         )}
+        {showSetupSql && renderSetupSqlHelper()}
         <ConnectedHeader
           kind="byo"
           label={byoSavedHost ?? byoConnectedHost ?? "Supabase"}
@@ -1503,6 +1532,65 @@ export function DatabasePanel({
     return (
       <div className="fixed bottom-4 right-4 z-50 rounded-xl border border-[#e5e7eb] bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] shadow-lg">
         {toast}
+      </div>
+    );
+  }
+
+  function renderSetupSqlHelper() {
+    if (!setupSql) return null;
+    const host = byoSavedHost ?? byoConnectedHost ?? "";
+    const projectRef = host.split(".")[0];
+    const sqlEditorUrl = projectRef
+      ? `https://supabase.com/dashboard/project/${projectRef}/sql/new`
+      : "https://supabase.com/dashboard";
+    return (
+      <div className="flex-shrink-0 border-b border-[#e5e7eb] bg-white px-4 py-4">
+        <div className="relative rounded-2xl border border-[#e5e7eb] bg-[#faf9f6] p-4">
+          <button
+            type="button"
+            onClick={() => setSetupSqlDismissed(true)}
+            aria-label="Dismiss setup SQL"
+            className="absolute right-3 top-3 rounded-lg p-1 text-[#9ca3af] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+          >
+            <X size={14} />
+          </button>
+          <div className="pr-6">
+            <p className="text-sm font-semibold text-[#1a1a1a]">Create your tables</p>
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Run this SQL in your Supabase project to create the required tables.
+            </p>
+          </div>
+          <pre className="mt-3 max-h-56 overflow-auto rounded-xl border border-[#1f2937] bg-[#0b1020] p-3 font-mono text-[11px] leading-relaxed text-[#e5e7eb]">
+            {setupSql}
+          </pre>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleCopySetupSql()}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
+                setupSqlCopied
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-[#e5e7eb] bg-white text-[#1a1a1a] hover:border-[#F97316]/50 hover:text-[#F97316]",
+              )}
+            >
+              {setupSqlCopied ? <Check size={12} /> : <Copy size={12} />}
+              {setupSqlCopied ? "Copied!" : "Copy SQL"}
+            </button>
+            <a
+              href={sqlEditorUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#1a1a1a] transition-colors hover:border-[#F97316]/50 hover:text-[#F97316]"
+            >
+              Open Supabase SQL editor
+              <ArrowRight size={12} />
+            </a>
+          </div>
+          <p className="mt-3 text-[11px] text-[#9ca3af]">
+            Already have these tables? You can skip this step.
+          </p>
+        </div>
       </div>
     );
   }

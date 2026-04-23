@@ -447,16 +447,21 @@ export async function disconnectByoDb(projectId: string): Promise<void> {
 }
 
 /** BEO-522: Connect a user's own Supabase project (URL + anon key).
- *  BEO-524: Returns { wiring: true } when an auto-wire iteration was triggered. */
+ *  BEO-524: Returns { wiring: true } when an auto-wire iteration was triggered.
+ *  BEO-532: May return setupSql — CREATE TABLE statements the user must run
+ *           in their Supabase SQL editor (service role key is not available). */
 export async function connectSupabaseDb(
   projectId: string,
   url: string,
   anonKey: string,
-): Promise<{ wiring: boolean; host?: string }> {
-  return requestJson<{ wiring: boolean; host?: string }>(`/projects/${projectId}/byo-db`, {
-    method: "POST",
-    body: JSON.stringify({ supabaseUrl: url, supabaseAnonKey: anonKey }),
-  });
+): Promise<{ wiring: boolean; host?: string; setupSql?: string }> {
+  return requestJson<{ wiring: boolean; host?: string; setupSql?: string }>(
+    `/projects/${projectId}/byo-db`,
+    {
+      method: "POST",
+      body: JSON.stringify({ supabaseUrl: url, supabaseAnonKey: anonKey }),
+    },
+  );
 }
 
 /** BEO-522: Disconnect a BYO Supabase project (and clear all db_ columns). */
