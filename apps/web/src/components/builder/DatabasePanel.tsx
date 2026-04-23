@@ -194,6 +194,8 @@ export function DatabasePanel({
   // ── BYO wiring progress after initial connect (BEO-524) ──
   const [byoWiring, setByoWiring] = useState(false);
   const [byoWiringDone, setByoWiringDone] = useState(false);
+  /** BEO-530: poll hit 120s with no completed build — show "next build" copy instead of hanging */
+  const [byoWiringPollDeferred, setByoWiringPollDeferred] = useState(false);
   const wiringPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wiringStartTimeRef = useRef<number>(0);
 
@@ -456,6 +458,7 @@ export function DatabasePanel({
       setByoSavedHost(host);
       if (result.wiring) {
         wiringStartTimeRef.current = Date.now();
+        setByoWiringPollDeferred(false);
         setByoWiring(true);
         onDbStateChange();
       } else {
@@ -485,6 +488,7 @@ export function DatabasePanel({
           const isNew = buildStarted >= wiringStartTimeRef.current - 5000;
           if (isNew && (status.build.status === "completed" || status.build.status === "failed")) {
             setByoWiring(false);
+            setByoWiringPollDeferred(false);
             setByoWiringDone(true);
             return;
           }
@@ -495,7 +499,10 @@ export function DatabasePanel({
             void poll();
           }, POLL_INTERVAL_MS);
         } else {
+          // BEO-530: no completed build within 120s — exit wiring and show next-build message
           setByoWiring(false);
+          setByoWiringPollDeferred(true);
+          setByoWiringDone(true);
         }
       } catch {
         if (!cancelled) {
@@ -506,6 +513,8 @@ export function DatabasePanel({
             }, POLL_INTERVAL_MS);
           } else {
             setByoWiring(false);
+            setByoWiringPollDeferred(true);
+            setByoWiringDone(true);
           }
         }
       }
@@ -679,7 +688,12 @@ export function DatabasePanel({
   if (isByoConnected) {
     return (
       <div className={cn("flex h-full flex-col overflow-hidden", className)}>
-        {renderByoWiringBanner(byoWiring, byoWiringDone, byoSavedHost ?? byoConnectedHost ?? null)}
+        {renderByoWiringBanner(
+          byoWiring,
+          byoWiringDone,
+          byoWiringPollDeferred,
+          byoSavedHost ?? byoConnectedHost ?? null,
+        )}
         <ConnectedHeader
           kind="byo"
           label={byoSavedHost ?? byoConnectedHost ?? "Supabase"}
@@ -1549,9 +1563,13 @@ function ConnectedHeader({
 // BYO-connect wiring banner (initial connect progress)
 // ═══════════════════════════════════════════════════════════
 
+const BYO_WIRING_DEFERRED_MSG =
+  "✅ Connected to Supabase — rewire will apply on your next build";
+
 function renderByoWiringBanner(
   byoWiring: boolean,
   byoWiringDone: boolean,
+  pollTimedOutNoBuild: boolean,
   host: string | null,
 ) {
   if (!byoWiring && !byoWiringDone) return null;
@@ -1568,6 +1586,15 @@ function renderByoWiringBanner(
               Rewiring your app to use real data · ~30s
             </p>
           </div>
+        </div>
+      </div>
+    );
+  }
+  if (pollTimedOutNoBuild) {
+    return (
+      <div className="flex-shrink-0 border-b border-emerald-200 bg-emerald-50 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <p className="text-sm font-semibold text-emerald-700">{BYO_WIRING_DEFERRED_MSG}</p>
         </div>
       </div>
     );
