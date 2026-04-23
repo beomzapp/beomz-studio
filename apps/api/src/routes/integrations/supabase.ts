@@ -494,6 +494,8 @@ export function createSupabaseIntegrationsRoute(
         supabaseUrl,
         supabaseAnonKey: anonKey,
         serviceRoleKey,
+        oauthAccessToken: tokens.accessToken,
+        oauthRefreshToken: tokens.refreshToken,
         prompt: AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
         ensureSupabaseProjectColumnsFn,
         fetchFn,

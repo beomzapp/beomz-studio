@@ -8,7 +8,8 @@ import { apiConfig } from "../config.js";
 import type { OrgContext } from "../types.js";
 import { buildSupabaseSetupSqlFromFiles } from "./supabaseSetupSql.js";
 import { runBuildInBackground } from "../routes/builds/generate.js";
-import { decryptProjectSecret } from "./projectSecrets.js";
+import { decryptProjectSecret, encryptProjectSecret } from "./projectSecrets.js";
+import { refreshSupabaseOAuthTokens } from "./supabaseOAuth.js";
 
 const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
 const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
@@ -21,11 +22,16 @@ export const AUTO_WIRE_SUPABASE_ITERATION_PROMPT = [
   "Use this exact import line, character for character:",
   'import { createClient } from "@supabase/supabase-js"',
   'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
+  "NEVER use fetch() to call Supabase under ANY circumstances.",
   "NEVER use raw fetch() to call Supabase REST endpoints directly.",
-  "NEVER construct URLs like `${supabaseUrl}/rest/v1/tasks?select=*`.",
-  "ALWAYS use the supabase client exclusively:",
+  "NEVER construct URLs like supabaseUrl + '/rest/v1/...'.",
+  "NEVER construct URLs like `${supabaseUrl}/rest/v1/...`.",
+  "ALWAYS use ONLY the supabase client:",
   "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
-  "const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })",
+  "supabase.from('todos').select('*').order('created_at', { ascending: false })",
+  "supabase.from('todos').insert({ title, completed: false })",
+  "supabase.from('todos').update({ completed }).eq('id', id)",
+  "supabase.from('todos').delete().eq('id', id)",
   "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all hardcoded arrays and sample data with real Supabase queries.",
   "Use useEffect + useState for data fetching with loading and error states.",
@@ -36,11 +42,16 @@ export const UPGRADE_TO_BYO_ITERATION_PROMPT = [
   "Use this exact import line, character for character:",
   'import { createClient } from "@supabase/supabase-js"',
   'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
+  "NEVER use fetch() to call Supabase under ANY circumstances.",
   "NEVER use raw fetch() to call Supabase REST endpoints directly.",
-  "NEVER construct URLs like `${supabaseUrl}/rest/v1/tasks?select=*`.",
-  "ALWAYS use the supabase client exclusively:",
+  "NEVER construct URLs like supabaseUrl + '/rest/v1/...'.",
+  "NEVER construct URLs like `${supabaseUrl}/rest/v1/...`.",
+  "ALWAYS use ONLY the supabase client:",
   "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
-  "const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })",
+  "supabase.from('todos').select('*').order('created_at', { ascending: false })",
+  "supabase.from('todos').insert({ title, completed: false })",
+  "supabase.from('todos').update({ completed }).eq('id', id)",
+  "supabase.from('todos').delete().eq('id', id)",
   "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all Neon/postgres queries with Supabase queries.",
   "Use useEffect + useState with loading and error states.",
@@ -206,6 +217,92 @@ export function readSetupSqlFromMetadata(metadata: unknown): string {
   return typeof setupSql === "string" ? setupSql : "";
 }
 
+function getSupabaseProjectRef(supabaseUrl: string): string {
+  return new URL(supabaseUrl).hostname.split(".")[0] ?? "";
+}
+
+function readStoredToken(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return decryptProjectSecret(trimmed) ?? trimmed;
+}
+
+async function runSupabaseManagementQueryWithOAuth(input: {
+  orgContext: OrgContext;
+  projectId: string;
+  supabaseUrl: string;
+  accessToken: string;
+  refreshToken: string;
+  query: string;
+  fetchFn: typeof fetch;
+}): Promise<void> {
+  const projectRef = getSupabaseProjectRef(input.supabaseUrl);
+  const requestQuery = (accessToken: string) => input.fetchFn(
+    `${SUPABASE_MANAGEMENT_API_BASE}/projects/${projectRef}/database/query`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ query: input.query }),
+    },
+  );
+
+  let currentAccessToken = input.accessToken;
+  let currentRefreshToken = input.refreshToken;
+
+  console.log("[supabaseByo] starting OAuth table auto-creation", {
+    projectId: input.projectId,
+    projectRef,
+  });
+
+  let response = await requestQuery(currentAccessToken);
+
+  if (response.status === 401 && currentRefreshToken) {
+    console.log("[supabaseByo] OAuth access token expired, refreshing before retry", {
+      projectId: input.projectId,
+      projectRef,
+    });
+
+    const refreshedTokens = await refreshSupabaseOAuthTokens(currentRefreshToken, input.fetchFn);
+    currentAccessToken = refreshedTokens.accessToken;
+    currentRefreshToken = refreshedTokens.refreshToken;
+
+    await updateProjectWithSchemaReloadRetry(input.orgContext, input.projectId, {
+      supabase_oauth_access_token: encryptProjectSecret(currentAccessToken),
+      supabase_oauth_refresh_token: encryptProjectSecret(currentRefreshToken),
+    });
+
+    response = await requestQuery(currentAccessToken);
+  }
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    console.error("[supabaseByo] OAuth table auto-creation failed", {
+      projectId: input.projectId,
+      projectRef,
+      status: response.status,
+      body,
+    });
+    throw new Error(
+      `Supabase Management API query failed (${response.status})${body ? `: ${body}` : ""}`,
+    );
+  }
+
+  console.log("[supabaseByo] OAuth table auto-creation completed", {
+    projectId: input.projectId,
+    projectRef,
+  });
+}
+
 export async function waitForGenerationCompletion(
   db: OrgContext["db"],
   buildId: string,
@@ -278,6 +375,8 @@ export async function connectProjectToSupabase(
     ensureSupabaseProjectColumnsFn?: typeof ensureSupabaseProjectColumns;
     extraProjectPatch?: Record<string, unknown>;
     serviceRoleKey?: string | null;
+    oauthAccessToken?: string | null;
+    oauthRefreshToken?: string | null;
     fetchFn?: typeof fetch;
   },
 ): Promise<{ host: string; wiring: true; setupSql?: string }> {
@@ -288,6 +387,16 @@ export async function connectProjectToSupabase(
   const host = new URL(input.supabaseUrl).hostname;
   const serviceRoleKey = input.serviceRoleKey
     ?? decryptProjectSecret((input.project as Record<string, unknown> | null)?.byo_db_service_key);
+  const oauthAccessToken = readStoredToken(
+    input.oauthAccessToken
+    ?? input.extraProjectPatch?.supabase_oauth_access_token
+    ?? (input.project as Record<string, unknown> | null)?.supabase_oauth_access_token,
+  );
+  const oauthRefreshToken = readStoredToken(
+    input.oauthRefreshToken
+    ?? input.extraProjectPatch?.supabase_oauth_refresh_token
+    ?? (input.project as Record<string, unknown> | null)?.supabase_oauth_refresh_token,
+  );
 
   await ensureSupabaseProjectColumnsFn(fetchFn);
 
@@ -324,10 +433,37 @@ export async function connectProjectToSupabase(
   const generationFiles = Array.isArray(completedGeneration?.files)
     ? completedGeneration.files
     : [];
+  console.log("[supabaseByo] auto-wire iteration completed", {
+    buildId,
+    projectId: input.projectId,
+    status: completedGeneration?.status ?? null,
+    fileCount: generationFiles.length,
+  });
   const setupSql = readSetupSqlFromMetadata(completedGeneration?.metadata)
     || buildSupabaseSetupSqlFromFiles(generationFiles);
 
-  if (serviceRoleKey && setupSql) {
+  if (!setupSql) {
+    console.log("[supabaseByo] no setup SQL detected after auto-wire", {
+      buildId,
+      projectId: input.projectId,
+    });
+    return { host, wiring: true };
+  }
+
+  if (oauthAccessToken && oauthRefreshToken) {
+    await runSupabaseManagementQueryWithOAuth({
+      orgContext: input.orgContext,
+      projectId: input.projectId,
+      supabaseUrl: input.supabaseUrl,
+      accessToken: oauthAccessToken,
+      refreshToken: oauthRefreshToken,
+      query: setupSql,
+      fetchFn,
+    });
+    return { host, wiring: true };
+  }
+
+  if (serviceRoleKey) {
     await runSupabaseExecSql(input.supabaseUrl, serviceRoleKey, setupSql, fetchFn);
     return { host, wiring: true };
   }

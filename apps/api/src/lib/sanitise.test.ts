@@ -186,6 +186,8 @@ test("sanitiseContent replaces raw Supabase REST fetch patterns with a TODO plac
     "    headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY },",
     "  });",
     "  const fallback = await fetch(supabaseUrl + '/rest/v1/tasks?select=*');",
+    "  const envFallback = await fetch(import.meta.env.VITE_SUPABASE_URL + '/rest/v1/tasks?select=*');",
+    "  const constFallback = await fetch(SUPABASE_URL + '/rest/v1/tasks?select=*');",
     "  await fetch(`${supabaseUrl}/rest/v1/tasks?select=*`);",
     "}",
   ].join("\n");
@@ -193,9 +195,11 @@ test("sanitiseContent replaces raw Supabase REST fetch patterns with a TODO plac
   const output = sanitiseContent(input, TEST_PATH);
 
   assert.equal(output.includes("/rest/v1/tasks"), false);
-  assert.match(output, /const response = undefined; \/\/ TODO: use supabase client instead of raw fetch/);
-  assert.match(output, /const fallback = undefined; \/\/ TODO: use supabase client instead of raw fetch/);
-  assert.match(output, /\/\/ TODO: use supabase client instead of raw fetch/);
+  assert.match(output, /const response = undefined; \/\/ TODO: use supabase client: supabase\.from\('table'\)\.select\('\*'\)/);
+  assert.match(output, /const fallback = undefined; \/\/ TODO: use supabase client: supabase\.from\('table'\)\.select\('\*'\)/);
+  assert.match(output, /const envFallback = undefined; \/\/ TODO: use supabase client: supabase\.from\('table'\)\.select\('\*'\)/);
+  assert.match(output, /const constFallback = undefined; \/\/ TODO: use supabase client: supabase\.from\('table'\)\.select\('\*'\)/);
+  assert.match(output, /\/\/ TODO: use supabase client: supabase\.from\('table'\)\.select\('\*'\)/);
 });
 
 test("sanitiseContent fixes multi-word hyphenated component names", () => {

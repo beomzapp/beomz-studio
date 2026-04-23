@@ -123,7 +123,7 @@ const supabaseImport: Fixer = {
 };
 
 const SUPABASE_REST_FETCH_TARGET =
-  "(?:`[\\s\\S]*?/rest/v1/[\\s\\S]*?`|[A-Za-z_$][\\w$.]*\\s*\\+\\s*['\"][^'\"]*/rest/v1/[^'\"]*['\"]|['\"][^'\"]*/rest/v1/[^'\"]*['\"])";
+  "(?:`[\\s\\S]*?/rest/v1/[\\s\\S]*?`|[^,\\n)]+?\\s*\\+\\s*['\"][^'\"]*/rest/v1/[^'\"]*['\"]|['\"][^'\"]*/rest/v1/[^'\"]*['\"])";
 const SUPABASE_REST_FETCH_ASSIGNMENT_PATTERN = new RegExp(
   `^([ \\t]*)(const|let|var)\\s+([^=\\n]+?)=\\s*(await\\s*)?fetch\\(\\s*${SUPABASE_REST_FETCH_TARGET}\\s*(?:,\\s*\\{[\\s\\S]*?\\})?\\s*\\)\\s*;?`,
   "gm",
@@ -144,12 +144,12 @@ const supabaseRestFetch: Fixer = {
       .replace(
         SUPABASE_REST_FETCH_ASSIGNMENT_PATTERN,
         (_match, indent: string, keyword: string, identifier: string) =>
-          `${indent}${keyword} ${identifier}= undefined; // TODO: use supabase client instead of raw fetch`,
+          `${indent}${keyword} ${identifier.trim()} = undefined; // TODO: use supabase client: supabase.from('table').select('*')`,
       )
       .replace(
         SUPABASE_REST_FETCH_STATEMENT_PATTERN,
         (_match, indent: string) =>
-          `${indent}// TODO: use supabase client instead of raw fetch`,
+          `${indent}// TODO: use supabase client: supabase.from('table').select('*')`,
       ),
 };
 

@@ -459,9 +459,15 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
   assert.match(String(buildRuns[0]?.prompt ?? ""), /Rewire the entire app to use Supabase instead of hardcoded data\./);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /import \{ createClient \} from "@supabase\/supabase-js"/);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /do NOT use "\.\/supabase-js", "supabase-js", or any relative path\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER use fetch\(\) to call Supabase under ANY circumstances\./);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER use raw fetch\(\) to call Supabase REST endpoints directly\./);
-  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like `\$\{supabaseUrl\}\/rest\/v1\/tasks\?select=\*`\./);
-  assert.match(String(buildRuns[0]?.prompt ?? ""), /ALWAYS use the supabase client exclusively:/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like supabaseUrl \+ '\/rest\/v1\/\.\.\.'\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like `\$\{supabaseUrl\}\/rest\/v1\/\.\.\.`\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /ALWAYS use ONLY the supabase client:/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.select\('\*'\)\.order\('created_at', \{ ascending: false \}\)/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.insert\(\{ title, completed: false \}\)/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.update\(\{ completed \}\)\.eq\('id', id\)/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.delete\(\)\.eq\('id', id\)/);
 });
 
 test("byo-db delete clears saved Supabase credentials", async () => {
@@ -746,9 +752,15 @@ test("upgrade-to-byo migrates data, deletes Neon, and queues a Supabase rewire",
   assert.match(String(buildRuns[0]?.prompt ?? ""), /use Supabase instead of Neon\./);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /import \{ createClient \} from "@supabase\/supabase-js"/);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /do NOT use "\.\/supabase-js", "supabase-js", or any relative path\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER use fetch\(\) to call Supabase under ANY circumstances\./);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER use raw fetch\(\) to call Supabase REST endpoints directly\./);
-  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like `\$\{supabaseUrl\}\/rest\/v1\/tasks\?select=\*`\./);
-  assert.match(String(buildRuns[0]?.prompt ?? ""), /ALWAYS use the supabase client exclusively:/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like supabaseUrl \+ '\/rest\/v1\/\.\.\.'\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like `\$\{supabaseUrl\}\/rest\/v1\/\.\.\.`\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /ALWAYS use ONLY the supabase client:/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.select\('\*'\)\.order\('created_at', \{ ascending: false \}\)/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.insert\(\{ title, completed: false \}\)/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.update\(\{ completed \}\)\.eq\('id', id\)/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /supabase\.from\('todos'\)\.delete\(\)\.eq\('id', id\)/);
 });
 
 test("upgrade-to-byo continues when Neon deletion fails after a successful migration", async () => {

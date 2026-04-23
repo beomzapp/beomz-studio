@@ -313,6 +313,8 @@ test("connect fetches api keys, stores encrypted secrets, and triggers silent wi
   assert.equal(connectCalls[0]?.supabaseUrl, "https://abcd1234.supabase.co");
   assert.equal(connectCalls[0]?.supabaseAnonKey, "anon-key-1");
   assert.equal(connectCalls[0]?.serviceRoleKey, "service-role-key-1");
+  assert.equal(connectCalls[0]?.oauthAccessToken, "access-token-1");
+  assert.equal(connectCalls[0]?.oauthRefreshToken, "refresh-token-1");
   assert.equal(
     decryptProjectSecret((connectCalls[0]?.extraProjectPatch as Record<string, unknown>)?.byo_db_service_key),
     "service-role-key-1",
