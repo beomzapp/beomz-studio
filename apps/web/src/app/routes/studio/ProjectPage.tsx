@@ -405,11 +405,20 @@ export function ProjectPage() {
   // ─── Wire to database (fires after Neon provisioning) ────────────────────
 
   const handleWireToDatabase = useCallback(
-    (prompt: string) => {
+    (prompt: string, options?: { forceIteration?: boolean }) => {
       setActiveView("preview");
+      if (options?.forceIteration) {
+        // BEO-541: route through implementWithPlan so the build body carries
+        // `implementPlan`, which makes the API's `hasExplicitImplementSignal()`
+        // bypass `detectIntent()` — fires a silent iteration with no plan card
+        // and no Implement button. Used for the Supabase BYO rewire whose short
+        // prompt would otherwise be classified as plan mode.
+        void implementWithPlan(prompt);
+        return;
+      }
       handleSendMessage(prompt, undefined, true);
     },
-    [handleSendMessage, setActiveView],
+    [handleSendMessage, setActiveView, implementWithPlan],
   );
 
   // ─── Stop streaming ───────────────────────────────────────────────────────

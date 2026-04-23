@@ -181,7 +181,16 @@ interface DatabasePanelProps {
   /** BEO-445: sanitised host returned by API when provider === 'byo' */
   byoConnectedHost?: string | null;
   onDbStateChange: () => void;
-  onWireToDatabase?: (prompt: string) => void;
+  /**
+   * BEO-541: `forceIteration: true` routes the prompt through
+   * `implementWithPlan` (passes `implementPlan` in build body → API's
+   * `hasExplicitImplementSignal()` bypasses `detectIntent()` and runs a
+   * silent iteration — no plan card, no Implement button). Used for the
+   * Supabase OAuth/manual rewire where the short prompt would otherwise
+   * be classified as plan mode. Managed Neon's long WIRING_PROMPT is
+   * already classified as build, so it omits the flag.
+   */
+  onWireToDatabase?: (prompt: string, options?: { forceIteration?: boolean }) => void;
 }
 
 export function DatabasePanel({
@@ -513,10 +522,12 @@ export function DatabasePanel({
       }
       onDbStateChange();
       setSubFlow(null);
-      // Same pattern as managed-Neon enableDatabase: fire the rewire prompt
-      // into chat so the user watches it in the chat panel (BEO-537).
+      // BEO-541: fire as a silent iteration (forceIteration bypasses the
+      // API's intent detection → no plan card, no Implement button). The
+      // short SUPABASE_WIRING_PROMPT would otherwise be classified as
+      // plan mode by detectIntent().
       setTimeout(() => {
-        onWireToDatabase?.(SUPABASE_WIRING_PROMPT);
+        onWireToDatabase?.(SUPABASE_WIRING_PROMPT, { forceIteration: true });
       }, 1200);
     } catch (err) {
       setByoConnectError(err instanceof Error ? err.message : "Failed to connect.");
@@ -712,11 +723,14 @@ export function DatabasePanel({
         setSetupSqlCopied(false);
       }
       onDbStateChange();
-      // Close modal first, then inject the rewire prompt into chat — exact
-      // same pattern as managed-Neon enableDatabase + WIRING_PROMPT.
+      // BEO-541: close modal then fire as a silent iteration.
+      // `forceIteration: true` routes through `implementWithPlan` so the
+      // API's `hasExplicitImplementSignal()` bypasses `detectIntent()` —
+      // matches the managed-Neon WIRING_PROMPT behaviour (which is already
+      // classified as build by virtue of its long prescriptive content).
       handleCloseConnectModal();
       setTimeout(() => {
-        onWireToDatabase?.(SUPABASE_WIRING_PROMPT);
+        onWireToDatabase?.(SUPABASE_WIRING_PROMPT, { forceIteration: true });
       }, 300);
     } catch (err) {
       setOauthConnectError(err instanceof Error ? err.message : "Failed to connect project.");
