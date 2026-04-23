@@ -228,6 +228,8 @@ export function DatabasePanel({
   const [oauthConnectError, setOauthConnectError] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
   const popupWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** BEO-538: localStorage poll fallback when postMessage does not fire */
+  const supabaseOauthLsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── BEO-532: setup SQL helper after BYO rewire ──
   const [setupSql, setSetupSql] = useState<string | null>(null);
@@ -529,10 +531,14 @@ export function DatabasePanel({
     setPopupOpening(true);
     setPopupClosedError(null);
     const authorizeUrl = `${getApiBaseUrl()}/integrations/supabase/authorize?projectId=${encodeURIComponent(projectId)}`;
+    const w = 600;
+    const h = 700;
+    const left = Math.round(window.screenX + (window.outerWidth - w) / 2);
+    const top = Math.round(window.screenY + (window.outerHeight - h) / 2);
     const popup = window.open(
       authorizeUrl,
       "supabase_oauth",
-      "width=600,height=700,scrollbars=yes",
+      `width=${w},height=${h},left=${left},top=${top},scrollbars=yes,resizable=yes,toolbar=no,menubar=no`,
     );
     if (!popup) {
       setPopupOpening(false);
@@ -564,7 +570,7 @@ export function DatabasePanel({
     }, 500);
   }, [projectId]);
 
-  // ── BEO-537: Listen for OAuth popup success postMessage ─
+  // ── BEO-537: Listen for OAuth popup success postMessage + BEO-538 localStorage fallback
   useEffect(() => {
     if (!connectModalOpen) return;
     const apiOrigin = (() => {
@@ -574,19 +580,15 @@ export function DatabasePanel({
         return "";
       }
     })();
-    function handleMessage(event: MessageEvent) {
-      // Accept from either the API origin or the studio origin (callback may
-      // be served from either depending on reverse-proxy setup).
-      if (
-        apiOrigin &&
-        event.origin !== apiOrigin &&
-        event.origin !== window.location.origin
-      ) {
-        return;
+    function clearOauthResultPoll() {
+      if (supabaseOauthLsIntervalRef.current) {
+        clearInterval(supabaseOauthLsIntervalRef.current);
+        supabaseOauthLsIntervalRef.current = null;
       }
-      const data = event.data as { type?: string; projectId?: string } | null;
-      if (!data || data.type !== "supabase_oauth_success") return;
+    }
+    function applyOauthSuccess(data: { projectId?: string }) {
       if (data.projectId && projectId && data.projectId !== projectId) return;
+      clearOauthResultPoll();
 
       // Close the popup if still open
       if (popupRef.current && !popupRef.current.closed) {
@@ -619,9 +621,40 @@ export function DatabasePanel({
         })
         .finally(() => setOauthProjectsLoading(false));
     }
+    function handleMessage(event: MessageEvent) {
+      // Accept from either the API origin or the studio origin (callback may
+      // be served from either depending on reverse-proxy setup).
+      if (
+        apiOrigin &&
+        event.origin !== apiOrigin &&
+        event.origin !== window.location.origin
+      ) {
+        return;
+      }
+      const data = event.data as { type?: string; projectId?: string } | null;
+      if (!data || data.type !== "supabase_oauth_success") return;
+      applyOauthSuccess(data);
+    }
     window.addEventListener("message", handleMessage);
+    const lsInterval = setInterval(() => {
+      const result = localStorage.getItem("supabase_oauth_result");
+      if (!result) return;
+      localStorage.removeItem("supabase_oauth_result");
+      clearOauthResultPoll();
+      let data: { type?: string; projectId?: string };
+      try {
+        data = JSON.parse(result) as { type?: string; projectId?: string };
+      } catch {
+        return;
+      }
+      if (data.type === "supabase_oauth_success") {
+        applyOauthSuccess(data);
+      }
+    }, 500);
+    supabaseOauthLsIntervalRef.current = lsInterval;
     return () => {
       window.removeEventListener("message", handleMessage);
+      clearOauthResultPoll();
     };
   }, [connectModalOpen, projectId]);
 
@@ -655,6 +688,10 @@ export function DatabasePanel({
     if (popupWatchRef.current) {
       clearInterval(popupWatchRef.current);
       popupWatchRef.current = null;
+    }
+    if (supabaseOauthLsIntervalRef.current) {
+      clearInterval(supabaseOauthLsIntervalRef.current);
+      supabaseOauthLsIntervalRef.current = null;
     }
     popupRef.current = null;
   }, []);
@@ -785,6 +822,10 @@ export function DatabasePanel({
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (setupSqlCopyTimerRef.current) clearTimeout(setupSqlCopyTimerRef.current);
       if (popupWatchRef.current) clearInterval(popupWatchRef.current);
+      if (supabaseOauthLsIntervalRef.current) {
+        clearInterval(supabaseOauthLsIntervalRef.current);
+        supabaseOauthLsIntervalRef.current = null;
+      }
       if (popupRef.current && !popupRef.current.closed) {
         try {
           popupRef.current.close();
