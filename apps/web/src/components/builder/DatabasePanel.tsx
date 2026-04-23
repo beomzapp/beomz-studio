@@ -1,13 +1,23 @@
 /**
- * DatabasePanel — BEO-527 unified rewrite.
+ * DatabasePanel — BEO-537 (Supabase OAuth UX rework).
  *
  * One panel, three states, one-way managed → BYO upgrade.
  *
  * State 1 — No DB connected      → two side-by-side cards (no tabs)
- *                                   "Add database"          → inline Neon provision
- *                                   "Connect Supabase →"    → URL + Anon Key form
+ *                                   "Add database"             → inline Neon provision
+ *                                   "Connect Supabase →"       → popup-OAuth modal (step 1)
+ *                                   "Connect manually →"       → URL + Anon Key form
  * State 2 — Managed (Neon)       → header + "Upgrade to BYO →" link + Data tabs
  * State 3 — BYO (Supabase)       → header + Data tabs (no downgrade)
+ *
+ * OAuth connect modal (State 1 → State 3):
+ *   Step 1: "Continue with Supabase" → window.open popup (no redirect).
+ *           Popup posts { type: 'supabase_oauth_success', projectId } on success.
+ *   Step 2: Project picker (fetched from GET /integrations/supabase/projects).
+ *           "Connect this project" → POST /integrations/supabase/connect.
+ *   On success: close modal, inject SUPABASE_WIRING_PROMPT into chat (same
+ *   mechanism as managed Neon's WIRING_PROMPT), fire it immediately. The
+ *   chat-based iteration shows progress — no silent polling here.
  *
  * Upgrade (State 2 → State 3):
  *   Modal (min-height faux viewport, NOT position:fixed)
@@ -62,7 +72,7 @@ import {
 type PanelTab = "schema" | "data" | "users" | "storage";
 type SubFlow = null | "supabase";
 type UpgradePhase = "idle" | "migrating" | "rewiring" | "done";
-type OAuthWiringPhase = "connecting" | "rewiring" | null;
+type ConnectModalStep = "oauth" | "projects";
 
 const WIRING_PROMPT = `Wire this app to its Postgres database.
 
@@ -123,6 +133,13 @@ no npm packages, no imports.
 After completing the wiring, respond with ONLY 1-2 sentences confirming what you did.
 Do not show file contents, import statements, or code examples in your response.
 Example: 'Done — I've wired your app to the Neon database. Notes are now saved and loaded from Postgres automatically.'`;
+
+/**
+ * BEO-537: Rewire prompt injected into chat after BYO Supabase connect
+ * (both OAuth popup flow and manual URL+key form). Mirrors the pattern
+ * used by WIRING_PROMPT for managed Neon provisioning.
+ */
+const SUPABASE_WIRING_PROMPT = `Rewire the entire app to use Supabase. Import createClient from "@supabase/supabase-js" and use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY. Replace all hardcoded data with real Supabase queries. Use useEffect + useState for loading and error states.`;
 
 function formatStorageMb(mb: number): string {
   if (mb >= 1000) return `${(mb / 1024).toFixed(1)}GB`;
@@ -198,24 +215,19 @@ export function DatabasePanel({
   const [byoConnectError, setByoConnectError] = useState<string | null>(null);
   const [byoSavedHost, setByoSavedHost] = useState<string | null>(byoConnectedHost ?? null);
 
-  // ── BYO wiring progress after initial connect (BEO-524) ──
-  const [byoWiring, setByoWiring] = useState(false);
-  const [byoWiringDone, setByoWiringDone] = useState(false);
-  /** BEO-530: poll hit 120s with no completed build — show "next build" copy instead of hanging */
-  const [byoWiringPollDeferred, setByoWiringPollDeferred] = useState(false);
-  const wiringPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wiringStartTimeRef = useRef<number>(0);
-
-  // ── BEO-534: OAuth connect state ──────────────────────
-  const [oauthCallbackDetected, setOauthCallbackDetected] = useState(false);
+  // ── BEO-537: OAuth connect modal state ────────────────
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [modalStep, setModalStep] = useState<ConnectModalStep>("oauth");
+  const [popupOpening, setPopupOpening] = useState(false);
+  const [popupClosedError, setPopupClosedError] = useState<string | null>(null);
   const [oauthProjects, setOauthProjects] = useState<SupabaseOAuthProject[]>([]);
   const [oauthProjectsLoading, setOauthProjectsLoading] = useState(false);
   const [oauthProjectsError, setOauthProjectsError] = useState<string | null>(null);
   const [selectedOauthRef, setSelectedOauthRef] = useState("");
   const [oauthConnecting, setOauthConnecting] = useState(false);
   const [oauthConnectError, setOauthConnectError] = useState<string | null>(null);
-  const [oauthWiringPhase, setOauthWiringPhase] = useState<OAuthWiringPhase>(null);
-  const oauthWiringPhaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const popupRef = useRef<Window | null>(null);
+  const popupWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── BEO-532: setup SQL helper after BYO rewire ──
   const [setupSql, setSetupSql] = useState<string | null>(null);
@@ -291,31 +303,6 @@ export function DatabasePanel({
   useEffect(() => {
     if (byoConnectedHost) setByoSavedHost(byoConnectedHost);
   }, [byoConnectedHost]);
-
-  // ── BEO-534: Detect OAuth callback on mount ───────────
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("supabase_connected") !== "1") return;
-    // Clean URL param immediately
-    params.delete("supabase_connected");
-    const newSearch = params.toString();
-    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
-    window.history.replaceState(null, "", newUrl);
-    if (!projectId) return;
-    setOauthCallbackDetected(true);
-    setOauthProjectsLoading(true);
-    setOauthProjectsError(null);
-    getSupabaseOAuthProjects(projectId)
-      .then((projects) => {
-        setOauthProjects(projects);
-        if (projects.length === 1) setSelectedOauthRef(projects[0].ref);
-      })
-      .catch((err) => {
-        setOauthProjectsError(err instanceof Error ? err.message : "Failed to load projects.");
-      })
-      .finally(() => setOauthProjectsLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ── Data fetchers ─────────────────────────────────────
   const fetchSchema = useCallback(async () => {
@@ -501,7 +488,7 @@ export function DatabasePanel({
     }
   }, [projectId, onDbStateChange, onWireToDatabase]);
 
-  // ── State 1 — "Connect Supabase →" ────────────────────
+  // ── State 1 — "Connect manually" (URL + Anon Key form) ─
   const handleConnectSupabase = useCallback(async () => {
     const url = supabaseUrl.trim();
     const key = supabaseAnonKey.trim();
@@ -522,23 +509,157 @@ export function DatabasePanel({
         setSetupSqlDismissed(false);
         setSetupSqlCopied(false);
       }
-      if (result.wiring) {
-        wiringStartTimeRef.current = Date.now();
-        setByoWiringPollDeferred(false);
-        setByoWiring(true);
-        onDbStateChange();
-      } else {
-        onDbStateChange();
-      }
+      onDbStateChange();
       setSubFlow(null);
+      // Same pattern as managed-Neon enableDatabase: fire the rewire prompt
+      // into chat so the user watches it in the chat panel (BEO-537).
+      setTimeout(() => {
+        onWireToDatabase?.(SUPABASE_WIRING_PROMPT);
+      }, 1200);
     } catch (err) {
       setByoConnectError(err instanceof Error ? err.message : "Failed to connect.");
     } finally {
       setByoConnecting(false);
     }
-  }, [projectId, supabaseUrl, supabaseAnonKey, onDbStateChange]);
+  }, [projectId, supabaseUrl, supabaseAnonKey, onDbStateChange, onWireToDatabase]);
 
-  // ── BEO-534: OAuth connect handler ────────────────────
+  // ── BEO-537: Open OAuth popup ─────────────────────────
+  const openOAuthPopup = useCallback(() => {
+    if (!projectId) return;
+    setPopupOpening(true);
+    setPopupClosedError(null);
+    const authorizeUrl = `${getApiBaseUrl()}/integrations/supabase/authorize?projectId=${encodeURIComponent(projectId)}`;
+    const popup = window.open(
+      authorizeUrl,
+      "supabase_oauth",
+      "width=600,height=700,scrollbars=yes",
+    );
+    if (!popup) {
+      setPopupOpening(false);
+      setPopupClosedError("Popup blocked — please allow popups for this site and try again.");
+      return;
+    }
+    popupRef.current = popup;
+    popup.focus();
+    // Watch for the user closing the popup without completing OAuth.
+    if (popupWatchRef.current) clearInterval(popupWatchRef.current);
+    popupWatchRef.current = setInterval(() => {
+      const w = popupRef.current;
+      if (!w || w.closed) {
+        if (popupWatchRef.current) {
+          clearInterval(popupWatchRef.current);
+          popupWatchRef.current = null;
+        }
+        popupRef.current = null;
+        setPopupOpening(false);
+        // Only show "closed" error if we haven't already transitioned to the
+        // project picker (i.e. postMessage success fired first).
+        setModalStep((current) => {
+          if (current === "oauth") {
+            setPopupClosedError("The popup was closed before authorization finished.");
+          }
+          return current;
+        });
+      }
+    }, 500);
+  }, [projectId]);
+
+  // ── BEO-537: Listen for OAuth popup success postMessage ─
+  useEffect(() => {
+    if (!connectModalOpen) return;
+    const apiOrigin = (() => {
+      try {
+        return new URL(getApiBaseUrl()).origin;
+      } catch {
+        return "";
+      }
+    })();
+    function handleMessage(event: MessageEvent) {
+      // Accept from either the API origin or the studio origin (callback may
+      // be served from either depending on reverse-proxy setup).
+      if (
+        apiOrigin &&
+        event.origin !== apiOrigin &&
+        event.origin !== window.location.origin
+      ) {
+        return;
+      }
+      const data = event.data as { type?: string; projectId?: string } | null;
+      if (!data || data.type !== "supabase_oauth_success") return;
+      if (data.projectId && projectId && data.projectId !== projectId) return;
+
+      // Close the popup if still open
+      if (popupRef.current && !popupRef.current.closed) {
+        try {
+          popupRef.current.close();
+        } catch {
+          // popup may have closed itself already
+        }
+      }
+      if (popupWatchRef.current) {
+        clearInterval(popupWatchRef.current);
+        popupWatchRef.current = null;
+      }
+      popupRef.current = null;
+      setPopupOpening(false);
+      setPopupClosedError(null);
+
+      // Transition to project picker and load projects
+      setModalStep("projects");
+      if (!projectId) return;
+      setOauthProjectsLoading(true);
+      setOauthProjectsError(null);
+      getSupabaseOAuthProjects(projectId)
+        .then((projects) => {
+          setOauthProjects(projects);
+          if (projects.length === 1) setSelectedOauthRef(projects[0].ref);
+        })
+        .catch((err) => {
+          setOauthProjectsError(err instanceof Error ? err.message : "Failed to load projects.");
+        })
+        .finally(() => setOauthProjectsLoading(false));
+    }
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [connectModalOpen, projectId]);
+
+  // ── Open the Connect Supabase modal ───────────────────
+  const handleOpenConnectModal = useCallback(() => {
+    if (!projectId) return;
+    setConnectModalOpen(true);
+    setModalStep("oauth");
+    setOauthProjects([]);
+    setSelectedOauthRef("");
+    setOauthProjectsError(null);
+    setOauthConnectError(null);
+    setPopupClosedError(null);
+    setPopupOpening(false);
+  }, [projectId]);
+
+  // ── Close the Connect Supabase modal ──────────────────
+  const handleCloseConnectModal = useCallback(() => {
+    setConnectModalOpen(false);
+    setModalStep("oauth");
+    setPopupClosedError(null);
+    setPopupOpening(false);
+    setOauthConnectError(null);
+    if (popupRef.current && !popupRef.current.closed) {
+      try {
+        popupRef.current.close();
+      } catch {
+        // ignore
+      }
+    }
+    if (popupWatchRef.current) {
+      clearInterval(popupWatchRef.current);
+      popupWatchRef.current = null;
+    }
+    popupRef.current = null;
+  }, []);
+
+  // ── BEO-537: Connect chosen project → inject rewire prompt ─
   const handleConnectOAuth = useCallback(async () => {
     if (!projectId || !selectedOauthRef) return;
     setOauthConnecting(true);
@@ -553,82 +674,19 @@ export function DatabasePanel({
         setSetupSqlDismissed(false);
         setSetupSqlCopied(false);
       }
-      wiringStartTimeRef.current = Date.now();
-      setByoWiringPollDeferred(false);
-      setOauthWiringPhase("connecting");
-      // Advance to "Rewiring" phase after 30s
-      if (oauthWiringPhaseTimerRef.current) clearTimeout(oauthWiringPhaseTimerRef.current);
-      oauthWiringPhaseTimerRef.current = setTimeout(() => {
-        setOauthWiringPhase((prev) => (prev === "connecting" ? "rewiring" : prev));
-      }, 30_000);
-      setByoWiring(true);
       onDbStateChange();
-      setOauthCallbackDetected(false);
+      // Close modal first, then inject the rewire prompt into chat — exact
+      // same pattern as managed-Neon enableDatabase + WIRING_PROMPT.
+      handleCloseConnectModal();
+      setTimeout(() => {
+        onWireToDatabase?.(SUPABASE_WIRING_PROMPT);
+      }, 300);
     } catch (err) {
       setOauthConnectError(err instanceof Error ? err.message : "Failed to connect project.");
     } finally {
       setOauthConnecting(false);
     }
-  }, [projectId, selectedOauthRef, onDbStateChange]);
-
-  // ── Poll BYO initial-connect wiring ───────────────────
-  useEffect(() => {
-    if (!byoWiring || !projectId) return;
-    let cancelled = false;
-    const POLL_INTERVAL_MS = 3000;
-    const MAX_WAIT_MS = 180_000;
-    async function poll() {
-      if (cancelled) return;
-      try {
-        const status = await getLatestBuildForProject(projectId!);
-        if (cancelled) return;
-        if (status) {
-          const buildStarted = new Date(status.build.startedAt).getTime();
-          const isNew = buildStarted >= wiringStartTimeRef.current - 5000;
-          if (isNew && (status.build.status === "completed" || status.build.status === "failed")) {
-            setByoWiring(false);
-            setByoWiringPollDeferred(false);
-            setByoWiringDone(true);
-            setOauthWiringPhase(null);
-            return;
-          }
-        }
-        const elapsed = Date.now() - wiringStartTimeRef.current;
-        if (elapsed < MAX_WAIT_MS) {
-          wiringPollRef.current = setTimeout(() => {
-            void poll();
-          }, POLL_INTERVAL_MS);
-        } else {
-          // BEO-530: no completed build within timeout — exit wiring and show next-build message
-          setByoWiring(false);
-          setByoWiringPollDeferred(true);
-          setByoWiringDone(true);
-          setOauthWiringPhase(null);
-        }
-      } catch {
-        if (!cancelled) {
-          const elapsed = Date.now() - wiringStartTimeRef.current;
-          if (elapsed < MAX_WAIT_MS) {
-            wiringPollRef.current = setTimeout(() => {
-              void poll();
-            }, POLL_INTERVAL_MS);
-          } else {
-            setByoWiring(false);
-            setByoWiringPollDeferred(true);
-            setByoWiringDone(true);
-            setOauthWiringPhase(null);
-          }
-        }
-      }
-    }
-    wiringPollRef.current = setTimeout(() => {
-      void poll();
-    }, 2000);
-    return () => {
-      cancelled = true;
-      if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
-    };
-  }, [byoWiring, projectId]);
+  }, [projectId, selectedOauthRef, onDbStateChange, onWireToDatabase, handleCloseConnectModal]);
 
   // ── Upgrade submit → POST + poll ──────────────────────
   const handleConfirmUpgrade = useCallback(async () => {
@@ -724,10 +782,16 @@ export function DatabasePanel({
     return () => {
       if (upgradePhaseTimerRef.current) clearTimeout(upgradePhaseTimerRef.current);
       if (upgradePollRef.current) clearTimeout(upgradePollRef.current);
-      if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (setupSqlCopyTimerRef.current) clearTimeout(setupSqlCopyTimerRef.current);
-      if (oauthWiringPhaseTimerRef.current) clearTimeout(oauthWiringPhaseTimerRef.current);
+      if (popupWatchRef.current) clearInterval(popupWatchRef.current);
+      if (popupRef.current && !popupRef.current.closed) {
+        try {
+          popupRef.current.close();
+        } catch {
+          // ignore
+        }
+      }
     };
   }, []);
 
@@ -793,13 +857,6 @@ export function DatabasePanel({
     const showSetupSql = !!setupSql && !setupSqlDismissed;
     return (
       <div className={cn("flex h-full flex-col overflow-hidden", className)}>
-        {renderByoWiringBanner(
-          byoWiring,
-          byoWiringDone,
-          byoWiringPollDeferred,
-          byoSavedHost ?? byoConnectedHost ?? null,
-          oauthWiringPhase,
-        )}
         {showSetupSql && renderSetupSqlHelper()}
         <ConnectedHeader
           kind="byo"
@@ -848,14 +905,9 @@ export function DatabasePanel({
   // STATE 1 — No DB connected
   return (
     <div className={cn("flex h-full flex-col overflow-hidden bg-[#faf9f6]", className)}>
-      {oauthCallbackDetected ? (
-        renderOAuthProjectPicker()
-      ) : subFlow === "supabase" ? (
-        renderSupabaseForm()
-      ) : (
-        renderIntroCards()
-      )}
+      {subFlow === "supabase" ? renderSupabaseForm() : renderIntroCards()}
       {renderToast()}
+      {connectModalOpen && renderConnectModal()}
     </div>
   );
 
@@ -914,10 +966,7 @@ export function DatabasePanel({
             <div className="flex-1" />
             <button
               type="button"
-              onClick={() => {
-                if (!projectId) return;
-                window.location.href = `${getApiBaseUrl()}/integrations/supabase/authorize?projectId=${projectId}`;
-              }}
+              onClick={handleOpenConnectModal}
               disabled={!projectId}
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-[#1a1a1a] bg-white px-4 py-3 text-sm font-semibold text-[#1a1a1a] transition-colors hover:bg-[#1a1a1a] hover:text-white disabled:opacity-50"
             >
@@ -940,107 +989,160 @@ export function DatabasePanel({
     );
   }
 
-  function renderOAuthProjectPicker() {
+  function renderConnectModal() {
     return (
-      <div className="flex-1 overflow-y-auto px-6 py-7">
-        <div className="mx-auto w-full max-w-lg space-y-5">
-          <div className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
-            <div
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold"
-              style={{ backgroundColor: "#edfaf4", color: "#3ecf8e" }}
-            >
-              S
-            </div>
-            <div className="min-w-0">
-              <p className="font-semibold text-[#1a1a1a]">Supabase connected</p>
-              <p className="text-xs text-[#6b7280]">Choose a project to link to this app</p>
-            </div>
-          </div>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
+        <div className="relative w-full max-w-md rounded-2xl border border-[#e5e7eb] bg-white p-7 shadow-2xl">
+          <button
+            type="button"
+            onClick={handleCloseConnectModal}
+            aria-label="Close"
+            className="absolute right-4 top-4 rounded-lg p-1 text-[#9ca3af] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+          >
+            <X size={16} />
+          </button>
 
-          {oauthProjectsLoading && (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
-            </div>
-          )}
-
-          {oauthProjectsError && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-              <XCircle size={14} className="mt-0.5 flex-shrink-0" />
-              {oauthProjectsError}
-            </div>
-          )}
-
-          {!oauthProjectsLoading && !oauthProjectsError && oauthProjects.length === 0 && (
-            <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
-              <p className="text-sm font-medium text-[#6b7280]">No projects found</p>
-              <p className="mt-1 text-xs text-[#9ca3af]">
-                Make sure your Supabase account has at least one project.
-              </p>
-            </div>
-          )}
-
-          {!oauthProjectsLoading && oauthProjects.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-[#6b7280]">Your projects</p>
-              {oauthProjects.map((project) => (
-                <button
-                  key={project.ref}
-                  type="button"
-                  onClick={() => setSelectedOauthRef(project.ref)}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
-                    selectedOauthRef === project.ref
-                      ? "border-[#F97316]/60 bg-[#F97316]/5 ring-2 ring-[#F97316]/10"
-                      : "border-[#e5e7eb] bg-white hover:border-[#F97316]/40 hover:bg-[#F97316]/5",
-                  )}
+          {modalStep === "oauth" && (
+            <>
+              <div className="mb-5 flex items-center gap-3">
+                <div
+                  className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl text-lg font-bold"
+                  style={{ backgroundColor: "#edfaf4", color: "#3ecf8e" }}
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[#1a1a1a]">{project.name}</p>
-                    <p className="mt-0.5 font-mono text-[11px] text-[#9ca3af]">
-                      {project.ref} · {project.region}
+                  S
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-[#1a1a1a]">
+                    Connect your Supabase project
+                  </h2>
+                  <p className="mt-0.5 text-xs text-[#6b7280]">
+                    Authorize Beomz to access your Supabase account.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={openOAuthPopup}
+                disabled={!projectId || popupOpening}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ backgroundColor: "#3ecf8e" }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "#34b77a";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "#3ecf8e";
+                }}
+              >
+                {popupOpening ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <span className="text-base font-bold leading-none">S</span>
+                )}
+                {popupOpening ? "Waiting for authorization…" : "Continue with Supabase"}
+              </button>
+              <p className="mt-2 text-center text-[11px] text-[#9ca3af]">
+                You'll be asked to authorize Beomz in a popup
+              </p>
+
+              {popupClosedError && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-600">
+                  <XCircle size={13} className="mt-0.5 flex-shrink-0" />
+                  {popupClosedError}
+                </div>
+              )}
+            </>
+          )}
+
+          {modalStep === "projects" && (
+            <>
+              <div className="mb-5 flex items-center gap-3">
+                <div
+                  className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl text-lg font-bold"
+                  style={{ backgroundColor: "#edfaf4", color: "#3ecf8e" }}
+                >
+                  S
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold text-[#1a1a1a]">Choose a project</h2>
+                  <p className="mt-0.5 text-xs text-[#6b7280]">
+                    Link a Supabase project to this app.
+                  </p>
+                </div>
+              </div>
+
+              {oauthProjectsLoading && (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+                </div>
+              )}
+
+              {oauthProjectsError && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+                  {oauthProjectsError}
+                </div>
+              )}
+
+              {!oauthProjectsLoading &&
+                !oauthProjectsError &&
+                oauthProjects.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-[#faf9f6] p-6 text-center">
+                    <p className="text-sm font-medium text-[#6b7280]">No projects found</p>
+                    <p className="mt-1 text-xs text-[#9ca3af]">
+                      Make sure your Supabase account has at least one project.
                     </p>
                   </div>
-                  {selectedOauthRef === project.ref && (
-                    <Check size={15} className="ml-3 flex-shrink-0 text-[#F97316]" />
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+                )}
 
-          {oauthConnectError && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-              <XCircle size={14} className="mt-0.5 flex-shrink-0" />
-              {oauthConnectError}
-            </div>
-          )}
+              {!oauthProjectsLoading && oauthProjects.length > 0 && (
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                  {oauthProjects.map((project) => (
+                    <button
+                      key={project.ref}
+                      type="button"
+                      onClick={() => setSelectedOauthRef(project.ref)}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
+                        selectedOauthRef === project.ref
+                          ? "border-[#F97316]/60 bg-[#F97316]/5 ring-2 ring-[#F97316]/10"
+                          : "border-[#e5e7eb] bg-white hover:border-[#F97316]/40 hover:bg-[#F97316]/5",
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#1a1a1a]">
+                          {project.name}
+                        </p>
+                        <p className="mt-0.5 font-mono text-[11px] text-[#9ca3af]">
+                          {project.ref} · {project.region}
+                        </p>
+                      </div>
+                      {selectedOauthRef === project.ref && (
+                        <Check size={15} className="ml-3 flex-shrink-0 text-[#F97316]" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-          {!oauthProjectsLoading && oauthProjects.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void handleConnectOAuth()}
-              disabled={!selectedOauthRef || oauthConnecting}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {oauthConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-              {oauthConnecting ? "Connecting…" : "Connect this project"}
-            </button>
-          )}
+              {oauthConnectError && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                  <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+                  {oauthConnectError}
+                </div>
+              )}
 
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setOauthCallbackDetected(false);
-                setOauthProjects([]);
-                setSelectedOauthRef("");
-                setOauthConnectError(null);
-              }}
-              className="text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
-            >
-              ← Back
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => void handleConnectOAuth()}
+                disabled={!selectedOauthRef || oauthConnecting}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {oauthConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                {oauthConnecting ? "Connecting…" : "Connect this project"}
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -1846,57 +1948,3 @@ function ConnectedHeader({
   );
 }
 
-// ═══════════════════════════════════════════════════════════
-// BYO-connect wiring banner (initial connect progress)
-// ═══════════════════════════════════════════════════════════
-
-const BYO_WIRING_DEFERRED_MSG =
-  "✅ Connected to Supabase — rewire will apply on your next build";
-
-function renderByoWiringBanner(
-  byoWiring: boolean,
-  byoWiringDone: boolean,
-  pollTimedOutNoBuild: boolean,
-  _host: string | null,
-  wiringPhase?: OAuthWiringPhase,
-) {
-  if (!byoWiring && !byoWiringDone) return null;
-  if (byoWiring) {
-    const heading =
-      wiringPhase === "rewiring"
-        ? "Rewiring your app…"
-        : "Connecting your Supabase project…";
-    return (
-      <div className="flex-shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
-            <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-[#F97316]">{heading}</p>
-            <p className="mt-0.5 text-xs text-orange-500/80">~30s</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  if (pollTimedOutNoBuild) {
-    return (
-      <div className="flex-shrink-0 border-b border-emerald-200 bg-emerald-50 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <p className="text-sm font-semibold text-emerald-700">{BYO_WIRING_DEFERRED_MSG}</p>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex-shrink-0 border-b border-emerald-200 bg-emerald-50 px-4 py-3">
-      <div className="flex items-center gap-3">
-        <span className="text-lg">✅</span>
-        <p className="text-sm font-semibold text-emerald-700">
-          Connected to Supabase — your data is live
-        </p>
-      </div>
-    </div>
-  );
-}
