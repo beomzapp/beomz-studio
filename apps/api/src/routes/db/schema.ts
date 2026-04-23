@@ -3,9 +3,8 @@
  *
  * Returns the live tables + columns from the project's DB schema.
  * For managed (beomz) projects: queries beomz-user-data via Management API.
- * For BYO Supabase: queries via the anon key + Supabase REST / RPC APIs.
+ * For BYO Supabase: queries via the anon key + Supabase REST OpenAPI spec.
  */
-import { createClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
@@ -28,68 +27,6 @@ interface SchemaRouteTableColumn {
 interface SchemaRouteTable {
   table_name: string;
   columns: SchemaRouteTableColumn[];
-}
-
-function buildSupabaseClient(supabaseUrl: string, supabaseAnonKey: string) {
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
-
-function normalizeExecSqlRows(data: unknown): Array<Record<string, unknown>> | null {
-  if (Array.isArray(data)) {
-    return data.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null);
-  }
-
-  if (typeof data === "string") {
-    try {
-      return normalizeExecSqlRows(JSON.parse(data));
-    } catch {
-      return null;
-    }
-  }
-
-  if (typeof data === "object" && data !== null) {
-    const rows = (data as { rows?: unknown; data?: unknown }).rows
-      ?? (data as { rows?: unknown; data?: unknown }).data;
-    if (rows !== undefined) {
-      return normalizeExecSqlRows(rows);
-    }
-  }
-
-  return null;
-}
-
-function groupSchemaRows(rows: Array<Record<string, unknown>>): SchemaRouteTable[] {
-  const tables = new Map<string, SchemaRouteTableColumn[]>();
-
-  for (const row of rows) {
-    const tableName = typeof row.table_name === "string" ? row.table_name : "";
-    if (!tableName) {
-      continue;
-    }
-
-    const columns = tables.get(tableName) ?? [];
-    const columnName = typeof row.column_name === "string" ? row.column_name : "";
-    const columnType = typeof row.data_type === "string"
-      ? row.data_type
-      : typeof row.udt_name === "string"
-        ? row.udt_name
-        : "unknown";
-
-    if (columnName) {
-      columns.push({ name: columnName, type: columnType });
-    }
-
-    tables.set(tableName, columns);
-  }
-
-  return [...tables.entries()]
-    .map(([table_name, columns]) => ({ table_name, columns }))
-    .sort((a, b) => a.table_name.localeCompare(b.table_name));
 }
 
 function parseRefName(ref: string): string | null {
@@ -212,26 +149,7 @@ export async function listSupabaseSchemaTables(
   supabaseUrl: string,
   supabaseAnonKey: string,
   fetchFn: typeof fetch = fetch,
-): Promise<{ tables: SchemaRouteTable[]; note?: string }> {
-  const client = buildSupabaseClient(supabaseUrl, supabaseAnonKey);
-
-  try {
-    const rpcResponse = await (client as any).rpc("exec_sql", {
-      query: `
-        SELECT table_name, column_name, data_type
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-        ORDER BY table_name, ordinal_position;
-      `,
-    });
-    const rpcRows = normalizeExecSqlRows(rpcResponse.data);
-    if (!rpcResponse.error && rpcRows) {
-      return { tables: groupSchemaRows(rpcRows) };
-    }
-  } catch {
-    // Fall back to the OpenAPI spec below.
-  }
-
+): Promise<{ tables: SchemaRouteTable[] }> {
   try {
     const response = await fetchFn(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/`, {
       headers: {
@@ -248,10 +166,7 @@ export async function listSupabaseSchemaTables(
     // Fall through to the non-fatal empty state below.
   }
 
-  return {
-    tables: [],
-    note: "BYO Supabase schema introspection is unavailable with this anon key.",
-  };
+  return { tables: [] };
 }
 
 interface SchemaDbRouteDeps {
@@ -290,7 +205,7 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
           supabaseConfig.supabaseUrl,
           supabaseConfig.supabaseAnonKey,
         );
-        return c.json(result.note ? { tables: result.tables, note: result.note } : { tables: result.tables });
+        return c.json({ tables: result.tables });
       } catch (err) {
         return c.json(
           { error: err instanceof Error ? err.message : "Failed to fetch schema" },

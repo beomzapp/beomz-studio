@@ -11,7 +11,7 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { createStatusDbRoute } = await import("./status.js");
-const { createSchemaDbRoute } = await import("./schema.js");
+const { createSchemaDbRoute, listSupabaseSchemaTables } = await import("./schema.js");
 const { createUsageDbRoute } = await import("./usage.js");
 
 function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
@@ -295,6 +295,65 @@ test("db schema returns BYO Supabase tables using byo_db_url + byo_db_anon_key f
       },
     ],
   });
+});
+
+test("listSupabaseSchemaTables parses BYO tables from the OpenAPI spec without exec_sql", async () => {
+  const result = await listSupabaseSchemaTables(
+    "https://demo-project.supabase.co",
+    "anon-key",
+    async () => new Response(JSON.stringify({
+      paths: {
+        "/todos": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string", format: "uuid" },
+                          title: { type: "string" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/rpc/exec_sql": {},
+      },
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/openapi+json" },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    tables: [
+      {
+        table_name: "todos",
+        columns: [
+          { name: "id", type: "string" },
+          { name: "title", type: "string" },
+        ],
+      },
+    ],
+  });
+});
+
+test("listSupabaseSchemaTables returns an empty table list when the OpenAPI spec is unavailable", async () => {
+  const result = await listSupabaseSchemaTables(
+    "https://demo-project.supabase.co",
+    "anon-key",
+    async () => new Response("missing", { status: 404 }),
+  );
+
+  assert.deepEqual(result, { tables: [] });
 });
 
 test("db usage returns Neon metrics with legacy-compatible keys", async () => {
