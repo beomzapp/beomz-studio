@@ -667,20 +667,17 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     const existingFiles = Array.isArray(latestGeneration?.files)
       ? latestGeneration.files as readonly StudioFile[]
       : [];
-    const shouldAutoWire = existingFiles.length > 0;
 
-    if (shouldAutoWire) {
-      await queueSupabaseAutoWireIteration(
-        orgContext,
-        project,
-        projectId,
-        AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
-        existingFiles,
-        runBuildInBackgroundFn,
-      );
-    }
+    await queueSupabaseAutoWireIteration(
+      orgContext,
+      project,
+      projectId,
+      AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
+      existingFiles,
+      runBuildInBackgroundFn,
+    );
 
-    return c.json({ success: true, host: parsed.host, wiring: shouldAutoWire });
+    return c.json({ success: true, host: parsed.host, wiring: true });
   });
 
   projectsRoute.post("/:id/upgrade-to-byo", authMiddleware, loadOrgContextMiddleware, async (c) => {

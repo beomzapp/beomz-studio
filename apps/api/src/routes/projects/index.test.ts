@@ -237,19 +237,32 @@ test("byo-db requires Supabase anon key", async () => {
   });
 });
 
-test("byo-db runs migration, saves Supabase credentials, and returns host", async () => {
+test("byo-db runs migration, saves Supabase credentials, and always queues auto-wire for fresh projects", async () => {
   const project = createProject();
   const updates: Record<string, unknown>[] = [];
+  const createdGenerations: Record<string, unknown>[] = [];
+  const buildRuns: Array<Record<string, unknown>> = [];
   let migrationRuns = 0;
   const orgContext = createOrgContext(project, {
     updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
       updates.push(patch);
       return { ...project, ...patch };
     },
+    createGeneration: async (input: Record<string, unknown>) => {
+      createdGenerations.push(input);
+      return {
+        ...input,
+        project_id: project.id,
+        template_id: project.template,
+      };
+    },
   });
   const app = createApp(orgContext, {
     ensureByoDbAnonKeyColumn: async () => {
       migrationRuns += 1;
+    },
+    runBuildInBackground: async (input: Record<string, unknown>) => {
+      buildRuns.push(input);
     },
   });
 
@@ -266,9 +279,13 @@ test("byo-db runs migration, saves Supabase credentials, and returns host", asyn
   assert.deepEqual(await response.json(), {
     success: true,
     host: "demo-project.supabase.co",
-    wiring: false,
+    wiring: true,
   });
   assert.equal(migrationRuns, 1);
+  assert.equal(createdGenerations.length, 1);
+  assert.equal(buildRuns.length, 1);
+  assert.deepEqual(buildRuns[0]?.existingFiles, []);
+  assert.equal(buildRuns[0]?.isIteration, true);
   assert.deepEqual(updates, [
     {
       byo_db_url: "https://demo-project.supabase.co",
