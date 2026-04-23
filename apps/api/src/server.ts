@@ -47,6 +47,7 @@ import {
 } from "./routes/projects/publish.js";
 import { vercelDeployRoute } from "./routes/projects/vercel.js";
 import nextPhaseRoute from "./routes/projects/next-phase.js";
+import supabaseIntegrationsRoute from "./routes/integrations/supabase.js";
 
 const app = new Hono();
 const activeSseConnections = new Set<string>();
@@ -170,6 +171,7 @@ app.route("/payments/webhook", webhookRoute);
 // BEO-329 / BEO-404: Storage add-on checkout + public add-on list
 app.route("/payments/storage-addon", createStorageAddonRoute());
 app.route("/payments/storage-addons", createStorageAddonRoute());
+app.route("/integrations/supabase", supabaseIntegrationsRoute);
 // BEO-130: Built-in DB + BYO Supabase
 app.route("/projects/:id/db", dbRouter);
 // BEO-262: Publish

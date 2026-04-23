@@ -10,8 +10,10 @@ import type { StudioFile } from "@beomz-studio/contracts";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
+process.env.PROJECT_JWT_SECRET ??= "test-project-secret";
 
 const { createProjectsRoute } = await import("./index.js");
+const { encryptProjectSecret } = await import("../../lib/projectSecrets.js");
 
 function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
   const now = new Date().toISOString();
@@ -333,6 +335,15 @@ test("byo-db runs migration, saves Supabase credentials, and always queues auto-
     {
       byo_db_url: "https://demo-project.supabase.co",
       byo_db_anon_key: "anon-key",
+      database_enabled: true,
+      db_provider: "supabase",
+      db_config: {
+        url: "https://demo-project.supabase.co",
+        anonKey: "anon-key",
+      },
+      db_schema: null,
+      db_nonce: null,
+      db_wired: false,
     },
   ]);
 });
@@ -428,6 +439,15 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
     {
       byo_db_url: "https://demo-project.supabase.co",
       byo_db_anon_key: "anon-key",
+      database_enabled: true,
+      db_provider: "supabase",
+      db_config: {
+        url: "https://demo-project.supabase.co",
+        anonKey: "anon-key",
+      },
+      db_schema: null,
+      db_nonce: null,
+      db_wired: false,
     },
   ]);
   assert.equal(createdGenerations[0]?.operation_id, "projectIteration");
@@ -468,8 +488,113 @@ test("byo-db delete clears saved Supabase credentials", async () => {
     {
       byo_db_url: null,
       byo_db_anon_key: null,
+      byo_db_service_key: null,
+      supabase_oauth_access_token: null,
+      supabase_oauth_refresh_token: null,
     },
   ]);
+});
+
+test("byo-db auto-creates Supabase tables when a service role key is already stored", async () => {
+  const project = createProject({
+    byo_db_service_key: encryptProjectSecret("service-role-key"),
+  });
+  const generatedFiles: StudioFile[] = [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: [
+        'import { createClient } from "@supabase/supabase-js";',
+        "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);",
+        "const { data } = await supabase.from('tasks').select('id, title, created_at').order('created_at', { ascending: false });",
+      ].join("\n"),
+      source: "ai",
+      locked: false,
+    },
+  ];
+  const updates: Record<string, unknown>[] = [];
+  let orgContext!: OrgContext;
+  orgContext = createOrgContext(project, {
+    updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
+      updates.push(patch);
+      return { ...project, ...patch };
+    },
+    createGeneration: async (input: Record<string, unknown>) => {
+      const row = {
+        ...input,
+        project_id: project.id,
+        template_id: project.template,
+      };
+      await orgContext.db.updateGeneration(String(input.id), row);
+      return row;
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  const execSqlCalls: Array<{ url: string; body: string | null }> = [];
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    execSqlCalls.push({
+      url: String(input),
+      body: typeof init?.body === "string" ? init.body : null,
+    });
+    return new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const app = createApp(orgContext, {
+      ensureByoDbAnonKeyColumn: async () => undefined,
+      runBuildInBackground: async (input: Record<string, unknown>) => {
+        await orgContext.db.updateGeneration(String(input.buildId), {
+          completed_at: new Date().toISOString(),
+          files: generatedFiles,
+          metadata: {},
+          status: "completed",
+          summary: "Rewired to Supabase.",
+        });
+      },
+    });
+
+    const response = await app.request(`http://localhost/projects/${project.id}/byo-db`, {
+      method: "POST",
+      body: JSON.stringify({
+        supabaseUrl: "https://demo-project.supabase.co",
+        supabaseAnonKey: "anon-key",
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      success: true,
+      host: "demo-project.supabase.co",
+      wiring: true,
+    });
+    assert.equal(execSqlCalls.length, 1);
+    assert.match(execSqlCalls[0]?.url ?? "", /demo-project\.supabase\.co\/rest\/v1\/rpc\/exec_sql$/);
+    const execSqlBody = JSON.parse(execSqlCalls[0]?.body ?? "{}") as { query?: string };
+    assert.match(execSqlBody.query ?? "", /CREATE TABLE IF NOT EXISTS public."tasks"/);
+    assert.deepEqual(updates, [
+      {
+        byo_db_url: "https://demo-project.supabase.co",
+        byo_db_anon_key: "anon-key",
+        database_enabled: true,
+        db_provider: "supabase",
+        db_config: {
+          url: "https://demo-project.supabase.co",
+          anonKey: "anon-key",
+        },
+        db_schema: null,
+        db_nonce: null,
+        db_wired: false,
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("upgrade-to-byo migrates data, deletes Neon, and queues a Supabase rewire", async () => {

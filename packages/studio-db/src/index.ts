@@ -78,6 +78,9 @@ export interface ProjectRow extends Record<string, unknown> {
   db_wired: boolean;
   byo_db_url?: string | null;
   byo_db_anon_key?: string | null;
+  byo_db_service_key?: string | null;
+  supabase_oauth_access_token?: string | null;
+  supabase_oauth_refresh_token?: string | null;
   thumbnail_url: string | null;
   // BEO-262: Publish
   published: boolean;
@@ -248,6 +251,9 @@ export interface ProjectUpdate extends Record<string, unknown> {
   db_wired?: boolean;
   byo_db_url?: string | null;
   byo_db_anon_key?: string | null;
+  byo_db_service_key?: string | null;
+  supabase_oauth_access_token?: string | null;
+  supabase_oauth_refresh_token?: string | null;
   thumbnail_url?: string | null;
   // BEO-262: Publish
   published?: boolean;

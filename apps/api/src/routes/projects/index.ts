@@ -5,16 +5,11 @@
  * last_opened_at desc (recently opened first) then updated_at desc.
  * Also returns the generation count per project and plan gate metadata.
  */
-import { randomUUID } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
-
-import { projectIterationOperation } from "@beomz-studio/operations";
-import type { StudioFile, TemplateId } from "@beomz-studio/contracts";
 import { neon } from "@neondatabase/serverless";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import type { StudioFile } from "@beomz-studio/contracts";
 
-import { apiConfig } from "../../config.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -31,7 +26,15 @@ import {
   parseSupabaseProjectUrl,
 } from "../../lib/projectDb.js";
 import { runBuildInBackground } from "../builds/generate.js";
-import { buildSupabaseSetupSqlFromFiles } from "../../lib/supabaseSetupSql.js";
+import {
+  AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
+  UPGRADE_TO_BYO_ITERATION_PROMPT,
+  connectProjectToSupabase,
+  ensureSupabaseProjectColumns,
+  queueSupabaseAutoWireIteration,
+  runSupabaseExecSql,
+  updateProjectWithSchemaReloadRetry,
+} from "../../lib/supabaseByo.js";
 
 interface DatabaseDumpColumn {
   name: string;
@@ -60,40 +63,6 @@ interface ProjectsRouteDeps {
   ensureByoDbAnonKeyColumn?: () => Promise<void>;
   runBuildInBackground?: typeof runBuildInBackground;
 }
-
-const SUPABASE_MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
-const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
-const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
-const AUTO_WIRE_WAIT_TIMEOUT_MS = 60_000;
-const AUTO_WIRE_WAIT_POLL_MS = 500;
-const AUTO_WIRE_SUPABASE_ITERATION_PROMPT = [
-  "Rewire the entire app to use Supabase instead of hardcoded data.",
-  "Use this exact import line, character for character:",
-  'import { createClient } from "@supabase/supabase-js"',
-  'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
-  "NEVER use raw fetch() to call Supabase REST endpoints directly.",
-  "NEVER construct URLs like `${supabaseUrl}/rest/v1/tasks?select=*`.",
-  "ALWAYS use the supabase client exclusively:",
-  "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
-  "const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })",
-  "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
-  "Replace all hardcoded arrays and sample data with real Supabase queries.",
-  "Use useEffect + useState for data fetching with loading and error states.",
-].join("\n");
-const UPGRADE_TO_BYO_ITERATION_PROMPT = [
-  "Rewire the entire app to use Supabase instead of Neon.",
-  "Use this exact import line, character for character:",
-  'import { createClient } from "@supabase/supabase-js"',
-  'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
-  "NEVER use raw fetch() to call Supabase REST endpoints directly.",
-  "NEVER construct URLs like `${supabaseUrl}/rest/v1/tasks?select=*`.",
-  "ALWAYS use the supabase client exclusively:",
-  "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
-  "const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })",
-  "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
-  "Replace all Neon/postgres queries with Supabase queries.",
-  "Use useEffect + useState with loading and error states.",
-].join("\n");
 
 function assertSafeSqlIdentifier(identifier: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
@@ -154,29 +123,6 @@ function buildSequenceResetStatements(table: DatabaseDumpTable): string[] {
     `  MAX(${quoteIdentifier(columnName)}) IS NOT NULL`,
     `) FROM ${quoteQualifiedPublicTable(table.name)};`,
   ].join("\n"));
-}
-
-async function runSupabaseExecSql(
-  supabaseUrl: string,
-  supabaseAnonKey: string,
-  sql: string,
-): Promise<void> {
-  const response = await fetch(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/exec_sql`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-    },
-    body: JSON.stringify({ query: sql }),
-  });
-
-  if (response.ok) {
-    return;
-  }
-
-  const body = await response.text().catch(() => "");
-  throw new Error(`Supabase exec_sql failed (${response.status})${body ? `: ${body}` : ""}`);
 }
 
 async function cleanupSupabaseTables(
@@ -324,192 +270,6 @@ async function restoreSupabaseDatabase(input: {
   }
 }
 
-function getStudioProjectRef(): string {
-  return new URL(apiConfig.STUDIO_SUPABASE_URL).hostname.split(".")[0] ?? "";
-}
-
-async function ensureByoDbAnonKeyColumn(): Promise<void> {
-  const managementKey = apiConfig.SUPABASE_MANAGEMENT_API_KEY?.trim();
-  if (!managementKey) {
-    return;
-  }
-
-  const response = await fetch(
-    `${SUPABASE_MANAGEMENT_API_BASE}/projects/${getStudioProjectRef()}/database/query`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${managementKey}`,
-      },
-      body: JSON.stringify({
-        query: "ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS byo_db_anon_key TEXT;",
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to migrate projects.byo_db_anon_key (${response.status}): ${body}`);
-  }
-}
-
-async function updateProjectWithSchemaReloadRetry(
-  orgContext: OrgContext,
-  projectId: string,
-  patch: Record<string, unknown>,
-): Promise<void> {
-  try {
-    await orgContext.db.updateProject(projectId, patch);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/byo_db_anon_key|schema cache/i.test(message)) {
-      throw error;
-    }
-
-    const dbWithSchemaReload = orgContext.db as OrgContext["db"] & {
-      notifySchemaReload?: () => Promise<void>;
-    };
-    await dbWithSchemaReload.notifySchemaReload?.().catch(() => undefined);
-    await delay(STUDIO_DB_SCHEMA_RELOAD_DELAY_MS);
-    await orgContext.db.updateProject(projectId, patch);
-  }
-}
-
-async function queueSupabaseAutoWireIteration(
-  orgContext: OrgContext,
-  project: Awaited<ReturnType<OrgContext["db"]["findProjectById"]>>,
-  projectId: string,
-  prompt: string,
-  existingFiles: readonly StudioFile[],
-  runBuildInBackgroundFn: typeof runBuildInBackground,
-): Promise<string> {
-  if (!project) {
-    throw new Error("Project not found");
-  }
-
-  const buildId = randomUUID();
-  const requestedAt = new Date().toISOString();
-  const operationId = projectIterationOperation.id;
-
-  await orgContext.db.createGeneration({
-    completed_at: null,
-    error: null,
-    files: [],
-    id: buildId,
-    metadata: {
-      sourcePrompt: prompt,
-      autoWire: "byo_supabase",
-      builderTrace: {
-        events: [
-          {
-            code: "build_queued",
-            id: "1",
-            message: "Supabase wiring queued.",
-            operation: "iteration",
-            timestamp: requestedAt,
-            type: "status",
-            phase: "queued",
-          },
-        ],
-        lastEventId: "1",
-        previewReady: false,
-        fallbackReason: null,
-        fallbackUsed: false,
-      },
-    },
-    operation_id: operationId,
-    output_paths: [],
-    preview_entry_path: "/",
-    project_id: projectId,
-    prompt,
-    started_at: requestedAt,
-    status: "queued",
-    summary: `Queued Supabase wiring for ${project.name}.`,
-    template_id: project.template as TemplateId,
-    warnings: [],
-  });
-
-  console.log("[projects] Supabase auto-wire iteration queued.", {
-    buildId,
-    projectId,
-    prompt,
-  });
-
-  runBuildInBackgroundFn(
-    {
-      buildId,
-      projectId,
-      orgId: orgContext.org.id,
-      userId: orgContext.user.id,
-      userEmail: orgContext.user.email,
-      prompt,
-      sourcePrompt: prompt,
-      templateId: project.template,
-      model: AUTO_WIRE_BUILD_MODEL,
-      requestedAt,
-      operationId,
-      isIteration: true,
-      existingFiles,
-      projectName: project.name,
-    },
-    orgContext.db,
-  ).catch((error: unknown) => {
-    console.error("[projects] Supabase auto-wire iteration failed:", {
-      buildId,
-      projectId,
-      error,
-    });
-  });
-
-  return buildId;
-}
-
-function readSetupSqlFromMetadata(metadata: unknown): string {
-  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
-    return "";
-  }
-
-  const setupSql = (metadata as Record<string, unknown>).setupSql;
-  return typeof setupSql === "string" ? setupSql : "";
-}
-
-async function waitForGenerationCompletion(
-  db: OrgContext["db"],
-  buildId: string,
-): Promise<{
-  files?: readonly StudioFile[];
-  metadata?: Record<string, unknown> | null;
-  status?: string | null;
-} | null> {
-  const dbWithFindGeneration = db as OrgContext["db"] & {
-    findGenerationById?: (id: string) => Promise<{
-      files?: readonly StudioFile[];
-      metadata?: Record<string, unknown> | null;
-      status?: string | null;
-    } | null>;
-  };
-
-  if (!dbWithFindGeneration.findGenerationById) {
-    return null;
-  }
-
-  const deadline = Date.now() + AUTO_WIRE_WAIT_TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    const generation = await dbWithFindGeneration.findGenerationById(buildId).catch(() => null);
-    if (generation && generation.status === "completed") {
-      return generation;
-    }
-    if (generation && generation.status === "failed") {
-      return generation;
-    }
-    await delay(AUTO_WIRE_WAIT_POLL_MS);
-  }
-
-  return dbWithFindGeneration.findGenerationById(buildId).catch(() => null);
-}
-
 export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const projectsRoute = new Hono();
   const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
@@ -520,7 +280,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
   const dumpNeonDatabaseFn = deps.dumpNeonDatabase ?? dumpNeonDatabase;
   const restoreSupabaseDatabaseFn = deps.restoreSupabaseDatabase ?? restoreSupabaseDatabase;
-  const ensureByoDbAnonKeyColumnFn = deps.ensureByoDbAnonKeyColumn ?? ensureByoDbAnonKeyColumn;
+  const ensureSupabaseProjectColumnsFn = deps.ensureByoDbAnonKeyColumn ?? ensureSupabaseProjectColumns;
   const runBuildInBackgroundFn = deps.runBuildInBackground ?? runBuildInBackground;
 
   projectsRoute.get("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
@@ -706,45 +466,21 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     }
 
     try {
-      await ensureByoDbAnonKeyColumnFn();
+      const result = await connectProjectToSupabase({
+        orgContext,
+        project,
+        projectId,
+        supabaseUrl: parsed.supabaseUrl,
+        supabaseAnonKey,
+        prompt: AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
+        runBuildInBackgroundFn,
+        ensureSupabaseProjectColumnsFn,
+      });
+      return c.json({ success: true, ...result });
     } catch (error) {
-      console.error("[projects/byo-db] failed ensuring byo_db_anon_key column:", error);
-      return c.json({ error: "Failed to prepare BYO DB storage" }, 500);
+      console.error("[projects/byo-db] failed connecting Supabase:", error);
+      return c.json({ error: "Failed to connect Supabase" }, 500);
     }
-
-    const patch = {
-      byo_db_url: parsed.supabaseUrl,
-      byo_db_anon_key: supabaseAnonKey,
-    };
-
-    try {
-      await updateProjectWithSchemaReloadRetry(orgContext, projectId, patch);
-    } catch (error) {
-      throw error;
-    }
-
-    const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectId);
-    const existingFiles = Array.isArray(latestGeneration?.files)
-      ? latestGeneration.files as readonly StudioFile[]
-      : [];
-
-    const buildId = await queueSupabaseAutoWireIteration(
-      orgContext,
-      project,
-      projectId,
-      AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
-      existingFiles,
-      runBuildInBackgroundFn,
-    );
-
-    const completedGeneration = await waitForGenerationCompletion(orgContext.db, buildId);
-    const generationFiles = Array.isArray(completedGeneration?.files)
-      ? completedGeneration.files
-      : [];
-    const setupSql = readSetupSqlFromMetadata(completedGeneration?.metadata)
-      || buildSupabaseSetupSqlFromFiles(generationFiles);
-
-    return c.json({ success: true, host: parsed.host, wiring: true, setupSql });
   });
 
   projectsRoute.post("/:id/upgrade-to-byo", authMiddleware, loadOrgContextMiddleware, async (c) => {
@@ -850,7 +586,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     }
 
     try {
-      await ensureByoDbAnonKeyColumnFn();
+      await ensureSupabaseProjectColumnsFn();
       await updateProjectWithSchemaReloadRetry(orgContext, projectId, {
         byo_db_url: parsedByoDb.supabaseUrl,
         byo_db_anon_key: byoDbAnonKey,
@@ -914,6 +650,9 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     await orgContext.db.updateProject(projectId, {
       byo_db_url: null,
       byo_db_anon_key: null,
+      byo_db_service_key: null,
+      supabase_oauth_access_token: null,
+      supabase_oauth_refresh_token: null,
     });
 
     return c.json({ ok: true });

@@ -150,6 +150,9 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
         await db.updateProject(projectId, {
           byo_db_url: null,
           byo_db_anon_key: null,
+          byo_db_service_key: null,
+          supabase_oauth_access_token: null,
+          supabase_oauth_refresh_token: null,
           database_enabled: true,
           db_provider: "neon",
           db_wired: false,
@@ -229,6 +232,9 @@ export function createEnableDbRoute(deps: EnableDbRouteDeps = {}) {
       await db.updateProject(projectId, {
         byo_db_url: null,
         byo_db_anon_key: null,
+        byo_db_service_key: null,
+        supabase_oauth_access_token: null,
+        supabase_oauth_refresh_token: null,
         database_enabled: true,
         db_schema: schema,
         db_nonce: nonce,

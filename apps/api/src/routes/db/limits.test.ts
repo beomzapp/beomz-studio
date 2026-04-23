@@ -523,6 +523,11 @@ test("db enable uses Neon path when NEON_API_KEY is set", async () => {
       message: "Database provisioned successfully",
     });
     assert.deepEqual(updateCalls[0], {
+      byo_db_url: null,
+      byo_db_anon_key: null,
+      byo_db_service_key: null,
+      supabase_oauth_access_token: null,
+      supabase_oauth_refresh_token: null,
       database_enabled: true,
       db_provider: "neon",
       db_wired: false,
