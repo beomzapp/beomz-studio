@@ -49,16 +49,20 @@ import {
   getStorageAddons,
   createStorageAddonCheckout,
   connectSupabaseDb,
+  getSupabaseOAuthProjects,
+  connectSupabaseOAuth,
   getLatestBuildForProject,
   getApiBaseUrl,
   getAccessToken,
   type DbTable,
   type StorageAddonInfo,
+  type SupabaseOAuthProject,
 } from "../../lib/api";
 
 type PanelTab = "schema" | "data" | "users" | "storage";
 type SubFlow = null | "supabase";
 type UpgradePhase = "idle" | "migrating" | "rewiring" | "done";
+type OAuthWiringPhase = "connecting" | "rewiring" | null;
 
 const WIRING_PROMPT = `Wire this app to its Postgres database.
 
@@ -202,6 +206,17 @@ export function DatabasePanel({
   const wiringPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wiringStartTimeRef = useRef<number>(0);
 
+  // ── BEO-534: OAuth connect state ──────────────────────
+  const [oauthCallbackDetected, setOauthCallbackDetected] = useState(false);
+  const [oauthProjects, setOauthProjects] = useState<SupabaseOAuthProject[]>([]);
+  const [oauthProjectsLoading, setOauthProjectsLoading] = useState(false);
+  const [oauthProjectsError, setOauthProjectsError] = useState<string | null>(null);
+  const [selectedOauthRef, setSelectedOauthRef] = useState("");
+  const [oauthConnecting, setOauthConnecting] = useState(false);
+  const [oauthConnectError, setOauthConnectError] = useState<string | null>(null);
+  const [oauthWiringPhase, setOauthWiringPhase] = useState<OAuthWiringPhase>(null);
+  const oauthWiringPhaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── BEO-532: setup SQL helper after BYO rewire ──
   const [setupSql, setSetupSql] = useState<string | null>(null);
   const [setupSqlDismissed, setSetupSqlDismissed] = useState(false);
@@ -276,6 +291,31 @@ export function DatabasePanel({
   useEffect(() => {
     if (byoConnectedHost) setByoSavedHost(byoConnectedHost);
   }, [byoConnectedHost]);
+
+  // ── BEO-534: Detect OAuth callback on mount ───────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("supabase_connected") !== "1") return;
+    // Clean URL param immediately
+    params.delete("supabase_connected");
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
+    window.history.replaceState(null, "", newUrl);
+    if (!projectId) return;
+    setOauthCallbackDetected(true);
+    setOauthProjectsLoading(true);
+    setOauthProjectsError(null);
+    getSupabaseOAuthProjects(projectId)
+      .then((projects) => {
+        setOauthProjects(projects);
+        if (projects.length === 1) setSelectedOauthRef(projects[0].ref);
+      })
+      .catch((err) => {
+        setOauthProjectsError(err instanceof Error ? err.message : "Failed to load projects.");
+      })
+      .finally(() => setOauthProjectsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Data fetchers ─────────────────────────────────────
   const fetchSchema = useCallback(async () => {
@@ -498,12 +538,45 @@ export function DatabasePanel({
     }
   }, [projectId, supabaseUrl, supabaseAnonKey, onDbStateChange]);
 
+  // ── BEO-534: OAuth connect handler ────────────────────
+  const handleConnectOAuth = useCallback(async () => {
+    if (!projectId || !selectedOauthRef) return;
+    setOauthConnecting(true);
+    setOauthConnectError(null);
+    try {
+      const result = await connectSupabaseOAuth(projectId, selectedOauthRef);
+      let host: string = selectedOauthRef + ".supabase.co";
+      if (result.host) host = result.host;
+      setByoSavedHost(host);
+      if (result.setupSql && result.setupSql.trim()) {
+        setSetupSql(result.setupSql);
+        setSetupSqlDismissed(false);
+        setSetupSqlCopied(false);
+      }
+      wiringStartTimeRef.current = Date.now();
+      setByoWiringPollDeferred(false);
+      setOauthWiringPhase("connecting");
+      // Advance to "Rewiring" phase after 30s
+      if (oauthWiringPhaseTimerRef.current) clearTimeout(oauthWiringPhaseTimerRef.current);
+      oauthWiringPhaseTimerRef.current = setTimeout(() => {
+        setOauthWiringPhase((prev) => (prev === "connecting" ? "rewiring" : prev));
+      }, 30_000);
+      setByoWiring(true);
+      onDbStateChange();
+      setOauthCallbackDetected(false);
+    } catch (err) {
+      setOauthConnectError(err instanceof Error ? err.message : "Failed to connect project.");
+    } finally {
+      setOauthConnecting(false);
+    }
+  }, [projectId, selectedOauthRef, onDbStateChange]);
+
   // ── Poll BYO initial-connect wiring ───────────────────
   useEffect(() => {
     if (!byoWiring || !projectId) return;
     let cancelled = false;
     const POLL_INTERVAL_MS = 3000;
-    const MAX_WAIT_MS = 120_000;
+    const MAX_WAIT_MS = 180_000;
     async function poll() {
       if (cancelled) return;
       try {
@@ -516,6 +589,7 @@ export function DatabasePanel({
             setByoWiring(false);
             setByoWiringPollDeferred(false);
             setByoWiringDone(true);
+            setOauthWiringPhase(null);
             return;
           }
         }
@@ -525,10 +599,11 @@ export function DatabasePanel({
             void poll();
           }, POLL_INTERVAL_MS);
         } else {
-          // BEO-530: no completed build within 120s — exit wiring and show next-build message
+          // BEO-530: no completed build within timeout — exit wiring and show next-build message
           setByoWiring(false);
           setByoWiringPollDeferred(true);
           setByoWiringDone(true);
+          setOauthWiringPhase(null);
         }
       } catch {
         if (!cancelled) {
@@ -541,6 +616,7 @@ export function DatabasePanel({
             setByoWiring(false);
             setByoWiringPollDeferred(true);
             setByoWiringDone(true);
+            setOauthWiringPhase(null);
           }
         }
       }
@@ -651,6 +727,7 @@ export function DatabasePanel({
       if (wiringPollRef.current) clearTimeout(wiringPollRef.current);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (setupSqlCopyTimerRef.current) clearTimeout(setupSqlCopyTimerRef.current);
+      if (oauthWiringPhaseTimerRef.current) clearTimeout(oauthWiringPhaseTimerRef.current);
     };
   }, []);
 
@@ -721,6 +798,7 @@ export function DatabasePanel({
           byoWiringDone,
           byoWiringPollDeferred,
           byoSavedHost ?? byoConnectedHost ?? null,
+          oauthWiringPhase,
         )}
         {showSetupSql && renderSetupSqlHelper()}
         <ConnectedHeader
@@ -770,7 +848,9 @@ export function DatabasePanel({
   // STATE 1 — No DB connected
   return (
     <div className={cn("flex h-full flex-col overflow-hidden bg-[#faf9f6]", className)}>
-      {subFlow === "supabase" ? (
+      {oauthCallbackDetected ? (
+        renderOAuthProjectPicker()
+      ) : subFlow === "supabase" ? (
         renderSupabaseForm()
       ) : (
         renderIntroCards()
@@ -834,12 +914,131 @@ export function DatabasePanel({
             <div className="flex-1" />
             <button
               type="button"
-              onClick={() => setSubFlow("supabase")}
+              onClick={() => {
+                if (!projectId) return;
+                window.location.href = `${getApiBaseUrl()}/integrations/supabase/authorize?projectId=${projectId}`;
+              }}
               disabled={!projectId}
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-[#1a1a1a] bg-white px-4 py-3 text-sm font-semibold text-[#1a1a1a] transition-colors hover:bg-[#1a1a1a] hover:text-white disabled:opacity-50"
             >
               Connect Supabase
               <ArrowRight size={14} />
+            </button>
+            <div className="mt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setSubFlow("supabase")}
+                disabled={!projectId}
+                className="text-xs text-[#9ca3af] underline underline-offset-2 transition-colors hover:text-[#6b7280] disabled:opacity-50"
+              >
+                Connect manually →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderOAuthProjectPicker() {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-7">
+        <div className="mx-auto w-full max-w-lg space-y-5">
+          <div className="flex items-center gap-3 rounded-xl border border-[#e5e7eb] bg-white p-4">
+            <div
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold"
+              style={{ backgroundColor: "#edfaf4", color: "#3ecf8e" }}
+            >
+              S
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-[#1a1a1a]">Supabase connected</p>
+              <p className="text-xs text-[#6b7280]">Choose a project to link to this app</p>
+            </div>
+          </div>
+
+          {oauthProjectsLoading && (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+            </div>
+          )}
+
+          {oauthProjectsError && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+              {oauthProjectsError}
+            </div>
+          )}
+
+          {!oauthProjectsLoading && !oauthProjectsError && oauthProjects.length === 0 && (
+            <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
+              <p className="text-sm font-medium text-[#6b7280]">No projects found</p>
+              <p className="mt-1 text-xs text-[#9ca3af]">
+                Make sure your Supabase account has at least one project.
+              </p>
+            </div>
+          )}
+
+          {!oauthProjectsLoading && oauthProjects.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#6b7280]">Your projects</p>
+              {oauthProjects.map((project) => (
+                <button
+                  key={project.ref}
+                  type="button"
+                  onClick={() => setSelectedOauthRef(project.ref)}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
+                    selectedOauthRef === project.ref
+                      ? "border-[#F97316]/60 bg-[#F97316]/5 ring-2 ring-[#F97316]/10"
+                      : "border-[#e5e7eb] bg-white hover:border-[#F97316]/40 hover:bg-[#F97316]/5",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[#1a1a1a]">{project.name}</p>
+                    <p className="mt-0.5 font-mono text-[11px] text-[#9ca3af]">
+                      {project.ref} · {project.region}
+                    </p>
+                  </div>
+                  {selectedOauthRef === project.ref && (
+                    <Check size={15} className="ml-3 flex-shrink-0 text-[#F97316]" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {oauthConnectError && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+              {oauthConnectError}
+            </div>
+          )}
+
+          {!oauthProjectsLoading && oauthProjects.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleConnectOAuth()}
+              disabled={!selectedOauthRef || oauthConnecting}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {oauthConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              {oauthConnecting ? "Connecting…" : "Connect this project"}
+            </button>
+          )}
+
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setOauthCallbackDetected(false);
+                setOauthProjects([]);
+                setSelectedOauthRef("");
+                setOauthConnectError(null);
+              }}
+              className="text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+            >
+              ← Back
             </button>
           </div>
         </div>
@@ -1658,10 +1857,15 @@ function renderByoWiringBanner(
   byoWiring: boolean,
   byoWiringDone: boolean,
   pollTimedOutNoBuild: boolean,
-  host: string | null,
+  _host: string | null,
+  wiringPhase?: OAuthWiringPhase,
 ) {
   if (!byoWiring && !byoWiringDone) return null;
   if (byoWiring) {
+    const heading =
+      wiringPhase === "rewiring"
+        ? "Rewiring your app…"
+        : "Connecting your Supabase project…";
     return (
       <div className="flex-shrink-0 border-b border-orange-200 bg-orange-50 px-4 py-3">
         <div className="flex items-center gap-3">
@@ -1669,10 +1873,8 @@ function renderByoWiringBanner(
             <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-[#F97316]">Connecting your Supabase data…</p>
-            <p className="mt-0.5 text-xs text-orange-500/80">
-              Rewiring your app to use real data · ~30s
-            </p>
+            <p className="text-sm font-semibold text-[#F97316]">{heading}</p>
+            <p className="mt-0.5 text-xs text-orange-500/80">~30s</p>
           </div>
         </div>
       </div>
@@ -1692,7 +1894,7 @@ function renderByoWiringBanner(
       <div className="flex items-center gap-3">
         <span className="text-lg">✅</span>
         <p className="text-sm font-semibold text-emerald-700">
-          Connected to {host ?? "Supabase"} — your real data is now live
+          Connected to Supabase — your data is live
         </p>
       </div>
     </div>
