@@ -115,9 +115,11 @@ const DISALLOWED_LUCIDE_ICONS = new Set([
 const supabaseImport: Fixer = {
   name: "supabaseImport",
   fix: (content) =>
-    content
-      .replace(/from\s+(['"])\.\.?\/supabase-js\1/g, 'from "@supabase/supabase-js"')
-      .replace(/from\s+(['"])supabase-js\1/g, 'from "@supabase/supabase-js"'),
+    content.replace(
+      /(from\s+|require\(\s*)(['"])(?:\.\.?\/)?supabase-js\2(\s*\))?/g,
+      (_match, prefix: string, quote: string, suffix = "") =>
+        `${prefix}${quote}@supabase/supabase-js${quote}${suffix}`,
+    ),
 };
 
 // ── Fixer 2: reactGlobals ─────────────────────────────────────────────────────
@@ -166,8 +168,9 @@ const flatImports: Fixer = {
         (_m, open, base: string, close) => `${open}./${base}${close}`,
       )
       // Bare directory paths without ./ prefix: 'src/components/X' → './X'
+      // Do not rewrite the scoped Supabase package import we already corrected.
       .replace(
-        /(?<=from\s+)(['"])(?!\.\.?\/)([^/'"]+\/(?:[^/'"]*\/)*[^/'"]+)(['"])/g,
+        /(?<=from\s+)(['"])(?!\.\.?\/)(?!@supabase\/)([^/'"]+\/(?:[^/'"]*\/)*[^/'"]+)(['"])/g,
         (_m, open, path: string, close) =>
           `${open}./${path.replace(/^.*\//, "")}${close}`,
       ),

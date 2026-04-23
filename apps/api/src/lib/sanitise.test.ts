@@ -158,6 +158,27 @@ test("sanitiseContent fixes export default function supabase-js()", () => {
   );
 });
 
+test("sanitiseContent fixes broken Supabase import and require variants in one pass", () => {
+  const input = [
+    'import { createClient } from "./supabase-js";',
+    "import { createClient as createClientSingle } from './supabase-js';",
+    'import { createClient as createClientPkg } from "supabase-js";',
+    "import { createClient as createClientPkgSingle } from 'supabase-js';",
+    'const supabase = require("./supabase-js");',
+    "const supabaseSingle = require('./supabase-js');",
+  ].join("\n");
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.match(output, /from "@supabase\/supabase-js";/);
+  assert.match(output, /from '@supabase\/supabase-js';/);
+  assert.match(output, /require\("@supabase\/supabase-js"\);/);
+  assert.match(output, /require\('@supabase\/supabase-js'\);/);
+  assert.equal(output.includes('./supabase-js'), false);
+  assert.equal(output.includes('"supabase-js"'), false);
+  assert.equal(output.includes("'supabase-js'"), false);
+});
+
 test("sanitiseContent fixes multi-word hyphenated component names", () => {
   const input = "export default function my-cool-component() {\n  return <div />;\n}\n";
 

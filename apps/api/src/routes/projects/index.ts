@@ -65,14 +65,19 @@ const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
 const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
 const AUTO_WIRE_SUPABASE_ITERATION_PROMPT = [
   "Rewire the entire app to use Supabase instead of hardcoded data.",
-  "Import createClient from @supabase/supabase-js and use",
-  "import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
+  "Use this exact import line, character for character:",
+  'import { createClient } from "@supabase/supabase-js"',
+  'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
+  "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all hardcoded arrays and sample data with real Supabase queries.",
   "Use useEffect + useState for data fetching with loading and error states.",
 ].join("\n");
 const UPGRADE_TO_BYO_ITERATION_PROMPT = [
   "Rewire the entire app to use Supabase instead of Neon.",
-  "Import createClient from @supabase/supabase-js and use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
+  "Use this exact import line, character for character:",
+  'import { createClient } from "@supabase/supabase-js"',
+  'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
+  "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all Neon/postgres queries with Supabase queries.",
   "Use useEffect + useState with loading and error states.",
 ].join("\n");

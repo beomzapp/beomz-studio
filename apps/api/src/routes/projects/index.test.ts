@@ -346,6 +346,8 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
   assert.equal(buildRuns[0]?.projectId, project.id);
   assert.deepEqual(buildRuns[0]?.existingFiles, existingFiles);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /Rewire the entire app to use Supabase instead of hardcoded data\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /import \{ createClient \} from "@supabase\/supabase-js"/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /do NOT use "\.\/supabase-js", "supabase-js", or any relative path\./);
 });
 
 test("byo-db delete clears saved Supabase credentials", async () => {
@@ -523,6 +525,8 @@ test("upgrade-to-byo migrates data, deletes Neon, and queues a Supabase rewire",
   assert.equal(buildRuns[0]?.projectId, project.id);
   assert.deepEqual(buildRuns[0]?.existingFiles, existingFiles);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /use Supabase instead of Neon\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /import \{ createClient \} from "@supabase\/supabase-js"/);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /do NOT use "\.\/supabase-js", "supabase-js", or any relative path\./);
 });
 
 test("upgrade-to-byo continues when Neon deletion fails after a successful migration", async () => {
