@@ -152,6 +152,40 @@ test("db data returns rows and columns for Neon projects", async () => {
   });
 });
 
+test("db data returns rows for BYO Supabase using byo_db_url + byo_db_anon_key first", async () => {
+  const project = createProject({
+    database_enabled: false,
+    db_provider: null,
+    db_wired: false,
+    byo_db_url: "https://demo-project.supabase.co",
+    byo_db_anon_key: "anon-key",
+  });
+  const orgContext = createOrgContext(project, null);
+
+  const app = mountRoute(
+    "/projects/:id/db/data",
+    createDataDbRoute({
+      authMiddleware: async (_c, next) => { await next(); },
+      loadOrgContextMiddleware: async (_c, next) => { await next(); },
+      fetchSupabaseTableRows: async () => ({
+        rows: [{ id: "todo-1", title: "Read with anon key" }],
+        columns: ["id", "title"],
+      }),
+    }),
+    orgContext,
+  );
+
+  const response = await app.request(
+    `http://localhost/projects/${project.id}/db/data?table=todos`,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    rows: [{ id: "todo-1", title: "Read with anon key" }],
+    columns: ["id", "title"],
+  });
+});
+
 test("project auth signup, login, and me return JWT-backed user data", async () => {
   const project = createProject();
   const limits = createLimits();

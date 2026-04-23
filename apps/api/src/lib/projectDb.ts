@@ -108,6 +108,55 @@ export function getByoSupabaseConfig(
   }
 }
 
+export function getStoredSupabaseConfig(
+  project: Record<string, unknown> | null | undefined,
+): { supabaseUrl: string; supabaseAnonKey: string; host: string; dbSchema: string } | null {
+  const cfg = (project?.db_config ?? null) as Record<string, unknown> | null;
+  const supabaseUrl = typeof cfg?.url === "string" ? cfg.url.trim() : "";
+  const supabaseAnonKey = typeof cfg?.anonKey === "string" ? cfg.anonKey.trim() : "";
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
+  try {
+    const parsed = parseSupabaseProjectUrl(supabaseUrl);
+    return {
+      supabaseUrl: parsed.supabaseUrl,
+      supabaseAnonKey,
+      host: parsed.host,
+      dbSchema: typeof cfg?.dbSchema === "string" && cfg.dbSchema.trim().length > 0
+        ? cfg.dbSchema
+        : "public",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getProjectSupabaseConfig(
+  project: Record<string, unknown> | null | undefined,
+): { supabaseUrl: string; supabaseAnonKey: string; host: string; dbSchema: string; source: "byo" | "db_config" } | null {
+  const byoSupabase = getByoSupabaseConfig(project);
+  if (byoSupabase) {
+    return {
+      ...byoSupabase,
+      dbSchema: "public",
+      source: "byo",
+    };
+  }
+
+  const storedSupabase = getStoredSupabaseConfig(project);
+  if (storedSupabase) {
+    return {
+      ...storedSupabase,
+      source: "db_config",
+    };
+  }
+
+  return null;
+}
+
 function getLegacyByoPostgresUrl(
   project: Record<string, unknown> | null | undefined,
 ): string | null {

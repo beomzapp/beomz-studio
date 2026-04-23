@@ -251,6 +251,52 @@ test("db schema returns live tables for Neon projects", async () => {
   });
 });
 
+test("db schema returns BYO Supabase tables using byo_db_url + byo_db_anon_key first", async () => {
+  const project = createProject({
+    database_enabled: false,
+    db_provider: null,
+    db_wired: false,
+    byo_db_url: "https://demo-project.supabase.co",
+    byo_db_anon_key: "anon-key",
+  });
+  const orgContext = createOrgContext(project, null);
+
+  const app = mountRoute(
+    "/projects/:id/db/schema",
+    createSchemaDbRoute({
+      authMiddleware: async (_c, next) => { await next(); },
+      loadOrgContextMiddleware: async (_c, next) => { await next(); },
+      listSupabaseSchemaTables: async () => ({
+        tables: [
+          {
+            table_name: "todos",
+            columns: [
+              { name: "id", type: "uuid" },
+              { name: "title", type: "text" },
+            ],
+          },
+        ],
+      }),
+    }),
+    orgContext,
+  );
+
+  const response = await app.request(`http://localhost/projects/${project.id}/db/schema`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    tables: [
+      {
+        table_name: "todos",
+        columns: [
+          { name: "id", type: "uuid" },
+          { name: "title", type: "text" },
+        ],
+      },
+    ],
+  });
+});
+
 test("db usage returns Neon metrics with legacy-compatible keys", async () => {
   const project = createProject();
   const limits = createLimits();

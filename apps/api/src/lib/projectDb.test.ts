@@ -8,6 +8,7 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const {
   buildProjectDatabaseEnvVars,
+  getProjectSupabaseConfig,
   parsePostgresConnectionString,
   parseSupabaseProjectUrl,
   resolveProjectDbProvider,
@@ -116,6 +117,51 @@ test("resolveProjectDbProvider prefers legacy BYO postgres when byo_db_url is a 
   );
 
   assert.equal(provider, "postgres");
+});
+
+test("getProjectSupabaseConfig prefers BYO Supabase credentials over db_config", () => {
+  const config = getProjectSupabaseConfig(
+    createProject({
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+      db_config: {
+        url: "https://legacy-project.supabase.co",
+        anonKey: "legacy-key",
+        dbSchema: "custom",
+      },
+    }),
+  );
+
+  assert.deepEqual(config, {
+    supabaseUrl: "https://demo-project.supabase.co",
+    supabaseAnonKey: "anon-key",
+    host: "demo-project.supabase.co",
+    dbSchema: "public",
+    source: "byo",
+  });
+});
+
+test("getProjectSupabaseConfig falls back to db_config Supabase credentials", () => {
+  const config = getProjectSupabaseConfig(
+    createProject({
+      byo_db_url: null,
+      byo_db_anon_key: null,
+      db_provider: "supabase",
+      db_config: {
+        url: "https://legacy-project.supabase.co",
+        anonKey: "legacy-key",
+        dbSchema: "custom",
+      },
+    }),
+  );
+
+  assert.deepEqual(config, {
+    supabaseUrl: "https://legacy-project.supabase.co",
+    supabaseAnonKey: "legacy-key",
+    host: "legacy-project.supabase.co",
+    dbSchema: "custom",
+    source: "db_config",
+  });
 });
 
 test("buildProjectDatabaseEnvVars returns BYO Supabase env vars and clears Neon/Postgres vars", () => {

@@ -412,6 +412,12 @@ async function queueSupabaseAutoWireIteration(
     warnings: [],
   });
 
+  console.log("[projects] Supabase auto-wire iteration queued.", {
+    buildId,
+    projectId,
+    prompt,
+  });
+
   runBuildInBackgroundFn(
     {
       buildId,
@@ -431,7 +437,11 @@ async function queueSupabaseAutoWireIteration(
     },
     orgContext.db,
   ).catch((error: unknown) => {
-    console.error("[projects] Supabase auto-wire iteration failed:", error);
+    console.error("[projects] Supabase auto-wire iteration failed:", {
+      buildId,
+      projectId,
+      error,
+    });
   });
 }
 

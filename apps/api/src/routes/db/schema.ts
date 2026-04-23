@@ -3,8 +3,9 @@
  *
  * Returns the live tables + columns from the project's DB schema.
  * For managed (beomz) projects: queries beomz-user-data via Management API.
- * For BYO Supabase: queries via the anon key + information_schema REST endpoint.
+ * For BYO Supabase: queries via the anon key + Supabase REST / RPC APIs.
  */
+import { createClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
@@ -13,7 +14,245 @@ import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import { getSchemaTableList, isUserDataConfigured } from "../../lib/userDataClient.js";
 import { getNeonSchemaTableList } from "../../lib/neonDb.js";
-import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import {
+  getProjectPostgresUrl,
+  getProjectSupabaseConfig,
+  resolveProjectDbProvider,
+} from "../../lib/projectDb.js";
+
+interface SchemaRouteTableColumn {
+  name: string;
+  type: string;
+}
+
+interface SchemaRouteTable {
+  table_name: string;
+  columns: SchemaRouteTableColumn[];
+}
+
+function buildSupabaseClient(supabaseUrl: string, supabaseAnonKey: string) {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
+
+function normalizeExecSqlRows(data: unknown): Array<Record<string, unknown>> | null {
+  if (Array.isArray(data)) {
+    return data.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null);
+  }
+
+  if (typeof data === "string") {
+    try {
+      return normalizeExecSqlRows(JSON.parse(data));
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof data === "object" && data !== null) {
+    const rows = (data as { rows?: unknown; data?: unknown }).rows
+      ?? (data as { rows?: unknown; data?: unknown }).data;
+    if (rows !== undefined) {
+      return normalizeExecSqlRows(rows);
+    }
+  }
+
+  return null;
+}
+
+function groupSchemaRows(rows: Array<Record<string, unknown>>): SchemaRouteTable[] {
+  const tables = new Map<string, SchemaRouteTableColumn[]>();
+
+  for (const row of rows) {
+    const tableName = typeof row.table_name === "string" ? row.table_name : "";
+    if (!tableName) {
+      continue;
+    }
+
+    const columns = tables.get(tableName) ?? [];
+    const columnName = typeof row.column_name === "string" ? row.column_name : "";
+    const columnType = typeof row.data_type === "string"
+      ? row.data_type
+      : typeof row.udt_name === "string"
+        ? row.udt_name
+        : "unknown";
+
+    if (columnName) {
+      columns.push({ name: columnName, type: columnType });
+    }
+
+    tables.set(tableName, columns);
+  }
+
+  return [...tables.entries()]
+    .map(([table_name, columns]) => ({ table_name, columns }))
+    .sort((a, b) => a.table_name.localeCompare(b.table_name));
+}
+
+function parseRefName(ref: string): string | null {
+  const segments = ref.split("/");
+  return segments.at(-1) ?? null;
+}
+
+function resolveOpenApiSchema(
+  schema: unknown,
+  components: Record<string, unknown>,
+  visited = new Set<string>(),
+): Record<string, unknown> | null {
+  if (!schema || typeof schema !== "object") {
+    return null;
+  }
+
+  const candidate = schema as Record<string, unknown>;
+
+  if (typeof candidate.$ref === "string") {
+    const refName = parseRefName(candidate.$ref);
+    if (!refName || visited.has(refName)) {
+      return null;
+    }
+
+    visited.add(refName);
+    return resolveOpenApiSchema(components[refName], components, visited);
+  }
+
+  if (candidate.type === "array" && candidate.items) {
+    return resolveOpenApiSchema(candidate.items, components, visited);
+  }
+
+  for (const key of ["oneOf", "anyOf", "allOf"] as const) {
+    const options = candidate[key];
+    if (!Array.isArray(options)) {
+      continue;
+    }
+
+    for (const option of options) {
+      const resolved = resolveOpenApiSchema(option, components, new Set(visited));
+      if (resolved) {
+        return resolved;
+      }
+    }
+  }
+
+  return candidate;
+}
+
+function inferOpenApiColumns(
+  tableName: string,
+  pathSpec: unknown,
+  components: Record<string, unknown>,
+): SchemaRouteTableColumn[] {
+  const pathObject = typeof pathSpec === "object" && pathSpec !== null
+    ? pathSpec as Record<string, unknown>
+    : {};
+  const getSpec = typeof pathObject.get === "object" && pathObject.get !== null
+    ? pathObject.get as Record<string, unknown>
+    : {};
+  const responses = typeof getSpec.responses === "object" && getSpec.responses !== null
+    ? getSpec.responses as Record<string, unknown>
+    : {};
+  const response200 = responses["200"] ?? responses.default ?? null;
+  const responseObject = typeof response200 === "object" && response200 !== null
+    ? response200 as Record<string, unknown>
+    : {};
+  const content = typeof responseObject.content === "object" && responseObject.content !== null
+    ? responseObject.content as Record<string, unknown>
+    : {};
+  const jsonContent = content["application/json"] ?? null;
+  const jsonObject = typeof jsonContent === "object" && jsonContent !== null
+    ? jsonContent as Record<string, unknown>
+    : {};
+  const resolved = resolveOpenApiSchema(jsonObject.schema, components)
+    ?? resolveOpenApiSchema(components[tableName], components)
+    ?? resolveOpenApiSchema(components[`public.${tableName}`], components)
+    ?? resolveOpenApiSchema(components[`${tableName}Row`], components);
+
+  const properties = typeof resolved?.properties === "object" && resolved.properties !== null
+    ? resolved.properties as Record<string, unknown>
+    : {};
+
+  return Object.entries(properties).map(([name, property]) => {
+    const propertyObject = typeof property === "object" && property !== null
+      ? property as Record<string, unknown>
+      : {};
+    const type = typeof propertyObject.type === "string"
+      ? propertyObject.type
+      : typeof propertyObject.format === "string"
+        ? propertyObject.format
+        : "unknown";
+    return { name, type };
+  });
+}
+
+function parseSupabaseOpenApiSpec(spec: unknown): SchemaRouteTable[] {
+  const specObject = typeof spec === "object" && spec !== null
+    ? spec as {
+      paths?: Record<string, unknown>;
+      components?: { schemas?: Record<string, unknown> };
+    }
+    : {};
+  const paths = specObject.paths ?? {};
+  const components = specObject.components?.schemas ?? {};
+
+  const tableNames = Object.keys(paths)
+    .map((path) => path.replace(/^\//, "").split("/")[0] ?? "")
+    .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !name.startsWith("rpc"))
+    .filter((value, index, allValues) => allValues.indexOf(value) === index)
+    .sort();
+
+  return tableNames.map((tableName) => ({
+    table_name: tableName,
+    columns: inferOpenApiColumns(tableName, paths[`/${tableName}`] ?? paths[tableName], components),
+  }));
+}
+
+export async function listSupabaseSchemaTables(
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<{ tables: SchemaRouteTable[]; note?: string }> {
+  const client = buildSupabaseClient(supabaseUrl, supabaseAnonKey);
+
+  try {
+    const rpcResponse = await (client as any).rpc("exec_sql", {
+      query: `
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        ORDER BY table_name, ordinal_position;
+      `,
+    });
+    const rpcRows = normalizeExecSqlRows(rpcResponse.data);
+    if (!rpcResponse.error && rpcRows) {
+      return { tables: groupSchemaRows(rpcRows) };
+    }
+  } catch {
+    // Fall back to the OpenAPI spec below.
+  }
+
+  try {
+    const response = await fetchFn(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/`, {
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        Accept: "application/openapi+json",
+      },
+    });
+
+    if (response.ok) {
+      return { tables: parseSupabaseOpenApiSpec(await response.json()) };
+    }
+  } catch {
+    // Fall through to the non-fatal empty state below.
+  }
+
+  return {
+    tables: [],
+    note: "BYO Supabase schema introspection is unavailable with this anon key.",
+  };
+}
 
 interface SchemaDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
@@ -21,6 +260,7 @@ interface SchemaDbRouteDeps {
   getSchemaTableList?: typeof getSchemaTableList;
   isUserDataConfigured?: typeof isUserDataConfigured;
   getNeonSchemaTableList?: typeof getNeonSchemaTableList;
+  listSupabaseSchemaTables?: typeof listSupabaseSchemaTables;
 }
 
 export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
@@ -30,6 +270,7 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
   const getSchemaTableListFn = deps.getSchemaTableList ?? getSchemaTableList;
   const isUserDataConfiguredFn = deps.isUserDataConfigured ?? isUserDataConfigured;
   const getNeonSchemaTableListFn = deps.getNeonSchemaTableList ?? getNeonSchemaTableList;
+  const listSupabaseSchemaTablesFn = deps.listSupabaseSchemaTables ?? listSupabaseSchemaTables;
 
   schemaDbRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
     const projectId = c.req.param("id") as string;
@@ -40,6 +281,24 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
     if (!project || project.org_id !== org.id) {
       return c.json({ error: "Project not found" }, 404);
     }
+
+    const supabaseConfig = getProjectSupabaseConfig(project);
+
+    if (supabaseConfig) {
+      try {
+        const result = await listSupabaseSchemaTablesFn(
+          supabaseConfig.supabaseUrl,
+          supabaseConfig.supabaseAnonKey,
+        );
+        return c.json(result.note ? { tables: result.tables, note: result.note } : { tables: result.tables });
+      } catch (err) {
+        return c.json(
+          { error: err instanceof Error ? err.message : "Failed to fetch schema" },
+          500,
+        );
+      }
+    }
+
     if (!project.database_enabled) {
       return c.json({ error: "Database not enabled for this project" }, 400);
     }
@@ -66,39 +325,7 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
     }
 
     if (provider === "supabase") {
-      const cfg = (project.db_config ?? {}) as Record<string, unknown>;
-      const url = typeof cfg.url === "string" ? cfg.url : null;
-      const anonKey = typeof cfg.anonKey === "string" ? cfg.anonKey : null;
-      if (!url || !anonKey) {
-        return c.json({ error: "BYO Supabase credentials missing" }, 400);
-      }
-      try {
-        const res = await fetch(`${url.replace(/\/$/, "")}/rest/v1/`, {
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            Accept: "application/openapi+json",
-          },
-        });
-        if (!res.ok) {
-          return c.json({ tables: [] });
-        }
-        const spec = (await res.json()) as {
-          paths?: Record<string, unknown>;
-          components?: { schemas?: Record<string, unknown> };
-        };
-        const tableNames = Object.keys(spec.paths ?? {})
-          .map((p) => p.replace(/^\//, "").split("/")[0] ?? "")
-          .filter((n) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) && !n.startsWith("rpc"))
-          .filter((v, i, a) => a.indexOf(v) === i)
-          .sort();
-        return c.json({ tables: tableNames.map((name) => ({ table_name: name, columns: [] })) });
-      } catch (err) {
-        return c.json(
-          { error: err instanceof Error ? err.message : "Failed to fetch schema" },
-          500,
-        );
-      }
+      return c.json({ tables: [] });
     }
 
     if (provider === "neon" || provider === "postgres") {
