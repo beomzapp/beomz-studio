@@ -571,6 +571,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const sourcePrompt = prompt;
   const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
   const confirmedIntent = parsedBody.data.confirmedIntent;
+  const forceIteration = parsedBody.data.forceIteration === true;
   let planSessionId = parsedBody.data.planSessionId;
   let planSummary = parsedBody.data.summary;
   let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
@@ -610,7 +611,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       : [];
   }
 
-  const isIteration = Boolean(projectRow && existingFiles.length > 0);
+  const hasExistingIterationContext = Boolean(projectRow && existingFiles.length > 0);
+  const isIteration = forceIteration || hasExistingIterationContext;
   const isImageIntentConfirmation = Boolean(imageUrl && confirmedIntent);
 
   // BEO-465: feed the classifier the last few turns so it can accumulate
@@ -632,7 +634,14 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     ?? (matchingStoredImplementPlan ? storedImplementPlan : null)
     ?? (explicitImplementSignal ? sourcePromptForComparison : null);
   const implementConfirmationIntent: Intent = (isIteration || isImageIntentConfirmation) ? "iteration" : "build_new";
-  const intentDecision = isImplementConfirmation
+  const intentDecision = forceIteration
+    ? {
+        intent: "iteration" as const,
+        confidence: 1,
+        reason: "forceIteration requested.",
+        accumulatedContext: effectivePrompt,
+      }
+    : isImplementConfirmation
     ? {
         intent: implementConfirmationIntent,
         confidence: 1,
@@ -732,6 +741,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     needsClarification,
     isNearReady,
     shouldOfferPlanSummary,
+    forceIteration,
     isImplementConfirmation,
     explicitImplementSignal,
     isIteration,
@@ -761,7 +771,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
 
   const selectedTemplateDef = getTemplateDefinitionSafe(selectedTemplateId);
   const projectName =
-    (isIteration ? projectRow?.name : parsedBody.data.projectName?.trim())
+    ((isIteration && projectRow) ? projectRow.name : parsedBody.data.projectName?.trim())
     || projectRow?.name
     || buildProjectNameFromPrompt(prompt, "New Project");
 
