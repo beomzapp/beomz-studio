@@ -119,6 +119,10 @@ test("connectProjectToSupabase auto-creates tables via the Supabase Management A
   const project = createProject();
   const { orgContext } = createTestOrgContext(project);
   const managementCalls: Array<{ url: string; auth: string; body: string }> = [];
+  const migrations = [
+    'CREATE TABLE IF NOT EXISTS public."tasks" ("id" UUID DEFAULT gen_random_uuid() PRIMARY KEY);',
+    'ALTER TABLE public."tasks" ADD COLUMN IF NOT EXISTS "title" TEXT;',
+  ];
 
   const result = await connectProjectToSupabase({
     orgContext: orgContext as any,
@@ -158,7 +162,7 @@ test("connectProjectToSupabase auto-creates tables via the Supabase Management A
             locked: false,
           },
         ],
-        metadata: {},
+        metadata: { migrations },
         status: "completed",
         summary: "Rewired to Supabase.",
       });
@@ -168,18 +172,22 @@ test("connectProjectToSupabase auto-creates tables via the Supabase Management A
   assert.deepEqual(result, {
     host: "demo-project.supabase.co",
     wiring: true,
+    setupSql: migrations.join("\n\n"),
   });
-  assert.equal(managementCalls.length, 1);
+  assert.equal(managementCalls.length, 2);
   assert.equal(managementCalls[0]?.url, "https://api.supabase.com/v1/projects/demo-project/database/query");
   assert.equal(managementCalls[0]?.auth, "Bearer oauth-access-token");
-  const payload = JSON.parse(managementCalls[0]?.body ?? "{}") as { query?: string };
-  assert.match(payload.query ?? "", /CREATE TABLE IF NOT EXISTS public."tasks"/);
+  const firstPayload = JSON.parse(managementCalls[0]?.body ?? "{}") as { query?: string };
+  const secondPayload = JSON.parse(managementCalls[1]?.body ?? "{}") as { query?: string };
+  assert.equal(firstPayload.query, migrations[0]);
+  assert.equal(secondPayload.query, migrations[1]);
 });
 
 test("connectProjectToSupabase refreshes the OAuth token and retries table auto-creation on 401", async () => {
   const project = createProject();
   const { orgContext, updates } = createTestOrgContext(project);
   const managementAuthHeaders: string[] = [];
+  const migrations = ['CREATE TABLE IF NOT EXISTS public."tasks" ("id" UUID DEFAULT gen_random_uuid() PRIMARY KEY);'];
 
   const result = await connectProjectToSupabase({
     orgContext: orgContext as any,
@@ -235,7 +243,7 @@ test("connectProjectToSupabase refreshes the OAuth token and retries table auto-
             locked: false,
           },
         ],
-        metadata: {},
+        metadata: { migrations },
         status: "completed",
         summary: "Rewired to Supabase.",
       });
@@ -245,6 +253,7 @@ test("connectProjectToSupabase refreshes the OAuth token and retries table auto-
   assert.deepEqual(result, {
     host: "demo-project.supabase.co",
     wiring: true,
+    setupSql: migrations[0],
   });
   assert.deepEqual(managementAuthHeaders, [
     "Bearer expired-access-token",
@@ -258,4 +267,62 @@ test("connectProjectToSupabase refreshes the OAuth token and retries table auto-
     decryptProjectSecret(updates.at(-1)?.supabase_oauth_refresh_token),
     "fresh-refresh-token",
   );
+});
+
+test("connectProjectToSupabase logs migration failures and still succeeds", async () => {
+  const project = createProject();
+  const { orgContext } = createTestOrgContext(project);
+  const migrations = [
+    'CREATE TABLE IF NOT EXISTS public."tasks" ("id" UUID DEFAULT gen_random_uuid() PRIMARY KEY);',
+    'ALTER TABLE public."tasks" ADD COLUMN IF NOT EXISTS "title" TEXT;',
+  ];
+  const managementCalls: string[] = [];
+  const originalConsoleError = console.error;
+  const loggedErrors: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    loggedErrors.push(args);
+  };
+
+  try {
+    const result = await connectProjectToSupabase({
+      orgContext: orgContext as any,
+      project,
+      projectId: project.id,
+      supabaseUrl: "https://demo-project.supabase.co",
+      supabaseAnonKey: "anon-key",
+      oauthAccessToken: "oauth-access-token",
+      oauthRefreshToken: "oauth-refresh-token",
+      prompt: "rewire prompt",
+      ensureSupabaseProjectColumnsFn: async () => undefined,
+      fetchFn: async (input: RequestInfo | URL) => {
+        managementCalls.push(String(input));
+        if (managementCalls.length === 1) {
+          return new Response("boom", { status: 500 });
+        }
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+      runBuildInBackgroundFn: async (input: Record<string, unknown>) => {
+        await (orgContext.db as any).updateGeneration(String(input.buildId), {
+          completed_at: new Date().toISOString(),
+          files: [],
+          metadata: { migrations },
+          status: "completed",
+          summary: "Rewired to Supabase.",
+        });
+      },
+    });
+
+    assert.deepEqual(result, {
+      host: "demo-project.supabase.co",
+      wiring: true,
+      setupSql: migrations.join("\n\n"),
+    });
+    assert.equal(managementCalls.length, 2);
+    assert.equal(loggedErrors.some((entry) => String(entry[0]).includes("[supabaseByo] OAuth migration failed")), true);
+  } finally {
+    console.error = originalConsoleError;
+  }
 });

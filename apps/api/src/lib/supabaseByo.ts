@@ -217,6 +217,22 @@ export function readSetupSqlFromMetadata(metadata: unknown): string {
   return typeof setupSql === "string" ? setupSql : "";
 }
 
+export function readMigrationStatementsFromMetadata(metadata: unknown): string[] {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return [];
+  }
+
+  const migrations = (metadata as Record<string, unknown>).migrations;
+  if (!Array.isArray(migrations)) {
+    return [];
+  }
+
+  return migrations
+    .filter((statement): statement is string => typeof statement === "string")
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0);
+}
+
 function getSupabaseProjectRef(supabaseUrl: string): string {
   return new URL(supabaseUrl).hostname.split(".")[0] ?? "";
 }
@@ -242,7 +258,7 @@ async function runSupabaseManagementQueryWithOAuth(input: {
   refreshToken: string;
   query: string;
   fetchFn: typeof fetch;
-}): Promise<void> {
+}): Promise<boolean> {
   const projectRef = getSupabaseProjectRef(input.supabaseUrl);
   const requestQuery = (accessToken: string) => input.fetchFn(
     `${SUPABASE_MANAGEMENT_API_BASE}/projects/${projectRef}/database/query`,
@@ -259,48 +275,72 @@ async function runSupabaseManagementQueryWithOAuth(input: {
   let currentAccessToken = input.accessToken;
   let currentRefreshToken = input.refreshToken;
 
-  console.log("[supabaseByo] starting OAuth table auto-creation", {
+  console.log("[supabaseByo] starting OAuth migration", {
     projectId: input.projectId,
     projectRef,
+    queryPreview: input.query.slice(0, 120),
   });
 
-  let response = await requestQuery(currentAccessToken);
+  let response: Response;
+  try {
+    response = await requestQuery(currentAccessToken);
+  } catch (error) {
+    console.error("[supabaseByo] OAuth migration request failed", {
+      projectId: input.projectId,
+      projectRef,
+      queryPreview: input.query.slice(0, 120),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 
   if (response.status === 401 && currentRefreshToken) {
     console.log("[supabaseByo] OAuth access token expired, refreshing before retry", {
       projectId: input.projectId,
       projectRef,
+      queryPreview: input.query.slice(0, 120),
     });
 
-    const refreshedTokens = await refreshSupabaseOAuthTokens(currentRefreshToken, input.fetchFn);
-    currentAccessToken = refreshedTokens.accessToken;
-    currentRefreshToken = refreshedTokens.refreshToken;
+    try {
+      const refreshedTokens = await refreshSupabaseOAuthTokens(currentRefreshToken, input.fetchFn);
+      currentAccessToken = refreshedTokens.accessToken;
+      currentRefreshToken = refreshedTokens.refreshToken;
 
-    await updateProjectWithSchemaReloadRetry(input.orgContext, input.projectId, {
-      supabase_oauth_access_token: encryptProjectSecret(currentAccessToken),
-      supabase_oauth_refresh_token: encryptProjectSecret(currentRefreshToken),
-    });
+      await updateProjectWithSchemaReloadRetry(input.orgContext, input.projectId, {
+        supabase_oauth_access_token: encryptProjectSecret(currentAccessToken),
+        supabase_oauth_refresh_token: encryptProjectSecret(currentRefreshToken),
+      });
 
-    response = await requestQuery(currentAccessToken);
+      response = await requestQuery(currentAccessToken);
+    } catch (error) {
+      console.error("[supabaseByo] OAuth token refresh failed during migration", {
+        projectId: input.projectId,
+        projectRef,
+        queryPreview: input.query.slice(0, 120),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    console.error("[supabaseByo] OAuth table auto-creation failed", {
+    console.error("[supabaseByo] OAuth migration failed", {
       projectId: input.projectId,
       projectRef,
       status: response.status,
       body,
+      queryPreview: input.query.slice(0, 120),
     });
-    throw new Error(
-      `Supabase Management API query failed (${response.status})${body ? `: ${body}` : ""}`,
-    );
+    return false;
   }
 
-  console.log("[supabaseByo] OAuth table auto-creation completed", {
+  console.log("[supabaseByo] OAuth migration completed", {
     projectId: input.projectId,
     projectRef,
+    queryPreview: input.query.slice(0, 120),
   });
+  return true;
 }
 
 export async function waitForGenerationCompletion(
@@ -339,30 +379,6 @@ export async function waitForGenerationCompletion(
   return dbWithFindGeneration.findGenerationById(buildId).catch(() => null);
 }
 
-export async function runSupabaseExecSql(
-  supabaseUrl: string,
-  apiKey: string,
-  sql: string,
-  fetchFn: typeof fetch = fetch,
-): Promise<void> {
-  const response = await fetchFn(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/exec_sql`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: apiKey,
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({ query: sql }),
-  });
-
-  if (response.ok) {
-    return;
-  }
-
-  const body = await response.text().catch(() => "");
-  throw new Error(`Supabase exec_sql failed (${response.status})${body ? `: ${body}` : ""}`);
-}
-
 export async function connectProjectToSupabase(
   input: {
     orgContext: OrgContext;
@@ -397,6 +413,7 @@ export async function connectProjectToSupabase(
     ?? input.extraProjectPatch?.supabase_oauth_refresh_token
     ?? (input.project as Record<string, unknown> | null)?.supabase_oauth_refresh_token,
   );
+  const projectRef = getSupabaseProjectRef(input.supabaseUrl);
 
   await ensureSupabaseProjectColumnsFn(fetchFn);
 
@@ -439,34 +456,50 @@ export async function connectProjectToSupabase(
     status: completedGeneration?.status ?? null,
     fileCount: generationFiles.length,
   });
-  const setupSql = readSetupSqlFromMetadata(completedGeneration?.metadata)
+  const migrations = readMigrationStatementsFromMetadata(completedGeneration?.metadata);
+  const setupSql = migrations.join("\n\n")
+    || readSetupSqlFromMetadata(completedGeneration?.metadata)
     || buildSupabaseSetupSqlFromFiles(generationFiles);
 
-  if (!setupSql) {
-    console.log("[supabaseByo] no setup SQL detected after auto-wire", {
+  if (migrations.length === 0) {
+    console.log("[supabaseByo] no migrations detected after auto-wire", {
       buildId,
       projectId: input.projectId,
+      hasSetupSqlFallback: Boolean(setupSql),
     });
-    return { host, wiring: true };
+    return setupSql
+      ? { host, wiring: true, setupSql }
+      : { host, wiring: true };
   }
 
-  if (oauthAccessToken && oauthRefreshToken) {
-    await runSupabaseManagementQueryWithOAuth({
-      orgContext: input.orgContext,
-      projectId: input.projectId,
-      supabaseUrl: input.supabaseUrl,
-      accessToken: oauthAccessToken,
-      refreshToken: oauthRefreshToken,
-      query: setupSql,
-      fetchFn,
-    });
-    return { host, wiring: true };
+  console.log("[supabaseByo] executing BYO Supabase migrations", {
+    buildId,
+    projectId: input.projectId,
+    projectRef,
+    migrationCount: migrations.length,
+  });
+
+  if (oauthAccessToken) {
+    for (const migrationSql of migrations) {
+      await runSupabaseManagementQueryWithOAuth({
+        orgContext: input.orgContext,
+        projectId: input.projectId,
+        supabaseUrl: input.supabaseUrl,
+        accessToken: oauthAccessToken,
+        refreshToken: oauthRefreshToken,
+        query: migrationSql,
+        fetchFn,
+      });
+    }
+    return { host, wiring: true, ...(setupSql ? { setupSql } : {}) };
   }
 
-  if (serviceRoleKey) {
-    await runSupabaseExecSql(input.supabaseUrl, serviceRoleKey, setupSql, fetchFn);
-    return { host, wiring: true };
-  }
+  console.warn("[supabaseByo] missing OAuth access token for BYO migration execution; returning setup SQL only", {
+    buildId,
+    projectId: input.projectId,
+    projectRef,
+    hasServiceRoleKey: Boolean(serviceRoleKey),
+  });
 
-  return { host, wiring: true, setupSql };
+  return { host, wiring: true, ...(setupSql ? { setupSql } : {}) };
 }

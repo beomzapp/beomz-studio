@@ -501,7 +501,7 @@ test("byo-db delete clears saved Supabase credentials", async () => {
   ]);
 });
 
-test("byo-db auto-creates Supabase tables when a service role key is already stored", async () => {
+test("byo-db returns setupSql instead of auto-creating tables when only a stored service role key exists", async () => {
   const project = createProject({
     byo_db_service_key: encryptProjectSecret("service-role-key"),
   });
@@ -538,9 +538,9 @@ test("byo-db auto-creates Supabase tables when a service role key is already sto
   });
 
   const originalFetch = globalThis.fetch;
-  const execSqlCalls: Array<{ url: string; body: string | null }> = [];
+  const fetchCalls: Array<{ url: string; body: string | null }> = [];
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    execSqlCalls.push({
+    fetchCalls.push({
       url: String(input),
       body: typeof init?.body === "string" ? init.body : null,
     });
@@ -578,11 +578,15 @@ test("byo-db auto-creates Supabase tables when a service role key is already sto
       success: true,
       host: "demo-project.supabase.co",
       wiring: true,
+      setupSql: [
+        'CREATE TABLE IF NOT EXISTS public."tasks" (',
+        '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
+        '  "created_at" TIMESTAMPTZ DEFAULT now(),',
+        '  "title" TEXT',
+        ");",
+      ].join("\n"),
     });
-    assert.equal(execSqlCalls.length, 1);
-    assert.match(execSqlCalls[0]?.url ?? "", /demo-project\.supabase\.co\/rest\/v1\/rpc\/exec_sql$/);
-    const execSqlBody = JSON.parse(execSqlCalls[0]?.body ?? "{}") as { query?: string };
-    assert.match(execSqlBody.query ?? "", /CREATE TABLE IF NOT EXISTS public."tasks"/);
+    assert.equal(fetchCalls.length, 0);
     assert.deepEqual(updates, [
       {
         byo_db_url: "https://demo-project.supabase.co",

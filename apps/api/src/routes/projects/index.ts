@@ -32,7 +32,6 @@ import {
   connectProjectToSupabase,
   ensureSupabaseProjectColumns,
   queueSupabaseAutoWireIteration,
-  runSupabaseExecSql,
   updateProjectWithSchemaReloadRetry,
 } from "../../lib/supabaseByo.js";
 
@@ -125,13 +124,37 @@ function buildSequenceResetStatements(table: DatabaseDumpTable): string[] {
   ].join("\n"));
 }
 
+async function runSupabaseExecSqlRpc(
+  supabaseUrl: string,
+  apiKey: string,
+  sql: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetchFn(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/exec_sql`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: apiKey,
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ query: sql }),
+  });
+
+  if (response.ok) {
+    return;
+  }
+
+  const body = await response.text().catch(() => "");
+  throw new Error(`Supabase exec_sql failed (${response.status})${body ? `: ${body}` : ""}`);
+}
+
 async function cleanupSupabaseTables(
   supabaseUrl: string,
   supabaseAnonKey: string,
   createdTables: readonly string[],
 ): Promise<void> {
   for (const tableName of [...createdTables].reverse()) {
-    await runSupabaseExecSql(
+    await runSupabaseExecSqlRpc(
       supabaseUrl,
       supabaseAnonKey,
       `DROP TABLE IF EXISTS ${quoteQualifiedPublicTable(tableName)} CASCADE;`,
@@ -246,7 +269,7 @@ async function restoreSupabaseDatabase(input: {
 
   try {
     for (const table of input.tables) {
-      await runSupabaseExecSql(
+      await runSupabaseExecSqlRpc(
         input.supabaseUrl,
         input.supabaseAnonKey,
         buildCreateTableStatement(table),
@@ -257,11 +280,11 @@ async function restoreSupabaseDatabase(input: {
     for (const table of input.tables) {
       const insertStatement = buildInsertRowsStatement(table);
       if (insertStatement) {
-        await runSupabaseExecSql(input.supabaseUrl, input.supabaseAnonKey, insertStatement);
+        await runSupabaseExecSqlRpc(input.supabaseUrl, input.supabaseAnonKey, insertStatement);
       }
 
       for (const resetStatement of buildSequenceResetStatements(table)) {
-        await runSupabaseExecSql(input.supabaseUrl, input.supabaseAnonKey, resetStatement);
+        await runSupabaseExecSqlRpc(input.supabaseUrl, input.supabaseAnonKey, resetStatement);
       }
     }
   } catch (error) {
