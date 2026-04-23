@@ -142,7 +142,7 @@ test("authorize sets a signed PKCE cookie and redirects to Supabase", async () =
   assert.match(response.headers.get("set-cookie") ?? "", /beomz_supabase_oauth_pkce=/);
 });
 
-test("callback exchanges the code, stores temporary tokens, and redirects back to studio", async () => {
+test("callback exchanges the code, stores temporary tokens, and returns popup HTML", async () => {
   clearAllTemporarySupabaseOAuthTokens();
   const app = createApp(createOrgContext(createProject()), {
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -175,11 +175,17 @@ test("callback exchanges the code, stores temporary tokens, and redirects back t
     },
   );
 
-  assert.equal(response.status, 302);
-  assert.equal(
-    response.headers.get("location"),
-    "https://beomz.ai/studio/project/project-1?supabase_connected=1",
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/html(?:;|$)/);
+  const html = await response.text();
+  assert.match(html, /^<!DOCTYPE html>/);
+  assert.match(
+    html,
+    /window\.opener\.postMessage\(\{"type":"supabase_oauth_success","projectId":"project-1"\}, "https:\/\/beomz\.ai"\);/,
   );
+  assert.match(html, /window\.close\(\);/);
+  assert.doesNotMatch(html, /access-token-1/);
+
   assert.deepEqual(readTemporarySupabaseOAuthTokens("project-1"), {
     accessToken: "access-token-1",
     refreshToken: "refresh-token-1",

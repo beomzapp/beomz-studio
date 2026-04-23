@@ -23,7 +23,6 @@ import {
   SUPABASE_OAUTH_CALLBACK_URL,
   SUPABASE_OAUTH_PKCE_COOKIE_NAME,
   SUPABASE_OAUTH_PKCE_TTL_SECONDS,
-  SUPABASE_STUDIO_PROJECT_URL_BASE,
 } from "../../lib/supabaseOAuth.js";
 import { parseSupabaseProjectUrl } from "../../lib/projectDb.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
@@ -278,6 +277,23 @@ function requireSupabaseProjectRef(projectRef: string): string {
   return normalized;
 }
 
+function renderSupabaseOAuthPopupHtml(projectId: string): string {
+  const messagePayload = JSON.stringify({
+    type: "supabase_oauth_success",
+    projectId,
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<body>
+<script>
+  window.opener.postMessage(${messagePayload}, "https://beomz.ai");
+  window.close();
+</script>
+</body>
+</html>`;
+}
+
 export function createSupabaseIntegrationsRoute(
   deps: SupabaseIntegrationsRouteDeps = {},
 ) {
@@ -371,10 +387,7 @@ export function createSupabaseIntegrationsRoute(
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
       });
-      return c.redirect(
-        `${SUPABASE_STUDIO_PROJECT_URL_BASE}/${encodeURIComponent(state)}?supabase_connected=1`,
-        302,
-      );
+      return c.html(renderSupabaseOAuthPopupHtml(state));
     } catch (exchangeError) {
       console.error("[integrations/supabase/callback] token exchange failed:", exchangeError);
       return c.json({ error: "Failed to complete Supabase OAuth" }, 500);
