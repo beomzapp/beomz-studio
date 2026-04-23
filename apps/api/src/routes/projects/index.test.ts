@@ -47,11 +47,23 @@ function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
 
 function createOrgContext(project: ProjectRow, dbOverrides: Partial<OrgContext["db"]> = {}): OrgContext {
   const now = new Date().toISOString();
+  const generationStore = new Map<string, Record<string, unknown>>();
+
   return {
     db: {
       findProjectById: async (id: string) => (id === project.id ? project : null),
       findLatestGenerationByProjectId: async () => null,
-      createGeneration: async (input: Record<string, unknown>) => input,
+      createGeneration: async (input: Record<string, unknown>) => {
+        generationStore.set(String(input.id), input);
+        return input;
+      },
+      findGenerationById: async (id: string) => generationStore.get(id) ?? null,
+      updateGeneration: async (id: string, patch: Record<string, unknown>) => {
+        const current = generationStore.get(id) ?? {};
+        const next = { ...current, ...patch };
+        generationStore.set(id, next);
+        return next;
+      },
       updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({ ...project, ...patch }),
       deleteProject: async () => undefined,
       deleteProjectDbLimits: async () => undefined,
@@ -242,19 +254,36 @@ test("byo-db runs migration, saves Supabase credentials, and always queues auto-
   const updates: Record<string, unknown>[] = [];
   const createdGenerations: Record<string, unknown>[] = [];
   const buildRuns: Array<Record<string, unknown>> = [];
+  const generatedFiles: StudioFile[] = [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: [
+        'import { createClient } from "@supabase/supabase-js";',
+        "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);",
+        "const { data } = await supabase.from('tasks').select('id, title, created_at').order('created_at', { ascending: false });",
+      ].join("\n"),
+      source: "ai",
+      locked: false,
+    },
+  ];
   let migrationRuns = 0;
-  const orgContext = createOrgContext(project, {
+  let orgContext!: OrgContext;
+  orgContext = createOrgContext(project, {
     updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
       updates.push(patch);
       return { ...project, ...patch };
     },
     createGeneration: async (input: Record<string, unknown>) => {
       createdGenerations.push(input);
-      return {
+      const row = {
         ...input,
         project_id: project.id,
         template_id: project.template,
       };
+      await orgContext.db.updateGeneration(String(input.id), row);
+      return row;
     },
   });
   const app = createApp(orgContext, {
@@ -263,6 +292,13 @@ test("byo-db runs migration, saves Supabase credentials, and always queues auto-
     },
     runBuildInBackground: async (input: Record<string, unknown>) => {
       buildRuns.push(input);
+      await orgContext.db.updateGeneration(String(input.buildId), {
+        completed_at: new Date().toISOString(),
+        files: generatedFiles,
+        metadata: {},
+        status: "completed",
+        summary: "Rewired to Supabase.",
+      });
     },
   });
 
@@ -280,6 +316,13 @@ test("byo-db runs migration, saves Supabase credentials, and always queues auto-
     success: true,
     host: "demo-project.supabase.co",
     wiring: true,
+    setupSql: [
+      'CREATE TABLE IF NOT EXISTS public."tasks" (',
+      '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
+      '  "created_at" TIMESTAMPTZ DEFAULT now(),',
+      '  "title" TEXT',
+      ");",
+    ].join("\n"),
   });
   assert.equal(migrationRuns, 1);
   assert.equal(createdGenerations.length, 1);
@@ -309,7 +352,22 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
   const updates: Record<string, unknown>[] = [];
   const createdGenerations: Record<string, unknown>[] = [];
   const buildRuns: Array<Record<string, unknown>> = [];
-  const orgContext = createOrgContext(project, {
+  const generatedFiles: StudioFile[] = [
+    {
+      path: "App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: [
+        'import { createClient } from "@supabase/supabase-js";',
+        "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);",
+        "const { data } = await supabase.from('tasks').select('id, title').order('created_at', { ascending: false });",
+      ].join("\n"),
+      source: "ai",
+      locked: false,
+    },
+  ];
+  let orgContext!: OrgContext;
+  orgContext = createOrgContext(project, {
     updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
       updates.push(patch);
       return { ...project, ...patch };
@@ -320,16 +378,25 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
     }),
     createGeneration: async (input: Record<string, unknown>) => {
       createdGenerations.push(input);
-      return {
+      const row = {
         ...input,
         project_id: project.id,
         template_id: project.template,
       };
+      await orgContext.db.updateGeneration(String(input.id), row);
+      return row;
     },
   });
   const app = createApp(orgContext, {
     runBuildInBackground: async (input: Record<string, unknown>) => {
       buildRuns.push(input);
+      await orgContext.db.updateGeneration(String(input.buildId), {
+        completed_at: new Date().toISOString(),
+        files: generatedFiles,
+        metadata: {},
+        status: "completed",
+        summary: "Rewired to Supabase.",
+      });
     },
   });
 
@@ -347,6 +414,13 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
     success: true,
     host: "demo-project.supabase.co",
     wiring: true,
+    setupSql: [
+      'CREATE TABLE IF NOT EXISTS public."tasks" (',
+      '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
+      '  "created_at" TIMESTAMPTZ DEFAULT now(),',
+      '  "title" TEXT',
+      ");",
+    ].join("\n"),
   });
   assert.equal(createdGenerations.length, 1);
   assert.equal(buildRuns.length, 1);
@@ -365,6 +439,9 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
   assert.match(String(buildRuns[0]?.prompt ?? ""), /Rewire the entire app to use Supabase instead of hardcoded data\./);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /import \{ createClient \} from "@supabase\/supabase-js"/);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /do NOT use "\.\/supabase-js", "supabase-js", or any relative path\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER use raw fetch\(\) to call Supabase REST endpoints directly\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like `\$\{supabaseUrl\}\/rest\/v1\/tasks\?select=\*`\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /ALWAYS use the supabase client exclusively:/);
 });
 
 test("byo-db delete clears saved Supabase credentials", async () => {
@@ -544,6 +621,9 @@ test("upgrade-to-byo migrates data, deletes Neon, and queues a Supabase rewire",
   assert.match(String(buildRuns[0]?.prompt ?? ""), /use Supabase instead of Neon\./);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /import \{ createClient \} from "@supabase\/supabase-js"/);
   assert.match(String(buildRuns[0]?.prompt ?? ""), /do NOT use "\.\/supabase-js", "supabase-js", or any relative path\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER use raw fetch\(\) to call Supabase REST endpoints directly\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /NEVER construct URLs like `\$\{supabaseUrl\}\/rest\/v1\/tasks\?select=\*`\./);
+  assert.match(String(buildRuns[0]?.prompt ?? ""), /ALWAYS use the supabase client exclusively:/);
 });
 
 test("upgrade-to-byo continues when Neon deletion fails after a successful migration", async () => {

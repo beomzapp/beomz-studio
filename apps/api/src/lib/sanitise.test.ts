@@ -179,6 +179,25 @@ test("sanitiseContent fixes broken Supabase import and require variants in one p
   assert.equal(output.includes("'supabase-js'"), false);
 });
 
+test("sanitiseContent replaces raw Supabase REST fetch patterns with a TODO placeholder", () => {
+  const input = [
+    "async function loadTasks() {",
+    "  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/tasks?select=*`, {",
+    "    headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY },",
+    "  });",
+    "  const fallback = await fetch(supabaseUrl + '/rest/v1/tasks?select=*');",
+    "  await fetch(`${supabaseUrl}/rest/v1/tasks?select=*`);",
+    "}",
+  ].join("\n");
+
+  const output = sanitiseContent(input, TEST_PATH);
+
+  assert.equal(output.includes("/rest/v1/tasks"), false);
+  assert.match(output, /const response = undefined; \/\/ TODO: use supabase client instead of raw fetch/);
+  assert.match(output, /const fallback = undefined; \/\/ TODO: use supabase client instead of raw fetch/);
+  assert.match(output, /\/\/ TODO: use supabase client instead of raw fetch/);
+});
+
 test("sanitiseContent fixes multi-word hyphenated component names", () => {
   const input = "export default function my-cool-component() {\n  return <div />;\n}\n";
 

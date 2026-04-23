@@ -76,6 +76,7 @@ import {
   resolveProjectDbProvider,
 } from "../../lib/projectDb.js";
 import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
+import { buildSupabaseSetupSqlFromFiles } from "../../lib/supabaseSetupSql.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
   getSchemaTableList,
@@ -4185,6 +4186,22 @@ async function _runBuildInBackground(
         status: "completed",
         summary: iterResult.summary,
       });
+
+      if (hasByoSupabaseConfig) {
+        const setupSql = buildSupabaseSetupSqlFromFiles(iterFinalFiles);
+        if (setupSql) {
+          const latestGeneration = await db.findGenerationById(buildId).catch(() => null);
+          const currentMetadata = typeof latestGeneration?.metadata === "object" && latestGeneration.metadata !== null
+            ? latestGeneration.metadata as Record<string, unknown>
+            : {};
+          await db.updateGeneration(buildId, {
+            metadata: {
+              ...currentMetadata,
+              setupSql,
+            },
+          }).catch(() => undefined);
+        }
+      }
 
       console.log("[generate] iteration complete.", {
         buildId,

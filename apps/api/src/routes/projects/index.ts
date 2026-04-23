@@ -31,6 +31,7 @@ import {
   parseSupabaseProjectUrl,
 } from "../../lib/projectDb.js";
 import { runBuildInBackground } from "../builds/generate.js";
+import { buildSupabaseSetupSqlFromFiles } from "../../lib/supabaseSetupSql.js";
 
 interface DatabaseDumpColumn {
   name: string;
@@ -63,11 +64,18 @@ interface ProjectsRouteDeps {
 const SUPABASE_MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
 const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
 const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
+const AUTO_WIRE_WAIT_TIMEOUT_MS = 60_000;
+const AUTO_WIRE_WAIT_POLL_MS = 500;
 const AUTO_WIRE_SUPABASE_ITERATION_PROMPT = [
   "Rewire the entire app to use Supabase instead of hardcoded data.",
   "Use this exact import line, character for character:",
   'import { createClient } from "@supabase/supabase-js"',
   'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
+  "NEVER use raw fetch() to call Supabase REST endpoints directly.",
+  "NEVER construct URLs like `${supabaseUrl}/rest/v1/tasks?select=*`.",
+  "ALWAYS use the supabase client exclusively:",
+  "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
+  "const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })",
   "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all hardcoded arrays and sample data with real Supabase queries.",
   "Use useEffect + useState for data fetching with loading and error states.",
@@ -77,6 +85,11 @@ const UPGRADE_TO_BYO_ITERATION_PROMPT = [
   "Use this exact import line, character for character:",
   'import { createClient } from "@supabase/supabase-js"',
   'The package name is "@supabase/supabase-js" — do NOT use "./supabase-js", "supabase-js", or any relative path.',
+  "NEVER use raw fetch() to call Supabase REST endpoints directly.",
+  "NEVER construct URLs like `${supabaseUrl}/rest/v1/tasks?select=*`.",
+  "ALWAYS use the supabase client exclusively:",
+  "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
+  "const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })",
   "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all Neon/postgres queries with Supabase queries.",
   "Use useEffect + useState with loading and error states.",
@@ -370,7 +383,7 @@ async function queueSupabaseAutoWireIteration(
   prompt: string,
   existingFiles: readonly StudioFile[],
   runBuildInBackgroundFn: typeof runBuildInBackground,
-): Promise<void> {
+): Promise<string> {
   if (!project) {
     throw new Error("Project not found");
   }
@@ -448,6 +461,53 @@ async function queueSupabaseAutoWireIteration(
       error,
     });
   });
+
+  return buildId;
+}
+
+function readSetupSqlFromMetadata(metadata: unknown): string {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return "";
+  }
+
+  const setupSql = (metadata as Record<string, unknown>).setupSql;
+  return typeof setupSql === "string" ? setupSql : "";
+}
+
+async function waitForGenerationCompletion(
+  db: OrgContext["db"],
+  buildId: string,
+): Promise<{
+  files?: readonly StudioFile[];
+  metadata?: Record<string, unknown> | null;
+  status?: string | null;
+} | null> {
+  const dbWithFindGeneration = db as OrgContext["db"] & {
+    findGenerationById?: (id: string) => Promise<{
+      files?: readonly StudioFile[];
+      metadata?: Record<string, unknown> | null;
+      status?: string | null;
+    } | null>;
+  };
+
+  if (!dbWithFindGeneration.findGenerationById) {
+    return null;
+  }
+
+  const deadline = Date.now() + AUTO_WIRE_WAIT_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const generation = await dbWithFindGeneration.findGenerationById(buildId).catch(() => null);
+    if (generation && generation.status === "completed") {
+      return generation;
+    }
+    if (generation && generation.status === "failed") {
+      return generation;
+    }
+    await delay(AUTO_WIRE_WAIT_POLL_MS);
+  }
+
+  return dbWithFindGeneration.findGenerationById(buildId).catch(() => null);
 }
 
 export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
@@ -668,7 +728,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       ? latestGeneration.files as readonly StudioFile[]
       : [];
 
-    await queueSupabaseAutoWireIteration(
+    const buildId = await queueSupabaseAutoWireIteration(
       orgContext,
       project,
       projectId,
@@ -677,7 +737,14 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       runBuildInBackgroundFn,
     );
 
-    return c.json({ success: true, host: parsed.host, wiring: true });
+    const completedGeneration = await waitForGenerationCompletion(orgContext.db, buildId);
+    const generationFiles = Array.isArray(completedGeneration?.files)
+      ? completedGeneration.files
+      : [];
+    const setupSql = readSetupSqlFromMetadata(completedGeneration?.metadata)
+      || buildSupabaseSetupSqlFromFiles(generationFiles);
+
+    return c.json({ success: true, host: parsed.host, wiring: true, setupSql });
   });
 
   projectsRoute.post("/:id/upgrade-to-byo", authMiddleware, loadOrgContextMiddleware, async (c) => {

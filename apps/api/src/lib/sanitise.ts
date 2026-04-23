@@ -122,7 +122,38 @@ const supabaseImport: Fixer = {
     ),
 };
 
-// ── Fixer 2: reactGlobals ─────────────────────────────────────────────────────
+const SUPABASE_REST_FETCH_TARGET =
+  "(?:`[\\s\\S]*?/rest/v1/[\\s\\S]*?`|[A-Za-z_$][\\w$.]*\\s*\\+\\s*['\"][^'\"]*/rest/v1/[^'\"]*['\"]|['\"][^'\"]*/rest/v1/[^'\"]*['\"])";
+const SUPABASE_REST_FETCH_ASSIGNMENT_PATTERN = new RegExp(
+  `^([ \\t]*)(const|let|var)\\s+([^=\\n]+?)=\\s*(await\\s*)?fetch\\(\\s*${SUPABASE_REST_FETCH_TARGET}\\s*(?:,\\s*\\{[\\s\\S]*?\\})?\\s*\\)\\s*;?`,
+  "gm",
+);
+const SUPABASE_REST_FETCH_STATEMENT_PATTERN = new RegExp(
+  `^([ \\t]*)(await\\s*)?fetch\\(\\s*${SUPABASE_REST_FETCH_TARGET}\\s*(?:,\\s*\\{[\\s\\S]*?\\})?\\s*\\)\\s*;?`,
+  "gm",
+);
+
+// ── Fixer 2: supabaseRestFetch ───────────────────────────────────────────────
+// Generated apps must use the Supabase client, not handwritten REST URLs.
+// Replace broken fetch statements with a safe placeholder and TODO comment.
+
+const supabaseRestFetch: Fixer = {
+  name: "supabaseRestFetch",
+  fix: (content) =>
+    content
+      .replace(
+        SUPABASE_REST_FETCH_ASSIGNMENT_PATTERN,
+        (_match, indent: string, keyword: string, identifier: string) =>
+          `${indent}${keyword} ${identifier}= undefined; // TODO: use supabase client instead of raw fetch`,
+      )
+      .replace(
+        SUPABASE_REST_FETCH_STATEMENT_PATTERN,
+        (_match, indent: string) =>
+          `${indent}// TODO: use supabase client instead of raw fetch`,
+      ),
+};
+
+// ── Fixer 3: reactGlobals ─────────────────────────────────────────────────────
 // Prebuilt templates use `const { useState, useEffect } = React;` (CJS/UMD
 // style) designed for the inline srcDoc preview where React is window.React.
 // Vite inside WebContainer uses strict ESM — patch to a proper import.
@@ -147,7 +178,7 @@ const reactGlobals: Fixer = {
   },
 };
 
-// ── Fixer 3: flatImports ──────────────────────────────────────────────────────
+// ── Fixer 4: flatImports ──────────────────────────────────────────────────────
 // After remapPrebuiltPath() all generated files live in the same flat directory.
 // Deep import paths like './components/X' break at Vite because the file is
 // already at './X'. Rewrite any import with directory components to flat form.
@@ -176,7 +207,7 @@ const flatImports: Fixer = {
       ),
 };
 
-// ── Fixer 4: jsxQuotes ───────────────────────────────────────────────────────
+// ── Fixer 5: jsxQuotes ───────────────────────────────────────────────────────
 // AI sometimes generates backslash-escaped quotes inside double-quoted JSX
 // attribute values: placeholder="e.g. MacBook Pro 14\" (HW001)"
 // This is invalid JSX — Vite/oxc chokes on it. Replace \" with &quot;.
@@ -450,6 +481,7 @@ const invalidLucideIcon: Fixer = {
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 // Order matters:
 //   supabaseImport    — before flatImports (don't re-flatten the corrected path)
+//   supabaseRestFetch — strip broken raw Supabase REST fetches before URL fixers touch them
 //   reactGlobals      — before flatImports (avoid flattening react import we just added)
 //   flatImports       — flatten all remaining deep relative/alias paths
 //   jsxQuotes         — fix backslash-escaped double quotes in JSX attributes
@@ -462,6 +494,7 @@ const invalidLucideIcon: Fixer = {
 
 const PIPELINE: readonly Fixer[] = [
   supabaseImport,
+  supabaseRestFetch,
   reactGlobals,
   flatImports,
   jsxQuotes,
