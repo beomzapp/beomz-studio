@@ -287,8 +287,16 @@ function renderSupabaseOAuthPopupHtml(projectId: string): string {
 <html>
 <body>
 <script>
-  window.opener.postMessage(${messagePayload}, "https://beomz.ai");
-  window.close();
+  if (window.opener) {
+    window.opener.postMessage(
+      ${messagePayload},
+      "https://beomz.ai"
+    );
+    setTimeout(() => window.close(), 500);
+  } else {
+    localStorage.setItem("supabase_oauth_result", JSON.stringify(${messagePayload}));
+    setTimeout(() => window.close(), 500);
+  }
 </script>
 </body>
 </html>`;

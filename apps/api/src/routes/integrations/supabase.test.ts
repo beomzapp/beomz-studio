@@ -181,9 +181,17 @@ test("callback exchanges the code, stores temporary tokens, and returns popup HT
   assert.match(html, /^<!DOCTYPE html>/);
   assert.match(
     html,
-    /window\.opener\.postMessage\(\{"type":"supabase_oauth_success","projectId":"project-1"\}, "https:\/\/beomz\.ai"\);/,
+    /if \(window\.opener\) \{/,
   );
-  assert.match(html, /window\.close\(\);/);
+  assert.match(
+    html,
+    /window\.opener\.postMessage\(\s*\{"type":"supabase_oauth_success","projectId":"project-1"\},\s*"https:\/\/beomz\.ai"\s*\);/,
+  );
+  assert.match(
+    html,
+    /localStorage\.setItem\("supabase_oauth_result", JSON\.stringify\(\{"type":"supabase_oauth_success","projectId":"project-1"\}\)\);/,
+  );
+  assert.match(html, /setTimeout\(\(\) => window\.close\(\), 500\);/);
   assert.doesNotMatch(html, /access-token-1/);
 
   assert.deepEqual(readTemporarySupabaseOAuthTokens("project-1"), {
