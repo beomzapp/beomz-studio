@@ -338,6 +338,8 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     };
   });
 
+  console.log("[vercel] project id:", project?.id, "byo_db_url:", project?.byo_db_url, "has_anon_key:", !!project?.byo_db_anon_key);
+
   const deployGeneratedFiles = replaceDeployEnvFile(generatedFiles, project, {
     provider,
     neonDbUrl,
