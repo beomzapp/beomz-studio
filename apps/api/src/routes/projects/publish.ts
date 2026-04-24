@@ -11,8 +11,10 @@ import archiver from "archiver";
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 
+import type { StudioFile } from "@beomz-studio/contracts";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 
+import { upsertEnvFile } from "../../lib/envFile.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -27,6 +29,82 @@ function validateSlug(slug: string): string | null {
     return "Slug must be lowercase letters, numbers, and hyphens only — no leading or trailing hyphens";
   }
   return null;
+}
+
+type PublishDbLookup = {
+  byo_db_url?: unknown;
+  byo_db_anon_key?: unknown;
+  db_wired?: unknown;
+  db_schema?: unknown;
+};
+
+type PublishedDbCredentials = {
+  supabaseUrl: string | undefined;
+  supabaseAnonKey: string | undefined;
+  schemaName: string | null;
+  VITE_SUPABASE_URL?: string;
+  VITE_SUPABASE_ANON_KEY?: string;
+  VITE_BYO_DB?: string;
+};
+
+function getByoSupabasePublishConfig(
+  project: PublishDbLookup,
+): { url: string; anonKey: string } | null {
+  const url = typeof project.byo_db_url === "string" ? project.byo_db_url.trim() : "";
+  const anonKey = typeof project.byo_db_anon_key === "string" ? project.byo_db_anon_key.trim() : "";
+
+  if (!url || !anonKey) {
+    return null;
+  }
+
+  return { url, anonKey };
+}
+
+export function buildPublishedDbCredentials(
+  project: PublishDbLookup,
+): PublishedDbCredentials | null {
+  const byoSupabase = getByoSupabasePublishConfig(project);
+  if (byoSupabase) {
+    return {
+      supabaseUrl: byoSupabase.url,
+      supabaseAnonKey: byoSupabase.anonKey,
+      schemaName: "public",
+      VITE_SUPABASE_URL: byoSupabase.url,
+      VITE_SUPABASE_ANON_KEY: byoSupabase.anonKey,
+      VITE_BYO_DB: "true",
+    };
+  }
+
+  if (project.db_wired) {
+    return {
+      supabaseUrl: process.env.USER_DATA_SUPABASE_URL,
+      supabaseAnonKey: process.env.USER_DATA_SUPABASE_ANON_KEY,
+      schemaName: typeof project.db_schema === "string" ? project.db_schema : null,
+    };
+  }
+
+  return null;
+}
+
+export function injectPublishedByoEnvFiles(
+  files: readonly StudioFile[],
+  project: PublishDbLookup,
+): readonly StudioFile[] {
+  const byoSupabase = getByoSupabasePublishConfig(project);
+  if (!byoSupabase) {
+    return files;
+  }
+
+  return upsertEnvFile(files, {
+    VITE_SUPABASE_URL: byoSupabase.url,
+    VITE_SUPABASE_ANON_KEY: byoSupabase.anonKey,
+    VITE_BYO_DB: "true",
+    VITE_DATABASE_URL: null,
+    VITE_DB_SCHEMA: null,
+    VITE_NEON_AUTH_URL: null,
+    NEON_AUTH_SECRET: null,
+    NEON_AUTH_PUB_KEY: null,
+  });
 }
 
 // ── POST /api/projects/:id/publish ────────────────────────────────────────────
@@ -97,19 +175,7 @@ publicSlugRoute.get("/:slug", async (c) => {
   const latestGen = await db.findLatestGenerationByProjectId(project.id);
   const files = latestGen?.files ?? [];
 
-  let dbCredentials: {
-    supabaseUrl: string | undefined;
-    supabaseAnonKey: string | undefined;
-    schemaName: string | null;
-  } | null = null;
-
-  if (project.db_wired) {
-    dbCredentials = {
-      supabaseUrl: process.env.USER_DATA_SUPABASE_URL,
-      supabaseAnonKey: process.env.USER_DATA_SUPABASE_ANON_KEY,
-      schemaName: project.db_schema,
-    };
-  }
+  const dbCredentials = buildPublishedDbCredentials(project);
 
   return c.json({
     projectId: project.id,
@@ -150,7 +216,10 @@ exportRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json({ error: "No generated files found" }, 404);
   }
 
-  const files = latestGen.files as Array<{ path: string; content: string }>;
+  const files = injectPublishedByoEnvFiles(
+    latestGen.files as readonly StudioFile[],
+    project,
+  );
   const safeName = project.name.replace(/[^a-zA-Z0-9_-]/g, "_");
 
   return stream(c, async (s) => {
