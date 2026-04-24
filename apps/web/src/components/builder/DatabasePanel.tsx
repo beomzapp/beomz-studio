@@ -748,37 +748,52 @@ export function DatabasePanel({
     popupRef.current = null;
   }, []);
 
+  /**
+   * BEO-537 / BEO-541 / BEO-552: POST /integrations/supabase/connect then
+   * rewire via chat. `forceIteration: true` is required for the short
+   * SUPABASE_WIRING_PROMPT (same as manual OAuth + "Connect manually").
+   * Used by the project picker and by the BEO-548 create-project path once
+   * the new project is ACTIVE_HEALTHY.
+   */
+  const connectOAuthProjectAndFireRewire = useCallback(
+    async (supabaseProjectRef: string) => {
+      if (!projectId) return;
+      setOauthConnecting(true);
+      setOauthConnectError(null);
+      try {
+        const result = await connectSupabaseOAuth(projectId, supabaseProjectRef);
+        let host: string = supabaseProjectRef + ".supabase.co";
+        if (result.host) host = result.host;
+        setByoSavedHost(host);
+        if (result.setupSql && result.setupSql.trim()) {
+          setSetupSql(result.setupSql);
+          setSetupSqlDismissed(false);
+          setSetupSqlCopied(false);
+        }
+        onDbStateChange();
+        // BEO-541: close modal then fire as a silent iteration.
+        // `forceIteration: true` routes through `implementWithPlan` so the
+        // API's `hasExplicitImplementSignal()` bypasses `detectIntent()` —
+        // matches the managed-Neon WIRING_PROMPT behaviour (which is already
+        // classified as build by virtue of its long prescriptive content).
+        handleCloseConnectModal();
+        setTimeout(() => {
+          onWireToDatabase?.(SUPABASE_WIRING_PROMPT, { forceIteration: true });
+        }, 300);
+      } catch (err) {
+        setOauthConnectError(err instanceof Error ? err.message : "Failed to connect project.");
+      } finally {
+        setOauthConnecting(false);
+      }
+    },
+    [projectId, onDbStateChange, onWireToDatabase, handleCloseConnectModal],
+  );
+
   // ── BEO-537: Connect chosen project → inject rewire prompt ─
   const handleConnectOAuth = useCallback(async () => {
     if (!projectId || !selectedOauthRef) return;
-    setOauthConnecting(true);
-    setOauthConnectError(null);
-    try {
-      const result = await connectSupabaseOAuth(projectId, selectedOauthRef);
-      let host: string = selectedOauthRef + ".supabase.co";
-      if (result.host) host = result.host;
-      setByoSavedHost(host);
-      if (result.setupSql && result.setupSql.trim()) {
-        setSetupSql(result.setupSql);
-        setSetupSqlDismissed(false);
-        setSetupSqlCopied(false);
-      }
-      onDbStateChange();
-      // BEO-541: close modal then fire as a silent iteration.
-      // `forceIteration: true` routes through `implementWithPlan` so the
-      // API's `hasExplicitImplementSignal()` bypasses `detectIntent()` —
-      // matches the managed-Neon WIRING_PROMPT behaviour (which is already
-      // classified as build by virtue of its long prescriptive content).
-      handleCloseConnectModal();
-      setTimeout(() => {
-        onWireToDatabase?.(SUPABASE_WIRING_PROMPT, { forceIteration: true });
-      }, 300);
-    } catch (err) {
-      setOauthConnectError(err instanceof Error ? err.message : "Failed to connect project.");
-    } finally {
-      setOauthConnecting(false);
-    }
-  }, [projectId, selectedOauthRef, onDbStateChange, onWireToDatabase, handleCloseConnectModal]);
+    await connectOAuthProjectAndFireRewire(selectedOauthRef);
+  }, [projectId, selectedOauthRef, connectOAuthProjectAndFireRewire]);
 
   // ── BEO-548: Open create-project form + fetch orgs ────
   const handleShowCreateProjectForm = useCallback(async () => {
@@ -828,12 +843,14 @@ export function DatabasePanel({
                 clearInterval(createProjectPollRef.current);
                 createProjectPollRef.current = null;
               }
-              // Refresh project list, auto-select the new project
+              // Refresh project list, auto-select the new project, then connect + rewire
+              // (BEO-552: same path as handleConnectOAuth — must use forceIteration on rewire)
               return getSupabaseOAuthProjects(projectId).then((projects) => {
                 setOauthProjects(projects);
                 setSelectedOauthRef(ref);
                 setCreatingProjectPolling(false);
                 setShowCreateProjectForm(false);
+                void connectOAuthProjectAndFireRewire(ref);
               });
             }
           })
@@ -845,7 +862,7 @@ export function DatabasePanel({
       setCreatingProjectError(err instanceof Error ? err.message : "Failed to create project.");
       setCreatingProject(false);
     }
-  }, [projectId, createProjName, createProjRegion, createProjOrgId]);
+  }, [projectId, createProjName, createProjRegion, createProjOrgId, connectOAuthProjectAndFireRewire]);
 
   // ── Upgrade submit → POST + poll ──────────────────────
   const handleConfirmUpgrade = useCallback(async () => {
