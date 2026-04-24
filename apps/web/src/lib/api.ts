@@ -743,35 +743,71 @@ export interface CustomDomainVerification {
 export interface CustomDomain {
   domain: string;
   status: "pending" | "verified" | "error";
+  /** Set when API returns a boolean (mirrors Vercel); prefer `status` in UI. */
+  verified?: boolean;
   verification?: CustomDomainVerification[];
 }
 
+/** API may return `verified` without `status`, or host under `name` / `hostname`. */
+function normalizeCustomDomain(raw: unknown): CustomDomain {
+  const r = raw as {
+    domain?: string;
+    name?: string;
+    hostname?: string;
+    status?: string;
+    verified?: boolean;
+    verification?: CustomDomainVerification[];
+  };
+  const host =
+    (typeof r.domain === "string" && r.domain) ||
+    (typeof r.name === "string" && r.name) ||
+    (typeof r.hostname === "string" && r.hostname) ||
+    "";
+  let status: CustomDomain["status"] = "pending";
+  if (r.status === "verified" || r.status === "pending" || r.status === "error") {
+    status = r.status;
+  } else if (r.verified === true) {
+    status = "verified";
+  } else if (r.verified === false) {
+    status = "pending";
+  }
+  return {
+    domain: host,
+    status,
+    /** Aligned with `status` so UI can use `!domain.verified` per API shape. */
+    verified: status === "verified",
+    verification: Array.isArray(r.verification) ? r.verification : undefined,
+  };
+}
+
 export async function listCustomDomains(projectId: string): Promise<CustomDomain[]> {
-  const data = await requestJson<{ domains?: CustomDomain[] }>(
+  const data = await requestJson<{ domains?: unknown[] }>(
     `/projects/${projectId}/domains`,
     { method: "GET" },
   );
-  return data.domains ?? [];
+  return (data.domains ?? []).map(normalizeCustomDomain);
 }
 
 export async function addCustomDomain(
   projectId: string,
   domain: string,
 ): Promise<CustomDomain> {
-  return requestJson<CustomDomain>(`/projects/${projectId}/domains`, {
+  const raw = await requestJson<unknown>(`/projects/${projectId}/domains`, {
     method: "POST",
     body: JSON.stringify({ domain }),
   });
+  return normalizeCustomDomain(raw);
 }
 
 export async function verifyCustomDomain(
   projectId: string,
   domain: string,
 ): Promise<CustomDomain> {
-  return requestJson<CustomDomain>(
+  const raw = await requestJson<unknown>(
     `/projects/${projectId}/domains/${encodeURIComponent(domain)}/verify`,
     { method: "POST", body: JSON.stringify({}) },
   );
+  return normalizeCustomDomain(raw);
 }
 
 export async function removeCustomDomain(

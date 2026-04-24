@@ -912,7 +912,14 @@ function DomainRow({
   onVerify,
   onRemove,
 }: DomainRowProps) {
-  const isVerified = domain.status === "verified";
+  console.log("[DomainRow] domain:", JSON.stringify(domain));
+  const isVerified =
+    domain.status === "verified" || domain.verified === true;
+  const showVerificationCard = Boolean(
+    !domain.verified &&
+      domain.verification &&
+      domain.verification.length > 0,
+  );
   const txt = domain.verification?.[0];
 
   return (
@@ -956,7 +963,7 @@ function DomainRow({
         </div>
       ) : (
         <>
-          {txt && (
+          {showVerificationCard && txt && (
             <div className="mt-3 rounded-lg border border-[#f0e6d6] bg-[#fef7ea] p-3">
               <p className="mb-2 text-xs font-medium text-[#92400e]">
                 Add this TXT record to your DNS:
@@ -964,7 +971,7 @@ function DomainRow({
               <dl className="space-y-1.5 text-xs">
                 <div className="flex items-center gap-2">
                   <dt className="w-14 flex-none font-medium text-[#6b7280]">Type</dt>
-                  <dd className="font-mono text-[#1a1a1a]">{txt.type || "TXT"}</dd>
+                  <dd className="font-mono text-[#1a1a1a]">TXT</dd>
                 </div>
                 <div className="flex items-center gap-2">
                   <dt className="w-14 flex-none font-medium text-[#6b7280]">Name</dt>
