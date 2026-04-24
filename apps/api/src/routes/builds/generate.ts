@@ -75,7 +75,12 @@ import {
   parseSupabaseProjectUrl,
   resolveProjectDbProvider,
 } from "../../lib/projectDb.js";
+import { encryptProjectSecret } from "../../lib/projectSecrets.js";
 import { rewriteNeonImports, sanitiseContent, sanitiseFiles } from "../../lib/sanitise.js";
+import {
+  readStoredSupabaseToken,
+  runSupabaseManagementQueryWithOAuth,
+} from "../../lib/supabaseManagement.js";
 import { buildSupabaseSetupSqlFromFiles } from "../../lib/supabaseSetupSql.js";
 import { classifyPalette } from "../../lib/slm/client.js";
 import {
@@ -4187,20 +4192,24 @@ async function _runBuildInBackground(
         summary: iterResult.summary,
       });
 
-      if (hasByoSupabaseConfig) {
-        const setupSql = buildSupabaseSetupSqlFromFiles(iterFinalFiles);
-        if (setupSql) {
-          const latestGeneration = await db.findGenerationById(buildId).catch(() => null);
-          const currentMetadata = typeof latestGeneration?.metadata === "object" && latestGeneration.metadata !== null
-            ? latestGeneration.metadata as Record<string, unknown>
-            : {};
-          await db.updateGeneration(buildId, {
-            metadata: {
-              ...currentMetadata,
-              setupSql,
-            },
-          }).catch(() => undefined);
-        }
+      const iterationMigrations = Array.isArray(iterResult.migrations)
+        ? iterResult.migrations.filter((statement): statement is string => typeof statement === "string" && statement.trim().length > 0)
+        : [];
+      const setupSql = hasByoSupabaseConfig
+        ? buildSupabaseSetupSqlFromFiles(iterFinalFiles)
+        : "";
+      if (iterationMigrations.length > 0 || setupSql) {
+        const latestGeneration = await db.findGenerationById(buildId).catch(() => null);
+        const currentMetadata = typeof latestGeneration?.metadata === "object" && latestGeneration.metadata !== null
+          ? latestGeneration.metadata as Record<string, unknown>
+          : {};
+        await db.updateGeneration(buildId, {
+          metadata: {
+            ...currentMetadata,
+            ...(iterationMigrations.length > 0 ? { migrations: iterationMigrations } : {}),
+            ...(setupSql ? { setupSql } : {}),
+          },
+        }).catch(() => undefined);
       }
 
       console.log("[generate] iteration complete.", {
@@ -4210,6 +4219,58 @@ async function _runBuildInBackground(
         updated: updatedCount,
         total: iterFinalFiles.length,
       });
+
+      const completedGeneration = await db.findGenerationById(buildId).catch(() => null);
+      const completedMetadata = typeof completedGeneration?.metadata === "object" && completedGeneration.metadata !== null
+        ? completedGeneration.metadata as Record<string, unknown>
+        : {};
+      const metadataMigrations = Array.isArray(completedMetadata.migrations)
+        ? completedMetadata.migrations.filter((statement): statement is string => typeof statement === "string" && statement.trim().length > 0)
+        : [];
+
+      if (metadataMigrations.length > 0) {
+        const projectRow = await db.findProjectById(projectId).catch(() => null);
+        const byoDbUrl = typeof projectRow?.byo_db_url === "string"
+          ? projectRow.byo_db_url.trim()
+          : "";
+        let oauthAccessToken = readStoredSupabaseToken(projectRow?.supabase_oauth_access_token);
+        let oauthRefreshToken = readStoredSupabaseToken(projectRow?.supabase_oauth_refresh_token);
+
+        if (byoDbUrl && oauthAccessToken) {
+          for (const migrationSql of metadataMigrations) {
+            const migrationResult = await runSupabaseManagementQueryWithOAuth({
+              projectId,
+              supabaseUrl: byoDbUrl,
+              accessToken: oauthAccessToken,
+              refreshToken: oauthRefreshToken,
+              query: migrationSql,
+              logPrefix: "[supabase]",
+              persistTokens: async (tokens) => {
+                try {
+                  await db.updateProject(projectId, {
+                    supabase_oauth_access_token: encryptProjectSecret(tokens.accessToken),
+                    supabase_oauth_refresh_token: encryptProjectSecret(tokens.refreshToken),
+                  });
+                } catch (error) {
+                  console.error(
+                    "[supabase] failed to persist refreshed OAuth tokens (non-fatal):",
+                    error instanceof Error ? error.message : String(error),
+                  );
+                }
+              },
+            });
+
+            oauthAccessToken = migrationResult.accessToken;
+            oauthRefreshToken = migrationResult.refreshToken;
+
+            if (migrationResult.ok) {
+              console.log("[supabase] migration applied:", migrationSql.slice(0, 50));
+            } else {
+              console.error("[supabase] migration failed (non-fatal):", migrationResult.error ?? "Unknown error");
+            }
+          }
+        }
+      }
 
       await db.upsertBuildTelemetry({
         id: buildId,

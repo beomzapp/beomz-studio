@@ -218,6 +218,19 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
   assert.match(source, /workingPrompt = input\.isIteration \? promptWithUrlGrounding : await enrichPrompt\(promptWithUrlGrounding\);/);
 });
 
+test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {
+  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(source, /const iterationMigrations = Array\.isArray\(iterResult\.migrations\)/);
+  assert.match(source, /migrations: iterationMigrations/);
+  assert.match(source, /const completedGeneration = await db\.findGenerationById\(buildId\)\.catch\(\(\) => null\);/);
+  assert.match(source, /const metadataMigrations = Array\.isArray\(completedMetadata\.migrations\)/);
+  assert.match(source, /readStoredSupabaseToken\(projectRow\?\.supabase_oauth_access_token\)/);
+  assert.match(source, /runSupabaseManagementQueryWithOAuth\(/);
+  assert.match(source, /\[supabase\] migration applied:/);
+  assert.match(source, /\[supabase\] migration failed \(non-fatal\):/);
+});
+
 test("iteration path uses a lower Anthropic max token cap, enables tool-based file access, and logs iteration metrics", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 

@@ -321,7 +321,7 @@ test("connectProjectToSupabase logs migration failures and still succeeds", asyn
       setupSql: migrations.join("\n\n"),
     });
     assert.equal(managementCalls.length, 2);
-    assert.equal(loggedErrors.some((entry) => String(entry[0]).includes("[supabaseByo] OAuth migration failed")), true);
+    assert.equal(loggedErrors.some((entry) => String(entry[0]).includes("[supabaseByo] management query failed")), true);
   } finally {
     console.error = originalConsoleError;
   }

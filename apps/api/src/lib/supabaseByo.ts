@@ -9,7 +9,11 @@ import type { OrgContext } from "../types.js";
 import { buildSupabaseSetupSqlFromFiles } from "./supabaseSetupSql.js";
 import { runBuildInBackground } from "../routes/builds/generate.js";
 import { decryptProjectSecret, encryptProjectSecret } from "./projectSecrets.js";
-import { refreshSupabaseOAuthTokens } from "./supabaseOAuth.js";
+import {
+  getSupabaseProjectRef,
+  readStoredSupabaseToken,
+  runSupabaseManagementQueryWithOAuth,
+} from "./supabaseManagement.js";
 
 const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
 const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
@@ -233,116 +237,6 @@ export function readMigrationStatementsFromMetadata(metadata: unknown): string[]
     .filter((statement) => statement.length > 0);
 }
 
-function getSupabaseProjectRef(supabaseUrl: string): string {
-  return new URL(supabaseUrl).hostname.split(".")[0] ?? "";
-}
-
-function readStoredToken(value: unknown): string {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  return decryptProjectSecret(trimmed) ?? trimmed;
-}
-
-async function runSupabaseManagementQueryWithOAuth(input: {
-  orgContext: OrgContext;
-  projectId: string;
-  supabaseUrl: string;
-  accessToken: string;
-  refreshToken: string;
-  query: string;
-  fetchFn: typeof fetch;
-}): Promise<boolean> {
-  const projectRef = getSupabaseProjectRef(input.supabaseUrl);
-  const requestQuery = (accessToken: string) => input.fetchFn(
-    `${SUPABASE_MANAGEMENT_API_BASE}/projects/${projectRef}/database/query`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ query: input.query }),
-    },
-  );
-
-  let currentAccessToken = input.accessToken;
-  let currentRefreshToken = input.refreshToken;
-
-  console.log("[supabaseByo] starting OAuth migration", {
-    projectId: input.projectId,
-    projectRef,
-    queryPreview: input.query.slice(0, 120),
-  });
-
-  let response: Response;
-  try {
-    response = await requestQuery(currentAccessToken);
-  } catch (error) {
-    console.error("[supabaseByo] OAuth migration request failed", {
-      projectId: input.projectId,
-      projectRef,
-      queryPreview: input.query.slice(0, 120),
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-
-  if (response.status === 401 && currentRefreshToken) {
-    console.log("[supabaseByo] OAuth access token expired, refreshing before retry", {
-      projectId: input.projectId,
-      projectRef,
-      queryPreview: input.query.slice(0, 120),
-    });
-
-    try {
-      const refreshedTokens = await refreshSupabaseOAuthTokens(currentRefreshToken, input.fetchFn);
-      currentAccessToken = refreshedTokens.accessToken;
-      currentRefreshToken = refreshedTokens.refreshToken;
-
-      await updateProjectWithSchemaReloadRetry(input.orgContext, input.projectId, {
-        supabase_oauth_access_token: encryptProjectSecret(currentAccessToken),
-        supabase_oauth_refresh_token: encryptProjectSecret(currentRefreshToken),
-      });
-
-      response = await requestQuery(currentAccessToken);
-    } catch (error) {
-      console.error("[supabaseByo] OAuth token refresh failed during migration", {
-        projectId: input.projectId,
-        projectRef,
-        queryPreview: input.query.slice(0, 120),
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
-  }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    console.error("[supabaseByo] OAuth migration failed", {
-      projectId: input.projectId,
-      projectRef,
-      status: response.status,
-      body,
-      queryPreview: input.query.slice(0, 120),
-    });
-    return false;
-  }
-
-  console.log("[supabaseByo] OAuth migration completed", {
-    projectId: input.projectId,
-    projectRef,
-    queryPreview: input.query.slice(0, 120),
-  });
-  return true;
-}
-
 export async function waitForGenerationCompletion(
   db: OrgContext["db"],
   buildId: string,
@@ -403,12 +297,12 @@ export async function connectProjectToSupabase(
   const host = new URL(input.supabaseUrl).hostname;
   const serviceRoleKey = input.serviceRoleKey
     ?? decryptProjectSecret((input.project as Record<string, unknown> | null)?.byo_db_service_key);
-  const oauthAccessToken = readStoredToken(
+  let oauthAccessToken = readStoredSupabaseToken(
     input.oauthAccessToken
     ?? input.extraProjectPatch?.supabase_oauth_access_token
     ?? (input.project as Record<string, unknown> | null)?.supabase_oauth_access_token,
   );
-  const oauthRefreshToken = readStoredToken(
+  let oauthRefreshToken = readStoredSupabaseToken(
     input.oauthRefreshToken
     ?? input.extraProjectPatch?.supabase_oauth_refresh_token
     ?? (input.project as Record<string, unknown> | null)?.supabase_oauth_refresh_token,
@@ -481,15 +375,23 @@ export async function connectProjectToSupabase(
 
   if (oauthAccessToken) {
     for (const migrationSql of migrations) {
-      await runSupabaseManagementQueryWithOAuth({
-        orgContext: input.orgContext,
+      const migrationResult = await runSupabaseManagementQueryWithOAuth({
         projectId: input.projectId,
         supabaseUrl: input.supabaseUrl,
         accessToken: oauthAccessToken,
         refreshToken: oauthRefreshToken,
         query: migrationSql,
         fetchFn,
+        logPrefix: "[supabaseByo]",
+        persistTokens: async (tokens) => {
+          await updateProjectWithSchemaReloadRetry(input.orgContext, input.projectId, {
+            supabase_oauth_access_token: encryptProjectSecret(tokens.accessToken),
+            supabase_oauth_refresh_token: encryptProjectSecret(tokens.refreshToken),
+          });
+        },
       });
+      oauthAccessToken = migrationResult.accessToken;
+      oauthRefreshToken = migrationResult.refreshToken;
     }
     return { host, wiring: true, ...(setupSql ? { setupSql } : {}) };
   }
