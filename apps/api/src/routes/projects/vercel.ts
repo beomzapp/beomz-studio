@@ -15,7 +15,7 @@ import type { VercelDeployFile } from "../../lib/vercelDeploy.js";
 import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
-import { getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { getByoSupabaseConfig, getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
 
 // ── Scaffold files required for Vercel to build a Vite + React project ────────
 // Mirrors the WebContainer scaffold in apps/web/src/lib/webcontainer.ts
@@ -181,6 +181,56 @@ export function injectNeonEnvVars(
   );
 }
 
+type DeploySupabaseProjectLookup = {
+  db_wired?: unknown;
+  db_schema?: unknown;
+  byo_db_url?: unknown;
+  byo_db_anon_key?: unknown;
+};
+
+export function resolveDeploySupabaseCredentials(
+  project: DeploySupabaseProjectLookup,
+  options: {
+    managedUrl?: string | null;
+    managedAnonKey?: string | null;
+  } = {},
+): {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  dbSchema: string;
+  source: "byo" | "managed" | "placeholder";
+} {
+  const byoSupabase = getByoSupabaseConfig(project);
+  if (byoSupabase) {
+    return {
+      supabaseUrl: byoSupabase.supabaseUrl,
+      supabaseAnonKey: byoSupabase.supabaseAnonKey,
+      dbSchema: "public",
+      source: "byo",
+    };
+  }
+
+  const managedUrl = typeof options.managedUrl === "string" ? options.managedUrl.trim() : "";
+  const managedAnonKey = typeof options.managedAnonKey === "string" ? options.managedAnonKey.trim() : "";
+  const dbSchema = typeof project.db_schema === "string" ? project.db_schema.trim() : "";
+
+  if (project.db_wired && dbSchema && managedUrl && managedAnonKey) {
+    return {
+      supabaseUrl: managedUrl,
+      supabaseAnonKey: managedAnonKey,
+      dbSchema,
+      source: "managed",
+    };
+  }
+
+  return {
+    supabaseUrl: PLACEHOLDER_SUPABASE_URL,
+    supabaseAnonKey: PLACEHOLDER_SUPABASE_KEY,
+    dbSchema: PLACEHOLDER_SUPABASE_SCHEMA,
+    source: "placeholder",
+  };
+}
+
 const DEPLOY_ENV_FILE_PATH = "src/.env.local";
 
 type DeployEnvProjectLookup = {
@@ -292,18 +342,20 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     : project.db_provider;
 
   if (usesSupabase) {
-    if (project.db_wired && project.db_schema) {
-      const cfgUrl = apiConfig.USER_DATA_SUPABASE_URL;
-      const cfgKey = apiConfig.USER_DATA_SUPABASE_ANON_KEY;
-      if (cfgUrl && cfgKey) {
-        supabaseUrl = cfgUrl;
-        supabaseAnonKey = cfgKey;
-        dbSchema = project.db_schema;
-        console.log(`[vercel deploy] injecting real DB creds for schema ${dbSchema}`);
-      } else {
-        console.warn(`[vercel deploy] db_wired=true but USER_DATA_SUPABASE_* not configured — using placeholders`);
-      }
-    } else if (!project.byo_db_url) {
+    const supabaseConfig = resolveDeploySupabaseCredentials(project, {
+      managedUrl: apiConfig.USER_DATA_SUPABASE_URL,
+      managedAnonKey: apiConfig.USER_DATA_SUPABASE_ANON_KEY,
+    });
+
+    supabaseUrl = supabaseConfig.supabaseUrl;
+    supabaseAnonKey = supabaseConfig.supabaseAnonKey;
+    dbSchema = supabaseConfig.dbSchema;
+
+    if (supabaseConfig.source === "byo") {
+      console.log("[vercel deploy] injecting BYO Supabase creds into published bundle");
+    } else if (supabaseConfig.source === "managed") {
+      console.log(`[vercel deploy] injecting real DB creds for schema ${dbSchema}`);
+    } else {
       console.log(`[vercel deploy] app uses Supabase but db_wired=false — injecting placeholder creds`);
     }
   }

@@ -7,6 +7,7 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const {
   injectNeonEnvVars,
+  resolveDeploySupabaseCredentials,
   replaceDeployEnvFile,
 } = await import("./vercel.js");
 
@@ -33,6 +34,48 @@ test("injectNeonEnvVars replaces repeated VITE_DATABASE_URL references", () => {
   assert.equal(output.includes("import.meta.env.VITE_DATABASE_URL"), false);
   assert.match(output, /const primary = "postgresql:\/\/user:pass@host\/db";/);
   assert.match(output, /const backup = "postgresql:\/\/user:pass@host\/db";/);
+});
+
+test("resolveDeploySupabaseCredentials prefers BYO Supabase credentials before placeholder injection", () => {
+  const config = resolveDeploySupabaseCredentials(
+    {
+      db_wired: false,
+      byo_db_url: "https://demo-project.supabase.co",
+      byo_db_anon_key: "anon-key",
+    },
+    {
+      managedUrl: "https://managed.supabase.co",
+      managedAnonKey: "managed-anon-key",
+    },
+  );
+
+  assert.deepEqual(config, {
+    supabaseUrl: "https://demo-project.supabase.co",
+    supabaseAnonKey: "anon-key",
+    dbSchema: "public",
+    source: "byo",
+  });
+});
+
+test("resolveDeploySupabaseCredentials falls back to placeholders when no BYO or managed config exists", () => {
+  const config = resolveDeploySupabaseCredentials(
+    {
+      db_wired: false,
+      byo_db_url: null,
+      byo_db_anon_key: null,
+    },
+    {
+      managedUrl: null,
+      managedAnonKey: null,
+    },
+  );
+
+  assert.deepEqual(config, {
+    supabaseUrl: "https://placeholder.supabase.co",
+    supabaseAnonKey: "placeholder",
+    dbSchema: "public",
+    source: "placeholder",
+  });
 });
 
 test("replaceDeployEnvFile overwrites src/.env.local with BYO Supabase credentials", () => {
