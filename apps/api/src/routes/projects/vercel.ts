@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
+import type { VercelDeployFile } from "../../lib/vercelDeploy.js";
 import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
@@ -180,6 +181,53 @@ export function injectNeonEnvVars(
   );
 }
 
+const DEPLOY_ENV_FILE_PATH = "src/.env.local";
+
+type DeployEnvProjectLookup = {
+  byo_db_url?: unknown;
+  byo_db_anon_key?: unknown;
+};
+
+export function replaceDeployEnvFile(
+  files: readonly VercelDeployFile[],
+  project: DeployEnvProjectLookup,
+  options: {
+    provider?: string | null;
+    neonDbUrl?: string | null;
+  } = {},
+): VercelDeployFile[] {
+  const byoDbUrl = typeof project.byo_db_url === "string" ? project.byo_db_url.trim() : "";
+  const byoDbAnonKey = typeof project.byo_db_anon_key === "string" ? project.byo_db_anon_key.trim() : "";
+
+  let envFileContent: string | null = null;
+
+  if (byoDbUrl && byoDbAnonKey) {
+    envFileContent = [
+      `VITE_SUPABASE_URL=${byoDbUrl}`,
+      `VITE_SUPABASE_ANON_KEY=${byoDbAnonKey}`,
+      "VITE_BYO_DB=true",
+    ].join("\n");
+  } else if (options.provider === "neon") {
+    const neonDbUrl = typeof options.neonDbUrl === "string" ? options.neonDbUrl.trim() : "";
+    if (neonDbUrl) {
+      envFileContent = `VITE_DATABASE_URL=${neonDbUrl}`;
+    }
+  }
+
+  if (!envFileContent) {
+    return [...files];
+  }
+
+  const nextFiles = files.filter((file) => file.filename !== DEPLOY_ENV_FILE_PATH);
+  return [
+    ...nextFiles,
+    {
+      filename: DEPLOY_ENV_FILE_PATH,
+      content: `${envFileContent}\n`,
+    },
+  ];
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 export const vercelDeployRoute = new Hono();
@@ -290,8 +338,19 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     };
   });
 
+  const deployGeneratedFiles = replaceDeployEnvFile(generatedFiles, project, {
+    provider,
+    neonDbUrl,
+  });
+
+  if (typeof project.byo_db_url === "string" && typeof project.byo_db_anon_key === "string") {
+    console.log("[vercel deploy] overwrote src/.env.local with BYO Supabase credentials");
+  } else if (provider === "neon" && neonDbUrl) {
+    console.log("[vercel deploy] overwrote src/.env.local with managed Neon connection string");
+  }
+
   // Scaffold + generated files (scaffold first so generated files can override if needed)
-  const deployFiles = [...buildScaffold(), ...generatedFiles];
+  const deployFiles = [...buildScaffold(), ...deployGeneratedFiles];
 
   // Phase 1: upload files + create deployment (~5-10s) — synchronous so errors surface
   let handle: Awaited<ReturnType<typeof vercelDeployStart>>;
