@@ -5,6 +5,10 @@
  * domain(s) to the published app. Adds a verification card with the TXT
  * record from Vercel, a manual "Check verification" button, 30s background
  * polling (up to 10 min), plus Visit/Remove once verified.
+ *
+ * BEO-559: Custom domain appears on the main "choose" view (below the two
+ * publish options) when the project already has a Beomz slug or beomz.app URL
+ * — not only after the Vercel success screen.
  */
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -298,6 +302,10 @@ export function PublishModal({
     ? vercelUrl.replace(/^https?:\/\//, "")
     : null;
 
+  /** Published to Beomz (slug) and/or beomz.app (Vercel) — custom domain applies after at least one is live. */
+  const hasPublishedSurface =
+    Boolean(publishedSlug?.length) || Boolean(beomzAppUrl) || Boolean(vercelUrl);
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -369,6 +377,10 @@ export function PublishModal({
                 )}
               </button>
             </div>
+
+            {hasPublishedSurface && (
+              <CustomDomainsSection projectId={projectId} plan={plan} onCloseModal={onClose} />
+            )}
 
             {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
           </>
@@ -489,8 +501,6 @@ export function PublishModal({
               </button>
             </div>
 
-            <CustomDomainsSection projectId={projectId} plan={plan} onCloseModal={onClose} />
-
             <div className="mt-5 border-t border-[#e5e5e5] pt-4">
               {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
               <button
@@ -591,8 +601,6 @@ export function PublishModal({
                 Done
               </button>
             </div>
-
-            <CustomDomainsSection projectId={projectId} plan={plan} onCloseModal={onClose} />
 
             <div className="mt-4 border-t border-[#e5e5e5] pt-3">
               <button
