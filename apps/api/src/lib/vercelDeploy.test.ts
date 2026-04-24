@@ -41,7 +41,6 @@ test("assignDeploymentAlias posts the alias to the new deployment", async () => 
   assert.equal(calls[0]?.init?.headers && "Authorization" in calls[0].init.headers ? (calls[0].init.headers as Record<string, string>).Authorization : undefined, "Bearer vercel-token");
   assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
     alias: "taskly.beomz.app",
-    redirect: null,
   });
 });
 
@@ -104,4 +103,45 @@ test("vercelDeployStart assigns the project alias after creating the deployment"
   const createBody = JSON.parse(String(calls[createIndex]?.init?.body));
   assert.equal(createBody.target, "production");
   assert.equal("alias" in createBody, false);
+});
+
+test("vercelDeployStart continues when alias assignment fails", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url === "https://api.vercel.com/v2/now/files") {
+      return new Response(null, { status: 200 });
+    }
+
+    if (url === "https://api.vercel.com/v13/deployments?teamId=team_123") {
+      return new Response(JSON.stringify({ id: "dpl_new" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (url === "https://api.vercel.com/v2/deployments/dpl_new/aliases?teamId=team_123") {
+      return new Response("alias failed", { status: 500 });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  };
+
+  try {
+    const handle = await vercelDeployStart({
+      slug: "taskly",
+      files: [
+        {
+          filename: "index.html",
+          content: "<html></html>",
+        },
+      ],
+    });
+
+    assert.equal(handle.deploymentId, "dpl_new");
+    assert.equal(handle.url, "https://taskly.beomz.app");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

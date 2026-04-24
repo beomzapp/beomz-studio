@@ -88,7 +88,6 @@ export async function assignDeploymentAlias(
       },
       body: JSON.stringify({
         alias,
-        redirect: null,
       }),
     },
   );
@@ -185,8 +184,12 @@ export async function vercelDeployStart(opts: {
   }
 
   const deploy = (await deployRes.json()) as { id: string };
-  await assignDeploymentAlias(token, teamId, deploy.id, alias);
-  console.log(`[vercel deploy] alias updated: ${alias} -> ${deploy.id}`);
+  try {
+    await assignDeploymentAlias(token, teamId, deploy.id, alias);
+    console.log(`[vercel] alias assigned: ${alias}`);
+  } catch (err) {
+    console.error("[vercel] alias assignment failed (non-fatal):", err);
+  }
 
   return {
     deploymentId: deploy.id,
