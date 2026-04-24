@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { Hono } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 import type { MiddlewareHandler } from "hono";
@@ -607,6 +608,8 @@ export function createSupabaseIntegrationsRoute(
         }
       }
 
+      const dbPass = randomBytes(24).toString("base64url");
+
       const { response } = await performSupabaseManagementRequest({
         orgContext,
         projectId,
@@ -618,6 +621,7 @@ export function createSupabaseIntegrationsRoute(
           region,
           organization_id: organizationId,
           plan: "free",
+          db_pass: dbPass,
         }),
         fetchFn,
       });

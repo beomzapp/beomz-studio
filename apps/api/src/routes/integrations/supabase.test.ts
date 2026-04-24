@@ -286,11 +286,18 @@ test("create-project retries once on 401 using the refresh token and returns the
       if (url === "https://api.supabase.com/v1/projects" && createCalls++ === 0) {
         assert.equal(init?.method, "POST");
         assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer stale-access-token");
-        assert.deepEqual(JSON.parse(String(init?.body ?? "{}")), {
+        const parsedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        assert.equal(typeof parsedBody.db_pass, "string");
+        assert.match(String(parsedBody.db_pass), /^[A-Za-z0-9_-]{24,}$/);
+        assert.deepEqual({
+          ...parsedBody,
+          db_pass: "<generated>",
+        }, {
           name: "My App DB",
           region: "us-east-1",
           organization_id: "org_123",
           plan: "free",
+          db_pass: "<generated>",
         });
         return new Response("unauthorized", { status: 401 });
       }
@@ -308,6 +315,9 @@ test("create-project retries once on 401 using the refresh token and returns the
       if (url === "https://api.supabase.com/v1/projects") {
         assert.equal(init?.method, "POST");
         assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer fresh-access-token");
+        const parsedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        assert.equal(typeof parsedBody.db_pass, "string");
+        assert.match(String(parsedBody.db_pass), /^[A-Za-z0-9_-]{24,}$/);
         return new Response(JSON.stringify({
           ref: "abcd1234",
           name: "My App DB",
@@ -383,11 +393,18 @@ test("create-project derives organizationId from the first existing Supabase pro
 
       if (url === "https://api.supabase.com/v1/projects" && method === "POST") {
         assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer persisted-access-token");
-        assert.deepEqual(JSON.parse(String(init?.body ?? "{}")), {
+        const parsedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        assert.equal(typeof parsedBody.db_pass, "string");
+        assert.match(String(parsedBody.db_pass), /^[A-Za-z0-9_-]{24,}$/);
+        assert.deepEqual({
+          ...parsedBody,
+          db_pass: "<generated>",
+        }, {
           name: "My App DB",
           region: "eu-west-1",
           organization_id: "org_derived",
           plan: "free",
+          db_pass: "<generated>",
         });
         return new Response(JSON.stringify({
           ref: "newref123",
