@@ -72,6 +72,33 @@ async function uploadFile(
   return { filename: file.filename, sha, size };
 }
 
+export async function assignDeploymentAlias(
+  token: string,
+  teamId: string,
+  deploymentId: string,
+  alias: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://api.vercel.com/v2/deployments/${deploymentId}/aliases?teamId=${teamId}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        alias,
+        redirect: null,
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Vercel alias assignment failed (${res.status}): ${body}`);
+  }
+}
+
 // ── Poll for READY ────────────────────────────────────────────────────────────
 
 export async function pollUntilReady(
@@ -107,6 +134,7 @@ export async function vercelDeployStart(opts: {
   slug: string;
 }): Promise<VercelDeployHandle> {
   const { token, projectId, teamId } = requireVercelConfig();
+  const alias = `${opts.slug}.beomz.app`;
 
   // Add vercel.json for SPA client-side routing
   const allFiles: VercelDeployFile[] = [
@@ -136,7 +164,6 @@ export async function vercelDeployStart(opts: {
     files: uploaded.map(({ filename, sha, size }) => ({ file: filename, sha, size })),
     projectSettings: { framework: "vite" },
     target: "production",
-    alias: [`${opts.slug}.beomz.app`],
   };
 
   // Create deployment
@@ -158,10 +185,12 @@ export async function vercelDeployStart(opts: {
   }
 
   const deploy = (await deployRes.json()) as { id: string };
+  await assignDeploymentAlias(token, teamId, deploy.id, alias);
+  console.log(`[vercel deploy] alias updated: ${alias} -> ${deploy.id}`);
 
   return {
     deploymentId: deploy.id,
-    url: `https://${opts.slug}.beomz.app`,
+    url: `https://${alias}`,
     _token: token,
     _teamId: teamId,
   };
@@ -177,4 +206,3 @@ export async function vercelDeploy(opts: {
   await pollUntilReady(handle._token, handle._teamId, handle.deploymentId);
   return { url: handle.url, deploymentId: handle.deploymentId };
 }
-
