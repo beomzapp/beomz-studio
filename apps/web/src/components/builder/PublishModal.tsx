@@ -310,7 +310,7 @@ export function PublishModal({
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
-      <div className="relative z-10 w-full max-w-[520px] rounded-xl bg-white p-6 shadow-xl">
+      <div className="relative z-10 w-full max-w-[520px] rounded-xl bg-white p-6 shadow-xl max-h-[80vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute right-4 top-4 z-10 rounded-md p-1 text-[#9ca3af] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
@@ -991,6 +991,9 @@ function DomainRow({
                   />
                 </div>
               </dl>
+              <p className="mt-2 text-[11px] text-[#92400e]/70">
+                DNS changes can take up to 24 hours to propagate.
+              </p>
             </div>
           )}
           <div className="mt-3 flex items-center gap-3 text-xs">
