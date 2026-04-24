@@ -491,6 +491,43 @@ export async function connectSupabaseOAuth(
   );
 }
 
+export type SupabaseOrganization = {
+  id: string;
+  name: string;
+};
+
+export async function getSupabaseOrganizations(
+  projectId: string,
+): Promise<SupabaseOrganization[]> {
+  const data = await requestJson<{ organizations: SupabaseOrganization[] }>(
+    `/integrations/supabase/organizations?projectId=${encodeURIComponent(projectId)}`,
+    { method: "GET" },
+  );
+  return data.organizations ?? [];
+}
+
+export async function createSupabaseProject(
+  projectId: string,
+  name: string,
+  region: string,
+  organizationId: string,
+): Promise<{ ref: string }> {
+  return requestJson<{ ref: string }>(`/integrations/supabase/create-project`, {
+    method: "POST",
+    body: JSON.stringify({ projectId, name, region, organizationId }),
+  });
+}
+
+export async function getSupabaseProjectStatus(
+  projectId: string,
+  ref: string,
+): Promise<{ status: string }> {
+  return requestJson<{ status: string }>(
+    `/integrations/supabase/project-status?projectId=${encodeURIComponent(projectId)}&ref=${encodeURIComponent(ref)}`,
+    { method: "GET" },
+  );
+}
+
 /** BEO-522: Disconnect a BYO Supabase project (and clear all db_ columns). */
 export async function disconnectSupabaseDb(projectId: string): Promise<void> {
   await requestJson<{ status: string }>(`/projects/${projectId}/db/disable`, {

@@ -61,18 +61,34 @@ import {
   connectSupabaseDb,
   getSupabaseOAuthProjects,
   connectSupabaseOAuth,
+  getSupabaseOrganizations,
+  createSupabaseProject,
+  getSupabaseProjectStatus,
   getLatestBuildForProject,
   getApiBaseUrl,
   getAccessToken,
   type DbTable,
   type StorageAddonInfo,
   type SupabaseOAuthProject,
+  type SupabaseOrganization,
 } from "../../lib/api";
 
 type PanelTab = "schema" | "data" | "users" | "storage";
 type SubFlow = null | "supabase";
 type UpgradePhase = "idle" | "migrating" | "rewiring" | "done";
 type ConnectModalStep = "oauth" | "projects";
+
+const SUPABASE_REGIONS = [
+  { value: "ap-southeast-1", label: "Singapore (ap-southeast-1)" },
+  { value: "ap-northeast-1", label: "Tokyo (ap-northeast-1)" },
+  { value: "ap-southeast-2", label: "Sydney (ap-southeast-2)" },
+  { value: "eu-west-1", label: "Ireland (eu-west-1)" },
+  { value: "eu-west-2", label: "London (eu-west-2)" },
+  { value: "eu-central-1", label: "Frankfurt (eu-central-1)" },
+  { value: "us-east-1", label: "N. Virginia (us-east-1)" },
+  { value: "us-west-1", label: "N. California (us-west-1)" },
+  { value: "ca-central-1", label: "Canada (ca-central-1)" },
+];
 
 const WIRING_PROMPT = `Wire this app to its Postgres database.
 
@@ -239,6 +255,19 @@ export function DatabasePanel({
   const popupWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** BEO-538: localStorage poll fallback when postMessage does not fire */
   const supabaseOauthLsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── BEO-548: Create new Supabase project sub-flow ─────
+  const [showCreateProjectForm, setShowCreateProjectForm] = useState(false);
+  const [createProjName, setCreateProjName] = useState("");
+  const [createProjRegion, setCreateProjRegion] = useState("us-east-1");
+  const [createProjOrgId, setCreateProjOrgId] = useState("");
+  const [supabaseOrgs, setSupabaseOrgs] = useState<SupabaseOrganization[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [orgsError, setOrgsError] = useState<string | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [creatingProjectPolling, setCreatingProjectPolling] = useState(false);
+  const [creatingProjectError, setCreatingProjectError] = useState<string | null>(null);
+  const createProjectPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── BEO-532: setup SQL helper after BYO rewire ──
   const [setupSql, setSetupSql] = useState<string | null>(null);
@@ -680,6 +709,10 @@ export function DatabasePanel({
     setOauthConnectError(null);
     setPopupClosedError(null);
     setPopupOpening(false);
+    setShowCreateProjectForm(false);
+    setCreatingProjectPolling(false);
+    setCreatingProject(false);
+    setCreatingProjectError(null);
   }, [projectId]);
 
   // ── Close the Connect Supabase modal ──────────────────
@@ -689,6 +722,14 @@ export function DatabasePanel({
     setPopupClosedError(null);
     setPopupOpening(false);
     setOauthConnectError(null);
+    setShowCreateProjectForm(false);
+    setCreatingProjectPolling(false);
+    setCreatingProject(false);
+    setCreatingProjectError(null);
+    if (createProjectPollRef.current) {
+      clearInterval(createProjectPollRef.current);
+      createProjectPollRef.current = null;
+    }
     if (popupRef.current && !popupRef.current.closed) {
       try {
         popupRef.current.close();
@@ -738,6 +779,69 @@ export function DatabasePanel({
       setOauthConnecting(false);
     }
   }, [projectId, selectedOauthRef, onDbStateChange, onWireToDatabase, handleCloseConnectModal]);
+
+  // ── BEO-548: Open create-project form + fetch orgs ────
+  const handleShowCreateProjectForm = useCallback(async () => {
+    if (!projectId) return;
+    setShowCreateProjectForm(true);
+    setCreateProjName("");
+    setCreateProjRegion("us-east-1");
+    setCreatingProjectError(null);
+    setOrgsLoading(true);
+    setOrgsError(null);
+    setSupabaseOrgs([]);
+    try {
+      const orgs = await getSupabaseOrganizations(projectId);
+      setSupabaseOrgs(orgs);
+      if (orgs.length > 0) setCreateProjOrgId(orgs[0].id);
+    } catch (err) {
+      setOrgsError(err instanceof Error ? err.message : "Failed to load organizations.");
+    } finally {
+      setOrgsLoading(false);
+    }
+  }, [projectId]);
+
+  // ── BEO-548: Submit create-project form ───────────────
+  const handleCreateSupabaseProject = useCallback(async () => {
+    if (!projectId || !createProjName.trim()) return;
+    setCreatingProject(true);
+    setCreatingProjectError(null);
+    try {
+      const { ref } = await createSupabaseProject(
+        projectId,
+        createProjName.trim(),
+        createProjRegion,
+        createProjOrgId,
+      );
+      setCreatingProject(false);
+      setCreatingProjectPolling(true);
+      // Poll every 3s until ACTIVE_HEALTHY
+      createProjectPollRef.current = setInterval(() => {
+        getSupabaseProjectStatus(projectId, ref)
+          .then(({ status }) => {
+            if (status === "ACTIVE_HEALTHY") {
+              if (createProjectPollRef.current) {
+                clearInterval(createProjectPollRef.current);
+                createProjectPollRef.current = null;
+              }
+              // Refresh project list, auto-select the new project
+              return getSupabaseOAuthProjects(projectId).then((projects) => {
+                setOauthProjects(projects);
+                setSelectedOauthRef(ref);
+                setCreatingProjectPolling(false);
+                setShowCreateProjectForm(false);
+              });
+            }
+          })
+          .catch(() => {
+            // Ignore transient errors — keep polling
+          });
+      }, 3000);
+    } catch (err) {
+      setCreatingProjectError(err instanceof Error ? err.message : "Failed to create project.");
+      setCreatingProject(false);
+    }
+  }, [projectId, createProjName, createProjRegion, createProjOrgId]);
 
   // ── Upgrade submit → POST + poll ──────────────────────
   const handleConfirmUpgrade = useCallback(async () => {
@@ -836,6 +940,10 @@ export function DatabasePanel({
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (setupSqlCopyTimerRef.current) clearTimeout(setupSqlCopyTimerRef.current);
       if (popupWatchRef.current) clearInterval(popupWatchRef.current);
+      if (createProjectPollRef.current) {
+        clearInterval(createProjectPollRef.current);
+        createProjectPollRef.current = null;
+      }
       if (supabaseOauthLsIntervalRef.current) {
         clearInterval(supabaseOauthLsIntervalRef.current);
         supabaseOauthLsIntervalRef.current = null;
@@ -1119,83 +1227,219 @@ export function DatabasePanel({
                   S
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-lg font-semibold text-[#1a1a1a]">Choose a project</h2>
+                  <h2 className="text-lg font-semibold text-[#1a1a1a]">
+                    {showCreateProjectForm ? "Create a new project" : "Choose a project"}
+                  </h2>
                   <p className="mt-0.5 text-xs text-[#6b7280]">
-                    Link a Supabase project to this app.
+                    {showCreateProjectForm
+                      ? "Your project will be ready in about 30 seconds."
+                      : "Link a Supabase project to this app."}
                   </p>
                 </div>
               </div>
 
-              {oauthProjectsLoading && (
-                <div className="flex items-center justify-center py-10">
-                  <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
-                </div>
-              )}
+              {/* ── Create project form ── */}
+              {showCreateProjectForm && (
+                <>
+                  {creatingProjectPolling ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <div className="relative mb-5 flex h-14 w-14 items-center justify-center">
+                        <span className="checklist-orb-active h-12 w-12 rounded-full bg-[#F97316]" />
+                      </div>
+                      <p className="text-sm font-semibold text-[#F97316]">
+                        Creating your Supabase project…
+                      </p>
+                      <p className="mt-1 text-xs text-[#9ca3af]">~30s</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-4">
+                        {/* Project name */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-[#6b7280]">
+                            Project name <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={createProjName}
+                            onChange={(e) => {
+                              setCreateProjName(e.target.value);
+                              setCreatingProjectError(null);
+                            }}
+                            placeholder="my-project"
+                            className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                          />
+                        </div>
 
-              {oauthProjectsError && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                  <XCircle size={14} className="mt-0.5 flex-shrink-0" />
-                  {oauthProjectsError}
-                </div>
-              )}
+                        {/* Region */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-medium text-[#6b7280]">Region</label>
+                          <select
+                            value={createProjRegion}
+                            onChange={(e) => setCreateProjRegion(e.target.value)}
+                            className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                          >
+                            {SUPABASE_REGIONS.map((r) => (
+                              <option key={r.value} value={r.value}>
+                                {r.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-              {!oauthProjectsLoading &&
-                !oauthProjectsError &&
-                oauthProjects.length === 0 && (
-                  <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-[#faf9f6] p-6 text-center">
-                    <p className="text-sm font-medium text-[#6b7280]">No projects found</p>
-                    <p className="mt-1 text-xs text-[#9ca3af]">
-                      Make sure your Supabase account has at least one project.
-                    </p>
-                  </div>
-                )}
+                        {/* Organization — only show if multiple orgs */}
+                        {orgsLoading && (
+                          <div className="flex items-center gap-2 text-xs text-[#9ca3af]">
+                            <Loader2 size={12} className="animate-spin" />
+                            Loading organizations…
+                          </div>
+                        )}
+                        {orgsError && (
+                          <p className="flex items-center gap-1.5 text-xs text-red-500">
+                            <XCircle size={12} /> {orgsError}
+                          </p>
+                        )}
+                        {!orgsLoading && supabaseOrgs.length > 1 && (
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-[#6b7280]">Organization</label>
+                            <select
+                              value={createProjOrgId}
+                              onChange={(e) => setCreateProjOrgId(e.target.value)}
+                              className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                            >
+                              {supabaseOrgs.map((org) => (
+                                <option key={org.id} value={org.id}>
+                                  {org.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
 
-              {!oauthProjectsLoading && oauthProjects.length > 0 && (
-                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                  {oauthProjects.map((project) => (
-                    <button
-                      key={project.ref}
-                      type="button"
-                      onClick={() => setSelectedOauthRef(project.ref)}
-                      className={cn(
-                        "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
-                        selectedOauthRef === project.ref
-                          ? "border-[#F97316]/60 bg-[#F97316]/5 ring-2 ring-[#F97316]/10"
-                          : "border-[#e5e7eb] bg-white hover:border-[#F97316]/40 hover:bg-[#F97316]/5",
+                      {creatingProjectError && (
+                        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                          <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+                          {creatingProjectError}
+                        </div>
                       )}
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-[#1a1a1a]">
-                          {project.name}
-                        </p>
-                        <p className="mt-0.5 font-mono text-[11px] text-[#9ca3af]">
-                          {project.ref} · {project.region}
+
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateSupabaseProject()}
+                        disabled={!createProjName.trim() || creatingProject || orgsLoading}
+                        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {creatingProject ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                        {creatingProject ? "Creating…" : "Create project"}
+                      </button>
+
+                      <div className="mt-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreateProjectForm(false);
+                            setCreatingProjectError(null);
+                          }}
+                          className="flex items-center justify-center gap-1 text-xs text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+                        >
+                          <ArrowLeft size={12} /> Back to project list
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* ── Existing project picker ── */}
+              {!showCreateProjectForm && (
+                <>
+                  {oauthProjectsLoading && (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 size={20} className="animate-spin text-[#9ca3af]" />
+                    </div>
+                  )}
+
+                  {oauthProjectsError && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                      <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+                      {oauthProjectsError}
+                    </div>
+                  )}
+
+                  {!oauthProjectsLoading &&
+                    !oauthProjectsError &&
+                    oauthProjects.length === 0 && (
+                      <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-[#faf9f6] p-6 text-center">
+                        <p className="text-sm font-medium text-[#6b7280]">No projects found</p>
+                        <p className="mt-1 text-xs text-[#9ca3af]">
+                          Create a new project below or check your Supabase account.
                         </p>
                       </div>
-                      {selectedOauthRef === project.ref && (
-                        <Check size={15} className="ml-3 flex-shrink-0 text-[#F97316]" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
+                    )}
 
-              {oauthConnectError && (
-                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                  <XCircle size={14} className="mt-0.5 flex-shrink-0" />
-                  {oauthConnectError}
-                </div>
-              )}
+                  {!oauthProjectsLoading && oauthProjects.length > 0 && (
+                    <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                      {oauthProjects.map((project) => (
+                        <button
+                          key={project.ref}
+                          type="button"
+                          onClick={() => setSelectedOauthRef(project.ref)}
+                          className={cn(
+                            "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
+                            selectedOauthRef === project.ref
+                              ? "border-[#F97316]/60 bg-[#F97316]/5 ring-2 ring-[#F97316]/10"
+                              : "border-[#e5e7eb] bg-white hover:border-[#F97316]/40 hover:bg-[#F97316]/5",
+                          )}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#1a1a1a]">
+                              {project.name}
+                            </p>
+                            <p className="mt-0.5 font-mono text-[11px] text-[#9ca3af]">
+                              {project.ref} · {project.region}
+                            </p>
+                          </div>
+                          {selectedOauthRef === project.ref && (
+                            <Check size={15} className="ml-3 flex-shrink-0 text-[#F97316]" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-              <button
-                type="button"
-                onClick={() => void handleConnectOAuth()}
-                disabled={!selectedOauthRef || oauthConnecting}
-                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {oauthConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                {oauthConnecting ? "Connecting…" : "Connect this project"}
-              </button>
+                  {/* + Create new project */}
+                  {!oauthProjectsLoading && (
+                    <div className="mt-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => void handleShowCreateProjectForm()}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#e5e7eb] bg-[#faf9f6] px-4 py-2.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#F97316]/40 hover:text-[#F97316]"
+                      >
+                        <Plus size={13} />
+                        Create new project
+                      </button>
+                    </div>
+                  )}
+
+                  {oauthConnectError && (
+                    <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                      <XCircle size={14} className="mt-0.5 flex-shrink-0" />
+                      {oauthConnectError}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleConnectOAuth()}
+                    disabled={!selectedOauthRef || oauthConnecting}
+                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {oauthConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                    {oauthConnecting ? "Connecting…" : "Connect this project"}
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
