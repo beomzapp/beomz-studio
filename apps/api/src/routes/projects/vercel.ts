@@ -303,7 +303,7 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       } else {
         console.warn(`[vercel deploy] db_wired=true but USER_DATA_SUPABASE_* not configured — using placeholders`);
       }
-    } else {
+    } else if (!project.byo_db_url) {
       console.log(`[vercel deploy] app uses Supabase but db_wired=false — injecting placeholder creds`);
     }
   }
