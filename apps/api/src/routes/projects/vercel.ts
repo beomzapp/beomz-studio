@@ -6,6 +6,8 @@
  * GET  /api/projects/:id/deploy/vercel/status
  *   → { status: 'deploying' | 'ready' | 'error', url?: string }
  */
+import { setTimeout as delay } from "node:timers/promises";
+
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { z } from "zod";
@@ -170,6 +172,9 @@ interface VercelDomainsRouteDeps {
   deleteProjectDomain?: typeof deleteProjectDomain;
   assignDomainToCurrentDeployment?: typeof assignDomainToCurrentDeployment;
 }
+
+const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
+const SUPABASE_MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -341,6 +346,59 @@ async function loadOwnedProject(orgContext: OrgContext, projectId: string) {
 
 function parseRequestedDomain(raw: string): string | null {
   return normalizeCustomDomain(raw);
+}
+
+function getStudioProjectRef(): string {
+  return new URL(apiConfig.STUDIO_SUPABASE_URL).hostname.split(".")[0] ?? "";
+}
+
+async function ensureCustomDomainProjectColumn(fetchFn: typeof fetch = fetch): Promise<void> {
+  const managementKey = apiConfig.SUPABASE_MANAGEMENT_API_KEY?.trim();
+  if (!managementKey) {
+    return;
+  }
+
+  const response = await fetchFn(
+    `${SUPABASE_MANAGEMENT_API_BASE}/projects/${getStudioProjectRef()}/database/query`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${managementKey}`,
+      },
+      body: JSON.stringify({
+        query: "ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS custom_domains TEXT[] DEFAULT '{}';",
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Failed to ensure custom_domains column (${response.status}): ${body}`);
+  }
+}
+
+async function updateProjectCustomDomainsWithRetry(
+  orgContext: OrgContext,
+  projectId: string,
+  customDomains: readonly string[],
+): Promise<void> {
+  try {
+    await orgContext.db.updateProject(projectId, { custom_domains: customDomains });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/custom_domains|schema cache/i.test(message)) {
+      throw error;
+    }
+
+    await ensureCustomDomainProjectColumn().catch(() => undefined);
+    const dbWithSchemaReload = orgContext.db as OrgContext["db"] & {
+      notifySchemaReload?: () => Promise<void>;
+    };
+    await dbWithSchemaReload.notifySchemaReload?.().catch(() => undefined);
+    await delay(STUDIO_DB_SCHEMA_RELOAD_DELAY_MS);
+    await orgContext.db.updateProject(projectId, { custom_domains: customDomains });
+  }
 }
 
 function respondToVercelError(c: Pick<Context, "json">, error: unknown) {
@@ -632,9 +690,11 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
 
     try {
       const result = await addDomain(domain);
-      await orgContext.db.updateProject(projectId, {
-        custom_domains: addDomainToProjectRecord(project, domain),
-      });
+      await updateProjectCustomDomainsWithRetry(
+        orgContext,
+        projectId,
+        addDomainToProjectRecord(project, domain),
+      );
 
       if (result.verified) {
         await assignCurrentDeploymentDomain(project, domain);
@@ -666,9 +726,11 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
 
     try {
       const result = await verifyDomain(domain);
-      await orgContext.db.updateProject(projectId, {
-        custom_domains: addDomainToProjectRecord(project, domain),
-      });
+      await updateProjectCustomDomainsWithRetry(
+        orgContext,
+        projectId,
+        addDomainToProjectRecord(project, domain),
+      );
 
       if (result.verified) {
         await assignCurrentDeploymentDomain(project, domain);
@@ -739,9 +801,11 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
 
     try {
       await removeProjectDomainFromVercel(domain);
-      await orgContext.db.updateProject(projectId, {
-        custom_domains: removeDomainFromProjectRecord(project, domain),
-      });
+      await updateProjectCustomDomainsWithRetry(
+        orgContext,
+        projectId,
+        removeDomainFromProjectRecord(project, domain),
+      );
       return c.json({ deleted: true });
     } catch (error) {
       return respondToVercelError(c, error);
