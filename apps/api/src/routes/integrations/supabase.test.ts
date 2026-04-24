@@ -264,6 +264,154 @@ test("projects retries once on 401 using the refresh token", async () => {
   });
 });
 
+test("create-project retries once on 401 using the refresh token and returns the created project", async () => {
+  clearAllTemporarySupabaseOAuthTokens();
+  const project = createProject();
+  const updates: Record<string, unknown>[] = [];
+  const orgContext = createOrgContext(project, {
+    updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
+      updates.push(patch);
+      return { ...project, ...patch };
+    },
+  });
+  let createCalls = 0;
+  storeTemporarySupabaseOAuthTokens(project.id, {
+    accessToken: "stale-access-token",
+    refreshToken: "refresh-token-1",
+  });
+
+  const app = createApp(orgContext, {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.supabase.com/v1/projects" && createCalls++ === 0) {
+        assert.equal(init?.method, "POST");
+        assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer stale-access-token");
+        assert.deepEqual(JSON.parse(String(init?.body ?? "{}")), {
+          name: "My App DB",
+          region: "us-east-1",
+          organization_id: "org_123",
+          plan: "free",
+        });
+        return new Response("unauthorized", { status: 401 });
+      }
+      if (url === "https://api.supabase.com/v1/oauth/token") {
+        assert.match(String(init?.body ?? ""), /grant_type=refresh_token/);
+        return new Response(JSON.stringify({
+          access_token: "fresh-access-token",
+          refresh_token: "fresh-refresh-token",
+          expires_in: 3600,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === "https://api.supabase.com/v1/projects") {
+        assert.equal(init?.method, "POST");
+        assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer fresh-access-token");
+        return new Response(JSON.stringify({
+          ref: "abcd1234",
+          name: "My App DB",
+          region: "us-east-1",
+          status: "IN_PROGRESS",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    },
+  });
+
+  const response = await app.request("http://localhost/integrations/supabase/create-project", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId: project.id,
+      name: "My App DB",
+      region: "us-east-1",
+      organizationId: "org_123",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    ref: "abcd1234",
+    name: "My App DB",
+    region: "us-east-1",
+    status: "IN_PROGRESS",
+  });
+  assert.equal(updates.length, 0);
+  assert.deepEqual(readTemporarySupabaseOAuthTokens(project.id), {
+    accessToken: "fresh-access-token",
+    refreshToken: "fresh-refresh-token",
+  });
+});
+
+test("project-status returns the Supabase project status", async () => {
+  clearAllTemporarySupabaseOAuthTokens();
+  const project = createProject({
+    supabase_oauth_access_token: encryptProjectSecret("persisted-access-token"),
+    supabase_oauth_refresh_token: encryptProjectSecret("persisted-refresh-token"),
+  });
+
+  const app = createApp(createOrgContext(project), {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(String(input), "https://api.supabase.com/v1/projects/abcd1234");
+      assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer persisted-access-token");
+      return new Response(JSON.stringify({
+        ref: "abcd1234",
+        status: "ACTIVE_HEALTHY",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  const response = await app.request(
+    `http://localhost/integrations/supabase/project-status?projectId=${project.id}&ref=abcd1234`,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    status: "ACTIVE_HEALTHY",
+  });
+});
+
+test("organizations returns the available Supabase organizations", async () => {
+  clearAllTemporarySupabaseOAuthTokens();
+  const project = createProject({
+    supabase_oauth_access_token: encryptProjectSecret("persisted-access-token"),
+    supabase_oauth_refresh_token: encryptProjectSecret("persisted-refresh-token"),
+  });
+
+  const app = createApp(createOrgContext(project), {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(String(input), "https://api.supabase.com/v1/organizations");
+      assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer persisted-access-token");
+      return new Response(JSON.stringify({
+        organizations: [
+          { id: "org_1", name: "Personal" },
+          { id: "org_2", name: "Beomz" },
+        ],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  const response = await app.request(
+    `http://localhost/integrations/supabase/organizations?projectId=${project.id}`,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), [
+    { id: "org_1", name: "Personal" },
+    { id: "org_2", name: "Beomz" },
+  ]);
+});
+
 test("connect fetches api keys, stores encrypted secrets, and triggers silent wiring", async () => {
   clearAllTemporarySupabaseOAuthTokens();
   const project = createProject();

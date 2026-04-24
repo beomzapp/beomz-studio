@@ -41,6 +41,18 @@ interface SupabaseProjectSummary {
   region: string | null;
 }
 
+interface SupabaseProjectProvisioningSummary {
+  ref: string;
+  name: string;
+  region: string | null;
+  status: string;
+}
+
+interface SupabaseOrganizationSummary {
+  id: string;
+  name: string;
+}
+
 interface ResolvedSupabaseManagementTokens {
   accessToken: string;
   refreshToken: string;
@@ -123,6 +135,78 @@ function parseSupabaseProjectSummaries(payload: unknown): SupabaseProjectSummary
       name,
       region: region || null,
     }];
+  });
+}
+
+function parseSupabaseProjectProvisioningSummary(
+  payload: unknown,
+): SupabaseProjectProvisioningSummary | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+
+  const record = payload as {
+    ref?: unknown;
+    name?: unknown;
+    region?: unknown;
+    status?: unknown;
+  };
+  const ref = readNonEmptyString(record.ref);
+  const name = readNonEmptyString(record.name);
+  const region = typeof record.region === "string"
+    ? readNonEmptyString(record.region)
+    : typeof (record.region as { name?: unknown } | null | undefined)?.name === "string"
+      ? readNonEmptyString((record.region as { name?: unknown }).name)
+      : "";
+  const status = readNonEmptyString(record.status);
+
+  if (!ref || !name || !status) {
+    return null;
+  }
+
+  return {
+    ref,
+    name,
+    region: region || null,
+    status,
+  };
+}
+
+function parseSupabaseProjectStatus(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+
+  const status = readNonEmptyString((payload as { status?: unknown }).status);
+  return status || null;
+}
+
+function parseSupabaseOrganizationSummaries(payload: unknown): SupabaseOrganizationSummary[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { data?: unknown[] })?.data)
+      ? (payload as { data: unknown[] }).data
+      : Array.isArray((payload as { organizations?: unknown[] })?.organizations)
+        ? (payload as { organizations: unknown[] }).organizations
+        : [];
+
+  return rows.flatMap((row) => {
+    if (typeof row !== "object" || row === null) {
+      return [];
+    }
+
+    const record = row as {
+      id?: unknown;
+      name?: unknown;
+    };
+    const id = readNonEmptyString(record.id);
+    const name = readNonEmptyString(record.name);
+
+    if (!id || !name) {
+      return [];
+    }
+
+    return [{ id, name }];
   });
 }
 
@@ -435,6 +519,151 @@ export function createSupabaseIntegrationsRoute(
       return c.json({ projects });
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : "Failed to load Supabase projects";
+      const status = /expired/i.test(message) ? 401 : 500;
+      return c.json({ error: message }, status);
+    }
+  });
+
+  route.post("/create-project", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const body = await c.req.json().catch(() => null) as {
+      projectId?: unknown;
+      name?: unknown;
+      region?: unknown;
+      organizationId?: unknown;
+    } | null;
+
+    const projectId = readNonEmptyString(body?.projectId);
+    const name = readNonEmptyString(body?.name);
+    const region = readNonEmptyString(body?.region);
+    const organizationId = readNonEmptyString(body?.organizationId);
+
+    if (!projectId || !name || !region || !organizationId) {
+      return c.json({ error: "projectId, name, region, and organizationId are required" }, 400);
+    }
+
+    const orgContext = c.get("orgContext") as OrgContext;
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    try {
+      const { response } = await performSupabaseManagementRequest({
+        orgContext,
+        projectId,
+        project,
+        path: "/projects",
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          region,
+          organization_id: organizationId,
+          plan: "free",
+        }),
+        fetchFn,
+      });
+
+      if (!response.ok) {
+        const responseBody = await response.text().catch(() => "");
+        return c.json(
+          { error: `Failed to create Supabase project (${response.status})${responseBody ? `: ${responseBody}` : ""}` },
+          response.status === 401 ? 401 : 502,
+        );
+      }
+
+      const createdProject = parseSupabaseProjectProvisioningSummary(
+        await response.json().catch(() => null),
+      );
+      if (!createdProject) {
+        return c.json({ error: "Supabase project response was incomplete" }, 502);
+      }
+
+      return c.json(createdProject);
+    } catch (createError) {
+      const message = createError instanceof Error ? createError.message : "Failed to create Supabase project";
+      const status = /expired/i.test(message) ? 401 : 500;
+      return c.json({ error: message }, status);
+    }
+  });
+
+  route.get("/project-status", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const projectId = readNonEmptyString(c.req.query("projectId"));
+    const ref = readNonEmptyString(c.req.query("ref"));
+    if (!projectId || !ref) {
+      return c.json({ error: "projectId and ref are required" }, 400);
+    }
+
+    const orgContext = c.get("orgContext") as OrgContext;
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    try {
+      const { response } = await performSupabaseManagementRequest({
+        orgContext,
+        projectId,
+        project,
+        path: `/projects/${encodeURIComponent(requireSupabaseProjectRef(ref))}`,
+        fetchFn,
+      });
+
+      if (!response.ok) {
+        const responseBody = await response.text().catch(() => "");
+        return c.json(
+          { error: `Failed to load Supabase project status (${response.status})${responseBody ? `: ${responseBody}` : ""}` },
+          response.status === 401 ? 401 : 502,
+        );
+      }
+
+      const statusValue = parseSupabaseProjectStatus(await response.json().catch(() => null));
+      if (!statusValue) {
+        return c.json({ error: "Supabase project status response was incomplete" }, 502);
+      }
+
+      return c.json({ status: statusValue });
+    } catch (statusError) {
+      const message = statusError instanceof Error ? statusError.message : "Failed to load Supabase project status";
+      const status = /expired/i.test(message) ? 401 : 500;
+      return c.json({ error: message }, status);
+    }
+  });
+
+  route.get("/organizations", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const projectId = readNonEmptyString(c.req.query("projectId"));
+    if (!projectId) {
+      return c.json({ error: "projectId is required" }, 400);
+    }
+
+    const orgContext = c.get("orgContext") as OrgContext;
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    try {
+      const { response } = await performSupabaseManagementRequest({
+        orgContext,
+        projectId,
+        project,
+        path: "/organizations",
+        fetchFn,
+      });
+
+      if (!response.ok) {
+        const responseBody = await response.text().catch(() => "");
+        return c.json(
+          { error: `Failed to load Supabase organizations (${response.status})${responseBody ? `: ${responseBody}` : ""}` },
+          response.status === 401 ? 401 : 502,
+        );
+      }
+
+      const organizations = parseSupabaseOrganizationSummaries(
+        await response.json().catch(() => null),
+      );
+      return c.json(organizations);
+    } catch (organizationsError) {
+      const message = organizationsError instanceof Error ? organizationsError.message : "Failed to load Supabase organizations";
       const status = /expired/i.test(message) ? 401 : 500;
       return c.json({ error: message }, status);
     }
