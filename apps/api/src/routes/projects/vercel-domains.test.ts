@@ -190,15 +190,18 @@ test("POST /projects/:id/domains/:domain/verify returns verified true for a veri
 test("GET /projects/:id/domains returns verification state for stored custom domains", async () => {
   const project = createProject({ custom_domains: ["myapp.com", "docs.myapp.com"] });
   const app = createApp(createOrgContext(project), {
-    getProjectDomain: async (domain: string) => ({
-      name: domain,
-      apexName: "myapp.com",
-      projectId: "prj_123",
-      verified: domain === "docs.myapp.com",
-      verification: domain === "myapp.com"
-        ? [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }]
-        : [],
-    }),
+    listProjectDomains: async () => ([
+      {
+        domain: "myapp.com",
+        verified: false,
+        verification: [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }],
+      },
+      {
+        domain: "docs.myapp.com",
+        verified: true,
+        verification: [],
+      },
+    ]),
   });
 
   const response = await app.request("http://localhost/projects/project-1/domains");

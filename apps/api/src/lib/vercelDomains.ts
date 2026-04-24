@@ -23,6 +23,12 @@ export interface VercelProjectDomain {
   verification?: VercelDomainVerificationRecord[];
 }
 
+export interface ProjectDomainListItem {
+  domain: string;
+  verified: boolean;
+  verification: VercelDomainVerificationRecord[];
+}
+
 type FetchLike = typeof fetch;
 
 export class VercelApiError extends Error {
@@ -295,6 +301,36 @@ export async function getProjectDomain(
     { method: "GET" },
     {},
     fetchFn,
+  );
+}
+
+export async function listProjectDomains(
+  project: Pick<ProjectRow, "custom_domains">,
+  fetchFn: FetchLike = fetch,
+): Promise<ProjectDomainListItem[]> {
+  const domains = readProjectCustomDomains(project);
+  if (domains.length === 0) {
+    return [];
+  }
+
+  return Promise.all(
+    domains.map(async (domain) => {
+      try {
+        const result = await getProjectDomain(domain, fetchFn);
+        return {
+          domain,
+          verified: result.verified === true,
+          verification: result.verified === true
+            ? []
+            : Array.isArray(result.verification) ? result.verification : [],
+        };
+      } catch (error) {
+        if (error instanceof VercelApiError && error.status === 404) {
+          return { domain, verified: false, verification: [] };
+        }
+        throw error;
+      }
+    }),
   );
 }
 

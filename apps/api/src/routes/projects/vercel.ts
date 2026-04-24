@@ -23,9 +23,8 @@ import {
   addDomainToProjectRecord,
   addProjectDomain,
   deleteProjectDomain,
-  getProjectDomain,
+  listProjectDomains,
   normalizeCustomDomain,
-  readProjectCustomDomains,
   removeDomainFromProjectRecord,
   verifyProjectDomain,
 } from "../../lib/vercelDomains.js";
@@ -167,7 +166,7 @@ interface VercelDomainsRouteDeps {
   loadOrgContextMiddleware?: MiddlewareHandler;
   addProjectDomain?: typeof addProjectDomain;
   verifyProjectDomain?: typeof verifyProjectDomain;
-  getProjectDomain?: typeof getProjectDomain;
+  listProjectDomains?: typeof listProjectDomains;
   deleteProjectDomain?: typeof deleteProjectDomain;
 }
 
@@ -667,7 +666,7 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
   const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
   const addDomain = deps.addProjectDomain ?? addProjectDomain;
   const verifyDomain = deps.verifyProjectDomain ?? verifyProjectDomain;
-  const fetchProjectDomain = deps.getProjectDomain ?? getProjectDomain;
+  const listDomains = deps.listProjectDomains ?? listProjectDomains;
   const removeProjectDomainFromVercel = deps.deleteProjectDomain ?? deleteProjectDomain;
 
   vercelDomainsRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
@@ -755,27 +754,8 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
       return c.json({ error: "Project not found" }, 404);
     }
 
-    const domains = readProjectCustomDomains(project);
-    if (domains.length === 0) {
-      return c.json([]);
-    }
-
     try {
-      const statuses = await Promise.all(
-        domains.map(async (domain) => {
-          try {
-            const result = await fetchProjectDomain(domain);
-            return domainResponsePayload(domain, result);
-          } catch (error) {
-            if (error instanceof VercelApiError && error.status === 404) {
-              return { domain, verified: false, verification: [] };
-            }
-            throw error;
-          }
-        }),
-      );
-
-      return c.json(statuses);
+      return c.json(await listDomains(project));
     } catch (error) {
       return respondToVercelError(c, error);
     }

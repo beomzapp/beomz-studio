@@ -12,6 +12,7 @@ const {
   addProjectDomain,
   addDomainToProjectRecord,
   getFriendlyVercelErrorMessage,
+  listProjectDomains,
   normalizeCustomDomain,
   readProjectCustomDomains,
   removeDomainFromProjectRecord,
@@ -139,4 +140,61 @@ test("addProjectDomain throws a friendly conflict error when Vercel still return
       return true;
     },
   );
+});
+
+test("listProjectDomains returns verification details for unverified domains", async () => {
+  const calls: string[] = [];
+  const result = await listProjectDomains(
+    {
+      custom_domains: ["myapp.com", "docs.myapp.com"],
+    },
+    async (input) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url === "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123") {
+        return new Response(JSON.stringify({
+          name: "myapp.com",
+          apexName: "myapp.com",
+          projectId: "prj_123",
+          verified: false,
+          verification: [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url === "https://api.vercel.com/v9/projects/prj_123/domains/docs.myapp.com?teamId=team_123") {
+        return new Response(JSON.stringify({
+          name: "docs.myapp.com",
+          apexName: "myapp.com",
+          projectId: "prj_123",
+          verified: true,
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
+  );
+
+  assert.deepEqual(result, [
+    {
+      domain: "myapp.com",
+      verified: false,
+      verification: [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }],
+    },
+    {
+      domain: "docs.myapp.com",
+      verified: true,
+      verification: [],
+    },
+  ]);
+  assert.deepEqual(calls, [
+    "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123",
+    "https://api.vercel.com/v9/projects/prj_123/domains/docs.myapp.com?teamId=team_123",
+  ]);
 });
