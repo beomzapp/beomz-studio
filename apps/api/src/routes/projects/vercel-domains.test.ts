@@ -11,6 +11,7 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { createVercelDomainsRoute } = await import("./vercel.js");
+const { VercelApiError } = await import("../../lib/vercelDomains.js");
 
 function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
   const now = new Date().toISOString();
@@ -257,4 +258,46 @@ test("DELETE /projects/:id/domains/:domain removes the domain from Vercel and th
       custom_domains: ["myapp.com"],
     },
   ]);
+});
+
+test("POST /projects/:id/domains returns a friendly message when Vercel reports a conflict", async () => {
+  const project = createProject();
+  const app = createApp(createOrgContext(project), {
+    addProjectDomain: async () => {
+      throw new VercelApiError(409, {
+        error: {
+          code: "domain_in_use",
+          message: "Domain already exists",
+        },
+      }, {
+        rawBody: JSON.stringify({
+          error: {
+            code: "domain_in_use",
+            message: "Domain already exists",
+          },
+        }),
+        friendlyMessage: "This domain is already in use on another project.",
+        code: "domain_in_use",
+      });
+    },
+  });
+
+  const response = await app.request("http://localhost/projects/project-1/domains", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ domain: "myapp.com" }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    error: "vercel_error",
+    message: "This domain is already in use on another project.",
+    detail: JSON.stringify({
+      error: {
+        code: "domain_in_use",
+        message: "Domain already exists",
+      },
+    }),
+    code: "domain_in_use",
+  });
 });

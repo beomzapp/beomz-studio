@@ -404,14 +404,23 @@ async function updateProjectCustomDomainsWithRetry(
 function respondToVercelError(c: Pick<Context, "json">, error: unknown) {
   if (error instanceof VercelApiError) {
     const status = error.status >= 500 ? 502 : error.status;
-    return new Response(JSON.stringify({ error: "vercel_error", detail: error.body }), {
+    return new Response(JSON.stringify({
+      error: "vercel_error",
+      message: error.friendlyMessage,
+      detail: error.rawBody,
+      ...(error.code ? { code: error.code } : {}),
+    }), {
       status,
       headers: { "Content-Type": "application/json" },
     });
   }
 
   const detail = error instanceof Error ? error.message : String(error);
-  return c.json({ error: "vercel_error", detail }, 502);
+  return c.json({
+    error: "vercel_error",
+    message: "Failed to add domain. Please try again.",
+    detail,
+  }, 502);
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────

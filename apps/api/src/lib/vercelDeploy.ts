@@ -34,7 +34,7 @@ function sha1(content: string): string {
   return crypto.createHash("sha1").update(content).digest("hex");
 }
 
-function requireVercelConfig(): { token: string; projectId: string; teamId: string } {
+export function requireVercelConfig(): { token: string; projectId: string; teamId: string } {
   const { VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID } = apiConfig;
   if (!VERCEL_TOKEN || !VERCEL_PROJECT_ID || !VERCEL_TEAM_ID) {
     throw new Error("Vercel env vars not configured (VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID)");
