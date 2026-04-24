@@ -171,6 +171,7 @@ publicSlugRoute.get("/:slug", async (c) => {
 
   const project = await db.findProjectByPublishedSlug(slug);
   if (!project) return c.json({ error: "Not found" }, 404);
+  console.log("[publish] byo creds:", project.byo_db_url, !!project.byo_db_anon_key);
 
   const latestGen = await db.findLatestGenerationByProjectId(project.id);
   const files = latestGen?.files ?? [];
