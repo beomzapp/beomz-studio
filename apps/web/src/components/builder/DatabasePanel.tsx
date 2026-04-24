@@ -790,10 +790,14 @@ export function DatabasePanel({
     setOrgsLoading(true);
     setOrgsError(null);
     setSupabaseOrgs([]);
+    setCreateProjOrgId("");
     try {
       const orgs = await getSupabaseOrganizations(projectId);
       setSupabaseOrgs(orgs);
-      if (orgs.length > 0) setCreateProjOrgId(orgs[0].id);
+      // BEO-549: always set first org, including single-org (no org dropdown in UI)
+      if (orgs.length > 0) {
+        setCreateProjOrgId(orgs[0].id);
+      }
     } catch (err) {
       setOrgsError(err instanceof Error ? err.message : "Failed to load organizations.");
     } finally {
