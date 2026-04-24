@@ -1,7 +1,6 @@
 import type { ProjectRow } from "@beomz-studio/studio-db";
 
-import { apiConfig } from "../config.js";
-import { assignDeploymentAlias, requireVercelConfig } from "./vercelDeploy.js";
+import { requireVercelConfig } from "./vercelDeploy.js";
 
 export interface VercelDomainVerificationRecord {
   type: string;
@@ -22,17 +21,6 @@ export interface VercelProjectDomain {
   updatedAt?: number;
   createdAt?: number;
   verification?: VercelDomainVerificationRecord[];
-}
-
-interface VercelAliasRecord {
-  alias: string;
-  deploymentId: string | null;
-  createdAt?: number;
-  updatedAt?: number;
-}
-
-interface VercelAliasesResponse {
-  aliases?: VercelAliasRecord[];
 }
 
 type FetchLike = typeof fetch;
@@ -205,22 +193,6 @@ export function normalizeCustomDomain(input: string): string | null {
   return trimmed;
 }
 
-export function getProjectAliasDomain(project: Pick<ProjectRow, "beomz_app_url" | "published_slug">): string | null {
-  if (typeof project.beomz_app_url === "string" && project.beomz_app_url.trim().length > 0) {
-    try {
-      return new URL(project.beomz_app_url).hostname.toLowerCase();
-    } catch {
-      return null;
-    }
-  }
-
-  if (typeof project.published_slug === "string" && project.published_slug.trim().length > 0) {
-    return `${project.published_slug.trim().toLowerCase()}.beomz.app`;
-  }
-
-  return null;
-}
-
 export function readProjectCustomDomains(project: Pick<ProjectRow, "custom_domains">): string[] {
   if (!Array.isArray(project.custom_domains)) {
     return [];
@@ -275,7 +247,7 @@ export async function addProjectDomain(
     requestInit,
   );
 
-  console.log("[vercelDomains] adding domain:", domain, "to project:", apiConfig.VERCEL_PROJECT_ID, "team:", apiConfig.VERCEL_TEAM_ID);
+  console.log("[vercelDomains] adding domain:", domain, "to project:", projectId, "team:", teamId);
 
   let response = await sendAddRequest();
   let { parsed: body, raw } = await readResponseBody(response);
@@ -345,48 +317,4 @@ export async function deleteProjectDomain(
     const { parsed, raw } = await readResponseBody(response);
     throw new VercelApiError(response.status, parsed, { rawBody: raw });
   }
-}
-
-export async function resolveDeploymentIdForAlias(
-  aliasDomain: string,
-  fetchFn: FetchLike = fetch,
-): Promise<string | null> {
-  const { projectId } = requireVercelConfig();
-  const result = await vercelRequest<VercelAliasesResponse>(
-    "/v4/aliases",
-    { method: "GET" },
-    {
-      projectId,
-      domain: aliasDomain,
-      limit: 20,
-    },
-    fetchFn,
-  );
-
-  const aliases = Array.isArray(result.aliases) ? result.aliases : [];
-  const matching = aliases
-    .filter((entry) => entry.alias === aliasDomain && typeof entry.deploymentId === "string" && entry.deploymentId.length > 0)
-    .sort((left, right) => (right.updatedAt ?? right.createdAt ?? 0) - (left.updatedAt ?? left.createdAt ?? 0));
-
-  return matching[0]?.deploymentId ?? null;
-}
-
-export async function assignDomainToCurrentDeployment(
-  project: Pick<ProjectRow, "beomz_app_url" | "published_slug">,
-  domain: string,
-  fetchFn: FetchLike = fetch,
-): Promise<string> {
-  const aliasDomain = getProjectAliasDomain(project);
-  if (!aliasDomain) {
-    throw new Error("Project does not have an active beomz.app deployment.");
-  }
-
-  const deploymentId = await resolveDeploymentIdForAlias(aliasDomain, fetchFn);
-  if (!deploymentId) {
-    throw new Error(`Could not resolve deployment for alias ${aliasDomain}.`);
-  }
-
-  const { token, teamId } = requireVercelConfig();
-  await assignDeploymentAlias(token, teamId, deploymentId, domain);
-  return deploymentId;
 }

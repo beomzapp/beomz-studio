@@ -129,10 +129,9 @@ test("POST /projects/:id/domains blocks free plan orgs", async () => {
   });
 });
 
-test("POST /projects/:id/domains saves the domain and assigns it when verification succeeds immediately", async () => {
+test("POST /projects/:id/domains saves the domain when verification succeeds immediately", async () => {
   const project = createProject();
   const updates: Array<Record<string, unknown>> = [];
-  const assigned: string[] = [];
   const orgContext = createOrgContext(project, "pro_starter", {
     updateProject: async (_projectId: string, patch: Record<string, unknown>) => {
       updates.push(patch);
@@ -147,10 +146,6 @@ test("POST /projects/:id/domains saves the domain and assigns it when verificati
       verified: true,
       verification: [],
     }),
-    assignDomainToCurrentDeployment: async (_projectArg, domain: string) => {
-      assigned.push(domain);
-      return "dpl_123";
-    },
   });
 
   const response = await app.request("http://localhost/projects/project-1/domains", {
@@ -165,7 +160,6 @@ test("POST /projects/:id/domains saves the domain and assigns it when verificati
     verified: true,
     verification: [],
   });
-  assert.deepEqual(assigned, ["myapp.com"]);
   assert.deepEqual(updates, [
     {
       custom_domains: ["myapp.com"],
@@ -173,9 +167,8 @@ test("POST /projects/:id/domains saves the domain and assigns it when verificati
   ]);
 });
 
-test("POST /projects/:id/domains/:domain/verify reassigns the verified domain to the current deployment", async () => {
+test("POST /projects/:id/domains/:domain/verify returns verified true for a verified project domain", async () => {
   const project = createProject({ custom_domains: ["myapp.com"] });
-  const assigned: string[] = [];
   const app = createApp(createOrgContext(project), {
     verifyProjectDomain: async (domain: string) => ({
       name: domain,
@@ -184,10 +177,6 @@ test("POST /projects/:id/domains/:domain/verify reassigns the verified domain to
       verified: true,
       verification: [],
     }),
-    assignDomainToCurrentDeployment: async (_projectArg, domain: string) => {
-      assigned.push(domain);
-      return "dpl_123";
-    },
   });
 
   const response = await app.request("http://localhost/projects/project-1/domains/myapp.com/verify", {
@@ -196,7 +185,6 @@ test("POST /projects/:id/domains/:domain/verify reassigns the verified domain to
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { verified: true });
-  assert.deepEqual(assigned, ["myapp.com"]);
 });
 
 test("GET /projects/:id/domains returns verification state for stored custom domains", async () => {

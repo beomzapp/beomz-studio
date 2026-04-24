@@ -22,7 +22,6 @@ import {
   VercelApiError,
   addDomainToProjectRecord,
   addProjectDomain,
-  assignDomainToCurrentDeployment,
   deleteProjectDomain,
   getProjectDomain,
   normalizeCustomDomain,
@@ -170,7 +169,6 @@ interface VercelDomainsRouteDeps {
   verifyProjectDomain?: typeof verifyProjectDomain;
   getProjectDomain?: typeof getProjectDomain;
   deleteProjectDomain?: typeof deleteProjectDomain;
-  assignDomainToCurrentDeployment?: typeof assignDomainToCurrentDeployment;
 }
 
 const STUDIO_DB_SCHEMA_RELOAD_DELAY_MS = 750;
@@ -671,7 +669,6 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
   const verifyDomain = deps.verifyProjectDomain ?? verifyProjectDomain;
   const fetchProjectDomain = deps.getProjectDomain ?? getProjectDomain;
   const removeProjectDomainFromVercel = deps.deleteProjectDomain ?? deleteProjectDomain;
-  const assignCurrentDeploymentDomain = deps.assignDomainToCurrentDeployment ?? assignDomainToCurrentDeployment;
 
   vercelDomainsRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
     const orgContext = c.get("orgContext") as OrgContext;
@@ -705,10 +702,7 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
         addDomainToProjectRecord(project, domain),
       );
 
-      if (result.verified) {
-        await assignCurrentDeploymentDomain(project, domain);
-      }
-
+      // Project-level custom domains automatically route to the latest production deployment on Vercel.
       return c.json(domainResponsePayload(domain, result));
     } catch (error) {
       return respondToVercelError(c, error);
@@ -741,10 +735,7 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
         addDomainToProjectRecord(project, domain),
       );
 
-      if (result.verified) {
-        await assignCurrentDeploymentDomain(project, domain);
-      }
-
+      // Project-level custom domains automatically route to the latest production deployment on Vercel.
       return c.json({ verified: result.verified === true });
     } catch (error) {
       return respondToVercelError(c, error);

@@ -15,7 +15,6 @@ const {
   normalizeCustomDomain,
   readProjectCustomDomains,
   removeDomainFromProjectRecord,
-  resolveDeploymentIdForAlias,
   VercelApiError,
 } = await import("./vercelDomains.js");
 
@@ -35,41 +34,6 @@ test("custom domain project record helpers dedupe and remove normalized domains"
   assert.deepEqual(readProjectCustomDomains(current), ["myapp.com", "app.myapp.com"]);
   assert.deepEqual(addDomainToProjectRecord(current, "newapp.com"), ["myapp.com", "app.myapp.com", "newapp.com"]);
   assert.deepEqual(removeDomainFromProjectRecord(current, "app.myapp.com"), ["myapp.com"]);
-});
-
-test("resolveDeploymentIdForAlias picks the newest matching alias deployment", async () => {
-  const calls: string[] = [];
-  const deploymentId = await resolveDeploymentIdForAlias(
-    "taskly.beomz.app",
-    async (input) => {
-      calls.push(String(input));
-      return new Response(JSON.stringify({
-        aliases: [
-          {
-            alias: "taskly.beomz.app",
-            deploymentId: "dpl_old",
-            createdAt: 100,
-            updatedAt: 100,
-          },
-          {
-            alias: "taskly.beomz.app",
-            deploymentId: "dpl_new",
-            createdAt: 200,
-            updatedAt: 250,
-          },
-        ],
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    },
-  );
-
-  assert.equal(deploymentId, "dpl_new");
-  assert.equal(
-    calls[0],
-    "https://api.vercel.com/v4/aliases?teamId=team_123&projectId=prj_123&domain=taskly.beomz.app&limit=20",
-  );
 });
 
 test("getFriendlyVercelErrorMessage maps Vercel status codes to UI-safe copy", () => {
