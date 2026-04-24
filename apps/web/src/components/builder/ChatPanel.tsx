@@ -2,10 +2,11 @@
  * ChatPanel — BEO-364 clean rewrite.
  * BEO-398: ImplementBar sticky zone (replaces implement_card message).
  * BEO-182: Image upload — paperclip, paste, thumbnail strip, upload-image API.
+ * BEO-511: Prompt enhance (sparkle) removed from builder input — home prompt unchanged.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
-import { ArrowDown, MessageSquare, Paperclip, Send, Sparkles, Square, X } from "lucide-react";
+import { ArrowDown, MessageSquare, Paperclip, Send, Square, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { BuildingShimmer, BAvatar, ChatMessageView } from "./ChatMessage";
 import { ImplementBar } from "./ImplementBar";
@@ -315,8 +316,6 @@ export function ChatPanel({
     : messages;
   const showBuildingShimmer = isBuilding;
 
-  // Enhance disabled when image attached but no text
-  const enhanceDisabled = !!pendingImageFile && !input.trim();
   // Send disabled when no text and no image, or out of credits
   const sendDisabled =
     (!input.trim() && !pendingImageUrl && !pendingImageFile)
@@ -476,19 +475,6 @@ export function ChatPanel({
                 title="Attach image"
               >
                 <Paperclip size={15} />
-              </button>
-              {/* BEO-182: Enhance disabled when only image attached */}
-              <button
-                disabled={enhanceDisabled}
-                className={cn(
-                  "rounded p-1.5 transition-colors",
-                  enhanceDisabled
-                    ? "cursor-not-allowed text-[#d1d5db]"
-                    : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
-                )}
-                title={enhanceDisabled ? "Enhance works on text — add a description" : "Enhance with AI"}
-              >
-                <Sparkles size={15} />
               </button>
               <div className="flex items-center gap-1">
                 <button
