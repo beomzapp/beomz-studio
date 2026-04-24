@@ -731,6 +731,59 @@ export async function unpublishVercel(
   );
 }
 
+// ── Custom Domains API (BEO-556) ──────────────────────────────
+
+export interface CustomDomainVerification {
+  type: string;
+  domain: string;
+  value: string;
+  reason?: string;
+}
+
+export interface CustomDomain {
+  domain: string;
+  status: "pending" | "verified" | "error";
+  verification?: CustomDomainVerification[];
+}
+
+export async function listCustomDomains(projectId: string): Promise<CustomDomain[]> {
+  const data = await requestJson<{ domains?: CustomDomain[] }>(
+    `/projects/${projectId}/domains`,
+    { method: "GET" },
+  );
+  return data.domains ?? [];
+}
+
+export async function addCustomDomain(
+  projectId: string,
+  domain: string,
+): Promise<CustomDomain> {
+  return requestJson<CustomDomain>(`/projects/${projectId}/domains`, {
+    method: "POST",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export async function verifyCustomDomain(
+  projectId: string,
+  domain: string,
+): Promise<CustomDomain> {
+  return requestJson<CustomDomain>(
+    `/projects/${projectId}/domains/${encodeURIComponent(domain)}/verify`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function removeCustomDomain(
+  projectId: string,
+  domain: string,
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(
+    `/projects/${projectId}/domains/${encodeURIComponent(domain)}`,
+    { method: "DELETE" },
+  );
+}
+
 // ── Fix API ────────────────────────────────────────────────────
 
 export async function fixFile(args: {

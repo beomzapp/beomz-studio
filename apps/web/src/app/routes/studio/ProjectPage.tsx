@@ -912,6 +912,7 @@ export function ProjectPage() {
           isPublished={isPublished}
           publishedSlug={publishedSlug ?? undefined}
           beomzAppUrl={beomzAppUrl}
+          plan={credits?.plan ?? "free"}
           onClose={() => setShowPublishModal(false)}
           onPublished={(_url, slug) => {
             setIsPublished(true);

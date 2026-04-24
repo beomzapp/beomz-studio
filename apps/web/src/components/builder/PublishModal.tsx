@@ -1,5 +1,10 @@
 /**
  * PublishModal — Two publish options: Beomz (WebContainer) and beomz.app (Vercel CDN).
+ *
+ * BEO-556: Custom-domain UI (Starter+ gated) lets users connect their own
+ * domain(s) to the published app. Adds a verification card with the TXT
+ * record from Vercel, a manual "Check verification" button, 30s background
+ * polling (up to 10 min), plus Visit/Remove once verified.
  */
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -11,6 +16,8 @@ import {
   X,
   Link2Off,
   RefreshCw,
+  Lock,
+  Plus,
 } from "lucide-react";
 import {
   publishProject,
@@ -19,7 +26,13 @@ import {
   deployToVercel,
   getVercelDeployStatus,
   unpublishVercel,
+  listCustomDomains,
+  addCustomDomain,
+  verifyCustomDomain,
+  removeCustomDomain,
+  type CustomDomain,
 } from "../../lib/api";
+import { usePricingModal } from "../../contexts/PricingModalContext";
 
 interface PublishModalProps {
   projectId: string;
@@ -27,12 +40,17 @@ interface PublishModalProps {
   isPublished: boolean;
   publishedSlug?: string;
   beomzAppUrl?: string | null;
+  /** BEO-556: user's plan — gates custom-domain UI. "free" shows locked state. */
+  plan?: string;
   onClose: () => void;
   onPublished: (url: string, slug: string) => void;
   onUnpublished: () => void;
   onVercelDeployed: (url: string) => void;
   onVercelUnpublished?: () => void;
 }
+
+const PAID_PLANS = new Set(["pro_starter", "pro_builder", "business"]);
+const MAX_CUSTOM_DOMAINS = 3;
 
 function slugify(name: string): string {
   return name
@@ -52,6 +70,7 @@ export function PublishModal({
   isPublished,
   publishedSlug,
   beomzAppUrl,
+  plan = "free",
   onClose,
   onPublished,
   onUnpublished,
@@ -470,6 +489,8 @@ export function PublishModal({
               </button>
             </div>
 
+            <CustomDomainsSection projectId={projectId} plan={plan} onCloseModal={onClose} />
+
             <div className="mt-5 border-t border-[#e5e5e5] pt-4">
               {error && <p className="mb-2 text-xs text-red-500">{error}</p>}
               <button
@@ -571,6 +592,8 @@ export function PublishModal({
               </button>
             </div>
 
+            <CustomDomainsSection projectId={projectId} plan={plan} onCloseModal={onClose} />
+
             <div className="mt-4 border-t border-[#e5e5e5] pt-3">
               <button
                 onClick={handleVercelUnpublish}
@@ -585,5 +608,429 @@ export function PublishModal({
         )}
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// BEO-556 — Custom domain section
+// ─────────────────────────────────────────────────────────────
+
+interface CustomDomainsSectionProps {
+  projectId: string;
+  plan: string;
+  onCloseModal: () => void;
+}
+
+function sanitizeDomainInput(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+}
+
+function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSectionProps) {
+  const { openPricingModal } = usePricingModal();
+  const isPaid = PAID_PLANS.has(plan);
+
+  const [domains, setDomains] = useState<CustomDomain[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [addInput, setAddInput] = useState("");
+  const [showAddInput, setShowAddInput] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollDeadlineRef = useRef<number>(0);
+
+  const clearPoll = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  // Load existing domains on mount (paid plans only)
+  useEffect(() => {
+    if (!isPaid) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    listCustomDomains(projectId)
+      .then((list) => {
+        if (!cancelled) setDomains(list);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Failed to load domains");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, isPaid]);
+
+  // Auto-poll every 30s (max 10 minutes) whenever any domain is pending.
+  useEffect(() => {
+    if (!isPaid) return;
+    const hasPending = domains.some((d) => d.status === "pending");
+    if (!hasPending) {
+      clearPoll();
+      return;
+    }
+    if (pollIntervalRef.current) return; // already polling
+    pollDeadlineRef.current = Date.now() + 10 * 60 * 1000;
+    pollIntervalRef.current = setInterval(async () => {
+      if (Date.now() > pollDeadlineRef.current) {
+        clearPoll();
+        return;
+      }
+      try {
+        const fresh = await listCustomDomains(projectId);
+        setDomains(fresh);
+      } catch {
+        // transient — keep polling
+      }
+    }, 30_000);
+  }, [projectId, domains, isPaid, clearPoll]);
+
+  // Cleanup on unmount
+  useEffect(() => () => clearPoll(), [clearPoll]);
+
+  const handleAdd = useCallback(async () => {
+    const cleaned = sanitizeDomainInput(addInput);
+    if (!cleaned) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      const created = await addCustomDomain(projectId, cleaned);
+      setDomains((prev) => {
+        const withoutDup = prev.filter((d) => d.domain !== created.domain);
+        return [...withoutDup, created];
+      });
+      setAddInput("");
+      setShowAddInput(false);
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "Failed to add domain");
+    } finally {
+      setAdding(false);
+    }
+  }, [projectId, addInput]);
+
+  const handleVerify = useCallback(
+    async (domain: string) => {
+      setVerifying(domain);
+      try {
+        const updated = await verifyCustomDomain(projectId, domain);
+        setDomains((prev) => prev.map((d) => (d.domain === domain ? updated : d)));
+      } catch {
+        // Fall back to a full list refresh so the UI still updates.
+        try {
+          const fresh = await listCustomDomains(projectId);
+          setDomains(fresh);
+        } catch {
+          // ignore
+        }
+      } finally {
+        setVerifying(null);
+      }
+    },
+    [projectId],
+  );
+
+  const handleRemove = useCallback(
+    async (domain: string) => {
+      if (!window.confirm(`Remove ${domain}?`)) return;
+      setRemoving(domain);
+      try {
+        await removeCustomDomain(projectId, domain);
+        setDomains((prev) => prev.filter((d) => d.domain !== domain));
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : "Failed to remove domain");
+      } finally {
+        setRemoving(null);
+      }
+    },
+    [projectId],
+  );
+
+  const handleCopy = useCallback(async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied((current) => (current === key ? null : current)), 2000);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleUpgrade = useCallback(() => {
+    onCloseModal();
+    openPricingModal();
+  }, [onCloseModal, openPricingModal]);
+
+  const canAddMore = domains.length < MAX_CUSTOM_DOMAINS;
+
+  return (
+    <div className="mt-5 border-t border-[#e5e5e5] pt-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-[#1a1a1a]">Custom domain</h3>
+          <p className="mt-0.5 text-xs text-[#6b7280]">Connect your own domain to this app</p>
+        </div>
+        {!isPaid && (
+          <span className="flex flex-none items-center gap-1 rounded-full bg-[#F97316]/10 px-2 py-0.5 text-[10px] font-semibold text-[#F97316]">
+            <Lock size={10} /> Locked
+          </span>
+        )}
+      </div>
+
+      {!isPaid ? (
+        <div className="mt-3 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] p-3">
+          <p className="text-xs text-[#6b7280]">
+            Available on Starter and above.{" "}
+            <button
+              onClick={handleUpgrade}
+              className="font-semibold text-[#F97316] hover:underline"
+            >
+              Upgrade →
+            </button>
+          </p>
+        </div>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {loading && (
+            <div className="flex items-center gap-2 text-xs text-[#9ca3af]">
+              <Loader size={12} className="animate-spin" /> Loading domains…
+            </div>
+          )}
+          {loadError && !loading && (
+            <p className="text-xs text-red-500">{loadError}</p>
+          )}
+
+          {/* Existing domains */}
+          {!loading &&
+            domains.map((d) => (
+              <DomainRow
+                key={d.domain}
+                domain={d}
+                verifying={verifying === d.domain}
+                removing={removing === d.domain}
+                copied={copied}
+                onCopy={handleCopy}
+                onVerify={() => handleVerify(d.domain)}
+                onRemove={() => handleRemove(d.domain)}
+              />
+            ))}
+
+          {/* Add form / add-another trigger */}
+          {!loading && canAddMore && (
+            domains.length === 0 || showAddInput ? (
+              <div className="space-y-1.5">
+                <div className="flex gap-2">
+                  <input
+                    value={addInput}
+                    onChange={(e) => setAddInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleAdd();
+                      }
+                    }}
+                    placeholder="yourdomain.com"
+                    className="min-w-0 flex-1 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] px-3 py-2 text-sm text-[#1a1a1a] outline-none placeholder:text-[#d1d5db] focus:border-[#F97316] focus:ring-1 focus:ring-[#F97316]/20"
+                  />
+                  <button
+                    onClick={() => void handleAdd()}
+                    disabled={adding || sanitizeDomainInput(addInput).length === 0}
+                    className="flex flex-none items-center gap-1.5 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {adding ? <Loader size={12} className="animate-spin" /> : null}
+                    Add
+                  </button>
+                  {domains.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setShowAddInput(false);
+                        setAddInput("");
+                        setAddError(null);
+                      }}
+                      className="flex-none rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6]"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+                {addError && <p className="text-xs text-red-500">{addError}</p>}
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowAddInput(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-[#F97316] transition-colors hover:text-[#ea6c0e]"
+              >
+                <Plus size={12} /> Add another domain
+              </button>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface DomainRowProps {
+  domain: CustomDomain;
+  verifying: boolean;
+  removing: boolean;
+  copied: string | null;
+  onCopy: (text: string, key: string) => void;
+  onVerify: () => void;
+  onRemove: () => void;
+}
+
+function DomainRow({
+  domain,
+  verifying,
+  removing,
+  copied,
+  onCopy,
+  onVerify,
+  onRemove,
+}: DomainRowProps) {
+  const isVerified = domain.status === "verified";
+  const txt = domain.verification?.[0];
+
+  return (
+    <div className="rounded-lg border border-[#e5e5e5] bg-white p-3">
+      <div className="flex items-center gap-2">
+        <Globe
+          size={14}
+          className={`flex-none ${isVerified ? "text-emerald-500" : "text-[#9ca3af]"}`}
+        />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#1a1a1a]">
+          {domain.domain}
+        </span>
+        {isVerified ? (
+          <span className="flex-none rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+            Active
+          </span>
+        ) : (
+          <span className="flex-none rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">
+            Pending verification
+          </span>
+        )}
+      </div>
+
+      {isVerified ? (
+        <div className="mt-3 flex items-center gap-3 text-xs">
+          <a
+            href={`https://${domain.domain}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-[#F97316] hover:underline"
+          >
+            Visit <ExternalLink size={11} />
+          </a>
+          <button
+            onClick={onRemove}
+            disabled={removing}
+            className="text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
+          >
+            {removing ? "Removing…" : "Remove"}
+          </button>
+        </div>
+      ) : (
+        <>
+          {txt && (
+            <div className="mt-3 rounded-lg border border-[#f0e6d6] bg-[#fef7ea] p-3">
+              <p className="mb-2 text-xs font-medium text-[#92400e]">
+                Add this TXT record to your DNS:
+              </p>
+              <dl className="space-y-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <dt className="w-14 flex-none font-medium text-[#6b7280]">Type</dt>
+                  <dd className="font-mono text-[#1a1a1a]">{txt.type || "TXT"}</dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <dt className="w-14 flex-none font-medium text-[#6b7280]">Name</dt>
+                  <dd className="min-w-0 flex-1 break-all font-mono text-[#1a1a1a]">
+                    {txt.domain}
+                  </dd>
+                  <CopyBtn
+                    text={txt.domain}
+                    k={`${domain.domain}:name`}
+                    copied={copied}
+                    onCopy={onCopy}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <dt className="w-14 flex-none font-medium text-[#6b7280]">Value</dt>
+                  <dd className="min-w-0 flex-1 break-all font-mono text-[#1a1a1a]">
+                    {txt.value}
+                  </dd>
+                  <CopyBtn
+                    text={txt.value}
+                    k={`${domain.domain}:value`}
+                    copied={copied}
+                    onCopy={onCopy}
+                  />
+                </div>
+              </dl>
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-3 text-xs">
+            <button
+              onClick={onVerify}
+              disabled={verifying}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#e5e5e5] bg-white px-2.5 py-1 font-medium text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6] disabled:opacity-50"
+            >
+              {verifying ? (
+                <>
+                  <Loader size={11} className="animate-spin" /> Checking…
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={11} /> Check verification
+                </>
+              )}
+            </button>
+            <button
+              onClick={onRemove}
+              disabled={removing}
+              className="text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
+            >
+              {removing ? "Removing…" : "Remove"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+interface CopyBtnProps {
+  text: string;
+  k: string;
+  copied: string | null;
+  onCopy: (text: string, key: string) => void;
+}
+
+function CopyBtn({ text, k, copied, onCopy }: CopyBtnProps) {
+  const isCopied = copied === k;
+  return (
+    <button
+      onClick={() => onCopy(text, k)}
+      className="flex-none rounded-md p-1 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+      title={isCopied ? "Copied!" : "Copy"}
+    >
+      {isCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+    </button>
   );
 }
