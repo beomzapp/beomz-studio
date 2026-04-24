@@ -138,6 +138,34 @@ function parseSupabaseProjectSummaries(payload: unknown): SupabaseProjectSummary
   });
 }
 
+function parseFirstSupabaseProjectOrganizationId(payload: unknown): string | null {
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { data?: unknown[] })?.data)
+      ? (payload as { data: unknown[] }).data
+      : Array.isArray((payload as { projects?: unknown[] })?.projects)
+        ? (payload as { projects: unknown[] }).projects
+        : [];
+
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) {
+      continue;
+    }
+
+    const record = row as {
+      organization_id?: unknown;
+      organization?: { id?: unknown } | null;
+    };
+    const organizationId = readNonEmptyString(record.organization_id)
+      || readNonEmptyString(record.organization?.id);
+    if (organizationId) {
+      return organizationId;
+    }
+  }
+
+  return null;
+}
+
 function parseSupabaseProjectProvisioningSummary(
   payload: unknown,
 ): SupabaseProjectProvisioningSummary | null {
@@ -535,10 +563,10 @@ export function createSupabaseIntegrationsRoute(
     const projectId = readNonEmptyString(body?.projectId);
     const name = readNonEmptyString(body?.name);
     const region = readNonEmptyString(body?.region);
-    const organizationId = readNonEmptyString(body?.organizationId);
+    let organizationId = readNonEmptyString(body?.organizationId);
 
-    if (!projectId || !name || !region || !organizationId) {
-      return c.json({ error: "projectId, name, region, and organizationId are required" }, 400);
+    if (!projectId || !name || !region) {
+      return c.json({ error: "projectId, name, and region are required" }, 400);
     }
 
     const orgContext = c.get("orgContext") as OrgContext;
@@ -548,6 +576,37 @@ export function createSupabaseIntegrationsRoute(
     }
 
     try {
+      if (!organizationId) {
+        const { response: projectsResponse } = await performSupabaseManagementRequest({
+          orgContext,
+          projectId,
+          project,
+          path: "/projects",
+          fetchFn,
+        });
+
+        if (!projectsResponse.ok) {
+          const responseBody = await projectsResponse.text().catch(() => "");
+          return c.json(
+            { error: `Failed to determine Supabase organization (${projectsResponse.status})${responseBody ? `: ${responseBody}` : ""}` },
+            projectsResponse.status === 401 ? 401 : 502,
+          );
+        }
+
+        organizationId = parseFirstSupabaseProjectOrganizationId(
+          await projectsResponse.json().catch(() => null),
+        ) ?? "";
+
+        if (!organizationId) {
+          return c.json(
+            {
+              error: "Could not determine your Supabase organization. Please create a project in Supabase first.",
+            },
+            400,
+          );
+        }
+      }
+
       const { response } = await performSupabaseManagementRequest({
         orgContext,
         projectId,

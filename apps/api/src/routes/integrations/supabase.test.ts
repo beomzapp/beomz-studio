@@ -347,6 +347,124 @@ test("create-project retries once on 401 using the refresh token and returns the
   });
 });
 
+test("create-project derives organizationId from the first existing Supabase project when omitted", async () => {
+  clearAllTemporarySupabaseOAuthTokens();
+  const project = createProject({
+    supabase_oauth_access_token: encryptProjectSecret("persisted-access-token"),
+    supabase_oauth_refresh_token: encryptProjectSecret("persisted-refresh-token"),
+  });
+  const calls: Array<{ url: string; method: string | undefined; body: string | null }> = [];
+
+  const app = createApp(createOrgContext(project), {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method;
+      calls.push({
+        url,
+        method,
+        body: typeof init?.body === "string" ? init.body : null,
+      });
+
+      if (url === "https://api.supabase.com/v1/projects" && method === "GET") {
+        assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer persisted-access-token");
+        return new Response(JSON.stringify([
+          {
+            id: "existing-project-1",
+            ref: "existingref",
+            name: "Existing",
+            region: "us-east-1",
+            organization_id: "org_derived",
+          },
+        ]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url === "https://api.supabase.com/v1/projects" && method === "POST") {
+        assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer persisted-access-token");
+        assert.deepEqual(JSON.parse(String(init?.body ?? "{}")), {
+          name: "My App DB",
+          region: "eu-west-1",
+          organization_id: "org_derived",
+          plan: "free",
+        });
+        return new Response(JSON.stringify({
+          ref: "newref123",
+          name: "My App DB",
+          region: "eu-west-1",
+          status: "IN_PROGRESS",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected fetch call: ${url} (${method ?? "GET"})`);
+    },
+  });
+
+  const response = await app.request("http://localhost/integrations/supabase/create-project", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId: project.id,
+      name: "My App DB",
+      region: "eu-west-1",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    ref: "newref123",
+    name: "My App DB",
+    region: "eu-west-1",
+    status: "IN_PROGRESS",
+  });
+  assert.deepEqual(
+        calls.map((call) => ({ url: call.url, method: call.method ?? "GET" })),
+    [
+      { url: "https://api.supabase.com/v1/projects", method: "GET" },
+      { url: "https://api.supabase.com/v1/projects", method: "POST" },
+    ],
+  );
+});
+
+test("create-project returns a helpful error when organizationId is omitted and no Supabase projects exist", async () => {
+  clearAllTemporarySupabaseOAuthTokens();
+  const project = createProject({
+    supabase_oauth_access_token: encryptProjectSecret("persisted-access-token"),
+    supabase_oauth_refresh_token: encryptProjectSecret("persisted-refresh-token"),
+  });
+
+  const app = createApp(createOrgContext(project), {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(String(input), "https://api.supabase.com/v1/projects");
+      assert.equal(init?.method, "GET");
+      assert.equal(init?.headers && (init.headers as Record<string, string>).Authorization, "Bearer persisted-access-token");
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  const response = await app.request("http://localhost/integrations/supabase/create-project", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId: project.id,
+      name: "My First DB",
+      region: "us-east-1",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "Could not determine your Supabase organization. Please create a project in Supabase first.",
+  });
+});
+
 test("project-status returns the Supabase project status", async () => {
   clearAllTemporarySupabaseOAuthTokens();
   const project = createProject({
