@@ -45,7 +45,7 @@ import {
   publicSlugRoute,
   publishRoute,
 } from "./routes/projects/publish.js";
-import { vercelDeployRoute } from "./routes/projects/vercel.js";
+import { vercelDeployRoute, vercelDomainsRoute } from "./routes/projects/vercel.js";
 import nextPhaseRoute from "./routes/projects/next-phase.js";
 import supabaseIntegrationsRoute from "./routes/integrations/supabase.js";
 
@@ -181,6 +181,7 @@ app.route("/projects/check-slug", checkSlugRoute);
 app.route("/p", publicSlugRoute);
 // Vercel deploy — slug.beomz.app
 app.route("/projects/:id/deploy/vercel", vercelDeployRoute);
+app.route("/projects/:id/domains", vercelDomainsRoute);
 // BEO-197: Phased build system
 app.route("/projects/:id/next-phase", nextPhaseRoute);
 

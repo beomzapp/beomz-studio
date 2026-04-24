@@ -7,12 +7,27 @@
  *   → { status: 'deploying' | 'ready' | 'error', url?: string }
  */
 import { Hono } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
+import { z } from "zod";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import type { VercelDeployFile } from "../../lib/vercelDeploy.js";
+import type { VercelProjectDomain } from "../../lib/vercelDomains.js";
 import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
+import {
+  VercelApiError,
+  addDomainToProjectRecord,
+  addProjectDomain,
+  assignDomainToCurrentDeployment,
+  deleteProjectDomain,
+  getProjectDomain,
+  normalizeCustomDomain,
+  readProjectCustomDomains,
+  removeDomainFromProjectRecord,
+  verifyProjectDomain,
+} from "../../lib/vercelDomains.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
 import { getByoSupabaseConfig, getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
@@ -132,6 +147,28 @@ function buildScaffold(): Array<{ filename: string; content: string }> {
     { filename: "src/main.tsx",    content: SCAFFOLD_MAIN_TSX },
     { filename: "src/tailwind.css", content: SCAFFOLD_TAILWIND_CSS },
   ];
+}
+
+const addCustomDomainSchema = z.object({
+  domain: z.string().trim().min(1).max(253),
+}).strict();
+
+interface VercelDeployRouteDeps {
+  authMiddleware?: MiddlewareHandler;
+  loadOrgContextMiddleware?: MiddlewareHandler;
+  createDbClient?: typeof createStudioDbClient;
+  startDeploy?: typeof vercelDeployStart;
+  pollDeployUntilReady?: typeof pollUntilReady;
+}
+
+interface VercelDomainsRouteDeps {
+  authMiddleware?: MiddlewareHandler;
+  loadOrgContextMiddleware?: MiddlewareHandler;
+  addProjectDomain?: typeof addProjectDomain;
+  verifyProjectDomain?: typeof verifyProjectDomain;
+  getProjectDomain?: typeof getProjectDomain;
+  deleteProjectDomain?: typeof deleteProjectDomain;
+  assignDomainToCurrentDeployment?: typeof assignDomainToCurrentDeployment;
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
@@ -278,13 +315,60 @@ export function replaceDeployEnvFile(
   ];
 }
 
+function domainResponsePayload(domain: string, result: Pick<VercelProjectDomain, "verified" | "verification">) {
+  return {
+    domain,
+    verified: result.verified === true,
+    verification: Array.isArray(result.verification) ? result.verification : [],
+  };
+}
+
+function requireCustomDomainPlan(c: Pick<Context, "json">, orgContext: OrgContext) {
+  if ((orgContext.org.plan ?? "free") !== "free") {
+    return null;
+  }
+
+  return c.json({ error: "upgrade_required", requiredPlan: "starter" }, 403);
+}
+
+async function loadOwnedProject(orgContext: OrgContext, projectId: string) {
+  const project = await orgContext.db.findProjectById(projectId);
+  if (!project || project.org_id !== orgContext.org.id) {
+    return null;
+  }
+  return project;
+}
+
+function parseRequestedDomain(raw: string): string | null {
+  return normalizeCustomDomain(raw);
+}
+
+function respondToVercelError(c: Pick<Context, "json">, error: unknown) {
+  if (error instanceof VercelApiError) {
+    const status = error.status >= 500 ? 502 : error.status;
+    return new Response(JSON.stringify({ error: "vercel_error", detail: error.body }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const detail = error instanceof Error ? error.message : String(error);
+  return c.json({ error: "vercel_error", detail }, 502);
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-export const vercelDeployRoute = new Hono();
+export function createVercelDeployRoute(deps: VercelDeployRouteDeps = {}) {
+  const vercelDeployRoute = new Hono();
+  const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
+  const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
+  const createDbClient = deps.createDbClient ?? createStudioDbClient;
+  const startDeploy = deps.startDeploy ?? vercelDeployStart;
+  const pollDeployUntilReady = deps.pollDeployUntilReady ?? pollUntilReady;
 
 // ── POST /api/projects/:id/deploy/vercel ─────────────────────────────────────
 
-vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
+  vercelDeployRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
   const projectId = c.req.param("id") as string;
 
@@ -409,7 +493,7 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   // Phase 1: upload files + create deployment (~5-10s) — synchronous so errors surface
   let handle: Awaited<ReturnType<typeof vercelDeployStart>>;
   try {
-    handle = await vercelDeployStart({ files: deployFiles, slug });
+    handle = await startDeploy({ files: deployFiles, slug });
   } catch (err) {
     console.error("[vercel deploy] start failed:", err);
     return c.json({ error: "deploy_failed", detail: String(err) }, 502);
@@ -420,9 +504,9 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
   // Phase 2: poll in background — fresh DB client so it outlives the request
   void (async () => {
-    const db = createStudioDbClient();
+    const db = createDbClient();
     try {
-      await pollUntilReady(_token, _teamId, deploymentId);
+      await pollDeployUntilReady(_token, _teamId, deploymentId);
       await db.updateProject(projectId, {
         beomz_app_url: url,
         beomz_app_deployed_at: new Date().toISOString(),
@@ -434,11 +518,11 @@ vercelDeployRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   })();
 
   return c.json({ ok: true, deploymentId, status: "deploying" }, 202);
-});
+  });
 
 // ── DELETE /api/projects/:id/deploy/vercel ────────────────────────────────────
 
-vercelDeployRoute.delete("/", verifyPlatformJwt, loadOrgContext, async (c) => {
+  vercelDeployRoute.delete("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
   const projectId = c.req.param("id") as string;
 
@@ -489,11 +573,11 @@ vercelDeployRoute.delete("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   });
 
   return c.json({ ok: true });
-});
+  });
 
 // ── GET /api/projects/:id/deploy/vercel/status ───────────────────────────────
 
-vercelDeployRoute.get("/status", verifyPlatformJwt, loadOrgContext, async (c) => {
+  vercelDeployRoute.get("/status", authMiddleware, loadOrgContextMiddleware, async (c) => {
   const orgContext = c.get("orgContext") as OrgContext;
   const projectId = c.req.param("id") as string;
 
@@ -507,4 +591,165 @@ vercelDeployRoute.get("/status", verifyPlatformJwt, loadOrgContext, async (c) =>
   }
 
   return c.json({ status: "deploying" });
-});
+  });
+
+  return vercelDeployRoute;
+}
+
+export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
+  const vercelDomainsRoute = new Hono();
+  const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
+  const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
+  const addDomain = deps.addProjectDomain ?? addProjectDomain;
+  const verifyDomain = deps.verifyProjectDomain ?? verifyProjectDomain;
+  const fetchProjectDomain = deps.getProjectDomain ?? getProjectDomain;
+  const removeProjectDomainFromVercel = deps.deleteProjectDomain ?? deleteProjectDomain;
+  const assignCurrentDeploymentDomain = deps.assignDomainToCurrentDeployment ?? assignDomainToCurrentDeployment;
+
+  vercelDomainsRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const planError = requireCustomDomainPlan(c, orgContext);
+    if (planError) {
+      return planError;
+    }
+
+    const projectId = c.req.param("id") as string;
+    const project = await loadOwnedProject(orgContext, projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = addCustomDomainSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: "invalid_domain" }, 400);
+    }
+
+    const domain = parseRequestedDomain(parsed.data.domain);
+    if (!domain) {
+      return c.json({ error: "invalid_domain" }, 400);
+    }
+
+    try {
+      const result = await addDomain(domain);
+      await orgContext.db.updateProject(projectId, {
+        custom_domains: addDomainToProjectRecord(project, domain),
+      });
+
+      if (result.verified) {
+        await assignCurrentDeploymentDomain(project, domain);
+      }
+
+      return c.json(domainResponsePayload(domain, result));
+    } catch (error) {
+      return respondToVercelError(c, error);
+    }
+  });
+
+  vercelDomainsRoute.post("/:domain/verify", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const planError = requireCustomDomainPlan(c, orgContext);
+    if (planError) {
+      return planError;
+    }
+
+    const projectId = c.req.param("id") as string;
+    const project = await loadOwnedProject(orgContext, projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const domain = parseRequestedDomain(c.req.param("domain"));
+    if (!domain) {
+      return c.json({ error: "invalid_domain" }, 400);
+    }
+
+    try {
+      const result = await verifyDomain(domain);
+      await orgContext.db.updateProject(projectId, {
+        custom_domains: addDomainToProjectRecord(project, domain),
+      });
+
+      if (result.verified) {
+        await assignCurrentDeploymentDomain(project, domain);
+      }
+
+      return c.json({ verified: result.verified === true });
+    } catch (error) {
+      return respondToVercelError(c, error);
+    }
+  });
+
+  vercelDomainsRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const planError = requireCustomDomainPlan(c, orgContext);
+    if (planError) {
+      return planError;
+    }
+
+    const projectId = c.req.param("id") as string;
+    const project = await loadOwnedProject(orgContext, projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const domains = readProjectCustomDomains(project);
+    if (domains.length === 0) {
+      return c.json([]);
+    }
+
+    try {
+      const statuses = await Promise.all(
+        domains.map(async (domain) => {
+          try {
+            const result = await fetchProjectDomain(domain);
+            return domainResponsePayload(domain, result);
+          } catch (error) {
+            if (error instanceof VercelApiError && error.status === 404) {
+              return { domain, verified: false, verification: [] };
+            }
+            throw error;
+          }
+        }),
+      );
+
+      return c.json(statuses);
+    } catch (error) {
+      return respondToVercelError(c, error);
+    }
+  });
+
+  vercelDomainsRoute.delete("/:domain", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const planError = requireCustomDomainPlan(c, orgContext);
+    if (planError) {
+      return planError;
+    }
+
+    const projectId = c.req.param("id") as string;
+    const project = await loadOwnedProject(orgContext, projectId);
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const domain = parseRequestedDomain(c.req.param("domain"));
+    if (!domain) {
+      return c.json({ error: "invalid_domain" }, 400);
+    }
+
+    try {
+      await removeProjectDomainFromVercel(domain);
+      await orgContext.db.updateProject(projectId, {
+        custom_domains: removeDomainFromProjectRecord(project, domain),
+      });
+      return c.json({ deleted: true });
+    } catch (error) {
+      return respondToVercelError(c, error);
+    }
+  });
+
+  return vercelDomainsRoute;
+}
+
+export const vercelDeployRoute = createVercelDeployRoute();
+export const vercelDomainsRoute = createVercelDomainsRoute();
