@@ -5,9 +5,11 @@
  * For managed (beomz) projects: queries beomz-user-data via Management API.
  * For BYO Supabase: queries via the anon key + Supabase REST OpenAPI spec.
  */
+import { createClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
+import { decryptProjectSecret } from "../../lib/projectSecrets.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -169,6 +171,40 @@ export async function listSupabaseSchemaTables(
   return { tables: [] };
 }
 
+export async function listSupabaseSchemaTablesWithServiceRole(
+  supabaseUrl: string,
+  supabaseServiceRoleKey: string,
+): Promise<{ tables: SchemaRouteTable[] }> {
+  try {
+    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+    const { data, error } = await supabase
+      .schema("information_schema")
+      .from("tables")
+      .select("table_name")
+      .eq("table_schema", "public")
+      .eq("table_type", "BASE TABLE");
+
+    if (error || !Array.isArray(data)) {
+      return { tables: [] };
+    }
+
+    const tableNames = data
+      .map((row) => typeof row?.table_name === "string" ? row.table_name.trim() : "")
+      .filter((tableName) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName))
+      .filter((tableName, index, allTableNames) => allTableNames.indexOf(tableName) === index)
+      .sort((left, right) => left.localeCompare(right));
+
+    return {
+      tables: tableNames.map((tableName) => ({
+        table_name: tableName,
+        columns: [],
+      })),
+    };
+  } catch {
+    return { tables: [] };
+  }
+}
+
 interface SchemaDbRouteDeps {
   authMiddleware?: MiddlewareHandler;
   loadOrgContextMiddleware?: MiddlewareHandler;
@@ -176,6 +212,7 @@ interface SchemaDbRouteDeps {
   isUserDataConfigured?: typeof isUserDataConfigured;
   getNeonSchemaTableList?: typeof getNeonSchemaTableList;
   listSupabaseSchemaTables?: typeof listSupabaseSchemaTables;
+  listSupabaseSchemaTablesWithServiceRole?: typeof listSupabaseSchemaTablesWithServiceRole;
 }
 
 export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
@@ -186,6 +223,8 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
   const isUserDataConfiguredFn = deps.isUserDataConfigured ?? isUserDataConfigured;
   const getNeonSchemaTableListFn = deps.getNeonSchemaTableList ?? getNeonSchemaTableList;
   const listSupabaseSchemaTablesFn = deps.listSupabaseSchemaTables ?? listSupabaseSchemaTables;
+  const listSupabaseSchemaTablesWithServiceRoleFn =
+    deps.listSupabaseSchemaTablesWithServiceRole ?? listSupabaseSchemaTablesWithServiceRole;
 
   schemaDbRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
     const projectId = c.req.param("id") as string;
@@ -200,18 +239,24 @@ export function createSchemaDbRoute(deps: SchemaDbRouteDeps = {}) {
     const supabaseConfig = getProjectSupabaseConfig(project);
 
     if (supabaseConfig) {
-      try {
-        const result = await listSupabaseSchemaTablesFn(
-          supabaseConfig.supabaseUrl,
-          supabaseConfig.supabaseAnonKey,
-        );
+      const result = await listSupabaseSchemaTablesFn(
+        supabaseConfig.supabaseUrl,
+        supabaseConfig.supabaseAnonKey,
+      );
+      if (result.tables.length > 0) {
         return c.json({ tables: result.tables });
-      } catch (err) {
-        return c.json(
-          { error: err instanceof Error ? err.message : "Failed to fetch schema" },
-          500,
-        );
       }
+
+      const serviceRoleKey = decryptProjectSecret(project.byo_db_service_key) ?? project.byo_db_service_key ?? "";
+      if (typeof serviceRoleKey === "string" && serviceRoleKey.trim().length > 0) {
+        const serviceRoleResult = await listSupabaseSchemaTablesWithServiceRoleFn(
+          supabaseConfig.supabaseUrl,
+          serviceRoleKey.trim(),
+        );
+        return c.json({ tables: serviceRoleResult.tables });
+      }
+
+      return c.json({ tables: [] });
     }
 
     if (!project.database_enabled) {

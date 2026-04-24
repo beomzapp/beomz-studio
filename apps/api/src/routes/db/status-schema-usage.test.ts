@@ -11,7 +11,12 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { createStatusDbRoute } = await import("./status.js");
-const { createSchemaDbRoute, listSupabaseSchemaTables } = await import("./schema.js");
+const {
+  createSchemaDbRoute,
+  listSupabaseSchemaTables,
+  listSupabaseSchemaTablesWithServiceRole,
+} = await import("./schema.js");
+const { encryptProjectSecret } = await import("../../lib/projectSecrets.js");
 const { createUsageDbRoute } = await import("./usage.js");
 
 function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
@@ -297,6 +302,48 @@ test("db schema returns BYO Supabase tables using byo_db_url + byo_db_anon_key f
   });
 });
 
+test("db schema falls back to service_role introspection when the OpenAPI spec returns no tables", async () => {
+  const project = createProject({
+    database_enabled: false,
+    db_provider: null,
+    db_wired: false,
+    byo_db_url: "https://demo-project.supabase.co",
+    byo_db_anon_key: "anon-key",
+    byo_db_service_key: encryptProjectSecret("service-role-key"),
+  });
+  const orgContext = createOrgContext(project, null);
+
+  const app = mountRoute(
+    "/projects/:id/db/schema",
+    createSchemaDbRoute({
+      authMiddleware: async (_c, next) => { await next(); },
+      loadOrgContextMiddleware: async (_c, next) => { await next(); },
+      listSupabaseSchemaTables: async () => ({ tables: [] }),
+      listSupabaseSchemaTablesWithServiceRole: async (supabaseUrl: string, serviceRoleKey: string) => {
+        assert.equal(supabaseUrl, "https://demo-project.supabase.co");
+        assert.equal(serviceRoleKey, "service-role-key");
+        return {
+          tables: [
+            { table_name: "profiles", columns: [] },
+            { table_name: "todos", columns: [] },
+          ],
+        };
+      },
+    }),
+    orgContext,
+  );
+
+  const response = await app.request(`http://localhost/projects/${project.id}/db/schema`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    tables: [
+      { table_name: "profiles", columns: [] },
+      { table_name: "todos", columns: [] },
+    ],
+  });
+});
+
 test("listSupabaseSchemaTables parses BYO tables from the OpenAPI spec without exec_sql", async () => {
   const result = await listSupabaseSchemaTables(
     "https://demo-project.supabase.co",
@@ -354,6 +401,41 @@ test("listSupabaseSchemaTables returns an empty table list when the OpenAPI spec
   );
 
   assert.deepEqual(result, { tables: [] });
+});
+
+test("listSupabaseSchemaTablesWithServiceRole returns public base table names", async () => {
+  const originalFetch = globalThis.fetch;
+  const fetchCalls: Array<{ url: string; headers: HeadersInit | undefined }> = [];
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    fetchCalls.push({ url: String(input), headers: init?.headers });
+    return new Response(JSON.stringify([
+      { table_name: "todos" },
+      { table_name: "profiles" },
+      { table_name: "todos" },
+      { table_name: "invalid-name!" },
+    ]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const result = await listSupabaseSchemaTablesWithServiceRole(
+      "https://demo-project.supabase.co",
+      "service-role-key",
+    );
+
+    assert.deepEqual(result, {
+      tables: [
+        { table_name: "profiles", columns: [] },
+        { table_name: "todos", columns: [] },
+      ],
+    });
+    assert.equal(fetchCalls.length > 0, true);
+    assert.match(fetchCalls[0]?.url ?? "", /demo-project\.supabase\.co\/rest\/v1\/tables/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("db usage returns Neon metrics with legacy-compatible keys", async () => {

@@ -42,6 +42,11 @@ test("buildSupabaseSetupSqlFromFiles generates simple CREATE TABLE statements", 
   assert.match(sql, /"id" UUID DEFAULT gen_random_uuid\(\) PRIMARY KEY/);
   assert.match(sql, /"created_at" TIMESTAMPTZ DEFAULT now\(\)/);
   assert.match(sql, /"title" TEXT/);
+  assert.match(sql, /ALTER TABLE public\."tasks" ENABLE ROW LEVEL SECURITY;/);
+  assert.match(sql, /CREATE POLICY "Allow all for anon" ON public\."tasks"/);
+  assert.match(sql, /TO anon/);
+  assert.match(sql, /USING \(true\)/);
+  assert.match(sql, /WITH CHECK \(true\);/);
 });
 
 test("buildSupabaseSetupSqlFromFiles returns empty string when no tables are detected", () => {

@@ -127,10 +127,19 @@ export function buildSupabaseSetupSqlFromFiles(
   return tables.map((table) => {
     const allColumns = ["id", "created_at", ...table.columns.filter((column) => column !== "id" && column !== "created_at")];
     const columnLines = allColumns.map((columnName) => `  ${quoteIdentifier(columnName)} ${sqlTypeForColumn(columnName)}`);
+    const qualifiedTableName = `public.${quoteIdentifier(table.name)}`;
     return [
-      `CREATE TABLE IF NOT EXISTS public.${quoteIdentifier(table.name)} (`,
+      `CREATE TABLE IF NOT EXISTS ${qualifiedTableName} (`,
       columnLines.join(",\n"),
       ");",
+      "",
+      `ALTER TABLE ${qualifiedTableName} ENABLE ROW LEVEL SECURITY;`,
+      "",
+      `CREATE POLICY "Allow all for anon" ON ${qualifiedTableName}`,
+      "  FOR ALL",
+      "  TO anon",
+      "  USING (true)",
+      "  WITH CHECK (true);",
     ].join("\n");
   }).join("\n\n");
 }
