@@ -332,7 +332,7 @@ function resolveRealEntryPath(
   return CANDIDATES.find((p) => filePaths.has(p));
 }
 
-function buildRuntimeJson(
+export function buildRuntimeJson(
   files: readonly Pick<StudioFile, "path" | "content">[],
   project: Pick<Project, "id" | "name" | "templateId">,
 ): string {

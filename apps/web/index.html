@@ -4,10 +4,93 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+
+    <!-- BEO-580: preconnect to critical third-party origins so DNS + TLS handshakes
+         start before the JS bundle requests them. -->
+    <link rel="preconnect" href="https://srflynvdrsdazxvcxmzb.supabase.co" crossorigin />
+    <link rel="preconnect" href="https://beomz.ai" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- BEO-580: load DM Sans non-blocking. The print/onload swap means the
+         stylesheet doesn't block render; the noscript fallback keeps users
+         without JS rendering correctly. font-display=swap is in the URL so
+         text remains visible during the (tiny) font fetch. -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap"
+      />
+    </noscript>
+
     <title>Beomz Studio</title>
+
+    <!-- BEO-580: minimal inline app shell. Renders before the JS bundle parses
+         so users see the cream background + orange B mark instead of a blank
+         white screen on hard refresh. The shell is removed once React mounts. -->
+    <style>
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: #faf9f6;
+        font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      #app-shell {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #faf9f6;
+        z-index: 9999;
+        transition: opacity 200ms ease-out;
+      }
+      #app-shell.app-shell-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #app-shell .app-shell-mark {
+        position: relative;
+        width: 64px;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #app-shell .app-shell-spinner {
+        position: absolute;
+        inset: 6px;
+        border: 2px solid transparent;
+        border-top-color: #F97316;
+        border-radius: 9999px;
+        animation: app-shell-spin 1s linear infinite;
+      }
+      #app-shell .app-shell-letter {
+        font-weight: 700;
+        font-size: 22px;
+        color: #F97316;
+        line-height: 1;
+      }
+      @keyframes app-shell-spin {
+        to { transform: rotate(360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #app-shell .app-shell-spinner { animation: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="app-shell" aria-hidden="true">
+      <div class="app-shell-mark">
+        <div class="app-shell-spinner"></div>
+        <span class="app-shell-letter">B</span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

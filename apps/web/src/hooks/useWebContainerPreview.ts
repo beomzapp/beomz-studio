@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Project, StudioFile } from "@beomz-studio/contracts";
+import { normalizeGeneratedPath } from "@beomz-studio/contracts";
 
 import {
   buildPreviewFileTree,
+  buildRuntimeJson,
   buildShellFileTree,
   getOrBootWebContainer,
   isWebContainerSupported,
@@ -51,6 +53,81 @@ async function deleteStaleStubFiles(
       // File doesn't exist — ignore
     }
   }
+}
+
+// BEO-586: write a single file to the WC filesystem, ensuring its parent
+// directory chain exists. WebContainer's fs.writeFile does NOT auto-create
+// intermediate directories, so a recursive mkdir is required for any file
+// whose parent dir hasn't been touched yet by an earlier mount.
+async function writeFileEnsuringDir(
+  wc: import("@webcontainer/api").WebContainer,
+  path: string,
+  contents: string,
+): Promise<void> {
+  const slash = path.lastIndexOf("/");
+  if (slash > 0) {
+    const dir = path.slice(0, slash);
+    try {
+      await wc.fs.mkdir(dir, { recursive: true });
+    } catch {
+      // Directory exists or is a non-fatal race — writeFile below will
+      // surface any real error.
+    }
+  }
+  await wc.fs.writeFile(path, contents);
+}
+
+// BEO-586: hot-patch the WebContainer FS for an iteration. Writes only the
+// files whose content changed vs. the previous snapshot, removes files that
+// are no longer present, and refreshes the runtime.json route manifest. The
+// dev server keeps running and Vite HMR picks up the changes in place.
+//
+// Returns the count of files written, deleted, and the runtime-manifest write
+// for diagnostics. The caller is responsible for updating the snapshot map.
+async function hotPatchFiles(
+  wc: import("@webcontainer/api").WebContainer,
+  currentFiles: readonly StudioFile[],
+  currentProject: Pick<Project, "id" | "name" | "templateId">,
+  previousSnapshot: ReadonlyMap<string, string>,
+): Promise<{ written: number; deleted: number }> {
+  const nextPaths = new Set<string>();
+  const writes: Promise<void>[] = [];
+
+  for (const file of currentFiles) {
+    const path = normalizeGeneratedPath(file.path);
+    nextPaths.add(path);
+    if (previousSnapshot.get(path) !== file.content) {
+      writes.push(writeFileEnsuringDir(wc, path, file.content));
+    }
+  }
+
+  // Remove files that were in the previous snapshot but are no longer
+  // present — keeps the running tree in sync so deleted files don't
+  // shadow newly added ones via Vite's module cache.
+  const deletions: Promise<void>[] = [];
+  for (const path of previousSnapshot.keys()) {
+    if (!nextPaths.has(path)) {
+      deletions.push(wc.fs.rm(path).catch(() => { /* already gone */ }));
+    }
+  }
+
+  // Always rewrite runtime.json — the route manifest depends on the current
+  // file set, and a cached stale manifest would cause Vite to render the old
+  // entry component until the next full reload.
+  writes.push(
+    writeFileEnsuringDir(
+      wc,
+      "apps/web/src/.beomz/runtime.json",
+      buildRuntimeJson(currentFiles, currentProject),
+    ),
+  );
+
+  await Promise.all([...writes, ...deletions]);
+
+  return {
+    written: writes.length,
+    deleted: deletions.length,
+  };
 }
 
 export interface WcPreviewState {
@@ -145,10 +222,15 @@ export function useWebContainerPreview(
   const serverReadyFiredRef = useRef(false);
   const pendingDeliverRef = useRef(false);
   // First-build real files have landed in the WC filesystem — from this point
-  // every subsequent files-change goes through the iteration branch (stale
-  // stub cleanup + wc.mount + HMR). Keeps first-build vs iteration semantics
-  // explicit without reusing viteStartedRef for two concerns.
+  // every subsequent files-change goes through the iteration branch
+  // (per-file wc.fs.writeFile() so Vite HMR updates in-place — BEO-586).
   const firstBuildDeliveredRef = useRef(false);
+  // BEO-586: snapshot of the last-delivered file set keyed by normalised path.
+  // Used to compute the diff between current and previously-mounted files so
+  // each iteration only writes the files that actually changed — Vite's
+  // chokidar watcher then fires HMR for those modules without touching the
+  // rest of the tree (no full container restart, no iframe reload).
+  const lastDeliveredFilesRef = useRef<Map<string, string>>(new Map());
 
   // Live refs so the boot closure (which has [] deps and captures stale values)
   // can always read the most-recent files/project at any point in time.
@@ -237,28 +319,49 @@ export function useWebContainerPreview(
         return;
       }
 
-      // BEO-421: delete stale stub files from the previous build before
-      // mounting new ones (iterations only — first delivery has nothing to
-      // clean up).
-      if (firstBuildDeliveredRef.current) {
+      const wasFirstBuild = !firstBuildDeliveredRef.current;
+
+      if (wasFirstBuild) {
+        // First delivery — mount the full file tree so Vite picks up the
+        // workspace package.json / tsconfig / vite.config / shell entry plus
+        // the generated files in one pass. The container is still booting
+        // its module graph; per-file writes here would fight with Vite's
+        // initial dep optimisation.
+        const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
+        await wc.mount(tree);
+      } else {
+        // BEO-586 hot-patch: iteration — container is already running and
+        // Vite HMR is live. Write only the files that actually changed
+        // (vs. the lastDelivered snapshot) directly to the FS via
+        // wc.fs.writeFile(). chokidar fires HMR for those modules in place,
+        // so the iframe stays mounted, no reload, no flash, no state loss.
+
+        // BEO-421: delete stale stub files from the previous build first.
         const firstFilePath = currentFiles[0]?.path
-          .replaceAll("\\", "/")
-          .replace(/^\.\//, "")
-          .replace(/\/+/g, "/") ?? "";
+          ? normalizeGeneratedPath(currentFiles[0].path)
+          : "";
         const generatedDir = firstFilePath.includes("/")
           ? firstFilePath.slice(0, firstFilePath.lastIndexOf("/"))
           : "";
         if (generatedDir) {
           await deleteStaleStubFiles(wc, generatedDir);
         }
+
+        const stats = await hotPatchFiles(
+          wc,
+          currentFiles,
+          currentProject,
+          lastDeliveredFilesRef.current,
+        );
+        console.log(
+          `[BEO-586] Hot-patched WC: wrote ${stats.written} file(s), removed ${stats.deleted} — Vite HMR will update preview in-place`,
+        );
       }
 
-      const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
-      await wc.mount(tree);
-
-      // BEO-452: Re-inject Neon env vars after every hot-swap wc.mount() so
-      // they survive HMR reload. mount() does not preserve files absent from
-      // the tree.
+      // BEO-452: Re-inject Neon env vars after every delivery so they
+      // survive across iterations. wc.mount() does not preserve files
+      // absent from the tree, and the hot-patch path skips infra files
+      // unless they changed — so we always rewrite .env.local explicitly.
       if (neonDbUrlRef.current) {
         const envLines = [
           `VITE_DATABASE_URL=${neonDbUrlRef.current}`,
@@ -266,6 +369,15 @@ export function useWebContainerPreview(
         ];
         await wc.fs.writeFile(".env.local", envLines.join("\n"));
       }
+
+      // Update the last-delivered snapshot AFTER both first-build mount and
+      // iteration hot-patch so the next iteration computes its diff against
+      // what is actually on disk right now.
+      const nextSnapshot = new Map<string, string>();
+      for (const file of currentFiles) {
+        nextSnapshot.set(normalizeGeneratedPath(file.path), file.content);
+      }
+      lastDeliveredFilesRef.current = nextSnapshot;
 
       // BEO-375: persist source files to IndexedDB so the next page load can
       // skip the API round-trip and mount immediately while npm install is warm.
@@ -277,7 +389,6 @@ export function useWebContainerPreview(
         void wcCacheSetFiles(currentProject.id, gId, currentFiles);
       }
 
-      const wasFirstBuild = !firstBuildDeliveredRef.current;
       firstBuildDeliveredRef.current = true;
       onFilesWrittenRef.current?.();
 
@@ -586,6 +697,10 @@ export function useWebContainerPreview(
             viteStartedRef.current = false;
             serverReadyFiredRef.current = false;
             firstBuildDeliveredRef.current = false;
+            // BEO-586: stale node_modules forces a fresh install + first-mount
+            // path. Drop the snapshot so the next delivery is treated as a
+            // first build (full wc.mount), not an iteration hot-patch.
+            lastDeliveredFilesRef.current = new Map();
             pendingDeliverRef.current = false;
             // BEO-456 follow-up: keep the gate closed through the rebuild so
             // the iframe stays hidden until the real files land again.
