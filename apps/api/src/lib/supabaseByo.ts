@@ -20,6 +20,28 @@ const AUTO_WIRE_BUILD_MODEL = "claude-sonnet-4-6";
 const AUTO_WIRE_WAIT_TIMEOUT_MS = 60_000;
 const AUTO_WIRE_WAIT_POLL_MS = 500;
 const SUPABASE_MANAGEMENT_API_BASE = "https://api.supabase.com/v1";
+const SUPABASE_MIGRATION_CRITICAL_PROMPT = [
+  "CRITICAL — Supabase schema migrations:",
+  "You MUST include ALL database schema changes in the migrations array.",
+  "This includes EVERY change needed for your code to work:",
+  "",
+  "New tables:",
+  '  "CREATE TABLE IF NOT EXISTS table_name (...)"',
+  "",
+  "New columns on existing tables:",
+  '  "ALTER TABLE todos ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ"',
+  '  "ALTER TABLE todos ADD COLUMN IF NOT EXISTS image_url TEXT"',
+  "",
+  "Storage buckets (REQUIRED whenever you use supabase.storage):",
+  "  \"INSERT INTO storage.buckets (id, name, public) VALUES ('bucket-name', 'bucket-name', true) ON CONFLICT (id) DO NOTHING\"",
+  "",
+  "RULES:",
+  "- Every SQL must be idempotent (IF NOT EXISTS, ON CONFLICT DO NOTHING)",
+  "- If your code references a column → it MUST be in migrations",
+  "- If your code uses supabase.storage → the bucket MUST be in migrations",
+  "- Missing migrations = runtime errors for the user",
+  "- Include ALL migrations even if you think they might already exist",
+].join("\n");
 
 export const AUTO_WIRE_SUPABASE_ITERATION_PROMPT = [
   "Rewire the entire app to use Supabase instead of hardcoded data.",
@@ -39,6 +61,8 @@ export const AUTO_WIRE_SUPABASE_ITERATION_PROMPT = [
   "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all hardcoded arrays and sample data with real Supabase queries.",
   "Use useEffect + useState for data fetching with loading and error states.",
+  "",
+  SUPABASE_MIGRATION_CRITICAL_PROMPT,
 ].join("\n");
 
 export const UPGRADE_TO_BYO_ITERATION_PROMPT = [
@@ -59,6 +83,8 @@ export const UPGRADE_TO_BYO_ITERATION_PROMPT = [
   "Use import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY.",
   "Replace all Neon/postgres queries with Supabase queries.",
   "Use useEffect + useState with loading and error states.",
+  "",
+  SUPABASE_MIGRATION_CRITICAL_PROMPT,
 ].join("\n");
 
 function getStudioProjectRef(): string {

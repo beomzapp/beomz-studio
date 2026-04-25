@@ -154,6 +154,29 @@ const BYO_SUPABASE_SYSTEM_PROMPT_BLOCK = [
   "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
 ].join("\n");
 
+const BYO_SUPABASE_MIGRATIONS_CRITICAL_BLOCK = [
+  "CRITICAL — Supabase schema migrations:",
+  "You MUST include ALL database schema changes in the migrations array.",
+  "This includes EVERY change needed for your code to work:",
+  "",
+  "New tables:",
+  '  "CREATE TABLE IF NOT EXISTS table_name (...)"',
+  "",
+  "New columns on existing tables:",
+  '  "ALTER TABLE todos ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ"',
+  '  "ALTER TABLE todos ADD COLUMN IF NOT EXISTS image_url TEXT"',
+  "",
+  "Storage buckets (REQUIRED whenever you use supabase.storage):",
+  "  \"INSERT INTO storage.buckets (id, name, public) VALUES ('bucket-name', 'bucket-name', true) ON CONFLICT (id) DO NOTHING\"",
+  "",
+  "RULES:",
+  "- Every SQL must be idempotent (IF NOT EXISTS, ON CONFLICT DO NOTHING)",
+  "- If your code references a column → it MUST be in migrations",
+  "- If your code uses supabase.storage → the bucket MUST be in migrations",
+  "- Missing migrations = runtime errors for the user",
+  "- Include ALL migrations even if you think they might already exist",
+].join("\n");
+
 interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -2788,6 +2811,8 @@ export function buildIterationSystemPrompt(
         "",
         "BYO SUPABASE (highest priority rule):",
         BYO_SUPABASE_SYSTEM_PROMPT_BLOCK,
+        "",
+        BYO_SUPABASE_MIGRATIONS_CRITICAL_BLOCK,
       ].join("\n")
     : "";
   const existingSupabaseClientBlock = hasWiredSupabaseClient && !isPostgresWired
@@ -4238,12 +4263,15 @@ async function _runBuildInBackground(
 
         if (byoDbUrl && oauthAccessToken) {
           for (const migrationSql of metadataMigrations) {
+            const sql = migrationSql.trim();
+            if (!sql) continue;
+            console.log("[supabase] running migration:", sql.substring(0, 80));
             const migrationResult = await runSupabaseManagementQueryWithOAuth({
               projectId,
               supabaseUrl: byoDbUrl,
               accessToken: oauthAccessToken,
               refreshToken: oauthRefreshToken,
-              query: migrationSql,
+              query: sql,
               logPrefix: "[supabase]",
               persistTokens: async (tokens) => {
                 try {
@@ -4264,7 +4292,7 @@ async function _runBuildInBackground(
             oauthRefreshToken = migrationResult.refreshToken;
 
             if (migrationResult.ok) {
-              console.log("[supabase] migration applied:", migrationSql.slice(0, 50));
+              console.log("[supabase] migration applied:", sql.slice(0, 50));
             } else {
               console.error("[supabase] migration failed (non-fatal):", migrationResult.error ?? "Unknown error");
             }
