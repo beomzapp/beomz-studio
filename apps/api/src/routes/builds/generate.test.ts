@@ -126,17 +126,16 @@ test("iteration system prompt appends explicit data URI embedding instructions f
     null,
     false,
     [
-      "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI. The image data is already provided to you as a vision input in this message — extract that exact data from what you can see.",
-      "Embed it as: <img src=\"data:image/png;base64,...\" /> where the base64 value comes from the image you received, NOT a placeholder.",
-      "Do NOT redraw, recreate, approximate, or describe the image. Use the actual data.",
+      "The user has attached an image. It is available at this public URL: https://egnkylrnmblvfpccnjps.supabase.co/storage/v1/object/public/project-assets/project-123/logo.png",
+      "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image. The URL is permanent and publicly accessible.",
     ].join("\n"),
   );
 
-  assert.match(prompt, /CRITICAL: The user has attached an image\./);
-  assert.match(prompt, /vision input in this message/);
-  assert.match(prompt, /<img src="data:image\/png;base64,\.\.\." \/>/);
-  assert.match(prompt, /NOT a placeholder/);
-  assert.doesNotMatch(prompt, /abc123/);
+  assert.match(prompt, /It is available at this public URL:/);
+  assert.match(prompt, /project-assets\/project-123\/logo\.png/);
+  assert.match(prompt, /Use this URL directly as the src attribute/);
+  assert.match(prompt, /Do NOT use a data URI/);
+  assert.doesNotMatch(prompt, /base64,\.\.\./);
 });
 
 test("iteration user message includes a project manifest, seed files, and the edit request", () => {
@@ -250,15 +249,17 @@ test("image attachments are passed directly into Anthropic content blocks with t
   assert.doesNotMatch(source, /type:\s*"image_intent"/);
 });
 
-test("iteration flow resolves attached images to base64 and injects the exact data URI instruction into the system prompt", async () => {
+test("iteration flow uploads attached images and injects the public asset URL into the system prompt", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 
   assert.match(source, /resolvedImageBlock = await resolveAnthropicImageBlock\(imageUrl\);/);
-  assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(resolvedImageBlock\);/);
+  assert.match(source, /uploadedImageUrl = await uploadProjectAsset\(/);
+  assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(uploadedImageUrl\);/);
   assert.match(source, /const systemPrompt = buildIterationSystemPrompt\([\s\S]*imageEmbeddingInstructionBlock,\s*\);/);
-  assert.match(source, /Embed it as: <img src="data:\$\{imageBlock\.source\.media_type\};base64,\.\.\." \/> where the base64 value comes from the image you received, NOT a placeholder\./);
-  assert.doesNotMatch(source, /imageBlock\.source\.data\}" alt="logo"/);
-  assert.doesNotMatch(source, /background-image: url\('data:\$\{imageBlock\.source\.media_type\};base64,\$\{imageBlock\.source\.data\}'\)/);
+  assert.match(source, /It is available at this public URL: \$\{imageUrl\}/);
+  assert.match(source, /Do NOT use a data URI/);
+  assert.doesNotMatch(source, /base64,\.\.\./);
+  assert.doesNotMatch(source, /imageBlock\.source\.data\}/);
 });
 
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {

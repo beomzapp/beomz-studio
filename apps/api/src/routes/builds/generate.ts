@@ -95,6 +95,7 @@ import {
   type WebsiteContext,
 } from "../../lib/chatPrompts.js";
 import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
+import { uploadProjectAsset } from "../../lib/uploadProjectAsset.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -858,16 +859,15 @@ function buildAnthropicUserContent(
 }
 
 function buildIterationImageEmbeddingInstruction(
-  imageBlock?: IterationImageBlock,
+  imageUrl?: string,
 ): string | undefined {
-  if (!imageBlock || imageBlock.source.type !== "base64") {
+  if (!imageUrl) {
     return undefined;
   }
 
   return [
-    "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI. The image data is already provided to you as a vision input in this message — extract that exact data from what you can see.",
-    `Embed it as: <img src="data:${imageBlock.source.media_type};base64,..." /> where the base64 value comes from the image you received, NOT a placeholder.`,
-    "Do NOT redraw, recreate, approximate, or describe the image. Use the actual data.",
+    `The user has attached an image. It is available at this public URL: ${imageUrl}`,
+    "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image. The URL is permanent and publicly accessible.",
   ].join("\n");
 }
 
@@ -2971,6 +2971,7 @@ function buildIterationEditRequest(prompt: string): string {
 async function callModelIterate(
   prompt: string,
   model: string,
+  projectId: string,
   existingFiles: readonly StudioFile[],
   instrumentation?: { buildId: string; isIteration: boolean },
   schemaSummary?: string,
@@ -2985,15 +2986,23 @@ async function callModelIterate(
   const isIteration = Boolean(instrumentation?.isIteration);
   const maxTokens = isIteration ? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;
   let resolvedImageBlock: IterationImageBlock | undefined;
+  let uploadedImageUrl: string | undefined;
   let imageEmbeddingInstructionBlock: string | undefined;
 
   if (imageUrl) {
     try {
       resolvedImageBlock = await resolveAnthropicImageBlock(imageUrl);
-      imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction(resolvedImageBlock);
+      if (resolvedImageBlock.source.type === "base64") {
+        uploadedImageUrl = await uploadProjectAsset(
+          projectId,
+          resolvedImageBlock.source.data,
+          resolvedImageBlock.source.media_type,
+        );
+        imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction(uploadedImageUrl);
+      }
     } catch (error) {
       console.warn(
-        "[generate] failed to resolve iteration image to base64 for prompt injection (non-fatal):",
+        "[generate] failed to resolve/upload iteration image for prompt injection (non-fatal):",
         error instanceof Error ? error.message : String(error),
       );
       resolvedImageBlock = buildAnthropicImageBlock(imageUrl);
@@ -3993,6 +4002,7 @@ async function _runBuildInBackground(
         iterResult = await callModelIterate(
           prompt,
           model,
+          projectId,
           existingFiles,
           { buildId, isIteration: true },
           iterSchemaSummary,
