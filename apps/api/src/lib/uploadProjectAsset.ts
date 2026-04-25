@@ -2,10 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { createClient } from "@supabase/supabase-js";
 
-import { apiConfig } from "../config.js";
-
 export const PROJECT_ASSETS_BUCKET = "project-assets";
-export const USER_DATA_PUBLIC_BASE_URL = "https://egnkylrnmblvfpccnjps.supabase.co";
+export const STUDIO_PUBLIC_BASE_URL = "https://srflynvdrsdazxvcxmzb.supabase.co";
 
 const PROJECT_ASSET_ALLOWED_MIME_TYPES = [
   "image/png",
@@ -18,17 +16,15 @@ type AllowedProjectAssetMimeType = (typeof PROJECT_ASSET_ALLOWED_MIME_TYPES)[num
 
 let ensureBucketPromise: Promise<void> | null = null;
 
-function getUserDataSupabaseUrl(): string {
-  return apiConfig.USER_DATA_SUPABASE_URL ?? USER_DATA_PUBLIC_BASE_URL;
+function getStudioSupabaseUrl(): string {
+  return STUDIO_PUBLIC_BASE_URL;
 }
 
-function getUserDataServiceRoleKey(): string {
-  const key = apiConfig.USER_DATA_SUPABASE_SERVICE_ROLE_KEY
-    ?? process.env.SUPABASE_USER_DATA_SERVICE_KEY
-    ?? process.env.USER_DATA_SUPABASE_SERVICE_KEY;
+function getStudioServiceRoleKey(): string {
+  const key = process.env.SUPABASE_SERVICE_KEY;
 
   if (!key) {
-    throw new Error("USER_DATA_SUPABASE_SERVICE_ROLE_KEY is not configured");
+    throw new Error("SUPABASE_SERVICE_KEY is not configured");
   }
 
   return key;
@@ -36,8 +32,8 @@ function getUserDataServiceRoleKey(): string {
 
 function createStorageClient() {
   return createClient(
-    getUserDataSupabaseUrl(),
-    getUserDataServiceRoleKey(),
+    getStudioSupabaseUrl(),
+    getStudioServiceRoleKey(),
     {
       auth: {
         autoRefreshToken: false,
@@ -87,7 +83,7 @@ export function createProjectAssetPath(
 }
 
 export function buildProjectAssetPublicUrl(path: string): string {
-  return `${USER_DATA_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/${path}`;
+  return `${STUDIO_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/${path}`;
 }
 
 export async function ensureProjectAssetsBucket(): Promise<void> {
@@ -99,7 +95,6 @@ export async function ensureProjectAssetsBucket(): Promise<void> {
     const client = createStorageClient();
     const desiredConfig = {
       public: true,
-      allowedMimeTypes: [...PROJECT_ASSET_ALLOWED_MIME_TYPES],
     };
 
     const updateResult = await client.storage.updateBucket(PROJECT_ASSETS_BUCKET, desiredConfig);

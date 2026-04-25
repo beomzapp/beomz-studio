@@ -4,10 +4,11 @@ import test from "node:test";
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+process.env.SUPABASE_SERVICE_KEY ??= "test-studio-service-key";
 
 const {
   PROJECT_ASSETS_BUCKET,
-  USER_DATA_PUBLIC_BASE_URL,
+  STUDIO_PUBLIC_BASE_URL,
   buildProjectAssetPublicUrl,
   createProjectAssetPath,
   projectAssetExtensionForMediaType,
@@ -31,6 +32,6 @@ test("createProjectAssetPath uses projectId and derived extension", () => {
 test("buildProjectAssetPublicUrl returns the expected public storage URL", () => {
   assert.equal(
     buildProjectAssetPublicUrl("project-123/asset-456.png"),
-    `${USER_DATA_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/project-123/asset-456.png`,
+    `${STUDIO_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/project-123/asset-456.png`,
   );
 });
