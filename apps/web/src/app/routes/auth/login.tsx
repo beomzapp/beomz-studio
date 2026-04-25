@@ -13,6 +13,14 @@ export function LoginPage() {
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setError(null);
+
+    // Save where the user came from so the callback can restore it.
+    // Skip saving if we're already on an auth page to avoid redirect loops.
+    const currentPath = window.location.pathname;
+    if (currentPath !== "/auth/login" && currentPath !== "/auth/callback") {
+      localStorage.setItem("beomz_auth_redirect", currentPath);
+    }
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {

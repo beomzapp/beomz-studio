@@ -13,8 +13,34 @@ import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { CreditsProvider } from "../../../lib/CreditsContext";
 import { OnboardingModal } from "../../../components/OnboardingModal";
-import { getMe } from "../../../lib/api";
+import { getApiBaseUrl, getAccessToken, type UserProfile } from "../../../lib/api";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+
+/**
+ * Fetch /api/me without triggering signOutAndRedirectToLogin on 401.
+ * Returns null on 401 (user record still bootstrapping after fresh OAuth)
+ * so the caller can retry.
+ */
+async function fetchMeRaw(): Promise<UserProfile | null> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/me`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`GET /me failed with ${res.status}`);
+  return res.json() as Promise<UserProfile>;
+}
+
+/**
+ * Retry once after 800 ms if the first attempt returns 401. This covers the
+ * window between fresh OAuth and the API bootstrapping the user record.
+ */
+async function fetchMeWithRetry(): Promise<UserProfile | null> {
+  const first = await fetchMeRaw();
+  if (first !== null) return first;
+  await new Promise<void>((r) => setTimeout(r, 800));
+  return fetchMeRaw().catch(() => null);
+}
 
 const NAV_ITEMS = [
   { to: "/studio/home", label: "Projects", icon: FolderOpen, locked: false },
@@ -29,9 +55,13 @@ export function StudioLayout() {
   const matchRoute = useMatchRoute();
 
   useEffect(() => {
-    getMe()
+    // studioRoute.beforeLoad in router.ts already guards this component behind
+    // a confirmed Supabase session, so getAccessToken() is safe to call here.
+    fetchMeWithRetry()
       .then((profile) => {
-        if (!profile.onboarding_completed) {
+        if (!profile) return;
+        console.log('[onboarding] completed:', profile.onboarding_completed);
+        if (profile.onboarding_completed === false || profile.onboarding_completed === null) {
           setShowOnboarding(true);
         }
       })

@@ -13,6 +13,17 @@ export function AuthCallback() {
         if (pendingPrompt) {
           sessionStorage.removeItem("pending_build_prompt");
           navigate({ to: "/plan", search: { q: pendingPrompt } });
+          return;
+        }
+
+        // Restore the page the user was on before they triggered sign-in.
+        // If they came from the landing page (/), honour that rather than
+        // dropping them into /studio/home.
+        const savedRedirect = localStorage.getItem("beomz_auth_redirect");
+        localStorage.removeItem("beomz_auth_redirect");
+
+        if (savedRedirect && savedRedirect !== "/auth/login" && savedRedirect !== "/auth/callback") {
+          navigate({ to: savedRedirect as "/" });
         } else {
           navigate({ to: "/studio/home" });
         }

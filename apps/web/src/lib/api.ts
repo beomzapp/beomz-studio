@@ -970,7 +970,7 @@ export interface UserProfile {
   avatar_url: string | null;
   building_for: string | null;
   referral_source: string | null;
-  onboarding_completed: boolean;
+  onboarding_completed: boolean | null;
   created_at: string;
   plan: string;
   credits: number;
