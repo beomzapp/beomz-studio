@@ -11,13 +11,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import type { ProjectRow } from "@beomz-studio/studio-db";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import type { VercelDeployFile } from "../../lib/vercelDeploy.js";
 import type { VercelProjectDomain } from "../../lib/vercelDomains.js";
-import { vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
+import { deleteVercelDeployment, vercelDeployStart, pollUntilReady } from "../../lib/vercelDeploy.js";
 import {
   VercelApiError,
   addDomainToProjectRecord,
@@ -25,6 +26,8 @@ import {
   deleteProjectDomain,
   listProjectDomains,
   normalizeCustomDomain,
+  readProjectCustomDomains,
+  removeAllProjectDomains,
   removeDomainFromProjectRecord,
   verifyProjectDomain,
 } from "../../lib/vercelDomains.js";
@@ -159,6 +162,8 @@ interface VercelDeployRouteDeps {
   createDbClient?: typeof createStudioDbClient;
   startDeploy?: typeof vercelDeployStart;
   pollDeployUntilReady?: typeof pollUntilReady;
+  deleteVercelDeployment?: typeof deleteVercelDeployment;
+  removeAllProjectDomains?: typeof removeAllProjectDomains;
 }
 
 interface VercelDomainsRouteDeps {
@@ -189,6 +194,12 @@ function slugify(name: string): string {
 function toDeployPath(fullPath: string): string {
   const basename = fullPath.split("/").pop() ?? fullPath;
   return `src/${basename}`;
+}
+
+function readVercelDeploymentId(project: ProjectRow): string | null {
+  return typeof project.vercel_deployment_id === "string" && project.vercel_deployment_id.trim().length > 0
+    ? project.vercel_deployment_id.trim()
+    : null;
 }
 
 // Replace import.meta.env.VITE_* references inline so Vite bakes the real
@@ -437,6 +448,8 @@ export function createVercelDeployRoute(deps: VercelDeployRouteDeps = {}) {
   const createDbClient = deps.createDbClient ?? createStudioDbClient;
   const startDeploy = deps.startDeploy ?? vercelDeployStart;
   const pollDeployUntilReady = deps.pollDeployUntilReady ?? pollUntilReady;
+  const deleteDeployment = deps.deleteVercelDeployment ?? deleteVercelDeployment;
+  const removeProjectDomains = deps.removeAllProjectDomains ?? removeAllProjectDomains;
 
 // ── POST /api/projects/:id/deploy/vercel ─────────────────────────────────────
 
@@ -615,28 +628,25 @@ export function createVercelDeployRoute(deps: VercelDeployRouteDeps = {}) {
   }
   const slug = slugMatch[1];
   const domain = `${slug}.beomz.app`;
+  const customDomains = readProjectCustomDomains(project);
+  const cleanupDomains = [...new Set([domain, ...customDomains])];
+  const deploymentId = readVercelDeploymentId(project);
 
-  const { VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID } = apiConfig;
-  if (!VERCEL_TOKEN || !VERCEL_PROJECT_ID || !VERCEL_TEAM_ID) {
-    return c.json({ error: "Vercel not configured" }, 503);
+  try {
+    console.log("[vercel undeploy] removing Vercel domains for project:", projectId, cleanupDomains);
+    await removeProjectDomains(cleanupDomains);
+  } catch (error) {
+    console.error("[vercel undeploy] domain cleanup failed (non-fatal):", error);
   }
 
-  // Remove the alias from the Vercel project
-  const domainRes = await fetch(
-    `https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}/domains/${domain}?teamId=${VERCEL_TEAM_ID}`,
-    {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${VERCEL_TOKEN}` },
-    },
-  );
-
-  if (!domainRes.ok && domainRes.status !== 404) {
-    const body = await domainRes.text();
-    console.error(`[vercel undeploy] domain removal failed (${domainRes.status}):`, body);
-    return c.json({ error: "domain_removal_failed", detail: body }, 502);
+  if (deploymentId) {
+    try {
+      console.log("[vercel undeploy] deleting Vercel deployment:", deploymentId, "for project:", projectId);
+      await deleteDeployment(deploymentId);
+    } catch (error) {
+      console.error("[vercel undeploy] deployment cleanup failed (non-fatal):", error);
+    }
   }
-
-  console.log(`[vercel undeploy] removed domain ${domain} for project ${projectId}`);
 
   // Clear deploy columns
   await orgContext.db.updateProject(projectId, {

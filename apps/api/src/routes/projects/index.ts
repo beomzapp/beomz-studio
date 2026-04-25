@@ -16,6 +16,11 @@ import type { OrgContext } from "../../types.js";
 import { mapProjectRowToProject } from "../builds/shared.js";
 import { PLAN_LIMITS } from "../../lib/credits.js";
 import {
+  readProjectCustomDomains,
+  removeAllProjectDomains,
+} from "../../lib/vercelDomains.js";
+import { deleteVercelDeployment } from "../../lib/vercelDeploy.js";
+import {
   deleteSchemaRegistry,
   isUserDataConfigured,
   runSql,
@@ -57,6 +62,8 @@ interface ProjectsRouteDeps {
   runSql?: typeof runSql;
   deleteSchemaRegistry?: typeof deleteSchemaRegistry;
   deleteNeonProject?: typeof deleteNeonProject;
+  deleteVercelDeployment?: typeof deleteVercelDeployment;
+  removeAllProjectDomains?: typeof removeAllProjectDomains;
   dumpNeonDatabase?: typeof dumpNeonDatabase;
   restoreSupabaseDatabase?: typeof restoreSupabaseDatabase;
   ensureByoDbAnonKeyColumn?: () => Promise<void>;
@@ -301,6 +308,8 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const runSqlFn = deps.runSql ?? runSql;
   const deleteSchemaRegistryFn = deps.deleteSchemaRegistry ?? deleteSchemaRegistry;
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
+  const deleteVercelDeploymentFn = deps.deleteVercelDeployment ?? deleteVercelDeployment;
+  const removeAllProjectDomainsFn = deps.removeAllProjectDomains ?? removeAllProjectDomains;
   const dumpNeonDatabaseFn = deps.dumpNeonDatabase ?? dumpNeonDatabase;
   const restoreSupabaseDatabaseFn = deps.restoreSupabaseDatabase ?? restoreSupabaseDatabase;
   const ensureSupabaseProjectColumnsFn = deps.ensureByoDbAnonKeyColumn ?? ensureSupabaseProjectColumns;
@@ -396,6 +405,31 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     }
 
     await orgContext.db.deleteProject(projectId);
+
+    const vercelDeploymentId = typeof project.vercel_deployment_id === "string" && project.vercel_deployment_id.trim().length > 0
+      ? project.vercel_deployment_id.trim()
+      : null;
+    const customDomains = readProjectCustomDomains(project);
+
+    console.log("[projects/delete] project deleted from database:", projectId);
+
+    if (vercelDeploymentId) {
+      try {
+        console.log("[projects/delete] deleting Vercel deployment:", vercelDeploymentId, "for project:", projectId);
+        await deleteVercelDeploymentFn(vercelDeploymentId);
+      } catch (err) {
+        console.error("[projects/delete] Vercel deployment cleanup failed (non-fatal):", err);
+      }
+    }
+
+    if (customDomains.length > 0) {
+      try {
+        console.log("[projects/delete] removing Vercel custom domains for project:", projectId, customDomains);
+        await removeAllProjectDomainsFn(customDomains);
+      } catch (err) {
+        console.error("[projects/delete] Vercel domain cleanup failed (non-fatal):", err);
+      }
+    }
 
     try {
       const dbWithCleanup = orgContext.db as OrgContext["db"] & {

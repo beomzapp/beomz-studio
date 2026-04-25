@@ -212,6 +212,80 @@ test("project deletion cleans up Neon project when neon_project_id exists", asyn
   assert.deepEqual(neonDeleteCalls, ["neon-proj-123"]);
 });
 
+test("project deletion cleans up Vercel deployment and custom domains after DB delete", async () => {
+  const project = createProject({
+    custom_domains: ["myapp.com", "docs.myapp.com"],
+    vercel_deployment_id: "dpl_123",
+  });
+  const callOrder: string[] = [];
+  const deletedDomains: string[][] = [];
+  const deletedDeployments: string[] = [];
+  const orgContext = createOrgContext(project, {
+    deleteProject: async () => {
+      callOrder.push("deleteProject");
+    },
+  });
+
+  const app = createApp(orgContext, {
+    isUserDataConfigured: () => false,
+    deleteVercelDeployment: async (deploymentId: string) => {
+      callOrder.push(`deleteVercelDeployment:${deploymentId}`);
+      deletedDeployments.push(deploymentId);
+    },
+    removeAllProjectDomains: async (domains: readonly string[]) => {
+      callOrder.push(`removeAllProjectDomains:${domains.join(",")}`);
+      deletedDomains.push([...domains]);
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}`, {
+    method: "DELETE",
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.deepEqual(callOrder, [
+    "deleteProject",
+    "deleteVercelDeployment:dpl_123",
+    "removeAllProjectDomains:myapp.com,docs.myapp.com",
+  ]);
+  assert.deepEqual(deletedDeployments, ["dpl_123"]);
+  assert.deepEqual(deletedDomains, [["myapp.com", "docs.myapp.com"]]);
+});
+
+test("project deletion still succeeds when Vercel cleanup throws unexpectedly", async () => {
+  const project = createProject({
+    custom_domains: ["myapp.com"],
+    vercel_deployment_id: "dpl_123",
+  });
+  let deleteProjectCalled = false;
+  let removeAllProjectDomainsCalled = false;
+  const orgContext = createOrgContext(project, {
+    deleteProject: async () => {
+      deleteProjectCalled = true;
+    },
+  });
+
+  const app = createApp(orgContext, {
+    isUserDataConfigured: () => false,
+    deleteVercelDeployment: async () => {
+      throw new Error("unexpected deploy cleanup failure");
+    },
+    removeAllProjectDomains: async () => {
+      removeAllProjectDomainsCalled = true;
+    },
+  });
+
+  const response = await app.request(`http://localhost/projects/${project.id}`, {
+    method: "DELETE",
+  });
+
+  assert.equal(deleteProjectCalled, true);
+  assert.equal(removeAllProjectDomainsCalled, true);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+});
+
 test("byo-db validates Supabase URL format", async () => {
   const project = createProject();
   const orgContext = createOrgContext(project);

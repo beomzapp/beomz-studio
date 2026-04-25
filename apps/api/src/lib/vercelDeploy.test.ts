@@ -10,6 +10,7 @@ process.env.VERCEL_TEAM_ID ??= "team_123";
 
 const {
   assignDeploymentAlias,
+  deleteVercelDeployment,
   vercelDeployStart,
 } = await import("./vercelDeploy.js");
 
@@ -141,6 +142,50 @@ test("vercelDeployStart continues when alias assignment fails", async () => {
 
     assert.equal(handle.deploymentId, "dpl_new");
     assert.equal(handle.url, "https://taskly.beomz.app");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deleteVercelDeployment deletes the deployment from Vercel", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input, init) => {
+    calls.push({
+      url: String(input),
+      init,
+    });
+
+    return new Response(null, { status: 200 });
+  };
+
+  try {
+    await deleteVercelDeployment("dpl_123");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.vercel.com/v13/deployments/dpl_123?teamId=team_123",
+      init: {
+        method: "DELETE",
+        headers: {
+          Authorization: "Bearer vercel-token",
+        },
+      },
+    },
+  ]);
+});
+
+test("deleteVercelDeployment never throws when Vercel deletion fails", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => new Response("failed", { status: 500 });
+
+  try {
+    await deleteVercelDeployment("dpl_123");
   } finally {
     globalThis.fetch = originalFetch;
   }

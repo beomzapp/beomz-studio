@@ -98,6 +98,30 @@ export async function assignDeploymentAlias(
   }
 }
 
+export async function deleteVercelDeployment(deploymentId: string): Promise<void> {
+  try {
+    const { token, teamId } = requireVercelConfig();
+    const response = await fetch(
+      `https://api.vercel.com/v13/deployments/${deploymentId}?teamId=${teamId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Vercel deployment delete failed (${response.status})${body ? `: ${body}` : ""}`);
+    }
+
+    console.log(`[vercel] deployment deleted: ${deploymentId}`);
+  } catch (error) {
+    console.error("[vercel] deployment delete failed (non-fatal):", error);
+  }
+}
+
 // ── Poll for READY ────────────────────────────────────────────────────────────
 
 export async function pollUntilReady(

@@ -15,6 +15,7 @@ const {
   getFriendlyVercelErrorMessage,
   listProjectDomains,
   normalizeCustomDomain,
+  removeAllProjectDomains,
   readProjectCustomDomains,
   removeDomainFromProjectRecord,
   VercelApiError,
@@ -293,4 +294,62 @@ test("listProjectDomains returns verification details for unverified domains", a
       },
     ],
   );
+});
+
+test("removeAllProjectDomains removes each normalized domain once", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+
+  await removeAllProjectDomains(
+    ["MyApp.com", "docs.myapp.com", "myapp.com", "invalid domain"],
+    async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+      });
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123",
+      method: "DELETE",
+    },
+    {
+      url: "https://api.vercel.com/v9/projects/prj_123/domains/docs.myapp.com?teamId=team_123",
+      method: "DELETE",
+    },
+  ]);
+});
+
+test("removeAllProjectDomains continues when one domain delete fails", async () => {
+  const calls: Array<{ url: string; method?: string }> = [];
+
+  await removeAllProjectDomains(
+    ["myapp.com", "docs.myapp.com"],
+    async (input, init) => {
+      const url = String(input);
+      calls.push({
+        url,
+        method: init?.method ?? "GET",
+      });
+
+      if (url === "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123") {
+        return new Response("boom", { status: 500 });
+      }
+
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123",
+      method: "DELETE",
+    },
+    {
+      url: "https://api.vercel.com/v9/projects/prj_123/domains/docs.myapp.com?teamId=team_123",
+      method: "DELETE",
+    },
+  ]);
 });

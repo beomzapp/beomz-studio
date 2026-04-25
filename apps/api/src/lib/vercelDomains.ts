@@ -514,3 +514,39 @@ export async function deleteProjectDomain(
     throw new VercelApiError(response.status, parsed, { rawBody: raw });
   }
 }
+
+export async function removeAllProjectDomains(
+  domains: readonly string[],
+  fetchFn: FetchLike = fetch,
+): Promise<void> {
+  const normalizedDomains = [...new Set(
+    domains
+      .map((domain) => normalizeCustomDomain(domain))
+      .filter((domain): domain is string => Boolean(domain)),
+  )];
+
+  if (normalizedDomains.length === 0) {
+    return;
+  }
+
+  let projectId = "unknown";
+  let teamId = "unknown";
+  try {
+    const config = requireVercelConfig();
+    projectId = config.projectId;
+    teamId = config.teamId;
+  } catch (error) {
+    console.error("[vercelDomains] remove all domains failed (non-fatal):", error);
+    return;
+  }
+
+  for (const domain of normalizedDomains) {
+    console.log("[vercelDomains] removing domain:", domain, "from project:", projectId, "team:", teamId);
+    try {
+      await deleteProjectDomain(domain, fetchFn);
+      console.log("[vercelDomains] removed domain:", domain);
+    } catch (error) {
+      console.error("[vercelDomains] domain delete failed (non-fatal):", domain, error);
+    }
+  }
+}
