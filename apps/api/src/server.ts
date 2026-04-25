@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
 
@@ -52,6 +53,7 @@ import supabaseIntegrationsRoute from "./routes/integrations/supabase.js";
 
 const app = new Hono();
 const activeSseConnections = new Set<string>();
+const REQUEST_BODY_LIMIT_BYTES = 20 * 1024 * 1024;
 const SSE_DRAIN_TIMEOUT_MS = 25_000;
 const SSE_DRAIN_POLL_INTERVAL_MS = 500;
 
@@ -75,6 +77,14 @@ app.use(
       return allowed.includes(origin) ? origin : null;
     },
     credentials: true,
+  }),
+);
+
+app.use(
+  "*",
+  bodyLimit({
+    maxSize: REQUEST_BODY_LIMIT_BYTES,
+    onError: (c) => c.json({ error: "Request body must be 20MB or smaller." }, 413),
   }),
 );
 

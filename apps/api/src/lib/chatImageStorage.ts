@@ -7,7 +7,7 @@ import {
 } from "./studioAssetProxy.js";
 
 export const CHAT_IMAGES_BUCKET = "chat-images";
-export const CHAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+export const CHAT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 export const CHAT_IMAGE_ALLOWED_MIME_TYPES = [
   "image/png",
   "image/jpeg",

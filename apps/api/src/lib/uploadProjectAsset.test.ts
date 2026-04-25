@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import sharp from "sharp";
+
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const {
   PROJECT_ASSETS_BUCKET,
+  PROJECT_ASSET_TARGET_BYTES,
   STUDIO_SERVICE_ROLE_ENV_VAR,
   buildProjectAssetPublicUrl,
+  compressProjectAssetImage,
   createProjectAssetPath,
   projectAssetExtensionForMediaType,
 } = await import("./uploadProjectAsset.js");
@@ -37,4 +41,23 @@ test("buildProjectAssetPublicUrl returns the expected public storage URL", () =>
 
 test("uploadProjectAsset uses the studio service role env var name", () => {
   assert.equal(STUDIO_SERVICE_ROLE_ENV_VAR, "STUDIO_SUPABASE_SERVICE_ROLE_KEY");
+});
+
+test("compressProjectAssetImage converts uploads to a capped JPEG", async () => {
+  const source = await sharp({
+    create: {
+      width: 1600,
+      height: 1200,
+      channels: 3,
+      background: { r: 249, g: 115, b: 22 },
+    },
+  }).png().toBuffer();
+
+  const compressed = await compressProjectAssetImage(source);
+  const metadata = await sharp(compressed).metadata();
+
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.width, 800);
+  assert.equal(metadata.height, 600);
+  assert.ok(compressed.length <= PROJECT_ASSET_TARGET_BYTES);
 });

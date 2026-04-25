@@ -63,14 +63,14 @@ function createRoute(projectId: string, uploadImage?: (typeof import("../../lib/
   });
 }
 
-test("upload-image rejects files larger than 10MB", async () => {
+test("upload-image rejects files larger than 20MB", async () => {
   const projectId = randomUUID();
   const route = createRoute(projectId);
   const formData = new FormData();
   formData.set("projectId", projectId);
   formData.set(
     "image",
-    new File([Buffer.alloc(10 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" }),
+    new File([Buffer.alloc(20 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" }),
   );
 
   const response = await route.request("http://localhost/", {
@@ -79,7 +79,7 @@ test("upload-image rejects files larger than 10MB", async () => {
   });
 
   assert.equal(response.status, 413);
-  assert.match(await response.text(), /10MB or smaller/i);
+  assert.match(await response.text(), /20MB or smaller/i);
 });
 
 test("upload-image rejects non-image mime types", async () => {

@@ -69,7 +69,7 @@ export function createBuildsUploadImageRoute(deps: UploadImageRouteDeps = {}) {
       }
 
       if (image.size > CHAT_IMAGE_MAX_BYTES) {
-        return c.json({ error: "Image must be 10MB or smaller." }, 413);
+        return c.json({ error: "Image must be 20MB or smaller." }, 413);
       }
 
       const project = await orgContext.db.findProjectById(parsed.data.projectId);
