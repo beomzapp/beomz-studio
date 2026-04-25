@@ -1,12 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import sharp from "sharp";
 import { z } from "zod";
 
 import { apiConfig } from "../config.js";
+import { buildAssetProxyUrl, createStudioStorageClient } from "../lib/studioAssetProxy.js";
 import { loadOrgContext } from "../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../types.js";
+
+const USER_AVATAR_BUCKET = "project-assets";
+const USER_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+const USER_AVATAR_ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 const displayNameSchema = z
   .string()
@@ -202,6 +208,64 @@ export function createMeRoute(deps: MeRouteDeps = {}) {
       }
 
       return c.json(buildMeResponse(updatedUser, org));
+    } catch (error) {
+      if (isMigrationMissingError(error)) {
+        return c.json({ error: "Migration 011 not applied." }, 503);
+      }
+      throw error;
+    }
+  });
+
+  meRoute.post("/avatar", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    try {
+      const orgContext = c.get("orgContext") as OrgContext;
+      const formData = await c.req.formData().catch(() => null);
+      if (!formData) {
+        return c.json({ error: "Invalid multipart form data." }, 400);
+      }
+
+      const avatarField = formData.get("avatar");
+      if (!(avatarField instanceof File)) {
+        return c.json({ error: "Avatar file is required." }, 400);
+      }
+      if (avatarField.size > USER_AVATAR_MAX_BYTES) {
+        return c.json({ error: "Avatar must be under 5MB." }, 400);
+      }
+      const mimeType = avatarField.type.split(";")[0]?.trim() ?? "";
+      if (!USER_AVATAR_ALLOWED_TYPES.includes(mimeType)) {
+        return c.json({ error: "Unsupported image type. Use PNG, JPEG, WebP, or GIF." }, 400);
+      }
+
+      const bytes = Buffer.from(await avatarField.arrayBuffer());
+      const compressed = await sharp(bytes, { failOn: "none" })
+        .rotate()
+        .resize({ width: 256, height: 256, fit: "cover" })
+        .jpeg({ quality: 85, mozjpeg: true })
+        .toBuffer();
+
+      const path = `user-avatars/${orgContext.user.id}.jpg`;
+      const client = createStudioStorageClient();
+      const uploadResult = await client.storage
+        .from(USER_AVATAR_BUCKET)
+        .upload(path, compressed, {
+          cacheControl: "3600",
+          contentType: "image/jpeg",
+          upsert: true,
+        });
+
+      if (uploadResult.error) {
+        console.error("[POST /me/avatar] upload failed:", uploadResult.error);
+        return c.json({ error: "Failed to upload avatar." }, 500);
+      }
+
+      const avatar_url = buildAssetProxyUrl(USER_AVATAR_BUCKET, path);
+
+      const updatedUser = await updateUserProfile(orgContext.user.id, { avatar_url });
+      if (!updatedUser) {
+        return c.json({ error: "User not found." }, 404);
+      }
+
+      return c.json({ avatar_url });
     } catch (error) {
       if (isMigrationMissingError(error)) {
         return c.json({ error: "Migration 011 not applied." }, 503);

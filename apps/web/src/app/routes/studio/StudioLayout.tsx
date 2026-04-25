@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
 import {
   FolderOpen,
@@ -12,6 +12,8 @@ import {
 import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { CreditsProvider } from "../../../lib/CreditsContext";
+import { OnboardingModal } from "../../../components/OnboardingModal";
+import { getMe } from "../../../lib/api";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 const NAV_ITEMS = [
@@ -23,7 +25,20 @@ const NAV_ITEMS = [
 
 export function StudioLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const matchRoute = useMatchRoute();
+
+  useEffect(() => {
+    getMe()
+      .then((profile) => {
+        if (!profile.onboarding_completed) {
+          setShowOnboarding(true);
+        }
+      })
+      .catch(() => {
+        // Silently ignore — user may not have migration yet
+      });
+  }, []);
 
   // Hide sidebar on builder pages — they have their own TopBar + layout
   const isProjectPage = !!matchRoute({ to: "/studio/project/$id", fuzzy: true });
@@ -37,6 +52,9 @@ export function StudioLayout() {
             <Outlet />
           </main>
         </div>
+        {showOnboarding && (
+          <OnboardingModal onClose={() => setShowOnboarding(false)} />
+        )}
       </CreditsProvider>
     );
   }
@@ -123,6 +141,9 @@ export function StudioLayout() {
         </main>
       </div>
     </div>
+    {showOnboarding && (
+      <OnboardingModal onClose={() => setShowOnboarding(false)} />
+    )}
     </CreditsProvider>
   );
 }

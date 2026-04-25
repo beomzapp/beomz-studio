@@ -929,6 +929,63 @@ export async function createTopupCheckout(
   });
 }
 
+// ── User Profile API (BEO-276) ────────────────────────────────
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  building_for: string | null;
+  referral_source: string | null;
+  onboarding_completed: boolean;
+  created_at: string;
+  plan: string;
+  credits: number;
+}
+
+export async function getMe(): Promise<UserProfile> {
+  return requestJson<UserProfile>("/me", { method: "GET" });
+}
+
+export async function patchMe(body: {
+  full_name?: string;
+  display_name?: string;
+  avatar_url?: string;
+  building_for?: string;
+  referral_source?: string;
+}): Promise<UserProfile> {
+  return requestJson<UserProfile>("/me", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function completeOnboarding(): Promise<void> {
+  await requestJson<{ success: boolean }>("/me/complete-onboarding", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function uploadUserAvatar(file: File): Promise<{ avatar_url: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = session?.access_token ?? "";
+  const form = new FormData();
+  form.append("avatar", file);
+  const resp = await fetch(`${getApiBaseUrl()}/me/avatar`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Avatar upload failed with ${resp.status}.`);
+  }
+  return resp.json() as Promise<{ avatar_url: string }>;
+}
+
 // ── Version History API (BEO-588) ─────────────────────────────
 
 export interface ProjectVersion {
