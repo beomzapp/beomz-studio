@@ -3,16 +3,28 @@ const MARKUP_MULTIPLIER = 3.0
 const CREDITS_PER_USD = 100
 const NEGATIVE_FLOOR = -80  // max negative balance (one build's worth)
 const SUB_CREDITS_PER_DOLLAR = 2000 / 19  // ~105.26 — topups must always stay below
+const BUILD_CREDIT_RATE_PER_MILLION = 49.5
+const ITERATION_CREDIT_RATE_PER_MILLION = 20.7
+const ITERATION_RATE_MULTIPLIER = ITERATION_CREDIT_RATE_PER_MILLION / BUILD_CREDIT_RATE_PER_MILLION
+
+function roundCredits(credits: number): number {
+  return Math.ceil(credits * 100) / 100
+}
 
 export function calcCreditCost(inputTokens: number, outputTokens: number): number {
   const costUsd = (inputTokens * 3 + outputTokens * 15) / 1_000_000
-  return Math.ceil(costUsd * MARKUP_MULTIPLIER * CREDITS_PER_USD * 100) / 100
+  return roundCredits(costUsd * MARKUP_MULTIPLIER * CREDITS_PER_USD)
   // returns 2dp decimal e.g. 14.73
+}
+
+export function calcIterationCreditCost(inputTokens: number, outputTokens: number): number {
+  const costUsd = (inputTokens * 3 + outputTokens * 15) / 1_000_000
+  return roundCredits(costUsd * MARKUP_MULTIPLIER * CREDITS_PER_USD * ITERATION_RATE_MULTIPLIER)
 }
 
 export function calcCreditCostHaiku(inputTokens: number, outputTokens: number): number {
   const costUsd = (inputTokens * 1 + outputTokens * 5) / 1_000_000
-  return Math.ceil(costUsd * MARKUP_MULTIPLIER * CREDITS_PER_USD * 100) / 100
+  return roundCredits(costUsd * MARKUP_MULTIPLIER * CREDITS_PER_USD)
 }
 
 export const NEGATIVE_FLOOR_CONST = NEGATIVE_FLOOR

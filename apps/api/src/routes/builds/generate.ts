@@ -55,6 +55,7 @@ import {
   NEGATIVE_FLOOR_CONST,
   calcCreditCost,
   calcCreditCostHaiku,
+  calcIterationCreditCost,
   isAdminEmail,
 } from "../../lib/credits.js";
 import { enrichPrompt } from "../../lib/enrichPrompt.js";
@@ -2960,6 +2961,10 @@ export function buildIterationSystemPrompt(
     "- Which files need to change?",
     "- What is the minimal change to each file?",
     "",
+    "TOKEN BUDGET: Your entire response must stay under 8,000 output tokens for feature additions, and under 3,000 tokens for minor changes (styling, text, small UI tweaks). This is a hard limit.",
+    "Do NOT rewrite files that only need 1-2 line changes — return only the specific changed lines with minimal surrounding context (5 lines max above and below the change).",
+    "Never return a file unchanged. Only include files that have actual modifications. If a file needs no changes, do not include it.",
+    "",
     "Additional constraints:",
     "Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
     "Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
@@ -4213,7 +4218,9 @@ async function _runBuildInBackground(
           const summaryResult = await generateBuildSummary(prompt, changedPaths);
           narrationUsage = addTokenUsage(narrationUsage, summaryResult.usage);
           if (iterTokens > 0 && !isAdminEmail(userEmail)) {
-            const mainCost = calcCreditCost(iterInputTokens, iterTokens);
+            const isIteration = true;
+            console.log("[credits] rate:", isIteration ? "iteration" : "build");
+            const mainCost = calcIterationCreditCost(iterInputTokens, iterTokens);
             const narrationCost = calcCreditCostHaiku(narrationUsage.inputTokens, narrationUsage.outputTokens);
             const totalCost = mainCost + narrationCost;
             iterCostUsd = roundUsd(
@@ -4626,6 +4633,7 @@ async function _runBuildInBackground(
         });
         narrationUsage = addTokenUsage(narrationUsage, nextSteps.usage);
         if (outputTokens > 0 && !isAdminEmail(userEmail)) {
+          console.log("[credits] rate:", input.isIteration ? "iteration" : "build");
           const mainCost = calcCreditCost(inputTokens, outputTokens);
           const narrationCost = calcCreditCostHaiku(narrationUsage.inputTokens, narrationUsage.outputTokens);
           const totalCost = mainCost + narrationCost;
