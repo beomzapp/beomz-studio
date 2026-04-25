@@ -9,6 +9,7 @@
  */
 import archiver from "archiver";
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { stream } from "hono/streaming";
 
 import type { StudioFile } from "@beomz-studio/contracts";
@@ -46,6 +47,11 @@ type PublishedDbCredentials = {
   VITE_SUPABASE_ANON_KEY?: string;
   VITE_BYO_DB?: string;
 };
+
+interface ExportRouteDeps {
+  authMiddleware?: MiddlewareHandler;
+  loadOrgContextMiddleware?: MiddlewareHandler;
+}
 
 function getByoSupabasePublishConfig(
   project: PublishDbLookup,
@@ -201,42 +207,55 @@ checkSlugRoute.get("/", async (c) => {
 
 // ── GET /api/projects/:id/export  (AUTH required) ─────────────────────────────
 
-export const exportRoute = new Hono();
+export function createExportRoute(deps: ExportRouteDeps = {}) {
+  const exportRoute = new Hono();
+  const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
+  const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
 
-exportRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
-  const orgContext = c.get("orgContext") as OrgContext;
-  const projectId = c.req.param("id") as string;
+  exportRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const projectId = c.req.param("id") as string;
 
-  const project = await orgContext.db.findProjectById(projectId);
-  if (!project || project.org_id !== orgContext.org.id) {
-    return c.json({ error: "Project not found" }, 404);
-  }
-
-  const latestGen = await orgContext.db.findLatestGenerationByProjectId(projectId);
-  if (!latestGen || !Array.isArray(latestGen.files) || latestGen.files.length === 0) {
-    return c.json({ error: "No generated files found" }, 404);
-  }
-
-  const files = injectPublishedByoEnvFiles(
-    latestGen.files as readonly StudioFile[],
-    project,
-  );
-  const safeName = project.name.replace(/[^a-zA-Z0-9_-]/g, "_");
-
-  return stream(c, async (s) => {
-    c.header("Content-Type", "application/zip");
-    c.header("Content-Disposition", `attachment; filename="${safeName}.zip"`);
-
-    const archive = archiver("zip", { zlib: { level: 6 } });
-
-    archive.on("data", (chunk: Buffer) => {
-      void s.write(chunk);
-    });
-
-    for (const file of files) {
-      archive.append(file.content, { name: file.path });
+    const plan = orgContext.org.plan;
+    if (!["pro_builder", "business"].includes(plan)) {
+      return c.json({ error: "upgrade_required", requiredPlan: "pro_builder" }, 403);
     }
 
-    await archive.finalize();
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const latestGen = await orgContext.db.findLatestGenerationByProjectId(projectId);
+    if (!latestGen || !Array.isArray(latestGen.files) || latestGen.files.length === 0) {
+      return c.json({ error: "No generated files found" }, 404);
+    }
+
+    const files = injectPublishedByoEnvFiles(
+      latestGen.files as readonly StudioFile[],
+      project,
+    );
+    const safeName = project.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+    return stream(c, async (s) => {
+      c.header("Content-Type", "application/zip");
+      c.header("Content-Disposition", `attachment; filename="${safeName}.zip"`);
+
+      const archive = archiver("zip", { zlib: { level: 6 } });
+
+      archive.on("data", (chunk: Buffer) => {
+        void s.write(chunk);
+      });
+
+      for (const file of files) {
+        archive.append(file.content, { name: file.path });
+      }
+
+      await archive.finalize();
+    });
   });
-});
+
+  return exportRoute;
+}
+
+export const exportRoute = createExportRoute();
