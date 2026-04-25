@@ -18,10 +18,12 @@ interface AuthModalProps {
    * so it can be restored by /auth/callback → /plan.
    */
   pendingPrompt?: string;
+  /** Start in signin or signup mode. Defaults to "signin". */
+  initialMode?: "signin" | "signup";
 }
 
-export function AuthModal({ open, onClose, pendingPrompt }: AuthModalProps) {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+export function AuthModal({ open, onClose, pendingPrompt, initialMode = "signin" }: AuthModalProps) {
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -35,6 +37,11 @@ export function AuthModal({ open, onClose, pendingPrompt }: AuthModalProps) {
     // Save prompt so callback.tsx can redirect to /plan after OAuth
     if (pendingPrompt) {
       sessionStorage.setItem("pending_build_prompt", pendingPrompt);
+    }
+    // Save the page the user was on so callback.tsx can return them there.
+    const currentPath = window.location.pathname;
+    if (currentPath !== "/auth/login" && currentPath !== "/auth/callback") {
+      localStorage.setItem("beomz_auth_redirect", currentPath);
     }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",

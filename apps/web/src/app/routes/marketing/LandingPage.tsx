@@ -258,22 +258,17 @@ export function LandingPage() {
             >
               Pricing
             </button>
-            <a
-              href="https://docs.beomz.com"
-              className="text-sm text-white/50 transition-colors hover:text-white/80"
-            >
-              Docs
-            </a>
             {session ? (
               <GlobalNav variant="light" />
             ) : (
               <div className="flex items-center gap-3">
-                <Link
-                  to="/auth/login"
+                <button
+                  type="button"
+                  onClick={() => setShowAuthModal(true)}
                   className="text-sm text-white/50 transition-colors hover:text-white/80"
                 >
                   Sign in
-                </Link>
+                </button>
                 <button
                   onClick={() => setShowAuthModal(true)}
                   className="text-sm text-white/30 transition-colors hover:text-white/50"
@@ -444,13 +439,13 @@ export function LandingPage() {
         {/* Mini footer pinned to bottom of viewport */}
         <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-3 text-center">
           <p className="text-[11px] text-white/20">
-            <a href="https://beomz.com" className="hover:text-white/40 transition-colors">beomz.com</a>
+            <Link to="/terms" className="transition-colors hover:text-white/40">Terms of Service</Link>
             {" · "}
-            <a href="https://crypto.beomz.com" className="hover:text-white/40 transition-colors">crypto.beomz.com</a>
+            <Link to="/privacy" className="transition-colors hover:text-white/40">Privacy Policy</Link>
             {" · "}
-            <a href="https://token.beomz.com" className="hover:text-white/40 transition-colors">token.beomz.com</a>
+            <Link to="/faq" className="transition-colors hover:text-white/40">FAQ</Link>
             {" · "}
-            <a href="https://token.beomz.com" className="hover:text-white/40 transition-colors">$BEOMZ token</a>
+            <Link to="/support" className="transition-colors hover:text-white/40">Support</Link>
             {" · "}
             <span>&copy; Beomz 2026</span>
           </p>

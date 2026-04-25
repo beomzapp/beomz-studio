@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { CreditsResponse } from "./api";
 import { getCredits } from "./api";
+import { supabase } from "./supabase";
 
 interface CreditsContextValue {
   /** Credits data, null while loading or if fetch failed */
@@ -59,6 +60,14 @@ export function CreditsProvider({ children }: { children: React.ReactNode }) {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
     void refresh();
+
+    // Re-fetch whenever the user signs in so the balance appears immediately
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN") {
+        void refresh();
+      }
+    });
+    return () => subscription.unsubscribe();
   }, [refresh]);
 
   return (

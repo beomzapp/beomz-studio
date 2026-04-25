@@ -57,17 +57,26 @@ export function StudioLayout() {
   useEffect(() => {
     // studioRoute.beforeLoad in router.ts already guards this component behind
     // a confirmed Supabase session, so getAccessToken() is safe to call here.
-    fetchMeWithRetry()
-      .then((profile) => {
-        if (!profile) return;
-        console.log('[onboarding] completed:', profile.onboarding_completed);
-        if (profile.onboarding_completed === false || profile.onboarding_completed === null) {
-          setShowOnboarding(true);
-        }
-      })
-      .catch(() => {
-        // Silently ignore — user may not have migration yet
-      });
+    // 1s delay ensures the DB upsert has completed before we check.
+    const timer = setTimeout(() => {
+      fetchMeWithRetry()
+        .then((data) => {
+          if (!data) return;
+          console.log('[onboarding] GET /api/me response:', JSON.stringify(data));
+          const showModal =
+            data.onboarding_completed === false ||
+            data.onboarding_completed === null ||
+            data.onboarding_completed === undefined;
+          console.log('[onboarding] will show modal:', showModal);
+          if (showModal) {
+            setShowOnboarding(true);
+          }
+        })
+        .catch(() => {
+          // Silently ignore — user may not have migration yet
+        });
+    }, 1000);
+    return () => clearTimeout(timer);
   }, []);
 
   // Hide sidebar on builder pages — they have their own TopBar + layout

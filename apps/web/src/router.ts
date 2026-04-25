@@ -61,6 +61,18 @@ const AuthCallback = lazy(() =>
 const PublicAppPage = lazy(() =>
   import("./app/routes/public/PublicAppPage").then(m => ({ default: m.PublicAppPage })),
 );
+const TermsPage = lazy(() =>
+  import("./app/routes/marketing/TermsPage").then(m => ({ default: m.TermsPage })),
+);
+const PrivacyPage = lazy(() =>
+  import("./app/routes/marketing/PrivacyPage").then(m => ({ default: m.PrivacyPage })),
+);
+const FaqPage = lazy(() =>
+  import("./app/routes/marketing/FaqPage").then(m => ({ default: m.FaqPage })),
+);
+const SupportPage = lazy(() =>
+  import("./app/routes/marketing/SupportPage").then(m => ({ default: m.SupportPage })),
+);
 
 /**
  * BEO-580: while a lazy chunk loads, show a transparent placeholder. The
@@ -143,6 +155,30 @@ const publicAppRoute = createRoute({
   },
 });
 
+const termsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/terms",
+  component: withSuspense(TermsPage),
+});
+
+const privacyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/privacy",
+  component: withSuspense(PrivacyPage),
+});
+
+const faqRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/faq",
+  component: withSuspense(FaqPage),
+});
+
+const supportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/support",
+  component: withSuspense(SupportPage),
+});
+
 const studioRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/studio",
@@ -213,6 +249,10 @@ const routeTree = rootRoute.addChildren([
   authLoginRoute,
   authSignupRoute,
   authCallbackRoute,
+  termsRoute,
+  privacyRoute,
+  faqRoute,
+  supportRoute,
   studioRoute.addChildren([
     studioHomeRoute,
     projectRoute,
