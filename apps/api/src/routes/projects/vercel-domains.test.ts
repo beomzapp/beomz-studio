@@ -159,6 +159,8 @@ test("POST /projects/:id/domains saves the domain when verification succeeds imm
     domain: "myapp.com",
     verified: true,
     verification: [],
+    registrar: null,
+    docsUrl: null,
   });
   assert.deepEqual(updates, [
     {
@@ -195,11 +197,15 @@ test("GET /projects/:id/domains returns verification state for stored custom dom
         domain: "myapp.com",
         verified: false,
         verification: [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }],
+        registrar: "Namecheap",
+        docsUrl: "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/",
       },
       {
         domain: "docs.myapp.com",
         verified: true,
         verification: [],
+        registrar: "Namecheap",
+        docsUrl: "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/",
       },
     ]),
   });
@@ -212,11 +218,15 @@ test("GET /projects/:id/domains returns verification state for stored custom dom
       domain: "myapp.com",
       verified: false,
       verification: [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }],
+      registrar: "Namecheap",
+      docsUrl: "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/",
     },
     {
       domain: "docs.myapp.com",
       verified: true,
       verification: [],
+      registrar: "Namecheap",
+      docsUrl: "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/",
     },
   ]);
 });

@@ -23,13 +23,29 @@ export interface VercelProjectDomain {
   verification?: VercelDomainVerificationRecord[];
 }
 
-export interface ProjectDomainListItem {
+export interface RegistrarDetectionResult {
+  registrar: string | null;
+  docsUrl: string | null;
+}
+
+export interface AddedProjectDomain extends VercelProjectDomain, RegistrarDetectionResult {}
+
+export interface ProjectDomainListItem extends RegistrarDetectionResult {
   domain: string;
   verified: boolean;
   verification: VercelDomainVerificationRecord[];
 }
 
 type FetchLike = typeof fetch;
+
+type RdapEntity = {
+  roles?: unknown;
+  vcardArray?: unknown;
+};
+
+type RdapResponse = {
+  entities?: RdapEntity[];
+};
 
 export class VercelApiError extends Error {
   status: number;
@@ -94,6 +110,92 @@ function readVercelErrorCode(body: unknown): string | null {
   const nestedCode = (body as { error?: { code?: unknown } }).error?.code;
   if (typeof nestedCode === "string" && nestedCode.trim().length > 0) {
     return nestedCode;
+  }
+
+  return null;
+}
+
+function emptyRegistrarDetectionResult(): RegistrarDetectionResult {
+  return {
+    registrar: null,
+    docsUrl: null,
+  };
+}
+
+function mapRegistrarName(rawRegistrarName: string): RegistrarDetectionResult {
+  const upper = rawRegistrarName.toUpperCase();
+
+  if (upper.includes("NAMECHEAP")) {
+    return {
+      registrar: "Namecheap",
+      docsUrl: "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/",
+    };
+  }
+
+  if (upper.includes("GODADDY")) {
+    return {
+      registrar: "GoDaddy",
+      docsUrl: "https://www.godaddy.com/help/manage-dns-records-680",
+    };
+  }
+
+  if (upper.includes("CLOUDFLARE")) {
+    return {
+      registrar: "Cloudflare",
+      docsUrl: "https://dash.cloudflare.com",
+    };
+  }
+
+  if (upper.includes("GOOGLE") || upper.includes("SQUARESPACE")) {
+    return {
+      registrar: "Squarespace/Google",
+      docsUrl: "https://support.squarespace.com/hc/en-us/articles/360002101888",
+    };
+  }
+
+  if (upper.includes("AMAZON") || upper.includes("AWS")) {
+    return {
+      registrar: "AWS Route 53",
+      docsUrl: "https://console.aws.amazon.com/route53/v2/hostedzones",
+    };
+  }
+
+  return emptyRegistrarDetectionResult();
+}
+
+function readRegistrarNameFromRdap(body: unknown): string | null {
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+
+  const entities = Array.isArray((body as RdapResponse).entities)
+    ? (body as RdapResponse).entities ?? []
+    : [];
+
+  for (const entity of entities) {
+    const roles = Array.isArray(entity.roles) ? entity.roles : [];
+    const hasRegistrarRole = roles.some((role) => typeof role === "string" && role.toLowerCase() === "registrar");
+    if (!hasRegistrarRole) {
+      continue;
+    }
+
+    const vcardEntries = Array.isArray(entity.vcardArray)
+      && Array.isArray(entity.vcardArray[1])
+      ? entity.vcardArray[1]
+      : [];
+
+    for (const entry of vcardEntries) {
+      if (!Array.isArray(entry) || entry.length < 4) {
+        continue;
+      }
+
+      const [propertyName, , , value] = entry;
+      if (propertyName !== "fn" || typeof value !== "string" || value.trim().length === 0) {
+        continue;
+      }
+
+      return value.trim();
+    }
   }
 
   return null;
@@ -199,6 +301,45 @@ export function normalizeCustomDomain(input: string): string | null {
   return trimmed;
 }
 
+export async function detectRegistrar(
+  domain: string,
+  fetchFn: FetchLike = fetch,
+): Promise<RegistrarDetectionResult> {
+  const normalized = normalizeCustomDomain(domain);
+  if (!normalized) {
+    return emptyRegistrarDetectionResult();
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5_000);
+
+  try {
+    const response = await fetchFn(`https://rdap.org/domain/${encodeURIComponent(normalized)}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/rdap+json, application/json",
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return emptyRegistrarDetectionResult();
+    }
+
+    const body = await response.json().catch(() => null);
+    const registrarName = readRegistrarNameFromRdap(body);
+    if (!registrarName) {
+      return emptyRegistrarDetectionResult();
+    }
+
+    return mapRegistrarName(registrarName);
+  } catch {
+    return emptyRegistrarDetectionResult();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export function readProjectCustomDomains(project: Pick<ProjectRow, "custom_domains">): string[] {
   if (!Array.isArray(project.custom_domains)) {
     return [];
@@ -237,7 +378,7 @@ export function removeDomainFromProjectRecord(
 export async function addProjectDomain(
   domain: string,
   fetchFn: FetchLike = fetch,
-): Promise<VercelProjectDomain> {
+): Promise<AddedProjectDomain> {
   const { token, projectId, teamId } = requireVercelConfig();
   const requestInit: RequestInit = {
     method: "POST",
@@ -260,7 +401,11 @@ export async function addProjectDomain(
   console.log("[vercelDomains] Vercel response:", response.status, JSON.stringify(body));
 
   if (response.ok) {
-    return body as VercelProjectDomain;
+    const projectDomain = body as VercelProjectDomain;
+    return {
+      ...projectDomain,
+      ...await detectRegistrar(projectDomain.apexName || domain, fetchFn),
+    };
   }
 
   if (response.status === 409) {
@@ -271,7 +416,11 @@ export async function addProjectDomain(
     console.log("[vercelDomains] Vercel response:", response.status, JSON.stringify(body));
 
     if (response.ok) {
-      return body as VercelProjectDomain;
+      const projectDomain = body as VercelProjectDomain;
+      return {
+        ...projectDomain,
+        ...await detectRegistrar(projectDomain.apexName || domain, fetchFn),
+      };
     }
   }
 
@@ -313,20 +462,31 @@ export async function listProjectDomains(
     return [];
   }
 
+  const registrarLookups = new Map<string, Promise<RegistrarDetectionResult>>();
+
   return Promise.all(
     domains.map(async (domain) => {
       try {
         const result = await getProjectDomain(domain, fetchFn);
+        const lookupDomain = normalizeCustomDomain(result.apexName || domain) ?? domain;
+        let registrarLookup = registrarLookups.get(lookupDomain);
+        if (!registrarLookup) {
+          registrarLookup = detectRegistrar(lookupDomain, fetchFn);
+          registrarLookups.set(lookupDomain, registrarLookup);
+        }
+        const registrarResult = await registrarLookup;
+
         return {
           domain,
           verified: result.verified === true,
           verification: result.verified === true
             ? []
             : Array.isArray(result.verification) ? result.verification : [],
+          ...registrarResult,
         };
       } catch (error) {
         if (error instanceof VercelApiError && error.status === 404) {
-          return { domain, verified: false, verification: [] };
+          return { domain, verified: false, verification: [], ...emptyRegistrarDetectionResult() };
         }
         throw error;
       }

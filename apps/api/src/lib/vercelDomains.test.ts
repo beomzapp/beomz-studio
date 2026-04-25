@@ -11,6 +11,7 @@ process.env.VERCEL_TEAM_ID ??= "team_123";
 const {
   addProjectDomain,
   addDomainToProjectRecord,
+  detectRegistrar,
   getFriendlyVercelErrorMessage,
   listProjectDomains,
   normalizeCustomDomain,
@@ -43,6 +44,45 @@ test("getFriendlyVercelErrorMessage maps Vercel status codes to UI-safe copy", (
   assert.equal(getFriendlyVercelErrorMessage(403), "Domain not allowed. Please try a different domain.");
   assert.equal(getFriendlyVercelErrorMessage(402), "Payment required. Please check your Vercel account.");
   assert.equal(getFriendlyVercelErrorMessage(500), "Failed to add domain. Please try again.");
+});
+
+test("detectRegistrar maps RDAP registrar entities to known registrar docs", async () => {
+  const result = await detectRegistrar(
+    "myapp.com",
+    async () => new Response(JSON.stringify({
+      entities: [
+        {
+          roles: ["registrar"],
+          vcardArray: ["vcard", [
+            ["version", {}, "text", "4.0"],
+            ["fn", {}, "text", "NAMECHEAP INC"],
+          ]],
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    registrar: "Namecheap",
+    docsUrl: "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/",
+  });
+});
+
+test("detectRegistrar never throws and falls back to nulls when RDAP fails", async () => {
+  const result = await detectRegistrar(
+    "myapp.com",
+    async () => {
+      throw new Error("RDAP unavailable");
+    },
+  );
+
+  assert.deepEqual(result, {
+    registrar: null,
+    docsUrl: null,
+  });
 });
 
 test("addProjectDomain retries after conflict by removing the existing domain from the configured project", async () => {
@@ -80,6 +120,22 @@ test("addProjectDomain retries after conflict by removing the existing domain fr
         });
       }
 
+      if (method === "GET" && url === "https://rdap.org/domain/myapp.com") {
+        return new Response(JSON.stringify({
+          entities: [
+            {
+              roles: ["registrar"],
+              vcardArray: ["vcard", [
+                ["fn", {}, "text", "NAMECHEAP INC"],
+              ]],
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       if (method === "DELETE" && url === "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123") {
         return new Response(null, { status: 404 });
       }
@@ -89,6 +145,8 @@ test("addProjectDomain retries after conflict by removing the existing domain fr
   );
 
   assert.equal(result.name, "myapp.com");
+  assert.equal(result.registrar, "Namecheap");
+  assert.equal(result.docsUrl, "https://www.namecheap.com/support/knowledgebase/article.aspx/767/10/how-to-change-dns-for-a-domain/");
   assert.deepEqual(calls, [
     {
       url: "https://api.vercel.com/v10/projects/prj_123/domains?teamId=team_123",
@@ -101,6 +159,10 @@ test("addProjectDomain retries after conflict by removing the existing domain fr
     {
       url: "https://api.vercel.com/v10/projects/prj_123/domains?teamId=team_123",
       method: "POST",
+    },
+    {
+      url: "https://rdap.org/domain/myapp.com",
+      method: "GET",
     },
   ]);
 });
@@ -143,14 +205,14 @@ test("addProjectDomain throws a friendly conflict error when Vercel still return
 });
 
 test("listProjectDomains returns verification details for unverified domains", async () => {
-  const calls: string[] = [];
+  const calls: Array<{ url: string; method?: string }> = [];
   const result = await listProjectDomains(
     {
       custom_domains: ["myapp.com", "docs.myapp.com"],
     },
-    async (input) => {
+    async (input, init) => {
       const url = String(input);
-      calls.push(url);
+      calls.push({ url, method: init?.method ?? "GET" });
 
       if (url === "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123") {
         return new Response(JSON.stringify({
@@ -177,6 +239,22 @@ test("listProjectDomains returns verification details for unverified domains", a
         });
       }
 
+      if (url === "https://rdap.org/domain/myapp.com") {
+        return new Response(JSON.stringify({
+          entities: [
+            {
+              roles: ["registrar"],
+              vcardArray: ["vcard", [
+                ["fn", {}, "text", "GODADDY.COM, LLC"],
+              ]],
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       throw new Error(`Unexpected fetch: ${url}`);
     },
   );
@@ -186,15 +264,33 @@ test("listProjectDomains returns verification details for unverified domains", a
       domain: "myapp.com",
       verified: false,
       verification: [{ type: "TXT", domain: "_vercel.myapp.com", value: "challenge", reason: "ownership" }],
+      registrar: "GoDaddy",
+      docsUrl: "https://www.godaddy.com/help/manage-dns-records-680",
     },
     {
       domain: "docs.myapp.com",
       verified: true,
       verification: [],
+      registrar: "GoDaddy",
+      docsUrl: "https://www.godaddy.com/help/manage-dns-records-680",
     },
   ]);
-  assert.deepEqual(calls, [
-    "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123",
-    "https://api.vercel.com/v9/projects/prj_123/domains/docs.myapp.com?teamId=team_123",
-  ]);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(
+    [...calls].sort((left, right) => left.url.localeCompare(right.url)),
+    [
+      {
+        url: "https://api.vercel.com/v9/projects/prj_123/domains/docs.myapp.com?teamId=team_123",
+        method: "GET",
+      },
+      {
+        url: "https://api.vercel.com/v9/projects/prj_123/domains/myapp.com?teamId=team_123",
+        method: "GET",
+      },
+      {
+        url: "https://rdap.org/domain/myapp.com",
+        method: "GET",
+      },
+    ],
+  );
 });

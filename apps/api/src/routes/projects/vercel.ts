@@ -317,11 +317,19 @@ export function replaceDeployEnvFile(
   ];
 }
 
-function domainResponsePayload(domain: string, result: Pick<VercelProjectDomain, "verified" | "verification">) {
+function domainResponsePayload(
+  domain: string,
+  result: Pick<VercelProjectDomain, "verified" | "verification"> & {
+    registrar?: string | null;
+    docsUrl?: string | null;
+  },
+) {
   return {
     domain,
     verified: result.verified === true,
     verification: Array.isArray(result.verification) ? result.verification : [],
+    registrar: result.registrar ?? null,
+    docsUrl: result.docsUrl ?? null,
   };
 }
 
