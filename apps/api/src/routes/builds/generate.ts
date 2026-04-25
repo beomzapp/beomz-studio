@@ -44,7 +44,10 @@ import {
 } from "@beomz-studio/templates";
 
 import { apiConfig } from "../../config.js";
-import { activeBuilds } from "../../lib/activeBuilds.js";
+import {
+  registerActiveBuild,
+  unregisterActiveBuild,
+} from "../../lib/activeBuilds.js";
 import { generateNextStepsWithUsage, generateStagePreambleWithUsage } from "../../lib/buildNarration.js";
 import { createBuildStageEmitter } from "../../lib/buildStageEvents.js";
 import {
@@ -229,6 +232,23 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
   inputTokens: 0,
   outputTokens: 0,
 };
+
+function createAbortError(): Error {
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error
+    && (error.name === "AbortError" || error.message === "The operation was aborted.");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
 
 function addTokenUsage(total: TokenUsage, usage: TokenUsage): TokenUsage {
   return {
@@ -2207,8 +2227,10 @@ async function callAnthropicWithMessages(
   prompt: string,
   maxTokens = DEFAULT_BUILD_MAX_TOKENS,
   instrumentation?: { buildId: string; isIteration: boolean },
+  abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
+    throwIfAborted(abortSignal);
     const isIteration = Boolean(instrumentation?.isIteration);
     const tokenWarningThreshold = Math.max(0, maxTokens - 8000);
     console.log("[generate] isIteration:", isIteration);
@@ -2228,7 +2250,7 @@ async function callAnthropicWithMessages(
       tools: [DELIVER_FILES_TOOL],
       tool_choice: { type: "tool", name: "deliver_customised_files" },
       messages: [{ role: "user", content: userMessage }],
-    });
+    }, abortSignal ? { signal: abortSignal } : undefined);
     const message = await stream.finalMessage();
     const usage = message.usage as typeof message.usage & {
       cache_creation_input_tokens?: number;
@@ -2321,6 +2343,7 @@ async function callAnthropicCustomise(
   phaseScope?: PhaseScope,
   maxTokens?: number,
   hasByoSupabaseConfig = false,
+  abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
@@ -2329,6 +2352,7 @@ async function callAnthropicCustomise(
     prompt,
     maxTokens,
     instrumentation,
+    abortSignal,
   );
 }
 
@@ -2410,8 +2434,10 @@ async function callAnthropicIterateWithTools(
   maxTokens: number,
   instrumentation?: { buildId: string; isIteration: boolean },
   imageBlock?: IterationImageBlock,
+  abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
+    throwIfAborted(abortSignal);
     const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
     const system = [
       {
@@ -2482,6 +2508,7 @@ async function callAnthropicIterateWithTools(
         prompt,
         maxTokens,
         instrumentation,
+        abortSignal,
       );
       const metrics = await buildIterationMetrics(
         fallbackResult.files.map((file) => file.path),
@@ -2499,6 +2526,7 @@ async function callAnthropicIterateWithTools(
     };
 
     for (let step = 0; step < ITERATION_MAX_TOOL_STEPS; step += 1) {
+      throwIfAborted(abortSignal);
       const stream = client.messages.stream({
         model: modelId,
         max_tokens: maxTokens,
@@ -2506,7 +2534,7 @@ async function callAnthropicIterateWithTools(
         tools: ITERATION_TOOLS,
         tool_choice: toolChoice,
         messages,
-      });
+      }, abortSignal ? { signal: abortSignal } : undefined);
 
       stream.on("streamEvent", (event) => {
         if (ttftMs !== null) return;
@@ -2734,6 +2762,7 @@ async function callModelCustomise(
   phaseScope?: PhaseScope,
   maxTokens?: number,
   hasByoSupabaseConfig = false,
+  abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
@@ -2756,6 +2785,7 @@ async function callModelCustomise(
       phaseScope,
       maxTokens,
       hasByoSupabaseConfig,
+      abortSignal,
     );
   }
 
@@ -2800,6 +2830,7 @@ async function callModelCustomise(
     phaseScope,
     maxTokens,
     hasByoSupabaseConfig,
+    abortSignal,
   );
 }
 
@@ -2992,8 +3023,10 @@ async function callModelIterate(
   dbProvider: string | null = null,
   neonAuthBaseUrl: string | null = null,
   hasByoSupabaseConfig = false,
+  abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
+  throwIfAborted(abortSignal);
   const isIteration = Boolean(instrumentation?.isIteration);
   const maxTokens = isIteration ? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;
   let resolvedImageBlock: IterationImageBlock | undefined;
@@ -3045,6 +3078,7 @@ async function callModelIterate(
       maxTokens,
       instrumentation,
       resolvedImageBlock,
+      abortSignal,
     );
     return {
       ...result,
@@ -3079,6 +3113,7 @@ async function callModelIterate(
     maxTokens,
     instrumentation,
     resolvedImageBlock,
+    abortSignal,
   );
 }
 
@@ -3508,22 +3543,25 @@ export async function runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
 ): Promise<void> {
-  const { buildId, projectId, prompt, templateId, model, requestedAt, userId } = input;
+  const { buildId } = input;
+  const abortController = new AbortController();
 
-  activeBuilds.add(buildId);
+  registerActiveBuild(buildId, abortController);
 
   try {
-    await _runBuildInBackground(input, db);
+    await _runBuildInBackground(input, db, abortController.signal);
   } finally {
-    activeBuilds.delete(buildId);
+    unregisterActiveBuild(buildId);
   }
 }
 
 async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   const { buildId, projectId, orgId, userEmail, templateId, model, requestedAt, userId } = input;
+  const throwIfBuildAborted = () => throwIfAborted(abortSignal);
   // BEO-372: use let so we can override with a combined prompt for clarification answers.
   let prompt = input.prompt;
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
@@ -3556,6 +3594,7 @@ async function _runBuildInBackground(
     console.warn("[generate] failed to load project chat memory (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 
+  throwIfBuildAborted();
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
@@ -3808,6 +3847,7 @@ async function _runBuildInBackground(
     }
   }
 
+  throwIfBuildAborted();
   // ── URL reference grounding + domain enrichment ───────────────────────────
   // When a build prompt includes a URL, fetch Jina reader content first and
   // prepend it as grounding so both enrichPrompt() and Sonnet see the real
@@ -3832,6 +3872,7 @@ async function _runBuildInBackground(
     }
     workingPrompt = input.isIteration ? promptWithUrlGrounding : await enrichPrompt(promptWithUrlGrounding);
   }
+  throwIfBuildAborted();
   const imageContextBlock = input.confirmedIntent
     ? buildImageIntentContext(input.confirmedIntent)
     : undefined;
@@ -3873,6 +3914,7 @@ async function _runBuildInBackground(
       }
     }
   }
+  throwIfBuildAborted();
 
   const statusEvent = (code: string, message: string, phase: string): BuilderV3StatusEvent => ({
     type: "status",
@@ -3925,6 +3967,7 @@ async function _runBuildInBackground(
   } catch {
     // non-fatal
   }
+  throwIfBuildAborted();
 
   try {
     // ── ITERATION PATH ─────────────────────────────────────────────────────────
@@ -4014,6 +4057,7 @@ async function _runBuildInBackground(
       let iterErrorReason: string | null = null;
       try {
         await stageEvents.emit("generating");
+        throwIfBuildAborted();
         if (input.imageUrl) {
           console.log("[generate] iteration source image URL:", input.imageUrl);
         } else if (imageContextBlock) {
@@ -4032,7 +4076,9 @@ async function _runBuildInBackground(
           iterDbProvider,
           iterNeonAuthBaseUrl,
           hasByoSupabaseConfigForIteration,
+          abortSignal,
         );
+        throwIfBuildAborted();
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
 
         // Classify returned files as "new" (not in current build) vs "updated" (overwrite existing).
@@ -4106,6 +4152,9 @@ async function _runBuildInBackground(
           }
         }
       } catch (iterErr) {
+        if (isAbortError(iterErr)) {
+          throw iterErr;
+        }
         iterErrorReason = iterErr instanceof Error ? iterErr.message : String(iterErr);
         console.warn("[generate] iteration AI call failed.", {
           buildId, prompt, model, error: iterErrorReason,
@@ -4144,6 +4193,7 @@ async function _runBuildInBackground(
       const iterCompletedAt = ts();
       let iterationHistoryReply = iterResult.summary;
 
+      throwIfBuildAborted();
       await stageEvents.emit("persisting");
       await stageEvents.emit("deploying");
 
@@ -4156,6 +4206,7 @@ async function _runBuildInBackground(
 
       // BEO-362: post-build summary via Haiku
       if (iterResult.files.length > 0) {
+        throwIfBuildAborted();
         try {
           const changedPaths = iterResult.files.map((f) => f.path.replace(/^.*\//, ""));
           const summaryResult = await generateBuildSummary(prompt, changedPaths);
@@ -4436,6 +4487,7 @@ async function _runBuildInBackground(
 
     try {
       await stageEvents.emit("generating");
+      throwIfBuildAborted();
       customised = await callModelCustomise(
         workingPrompt,
         model,
@@ -4447,7 +4499,9 @@ async function _runBuildInBackground(
         phaseScope,
         input.forcedSimple ? 32000 : undefined,
         hasByoSupabaseConfig,
+        abortSignal,
       );
+      throwIfBuildAborted();
       console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
       // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
       // tool JSON → input={}) and any case where Sonnet returns files:[]. Throwing
@@ -4470,6 +4524,9 @@ async function _runBuildInBackground(
       };
       console.log("[generate] Remapped files:", customised.files.map((f) => f.path));
     } catch (aiError) {
+      if (isAbortError(aiError)) {
+        throw aiError;
+      }
       // Graceful degradation: show pre-built template as-is (spec requirement)
       console.error("[generate] AI call failed — using scaffold fallback.", {
         buildId,
@@ -4531,6 +4588,7 @@ async function _runBuildInBackground(
       });
     }
 
+    throwIfBuildAborted();
     await stageEvents.emit("persisting");
     await stageEvents.emit("deploying");
 
@@ -4544,6 +4602,7 @@ async function _runBuildInBackground(
     let buildHistoryReply = customised.summary;
 
     if (!fallbackUsed) {
+      throwIfBuildAborted();
       try {
         const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
         const summaryResult = await generateBuildSummary(prompt, changedPaths);
@@ -4680,6 +4739,21 @@ async function _runBuildInBackground(
       await db.updateProject(projectId, { name: customised.appName }).catch(() => undefined);
     }
   } catch (fatalError) {
+    if (isAbortError(fatalError)) {
+      console.log("[generate] client disconnected — stream aborted");
+      const cancelledAt = ts();
+      await db.updateGeneration(buildId, {
+        completed_at: cancelledAt,
+        error: "Client disconnected",
+        status: "cancelled",
+        summary: "Build cancelled.",
+      }).catch(() => undefined);
+      await db.updateProject(projectId, {
+        status: input.isIteration ? "ready" : "draft",
+      }).catch(() => undefined);
+      return;
+    }
+
     // ── Error path ───────────────────────────────────────────────────────────
     const errorMessage = fatalError instanceof Error ? fatalError.message : "Build failed.";
     console.error("[generate] Fatal build error.", { buildId, error: errorMessage });

@@ -558,3 +558,19 @@ test("pipeline order: rewriteNeonImports runs before validateAndInjectStubs", ()
     "Short Neon import should be rewritten to package import before stub validation",
   );
 });
+
+test("generate build flow aborts the Anthropic stream when the client disconnects", async () => {
+  const generateSource = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const eventsSource = await readFile(new URL("./events.ts", import.meta.url), "utf8");
+  const activeBuildsSource = await readFile(new URL("../../lib/activeBuilds.ts", import.meta.url), "utf8");
+
+  assert.match(generateSource, /const abortController = new AbortController\(\);/);
+  assert.match(generateSource, /await _runBuildInBackground\(input, db, abortController\.signal\);/);
+  assert.match(generateSource, /client\.messages\.stream\([\s\S]*abortSignal \? \{ signal: abortSignal \} : undefined\);/);
+  assert.match(generateSource, /if \(isAbortError\(iterErr\)\) \{\s*throw iterErr;\s*\}/);
+  assert.match(generateSource, /if \(isAbortError\(aiError\)\) \{\s*throw aiError;\s*\}/);
+  assert.match(generateSource, /console\.log\("\[generate\] client disconnected — stream aborted"\);/);
+  assert.match(generateSource, /status: "cancelled"/);
+  assert.match(eventsSource, /abortActiveBuild\(buildId\)/);
+  assert.match(activeBuildsSource, /export function abortActiveBuild\(buildId: string\): boolean/);
+});

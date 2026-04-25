@@ -8,6 +8,7 @@ import { streamSSE } from "hono/streaming";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
+import { abortActiveBuild } from "../../lib/activeBuilds.js";
 import { readBuildMetadata, readBuildTraceMetadata } from "./shared.js";
 
 const buildsEventsRoute = new Hono();
@@ -163,6 +164,12 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   if (!projectRow || projectRow.org_id !== orgContext.org.id) {
     return c.json({ error: "Build not found." }, 404);
   }
+
+  c.req.raw.signal.addEventListener("abort", () => {
+    if (abortActiveBuild(buildId)) {
+      console.log("[builds/events] client disconnected — aborting active build", { buildId });
+    }
+  }, { once: true });
 
   const requestedLastEventId = c.req.header("last-event-id") ?? c.req.query("lastEventId") ?? null;
 
