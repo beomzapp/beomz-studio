@@ -43,6 +43,9 @@ const SettingsPage = lazy(() =>
 const ProfilePage = lazy(() =>
   import("./app/routes/studio/ProfilePage").then(m => ({ default: m.ProfilePage })),
 );
+const VersionPreviewPage = lazy(() =>
+  import("./app/routes/studio/VersionPreviewPage").then(m => ({ default: m.VersionPreviewPage })),
+);
 const LoginPage = lazy(() =>
   import("./app/routes/auth/login").then(m => ({ default: m.LoginPage })),
 );
@@ -187,6 +190,12 @@ const profileRoute = createRoute({
   component: withSuspense(ProfilePage),
 });
 
+const versionPreviewRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: "/version-preview",
+  component: withSuspense(VersionPreviewPage),
+});
+
 const routeTree = rootRoute.addChildren([
   landingRoute,
   planRoute,
@@ -202,6 +211,7 @@ const routeTree = rootRoute.addChildren([
     agentsRoute,
     settingsRoute,
     profileRoute,
+    versionPreviewRoute,
   ]),
 ]);
 

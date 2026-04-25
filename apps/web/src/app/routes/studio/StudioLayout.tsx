@@ -27,8 +27,9 @@ export function StudioLayout() {
 
   // Hide sidebar on builder pages — they have their own TopBar + layout
   const isProjectPage = !!matchRoute({ to: "/studio/project/$id", fuzzy: true });
+  const isVersionPreviewPage = !!matchRoute({ to: "/studio/version-preview", fuzzy: true });
 
-  if (isProjectPage) {
+  if (isProjectPage || isVersionPreviewPage) {
     return (
       <CreditsProvider>
         <div className="flex h-screen flex-col">

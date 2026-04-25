@@ -19,6 +19,7 @@ import {
   BookOpen,
   Briefcase,
   CheckSquare,
+  Clock,
   Download,
   ListChecks,
   ShoppingCart,
@@ -73,6 +74,8 @@ interface TopBarProps {
   currentPhase?: number;
   phasesTotal?: number;
   plan?: string;
+  versionHistoryOpen?: boolean;
+  onToggleVersionHistory?: () => void;
 }
 
 function toast(msg: string) {
@@ -113,6 +116,8 @@ export function TopBar({
   currentPhase = 0,
   phasesTotal = 0,
   plan = "free",
+  versionHistoryOpen = false,
+  onToggleVersionHistory,
 }: TopBarProps) {
   const navigate = useNavigate();
   const { openPricingModal } = usePricingModal();
@@ -230,6 +235,20 @@ export function TopBar({
           aria-label="Refresh preview"
         >
           <RefreshCw size={16} />
+        </button>
+
+        {/* Version history */}
+        <button
+          onClick={onToggleVersionHistory}
+          className={cn(
+            "rounded-md p-1.5 transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]",
+            versionHistoryOpen
+              ? "bg-[#f3f4f6] text-[#F97316]"
+              : "text-[#6b7280]",
+          )}
+          aria-label="Version history"
+        >
+          <Clock size={16} />
         </button>
 
         {/* Open in new tab */}

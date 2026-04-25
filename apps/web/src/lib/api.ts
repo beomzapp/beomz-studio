@@ -929,6 +929,44 @@ export async function createTopupCheckout(
   });
 }
 
+// ── Version History API (BEO-588) ─────────────────────────────
+
+export interface ProjectVersion {
+  id: string;
+  version_number: number;
+  label: string;
+  file_count: number;
+  created_at: string;
+}
+
+export interface ProjectVersionDetail extends ProjectVersion {
+  files: Record<string, string>;
+}
+
+export async function listProjectVersions(projectId: string): Promise<ProjectVersion[]> {
+  return requestJson<ProjectVersion[]>(`/projects/${projectId}/versions`, { method: "GET" });
+}
+
+export async function getProjectVersion(
+  projectId: string,
+  versionId: string,
+): Promise<ProjectVersionDetail> {
+  return requestJson<ProjectVersionDetail>(
+    `/projects/${projectId}/versions/${versionId}`,
+    { method: "GET" },
+  );
+}
+
+export async function restoreProjectVersion(
+  projectId: string,
+  versionId: string,
+): Promise<{ restoredVersionNumber: number; savedVersionNumber: number }> {
+  return requestJson<{ restoredVersionNumber: number; savedVersionNumber: number }>(
+    `/projects/${projectId}/versions/${versionId}/restore`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
 export async function forceSimpleBuild(buildId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/builds/${buildId}/force-simple`, {
     method: "POST",

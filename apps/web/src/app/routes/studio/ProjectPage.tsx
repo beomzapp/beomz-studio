@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BuilderV3Event, TemplateId } from "@beomz-studio/contracts";
+import type { BuilderV3Event, StudioFile, TemplateId } from "@beomz-studio/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Copy, Check, Code2, ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -20,7 +20,7 @@ import {
   PublishModal,
   type ActiveView,
 } from "../../../components/builder";
-import { HistoryPanel, PreviewPane } from "../../../components/studio";
+import { HistoryPanel, PreviewPane, VersionHistoryPanel } from "../../../components/studio";
 import {
   getBuildStatus,
   getLatestBuildForProject,
@@ -192,8 +192,10 @@ export function ProjectPage() {
 
   const [showChat, setShowChat] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [chatPanelWidth, setChatPanelWidth] = useState(380);
   const [historyPanelWidth, setHistoryPanelWidth] = useState(220);
+  const VERSION_HISTORY_WIDTH = 300;
 
   // ─── Code panel ───────────────────────────────────────────────────────────
 
@@ -654,6 +656,65 @@ export function ProjectPage() {
     if (build?.status === "completed" || build?.status === "failed") clearState();
   }, [build?.status, clearState]);
 
+  // ─── Version restore (BEO-588) ───────────────────────────────────────────
+
+  function showVersionToast(msg: string) {
+    const el = document.createElement("div");
+    el.textContent = msg;
+    el.className =
+      "fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] rounded-lg bg-[#1a1a1a] px-4 py-2 text-sm text-white shadow-lg";
+    document.body.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = "0";
+      el.style.transition = "opacity 200ms";
+      setTimeout(() => el.remove(), 200);
+    }, 3000);
+  }
+
+  const handleVersionRestored = useCallback(
+    (files: StudioFile[], restoredN: number, savedN: number) => {
+      // Update the build result with restored files so useWebContainerPreview hot-patches WC
+      setBuildResult(prev =>
+        prev
+          ? { ...prev, files }
+          : {
+              files,
+              generation: {
+                id: `version-restore-${Date.now()}`,
+                operationId: "",
+                outputPaths: files.map(f => f.path),
+                status: "completed" as const,
+              },
+              previewEntryPath: "",
+              warnings: [],
+            },
+      );
+      // New generationId triggers the WC hook to deliver the restored files
+      setPreviewGenerationId(`version-restore-${restoredN}-${Date.now()}`);
+      setActiveView("preview");
+      showVersionToast(`Restored to v${restoredN}. Previous state saved as v${savedN}.`);
+    },
+    [],
+  );
+
+  // ─── Toggle version history panel ─────────────────────────────────────────
+
+  const handleToggleVersionHistory = useCallback(() => {
+    setShowVersionHistory(v => {
+      const next = !v;
+      // When opening History while Code is active, switch back to Preview
+      if (next) setActiveView(cur => (cur === "code" ? "preview" : cur));
+      return next;
+    });
+  }, []);
+
+  // ─── Active view change (closes version history if switching to Code) ─────
+
+  const handleActiveViewChange = useCallback((view: ActiveView) => {
+    setActiveView(view);
+    if (view === "code") setShowVersionHistory(false);
+  }, []);
+
   // ─── Preview refresh ──────────────────────────────────────────────────────
 
   const handleRefreshPreview = useCallback(() => {
@@ -879,13 +940,15 @@ export function ProjectPage() {
         onProjectNameChange={setProjectName}
         onRefreshPreview={handleRefreshPreview}
         activeView={activeView}
-        onActiveViewChange={setActiveView}
+        onActiveViewChange={handleActiveViewChange}
         isPublished={Boolean(beomzAppUrl) || isPublished}
         onPublish={() => setShowPublishModal(true)}
         onExportZip={handleExportZip}
         isExporting={isExporting}
         beomzAppUrl={beomzAppUrl}
         plan={credits?.plan ?? "free"}
+        versionHistoryOpen={showVersionHistory}
+        onToggleVersionHistory={handleToggleVersionHistory}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -966,6 +1029,19 @@ export function ProjectPage() {
         {/* Main content */}
         <div className="flex min-w-0 flex-1 flex-col">
           {renderMainContent()}
+        </div>
+
+        {/* Version history panel — slides in from right */}
+        <div
+          className="shrink-0 overflow-hidden border-l border-[#e5e5e5] transition-[width] duration-200 ease-in-out"
+          style={{ width: showVersionHistory ? VERSION_HISTORY_WIDTH : 0 }}
+        >
+          <div style={{ width: VERSION_HISTORY_WIDTH, minWidth: VERSION_HISTORY_WIDTH }} className="h-full">
+            <VersionHistoryPanel
+              projectId={projectId}
+              onRestoreSuccess={handleVersionRestored}
+            />
+          </div>
         </div>
       </div>
 
