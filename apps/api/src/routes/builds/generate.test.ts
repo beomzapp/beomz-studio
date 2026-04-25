@@ -117,6 +117,29 @@ test("iteration system prompt forces surgical changed-file responses", () => {
   assert.match(prompt, /What is the minimal change to each file\?/);
 });
 
+test("iteration system prompt appends explicit data URI embedding instructions for attached images", () => {
+  const prompt = buildIterationSystemPrompt(
+    undefined,
+    undefined,
+    false,
+    null,
+    null,
+    false,
+    [
+      "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI using the EXACT image data that has been provided to you in this message. Do NOT redraw, recreate, approximate, or describe the image in any way. Do NOT use emoji or SVG as a substitute.",
+      "The correct usage is:",
+      "  As an img tag: <img src=\"data:image/png;base64,abc123\" alt=\"logo\" />",
+      "  As CSS: background-image: url('data:image/png;base64,abc123')",
+      "The base64 data is already available to you in this message — use it directly.",
+    ].join("\n"),
+  );
+
+  assert.match(prompt, /CRITICAL: The user has attached an image\./);
+  assert.match(prompt, /Do NOT redraw, recreate, approximate, or describe the image in any way\./);
+  assert.match(prompt, /<img src="data:image\/png;base64,abc123" alt="logo" \/>/);
+  assert.match(prompt, /background-image: url\('data:image\/png;base64,abc123'\)/);
+});
+
 test("iteration user message includes a project manifest, seed files, and the edit request", () => {
   const prompt = buildIterationUserMessage("Rename the CTA button.", [
     {
@@ -222,10 +245,20 @@ test("image attachments are passed directly into Anthropic content blocks with t
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 
   assert.match(source, /return \[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{ type: "text", text: userMessage \},\s*\];/);
-  assert.match(source, /const optimizedUserContent = imageUrl\s*\?\s*\[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{ type: "text", text: optimizedText, cache_control: \{ type: "ephemeral" \} \} as any,/);
-  assert.match(source, /return \[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{\s*type: "text",\s*text: filesContext,/);
+  assert.match(source, /const optimizedUserContent = imageBlock\s*\?\s*\[\s*imageBlock,\s*\{ type: "text", text: optimizedText, cache_control: \{ type: "ephemeral" \} \} as any,/);
+  assert.match(source, /return \[\s*imageBlock,\s*\{\s*type: "text",\s*text: filesContext,/);
   assert.doesNotMatch(source, /awaiting_image_confirmation/);
   assert.doesNotMatch(source, /type:\s*"image_intent"/);
+});
+
+test("iteration flow resolves attached images to base64 and injects the exact data URI instruction into the system prompt", async () => {
+  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(source, /resolvedImageBlock = await resolveAnthropicImageBlock\(imageUrl\);/);
+  assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(resolvedImageBlock\);/);
+  assert.match(source, /const systemPrompt = buildIterationSystemPrompt\([\s\S]*imageEmbeddingInstructionBlock,\s*\);/);
+  assert.match(source, /As an img tag: <img src="data:\$\{imageBlock\.source\.media_type\};base64,\$\{imageBlock\.source\.data\}" alt="logo" \/>/);
+  assert.match(source, /As CSS: background-image: url\('data:\$\{imageBlock\.source\.media_type\};base64,\$\{imageBlock\.source\.data\}'\)/);
 });
 
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {

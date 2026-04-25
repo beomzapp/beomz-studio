@@ -86,7 +86,7 @@ import {
   isAllowedMigrationStatement,
   runSql,
 } from "../../lib/userDataClient.js";
-import { buildAnthropicImageBlock } from "../../lib/anthropicImages.js";
+import { buildAnthropicImageBlock, resolveAnthropicImageBlock } from "../../lib/anthropicImages.js";
 import {
   buildClarifyingQuestionSystemPrompt,
   buildStructuredChatSystemPrompt,
@@ -218,6 +218,10 @@ interface NarrationTextResult {
   message: string;
   usage: TokenUsage;
 }
+
+type IterationImageBlock =
+  | ReturnType<typeof buildAnthropicImageBlock>
+  | Awaited<ReturnType<typeof resolveAnthropicImageBlock>>;
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   inputTokens: 0,
@@ -851,6 +855,22 @@ function buildAnthropicUserContent(
     buildAnthropicImageBlock(imageUrl),
     { type: "text", text: userMessage },
   ];
+}
+
+function buildIterationImageEmbeddingInstruction(
+  imageBlock?: IterationImageBlock,
+): string | undefined {
+  if (!imageBlock || imageBlock.source.type !== "base64") {
+    return undefined;
+  }
+
+  return [
+    "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI using the EXACT image data that has been provided to you in this message. Do NOT redraw, recreate, approximate, or describe the image in any way. Do NOT use emoji or SVG as a substitute.",
+    "The correct usage is:",
+    `  As an img tag: <img src="data:${imageBlock.source.media_type};base64,${imageBlock.source.data}" alt="logo" />`,
+    `  As CSS: background-image: url('data:${imageBlock.source.media_type};base64,${imageBlock.source.data}')`,
+    "The base64 data is already available to you in this message — use it directly.",
+  ].join("\n");
 }
 
 async function loadWebsiteContext(message: string) {
@@ -2126,7 +2146,7 @@ function searchIterationFiles(
 function buildIterationSelection(
   prompt: string,
   existingFiles: readonly StudioFile[],
-  imageUrl?: string,
+  imageBlock?: IterationImageBlock,
 ): IterationSelectionResult {
   const contexts = buildIterationFileContexts(existingFiles, prompt);
   const sorted = [...contexts].sort((a, b) => b.score - a.score || a.basename.localeCompare(b.basename));
@@ -2147,9 +2167,9 @@ function buildIterationSelection(
     editRequest,
   ].join("\n");
 
-  const optimizedUserContent = imageUrl
+  const optimizedUserContent = imageBlock
     ? [
-        buildAnthropicImageBlock(imageUrl),
+        imageBlock,
         { type: "text", text: optimizedText, cache_control: { type: "ephemeral" } } as any,
       ]
     : [
@@ -2345,12 +2365,12 @@ function resolveIterationFile(
 function buildBaselineIterationAnthropicUserContent(
   prompt: string,
   existingFiles: readonly StudioFile[],
-  imageUrl?: string,
+  imageBlock?: IterationImageBlock,
 ): Anthropic.MessageParam["content"] {
   const filesContext = buildIterationLegacyFilesContext(existingFiles);
   const editRequest = buildIterationEditRequest(prompt);
 
-  if (!imageUrl) {
+  if (!imageBlock) {
     return [
       {
         type: "text",
@@ -2362,7 +2382,7 @@ function buildBaselineIterationAnthropicUserContent(
   }
 
   return [
-    buildAnthropicImageBlock(imageUrl),
+    imageBlock,
     {
       type: "text",
       text: filesContext,
@@ -2380,7 +2400,7 @@ async function callAnthropicIterateWithTools(
   selection: IterationSelectionResult,
   maxTokens: number,
   instrumentation?: { buildId: string; isIteration: boolean },
-  imageUrl?: string,
+  imageBlock?: IterationImageBlock,
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
     const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
@@ -2400,7 +2420,7 @@ async function callAnthropicIterateWithTools(
       systemPrompt,
       tools: [DELIVER_FILES_TOOL],
       toolChoice: { type: "tool", name: "deliver_customised_files" },
-      messages: [{ role: "user", content: buildBaselineIterationAnthropicUserContent(prompt, existingFiles, imageUrl) }],
+      messages: [{ role: "user", content: buildBaselineIterationAnthropicUserContent(prompt, existingFiles, imageBlock) }],
     });
     const optimizedCountPromise = countAnthropicInputTokens(client, {
       model: modelId,
@@ -2449,7 +2469,7 @@ async function callAnthropicIterateWithTools(
       const fallbackResult = await callAnthropicWithMessages(
         modelId,
         systemPrompt,
-        buildBaselineIterationAnthropicUserContent(prompt, existingFiles, imageUrl),
+        buildBaselineIterationAnthropicUserContent(prompt, existingFiles, imageBlock),
         prompt,
         maxTokens,
         instrumentation,
@@ -2783,6 +2803,7 @@ export function buildIterationSystemPrompt(
   dbProvider: string | null = null,
   neonAuthBaseUrl: string | null = null,
   hasByoSupabaseConfig = false,
+  imageEmbeddingInstructionBlock?: string,
 ): string {
   const isPostgresWired = hasWiredSupabaseClient && (dbProvider === "neon" || dbProvider === "postgres");
   const hasNeonAuth = dbProvider === "neon"
@@ -2803,6 +2824,9 @@ export function buildIterationSystemPrompt(
     : "";
   const imageBlock = imageContextBlock
     ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
+    : "";
+  const imageEmbeddingBlock = imageEmbeddingInstructionBlock
+    ? ["", imageEmbeddingInstructionBlock].join("\n")
     : "";
   const byoSupabaseBlock = hasByoSupabaseConfig
     ? [
@@ -2877,6 +2901,7 @@ export function buildIterationSystemPrompt(
   return [
     "You are making a surgical edit to an existing React app.",
     imageBlock,
+    imageEmbeddingBlock,
     byoSupabaseBlock,
     "",
     "RULES:",
@@ -2961,6 +2986,21 @@ async function callModelIterate(
   console.log("[generate] iterating with model:", model);
   const isIteration = Boolean(instrumentation?.isIteration);
   const maxTokens = isIteration ? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;
+  let resolvedImageBlock: IterationImageBlock | undefined;
+  let imageEmbeddingInstructionBlock: string | undefined;
+
+  if (imageUrl) {
+    try {
+      resolvedImageBlock = await resolveAnthropicImageBlock(imageUrl);
+      imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction(resolvedImageBlock);
+    } catch (error) {
+      console.warn(
+        "[generate] failed to resolve iteration image to base64 for prompt injection (non-fatal):",
+        error instanceof Error ? error.message : String(error),
+      );
+      resolvedImageBlock = buildAnthropicImageBlock(imageUrl);
+    }
+  }
 
   const systemPrompt = buildIterationSystemPrompt(
     schemaSummary,
@@ -2969,8 +3009,9 @@ async function callModelIterate(
     dbProvider,
     neonAuthBaseUrl,
     hasByoSupabaseConfig,
+    imageEmbeddingInstructionBlock,
   );
-  const selection = buildIterationSelection(prompt, existingFiles, imageUrl);
+  const selection = buildIterationSelection(prompt, existingFiles, resolvedImageBlock);
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
   const userMessage = selection.legacyUserMessage;
 
@@ -2985,7 +3026,7 @@ async function callModelIterate(
       selection,
       maxTokens,
       instrumentation,
-      imageUrl,
+      resolvedImageBlock,
     );
   }
 
@@ -3015,7 +3056,7 @@ async function callModelIterate(
     selection,
     maxTokens,
     instrumentation,
-    imageUrl,
+    resolvedImageBlock,
   );
 }
 
