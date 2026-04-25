@@ -424,10 +424,12 @@ export function HomePage() {
                         ? "bg-[#1a1a1a] text-white"
                         : project.status === "building"
                           ? "bg-blue-500 text-white"
-                          : "bg-white/80 text-[#6b7280]",
+                          : project.status === "queued"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-white/80 text-[#6b7280]",
                     )}
                   >
-                    {project.status}
+                    {project.status === "queued" ? "Paused" : project.status}
                   </span>
                 </div>
               </div>
