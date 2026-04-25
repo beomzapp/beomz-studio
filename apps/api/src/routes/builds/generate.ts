@@ -2999,13 +2999,13 @@ async function callModelIterate(
           resolvedImageBlock.source.media_type,
         );
         imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction(uploadedImageUrl);
+        console.log("[generate] image URL to inject:", uploadedImageUrl);
+      } else {
+        console.warn("[generate] resolved image block was not base64; no upload URL available for injection.");
       }
     } catch (error) {
-      console.warn(
-        "[generate] failed to resolve/upload iteration image for prompt injection (non-fatal):",
-        error instanceof Error ? error.message : String(error),
-      );
-      resolvedImageBlock = buildAnthropicImageBlock(imageUrl);
+      console.error("[generate] failed to resolve/upload iteration image for prompt injection:", error);
+      throw error;
     }
   }
 
@@ -3999,6 +3999,11 @@ async function _runBuildInBackground(
       let iterErrorReason: string | null = null;
       try {
         await stageEvents.emit("generating");
+        if (input.imageUrl) {
+          console.log("[generate] iteration source image URL:", input.imageUrl);
+        } else if (imageContextBlock) {
+          console.warn("[generate] iteration has image context but no image URL was provided.");
+        }
         iterResult = await callModelIterate(
           prompt,
           model,

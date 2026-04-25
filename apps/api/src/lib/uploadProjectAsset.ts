@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export const PROJECT_ASSETS_BUCKET = "project-assets";
 export const STUDIO_PUBLIC_BASE_URL = "https://srflynvdrsdazxvcxmzb.supabase.co";
+export const STUDIO_SERVICE_ROLE_ENV_VAR = "STUDIO_SUPABASE_SERVICE_ROLE_KEY";
 
 const PROJECT_ASSET_ALLOWED_MIME_TYPES = [
   "image/png",
@@ -21,10 +22,10 @@ function getStudioSupabaseUrl(): string {
 }
 
 function getStudioServiceRoleKey(): string {
-  const key = process.env.SUPABASE_SERVICE_KEY;
+  const key = process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY;
 
   if (!key) {
-    throw new Error("SUPABASE_SERVICE_KEY is not configured");
+    throw new Error(`${STUDIO_SERVICE_ROLE_ENV_VAR} is not configured`);
   }
 
   return key;
@@ -103,15 +104,18 @@ export async function ensureProjectAssetsBucket(): Promise<void> {
     }
 
     if (!isMissingBucketError(updateResult.error.message)) {
+      console.error("[uploadProjectAsset] failed to update bucket:", updateResult.error);
       throw new Error(updateResult.error.message);
     }
 
     const createResult = await client.storage.createBucket(PROJECT_ASSETS_BUCKET, desiredConfig);
     if (createResult.error && !/already exists|duplicate/i.test(createResult.error.message)) {
+      console.error("[uploadProjectAsset] failed to create bucket:", createResult.error);
       throw new Error(createResult.error.message);
     }
   })().catch((error) => {
     ensureBucketPromise = null;
+    console.error("[uploadProjectAsset] ensure bucket failed:", error);
     throw error;
   });
 
@@ -123,24 +127,38 @@ export async function uploadProjectAsset(
   base64: string,
   mediaType: string,
 ): Promise<string> {
-  const normalisedMediaType = normaliseMediaType(mediaType);
-  const path = createProjectAssetPath(projectId, normalisedMediaType);
-  const bytes = Buffer.from(base64.replace(/\s+/g, ""), "base64");
+  console.log("[uploadProjectAsset] starting upload for project:", projectId);
+  console.log(
+    "[uploadProjectAsset] using key:",
+    process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING",
+  );
 
-  await ensureProjectAssetsBucket();
+  try {
+    const normalisedMediaType = normaliseMediaType(mediaType);
+    const path = createProjectAssetPath(projectId, normalisedMediaType);
+    const bytes = Buffer.from(base64.replace(/\s+/g, ""), "base64");
 
-  const client = createStorageClient();
-  const uploadResult = await client.storage
-    .from(PROJECT_ASSETS_BUCKET)
-    .upload(path, bytes, {
-      cacheControl: "3600",
-      contentType: normalisedMediaType,
-      upsert: false,
-    });
+    await ensureProjectAssetsBucket();
 
-  if (uploadResult.error) {
-    throw new Error(uploadResult.error.message);
+    const client = createStorageClient();
+    const uploadResult = await client.storage
+      .from(PROJECT_ASSETS_BUCKET)
+      .upload(path, bytes, {
+        cacheControl: "3600",
+        contentType: normalisedMediaType,
+        upsert: false,
+      });
+
+    if (uploadResult.error) {
+      console.error("[uploadProjectAsset] upload failed:", uploadResult.error);
+      throw new Error(uploadResult.error.message);
+    }
+
+    const url = buildProjectAssetPublicUrl(path);
+    console.log("[uploadProjectAsset] result URL:", url);
+    return url;
+  } catch (error) {
+    console.error("[uploadProjectAsset] upload failed with error:", error);
+    throw error;
   }
-
-  return buildProjectAssetPublicUrl(path);
 }

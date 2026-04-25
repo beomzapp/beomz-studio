@@ -117,7 +117,7 @@ test("iteration system prompt forces surgical changed-file responses", () => {
   assert.match(prompt, /What is the minimal change to each file\?/);
 });
 
-test("iteration system prompt appends explicit data URI embedding instructions for attached images", () => {
+test("iteration system prompt appends explicit public URL embedding instructions for attached images", () => {
   const prompt = buildIterationSystemPrompt(
     undefined,
     undefined,
@@ -255,11 +255,22 @@ test("iteration flow uploads attached images and injects the public asset URL in
   assert.match(source, /resolvedImageBlock = await resolveAnthropicImageBlock\(imageUrl\);/);
   assert.match(source, /uploadedImageUrl = await uploadProjectAsset\(/);
   assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(uploadedImageUrl\);/);
+  assert.match(source, /console\.log\("\[generate\] image URL to inject:", uploadedImageUrl\);/);
   assert.match(source, /const systemPrompt = buildIterationSystemPrompt\([\s\S]*imageEmbeddingInstructionBlock,\s*\);/);
   assert.match(source, /It is available at this public URL: \$\{imageUrl\}/);
   assert.match(source, /Do NOT use a data URI/);
   assert.doesNotMatch(source, /base64,\.\.\./);
   assert.doesNotMatch(source, /imageBlock\.source\.data\}/);
+  assert.doesNotMatch(source, /failed to resolve\/upload iteration image for prompt injection \(non-fatal\)/);
+  assert.match(source, /console\.error\("\[generate\] failed to resolve\/upload iteration image for prompt injection:", error\);/);
+  assert.match(source, /throw error;/);
+});
+
+test("iteration logs the source image URL before firing and warns if image context has no URL", async () => {
+  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(source, /console\.log\("\[generate\] iteration source image URL:", input\.imageUrl\);/);
+  assert.match(source, /console\.warn\("\[generate\] iteration has image context but no image URL was provided\."\);/);
 });
 
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {

@@ -4,11 +4,11 @@ import test from "node:test";
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
-process.env.SUPABASE_SERVICE_KEY ??= "test-studio-service-key";
 
 const {
   PROJECT_ASSETS_BUCKET,
   STUDIO_PUBLIC_BASE_URL,
+  STUDIO_SERVICE_ROLE_ENV_VAR,
   buildProjectAssetPublicUrl,
   createProjectAssetPath,
   projectAssetExtensionForMediaType,
@@ -34,4 +34,8 @@ test("buildProjectAssetPublicUrl returns the expected public storage URL", () =>
     buildProjectAssetPublicUrl("project-123/asset-456.png"),
     `${STUDIO_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/project-123/asset-456.png`,
   );
+});
+
+test("uploadProjectAsset uses the studio service role env var name", () => {
+  assert.equal(STUDIO_SERVICE_ROLE_ENV_VAR, "STUDIO_SUPABASE_SERVICE_ROLE_KEY");
 });
