@@ -816,6 +816,7 @@ export function ProjectPage() {
         onExportZip={handleExportZip}
         isExporting={isExporting}
         beomzAppUrl={beomzAppUrl}
+        plan={credits?.plan ?? "free"}
       />
 
       <div className="flex min-h-0 flex-1">

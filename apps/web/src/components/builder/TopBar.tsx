@@ -4,7 +4,7 @@
  * editable project name, publish states, plan badge.
  */
 import type React from "react";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   ChevronLeft,
   RefreshCw,
@@ -31,6 +31,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../lib/cn";
 import { GlobalNav } from "../layout/GlobalNav";
 import { displayProjectName } from "../../lib/displayProjectName";
+import { usePricingModal } from "../../contexts/PricingModalContext";
 
 export type ActiveView = "preview" | "code" | "database" | "integrations";
 
@@ -71,6 +72,7 @@ interface TopBarProps {
   phaseMode?: boolean;
   currentPhase?: number;
   phasesTotal?: number;
+  plan?: string;
 }
 
 function toast(msg: string) {
@@ -110,11 +112,29 @@ export function TopBar({
   phaseMode = false,
   currentPhase = 0,
   phasesTotal = 0,
+  plan = "free",
 }: TopBarProps) {
   const navigate = useNavigate();
+  const { openPricingModal } = usePricingModal();
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const [showExportGate, setShowExportGate] = useState(false);
+  const exportGateRef = useRef<HTMLDivElement>(null);
+
+  const EXPORT_GATED_PLANS = new Set(["free", "pro_starter"]);
+  const isExportGated = EXPORT_GATED_PLANS.has(plan);
+
+  useEffect(() => {
+    if (!showExportGate) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportGateRef.current && !exportGateRef.current.contains(e.target as Node)) {
+        setShowExportGate(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showExportGate]);
 
   const handleNameSubmit = useCallback(() => {
     setEditingName(false);
@@ -233,15 +253,44 @@ export function TopBar({
         <div className="h-4 w-px bg-[#e5e5e5]" />
 
         {/* Export ZIP */}
-        <button
-          onClick={onExportZip ?? (() => toast("Coming soon"))}
-          disabled={isExporting}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a] disabled:opacity-50"
-          aria-label="Export ZIP"
-        >
-          {isExporting ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
-          <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
-        </button>
+        <div ref={exportGateRef} className="relative">
+          <button
+            onClick={() => {
+              if (isExportGated) {
+                setShowExportGate((v) => !v);
+              } else {
+                (onExportZip ?? (() => toast("Coming soon")))();
+              }
+            }}
+            disabled={!isExportGated && isExporting}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a] disabled:opacity-50",
+              isExportGated && "cursor-not-allowed opacity-50",
+            )}
+            aria-label="Export ZIP"
+          >
+            {isExporting ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
+            <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
+          </button>
+
+          {showExportGate && (
+            <div className="absolute right-0 top-full z-[100] mt-1.5 w-64 rounded-xl border border-[#e5e5e5] bg-white p-4 shadow-xl">
+              <p className="text-xs font-semibold text-[#1a1a1a]">Upgrade to export</p>
+              <p className="mt-1 text-xs text-[#6b7280]">
+                Export is available on Pro and Business plans.
+              </p>
+              <button
+                onClick={() => {
+                  setShowExportGate(false);
+                  openPricingModal();
+                }}
+                className="mt-3 flex w-full items-center justify-center rounded-lg bg-[#F97316] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+              >
+                Upgrade
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* beomz.app pill */}
         {beomzAppUrl && (

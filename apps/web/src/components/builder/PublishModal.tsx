@@ -910,7 +910,7 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
           role="presentation"
         />
         <div
-          className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          className="relative z-10 w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
           role="dialog"
           aria-modal="true"
           aria-labelledby="remove-domain-title"
@@ -942,7 +942,7 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
                 setRemovingDomain(null);
                 void handleRemove(d);
               }}
-              className="rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+              className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-600"
             >
               Remove domain
             </button>
