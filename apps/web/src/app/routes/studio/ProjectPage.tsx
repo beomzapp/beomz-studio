@@ -195,7 +195,6 @@ export function ProjectPage() {
 
   const [showShareModal, setShowShareModal] = useState(false);
   const [isPublished, setIsPublished] = useState(false);
-  const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const [beomzAppUrl, setBeomzAppUrl] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -492,7 +491,6 @@ export function ProjectPage() {
         | undefined;
       if (proj) {
         setIsPublished(Boolean(proj.published));
-        setPublishedSlug(proj.published_slug ?? null);
         setBeomzAppUrl(proj.beomz_app_url ?? null);
       }
     }).catch(() => {});
@@ -811,7 +809,7 @@ export function ProjectPage() {
         onRefreshPreview={handleRefreshPreview}
         activeView={activeView}
         onActiveViewChange={setActiveView}
-        isPublished={isPublished}
+        isPublished={Boolean(beomzAppUrl) || isPublished}
         onPublish={() => setShowPublishModal(true)}
         onExportZip={handleExportZip}
         isExporting={isExporting}
@@ -909,26 +907,17 @@ export function ProjectPage() {
       {showPublishModal && projectId && (
         <PublishModal
           projectId={projectId}
-          projectName={projectName}
-          isPublished={isPublished}
-          publishedSlug={publishedSlug ?? undefined}
           beomzAppUrl={beomzAppUrl}
           plan={credits?.plan ?? "free"}
           onClose={() => setShowPublishModal(false)}
-          onPublished={(_url, slug) => {
-            setIsPublished(true);
-            setPublishedSlug(slug);
-          }}
-          onUnpublished={() => {
-            setIsPublished(false);
-            setPublishedSlug(null);
-          }}
           onVercelDeployed={url => {
             setBeomzAppUrl(url);
           }}
           onVercelUnpublished={() => {
             setBeomzAppUrl(null);
           }}
+          onExportZip={handleExportZip}
+          isExporting={isExporting}
         />
       )}
     </div>
