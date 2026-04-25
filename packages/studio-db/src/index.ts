@@ -90,6 +90,9 @@ export interface ProjectRow extends Record<string, unknown> {
   beomz_app_url: string | null;
   beomz_app_deployed_at: string | null;
   custom_domains?: string[] | null;
+  // BEO-576: active custom domain persisted to DB so state survives page refresh
+  custom_domain?: string | null;
+  domain_status?: string | null;
   // BEO-197: Phased build system
   build_phases: unknown | null;
   current_phase: number;
@@ -264,6 +267,9 @@ export interface ProjectUpdate extends Record<string, unknown> {
   beomz_app_url?: string | null;
   beomz_app_deployed_at?: string | null;
   custom_domains?: readonly string[] | null;
+  // BEO-576: active custom domain status
+  custom_domain?: string | null;
+  domain_status?: string | null;
   // BEO-197: Phased build system
   build_phases?: unknown | null;
   current_phase?: number;

@@ -789,11 +789,13 @@ function normalizeCustomDomain(raw: unknown): CustomDomain {
 }
 
 export async function listCustomDomains(projectId: string): Promise<CustomDomain[]> {
-  const data = await requestJson<{ domains?: unknown[] }>(
+  // The API returns a plain array (not wrapped in { domains: [...] })
+  const data = await requestJson<unknown>(
     `/projects/${projectId}/domains`,
     { method: "GET" },
   );
-  return (data.domains ?? []).map(normalizeCustomDomain);
+  const rawList = Array.isArray(data) ? data : [];
+  return rawList.map(normalizeCustomDomain);
 }
 
 export async function addCustomDomain(
@@ -824,6 +826,17 @@ export async function removeCustomDomain(
 ): Promise<void> {
   await requestJson<{ ok: boolean }>(
     `/projects/${projectId}/domains/${encodeURIComponent(domain)}`,
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * BEO-576: Remove the active custom domain from Vercel and clear the DB
+ * domain_status field. Calling this reverts the project to "no active domain".
+ */
+export async function deleteActiveDomain(projectId: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(
+    `/projects/${projectId}/domain`,
     { method: "DELETE" },
   );
 }

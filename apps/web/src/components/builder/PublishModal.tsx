@@ -11,6 +11,11 @@
  *
  * BEO-571: WebContainer (slug.beomz.ai) publish option removed; preview stays
  * in the builder; only Vercel CDN is offered as Beomz-managed hosting.
+ *
+ * BEO-576: custom_domain + domain_status read from DB-backed project record so
+ * the Live tag persists through page refresh. State 2 ("DNS setup") → "active"
+ * transition is persisted server-side via GET /domains once Vercel confirms
+ * domain verification.
  */
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -34,7 +39,7 @@ import {
   addCustomDomain,
   verifyCustomDomain,
   removeCustomDomain,
-  checkDomainReachable,
+  deleteActiveDomain,
   type CustomDomain,
 } from "../../lib/api";
 import { usePricingModal } from "../../contexts/PricingModalContext";
@@ -44,9 +49,15 @@ interface PublishModalProps {
   beomzAppUrl?: string | null;
   /** BEO-556: user's plan — gates custom-domain UI. "free" shows locked state. */
   plan?: string;
+  /** BEO-576: active custom domain from DB project record. */
+  customDomain?: string | null;
+  /** BEO-576: 'active' when domain is confirmed live (DB-persisted). */
+  domainStatus?: string | null;
   onClose: () => void;
   onVercelDeployed: (url: string) => void;
   onVercelUnpublished?: () => void;
+  /** BEO-576: called after active domain is removed so parent state is cleared. */
+  onDomainRemoved?: () => void;
   /** Same gating as TopBar: Pro Builder+ can export; optional so embedders can omit. */
   onExportZip?: () => void;
   isExporting?: boolean;
@@ -63,9 +74,12 @@ export function PublishModal({
   projectId,
   beomzAppUrl,
   plan = "free",
+  customDomain,
+  domainStatus,
   onClose,
   onVercelDeployed,
   onVercelUnpublished,
+  onDomainRemoved,
   onExportZip,
   isExporting = false,
 }: PublishModalProps) {
@@ -241,7 +255,14 @@ export function PublishModal({
             </div>
 
             {hasPublishedSurface && (
-              <CustomDomainsSection projectId={projectId} plan={plan} onCloseModal={onClose} />
+              <CustomDomainsSection
+                projectId={projectId}
+                plan={plan}
+                customDomain={customDomain ?? null}
+                domainStatus={domainStatus ?? null}
+                onCloseModal={onClose}
+                onDomainRemoved={onDomainRemoved}
+              />
             )}
 
             {onExportZip && (
@@ -410,12 +431,19 @@ function ModalExportSection({
 
 // ─────────────────────────────────────────────────────────────
 // BEO-556 — Custom domain section
+// BEO-576 — Active domain persisted to DB; "Live" view when domain_status=active
 // ─────────────────────────────────────────────────────────────
 
 interface CustomDomainsSectionProps {
   projectId: string;
   plan: string;
+  /** BEO-576: active custom domain name from DB project record, or null. */
+  customDomain: string | null;
+  /** BEO-576: 'active' when domain is confirmed live, null otherwise. */
+  domainStatus: string | null;
   onCloseModal: () => void;
+  /** BEO-576: called after active domain is successfully removed. */
+  onDomainRemoved?: () => void;
 }
 
 function sanitizeDomainInput(value: string): string {
@@ -426,9 +454,33 @@ function sanitizeDomainInput(value: string): string {
     .replace(/\/.*$/, "");
 }
 
-function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSectionProps) {
+function CustomDomainsSection({ projectId, plan, customDomain, domainStatus, onCloseModal, onDomainRemoved }: CustomDomainsSectionProps) {
   const { openPricingModal } = usePricingModal();
   const isPaid = PAID_PLANS.has(plan);
+
+  // BEO-576: If domain_status === 'active', show the Live view directly from
+  // DB state — no Vercel API call needed on modal open.
+  const isActiveDomain = domainStatus === "active" && Boolean(customDomain);
+
+  const [removingActive, setRemovingActive] = useState(false);
+  const [removeActiveError, setRemoveActiveError] = useState<string | null>(null);
+  // Local state: after removing, switch to the input view within this session
+  const [activeDomainCleared, setActiveDomainCleared] = useState(false);
+
+  const handleRemoveActiveDomain = useCallback(async () => {
+    if (!window.confirm(`Remove ${customDomain} from this app?`)) return;
+    setRemovingActive(true);
+    setRemoveActiveError(null);
+    try {
+      await deleteActiveDomain(projectId);
+      setActiveDomainCleared(true);
+      onDomainRemoved?.();
+    } catch (err) {
+      setRemoveActiveError(err instanceof Error ? err.message : "Failed to remove domain");
+    } finally {
+      setRemovingActive(false);
+    }
+  }, [projectId, customDomain, onDomainRemoved]);
 
   const [domains, setDomains] = useState<CustomDomain[]>([]);
   const [loading, setLoading] = useState(false);
@@ -452,9 +504,12 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
     }
   }, []);
 
-  // Load existing domains on mount (paid plans only)
+  // Load existing domains only when NOT in the active state
+  // (active state reads from DB directly, no Vercel API call needed)
+  const shouldLoadDomains = isPaid && (!isActiveDomain || activeDomainCleared);
+
   useEffect(() => {
-    if (!isPaid) return;
+    if (!shouldLoadDomains) return;
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
@@ -473,11 +528,11 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
     return () => {
       cancelled = true;
     };
-  }, [projectId, isPaid]);
+  }, [projectId, shouldLoadDomains]);
 
   // Auto-poll every 30s (max 10 minutes) whenever any domain is pending.
   useEffect(() => {
-    if (!isPaid) return;
+    if (!shouldLoadDomains) return;
     const hasPending = domains.some((d) => d.status === "pending");
     if (!hasPending) {
       clearPoll();
@@ -497,7 +552,7 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
         // transient — keep polling
       }
     }, 30_000);
-  }, [projectId, domains, isPaid, clearPoll]);
+  }, [projectId, domains, shouldLoadDomains, clearPoll]);
 
   // Cleanup on unmount
   useEffect(() => () => clearPoll(), [clearPoll]);
@@ -610,6 +665,39 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
               Upgrade →
             </button>
           </p>
+        </div>
+      ) : isActiveDomain && !activeDomainCleared ? (
+        /* ── BEO-576: Active domain — DB-sourced, no Vercel API call needed ── */
+        <div className="mt-3 rounded-lg border border-[#e5e5e5] bg-white p-3">
+          <div className="flex items-center gap-2">
+            <Globe size={14} className="flex-none text-emerald-500" />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#1a1a1a]">
+              {customDomain}
+            </span>
+            <span className="flex-none rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+              Live
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-3 text-xs">
+            <a
+              href={`https://${customDomain}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-[#F97316] hover:underline"
+            >
+              Visit <ExternalLink size={11} />
+            </a>
+            <button
+              onClick={() => void handleRemoveActiveDomain()}
+              disabled={removingActive}
+              className="text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
+            >
+              {removingActive ? "Removing…" : "Remove domain"}
+            </button>
+          </div>
+          {removeActiveError && (
+            <p className="mt-2 text-xs text-red-500">{removeActiveError}</p>
+          )}
         </div>
       ) : (
         <div className="mt-3 space-y-2">
@@ -754,12 +842,14 @@ interface DomainRowProps {
 
 /**
  * BEO-563 — Three domain states:
- *   pending-verification  verified=false, TXT record needed (rare)
- *   dns-setup             verified=true by Vercel but domain not yet reachable
- *   active                verified=true AND reachable
+ *   pending-verification  verified=false, TXT record needed
+ *   dns-setup             verified=true by Vercel but traffic not yet routed
+ *   active                verified=true (Vercel confirmation is source of truth)
  *
- * Default for any newly-verified domain is dns-setup (safe default).
- * A background reachability check upgrades to active if it passes.
+ * BEO-576: Removed the client-side checkDomainReachable HEAD request — it
+ * always failed due to CORS restrictions. Vercel's verified=true is now the
+ * sole criterion for the "active" state. domain_status='active' is persisted
+ * to the DB so the Live badge survives page refresh (handled in CustomDomainsSection).
  */
 function DomainRow({
   domain,
@@ -774,48 +864,10 @@ function DomainRow({
   const showTxtCard = Boolean(!isVerifiedByVercel && domain.verification?.length);
   const txt = domain.verification?.[0];
 
-  // Reachability: default false so we never show Active prematurely.
-  const [reachable, setReachable] = useState(false);
-  const [checkingDns, setCheckingDns] = useState(false);
-  const reachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const doReachCheck = useCallback(async () => {
-    setCheckingDns(true);
-    try {
-      const ok = await checkDomainReachable(domain.domain);
-      setReachable(ok);
-    } finally {
-      setCheckingDns(false);
-    }
-  }, [domain.domain]);
-
-  // On mount (or when Vercel verification flips to true): run first check.
-  useEffect(() => {
-    if (!isVerifiedByVercel) return;
-    void doReachCheck();
-  }, [isVerifiedByVercel, doReachCheck]);
-
-  // Auto-poll every 30s while verified-but-not-reachable (State 2).
-  useEffect(() => {
-    if (!isVerifiedByVercel || reachable) {
-      if (reachPollRef.current) {
-        clearInterval(reachPollRef.current);
-        reachPollRef.current = null;
-      }
-      return;
-    }
-    if (reachPollRef.current) return;
-    reachPollRef.current = setInterval(() => void doReachCheck(), 30_000);
-    return () => {
-      if (reachPollRef.current) {
-        clearInterval(reachPollRef.current);
-        reachPollRef.current = null;
-      }
-    };
-  }, [isVerifiedByVercel, reachable, doReachCheck]);
-
-  const displayState: "pending-verification" | "dns-setup" | "active" =
-    !isVerifiedByVercel ? "pending-verification" : reachable ? "active" : "dns-setup";
+  // Treat verified=true as active — the client-side reachability check was
+  // CORS-blocked and unreliable. Vercel's verification is the source of truth.
+  const displayState: "pending-verification" | "active" =
+    !isVerifiedByVercel ? "pending-verification" : "active";
 
   return (
     <div className="rounded-lg border border-[#e5e5e5] bg-white p-3">
@@ -830,12 +882,7 @@ function DomainRow({
         </span>
         {displayState === "active" && (
           <span className="flex-none rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-            Active
-          </span>
-        )}
-        {displayState === "dns-setup" && (
-          <span className="flex-none rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">
-            DNS setup required
+            Live
           </span>
         )}
         {displayState === "pending-verification" && (
@@ -845,7 +892,7 @@ function DomainRow({
         )}
       </div>
 
-      {/* ── State 3: Active ── */}
+      {/* ── State: Active ── */}
       {displayState === "active" && (
         <div className="mt-3 flex items-center gap-3 text-xs">
           <a
@@ -866,100 +913,7 @@ function DomainRow({
         </div>
       )}
 
-      {/* ── State 2: DNS setup required ── */}
-      {displayState === "dns-setup" && (
-        <>
-          <div className="mt-3 rounded-lg border border-[#f0e6d6] bg-[#fef7ea] p-3">
-            <p className="mb-2 text-xs font-medium text-[#92400e]">
-              {domain.registrar?.trim() ? (
-                <>
-                  Your domain is registered with {domain.registrar.trim()}. Add these DNS records:
-                  {domain.docsUrl ? (
-                    <>
-                      {" "}
-                      <a
-                        href={domain.docsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-medium text-[#F97316] hover:underline"
-                      >
-                        DNS guide →
-                      </a>
-                    </>
-                  ) : null}
-                </>
-              ) : (
-                "Add these DNS records in your domain registrar's DNS settings:"
-              )}
-            </p>
-            <div className="mb-2 overflow-hidden rounded-md border border-[#f0e6d6]">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-[#f0e6d6] bg-[#fdf0dc]">
-                    <th className="py-1.5 pl-3 pr-2 text-left font-medium text-[#6b7280]">Type</th>
-                    <th className="py-1.5 px-2 text-left font-medium text-[#6b7280]">Host</th>
-                    <th className="py-1.5 px-2 text-left font-medium text-[#6b7280]">Value</th>
-                    <th className="w-8 py-1.5 pr-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-[#f0e6d6]">
-                    <td className="py-1.5 pl-3 pr-2 font-mono text-[#1a1a1a]">A</td>
-                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">@</td>
-                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">76.76.21.21</td>
-                    <td className="py-1.5 pr-2">
-                      <CopyBtn
-                        text="76.76.21.21"
-                        k={`${domain.domain}:arecord`}
-                        copied={copied}
-                        onCopy={onCopy}
-                      />
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 pl-3 pr-2 font-mono text-[#1a1a1a]">CNAME</td>
-                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">www</td>
-                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">cname.vercel-dns.com</td>
-                    <td className="py-1.5 pr-2">
-                      <CopyBtn
-                        text="cname.vercel-dns.com"
-                        k={`${domain.domain}:cname`}
-                        copied={copied}
-                        onCopy={onCopy}
-                      />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p className="text-[11px] text-[#92400e]/70">
-              Changes may take up to 24 hours to propagate.
-            </p>
-          </div>
-          <div className="mt-3 flex items-center gap-3 text-xs">
-            <button
-              onClick={() => void doReachCheck()}
-              disabled={checkingDns}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[#e5e5e5] bg-white px-2.5 py-1 font-medium text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6] disabled:opacity-50"
-            >
-              {checkingDns ? (
-                <><Loader size={11} className="animate-spin" /> Checking…</>
-              ) : (
-                <><RefreshCw size={11} /> Check DNS</>
-              )}
-            </button>
-            <button
-              onClick={onRemove}
-              disabled={removing}
-              className="text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
-            >
-              {removing ? "Removing…" : "Remove"}
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* ── State 1: Pending TXT verification ── */}
+      {/* ── State: Pending TXT verification ── */}
       {displayState === "pending-verification" && (
         <>
           {showTxtCard && txt && (

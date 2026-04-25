@@ -198,6 +198,9 @@ export function ProjectPage() {
   const [beomzAppUrl, setBeomzAppUrl] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  // BEO-576: DB-backed custom domain state (sourced from project record on load)
+  const [activeDomain, setActiveDomain] = useState<string | null>(null);
+  const [domainStatus, setDomainStatus] = useState<string | null>(null);
 
   // ─── Database state ───────────────────────────────────────────────────────
 
@@ -487,11 +490,17 @@ export function ProjectPage() {
             published?: boolean;
             published_slug?: string | null;
             beomz_app_url?: string | null;
+            // BEO-576: DB-backed custom domain status
+            custom_domain?: string | null;
+            domain_status?: string | null;
           })
         | undefined;
       if (proj) {
         setIsPublished(Boolean(proj.published));
         setBeomzAppUrl(proj.beomz_app_url ?? null);
+        // BEO-576: read domain status from DB so Live tag persists on refresh
+        setActiveDomain(proj.custom_domain ?? null);
+        setDomainStatus(proj.domain_status ?? null);
       }
     }).catch(() => {});
   }, [projectId, id]);
@@ -909,12 +918,18 @@ export function ProjectPage() {
           projectId={projectId}
           beomzAppUrl={beomzAppUrl}
           plan={credits?.plan ?? "free"}
+          customDomain={activeDomain}
+          domainStatus={domainStatus}
           onClose={() => setShowPublishModal(false)}
           onVercelDeployed={url => {
             setBeomzAppUrl(url);
           }}
           onVercelUnpublished={() => {
             setBeomzAppUrl(null);
+          }}
+          onDomainRemoved={() => {
+            setActiveDomain(null);
+            setDomainStatus(null);
           }}
           onExportZip={handleExportZip}
           isExporting={isExporting}

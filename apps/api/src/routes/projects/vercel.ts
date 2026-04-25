@@ -752,7 +752,14 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
         addDomainToProjectRecord(project, domain),
       );
 
-      // Project-level custom domains automatically route to the latest production deployment on Vercel.
+      // BEO-576: persist active status to DB when Vercel confirms ownership
+      if (result.verified === true) {
+        orgContext.db.updateProject(projectId, {
+          custom_domain: domain,
+          domain_status: "active",
+        }).catch((err) => console.error("[domains/verify] failed to persist domain_status:", err));
+      }
+
       return c.json({ verified: result.verified === true });
     } catch (error) {
       return respondToVercelError(c, error);
@@ -773,7 +780,25 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
     }
 
     try {
-      return c.json(await listDomains(project));
+      const listResult = await listDomains(project);
+
+      // BEO-576: persist active status to DB so state survives page refresh.
+      // Use the first verified domain as the canonical active custom domain.
+      const firstVerified = listResult.find((d) => d.verified === true);
+      if (firstVerified && project.custom_domain !== firstVerified.domain) {
+        orgContext.db.updateProject(projectId, {
+          custom_domain: firstVerified.domain,
+          domain_status: "active",
+        }).catch((err) => console.error("[domains/list] failed to persist domain_status:", err));
+      } else if (!firstVerified && project.domain_status === "active") {
+        // Domain was removed externally — clear the cached status
+        orgContext.db.updateProject(projectId, {
+          custom_domain: null,
+          domain_status: null,
+        }).catch((err) => console.error("[domains/list] failed to clear domain_status:", err));
+      }
+
+      return c.json(listResult);
     } catch (error) {
       return respondToVercelError(c, error);
     }
@@ -804,6 +829,15 @@ export function createVercelDomainsRoute(deps: VercelDomainsRouteDeps = {}) {
         projectId,
         removeDomainFromProjectRecord(project, domain),
       );
+
+      // BEO-576: if this was the active domain, clear the cached status
+      if (project.custom_domain === domain) {
+        orgContext.db.updateProject(projectId, {
+          custom_domain: null,
+          domain_status: null,
+        }).catch((err) => console.error("[domains/delete] failed to clear domain_status:", err));
+      }
+
       return c.json({ deleted: true });
     } catch (error) {
       return respondToVercelError(c, error);

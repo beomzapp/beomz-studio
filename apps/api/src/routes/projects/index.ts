@@ -18,6 +18,7 @@ import { PLAN_LIMITS } from "../../lib/credits.js";
 import {
   readProjectCustomDomains,
   removeAllProjectDomains,
+  deleteProjectDomain,
 } from "../../lib/vercelDomains.js";
 import { deleteVercelDeployment } from "../../lib/vercelDeploy.js";
 import {
@@ -64,6 +65,7 @@ interface ProjectsRouteDeps {
   deleteNeonProject?: typeof deleteNeonProject;
   deleteVercelDeployment?: typeof deleteVercelDeployment;
   removeAllProjectDomains?: typeof removeAllProjectDomains;
+  deleteProjectDomain?: typeof deleteProjectDomain;
   dumpNeonDatabase?: typeof dumpNeonDatabase;
   restoreSupabaseDatabase?: typeof restoreSupabaseDatabase;
   ensureByoDbAnonKeyColumn?: () => Promise<void>;
@@ -310,6 +312,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
   const deleteVercelDeploymentFn = deps.deleteVercelDeployment ?? deleteVercelDeployment;
   const removeAllProjectDomainsFn = deps.removeAllProjectDomains ?? removeAllProjectDomains;
+  const deleteProjectDomainFn = deps.deleteProjectDomain ?? deleteProjectDomain;
   const dumpNeonDatabaseFn = deps.dumpNeonDatabase ?? dumpNeonDatabase;
   const restoreSupabaseDatabaseFn = deps.restoreSupabaseDatabase ?? restoreSupabaseDatabase;
   const ensureSupabaseProjectColumnsFn = deps.ensureByoDbAnonKeyColumn ?? ensureSupabaseProjectColumns;
@@ -335,6 +338,9 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
         published: Boolean(project.published),
         published_slug: project.published_slug ?? null,
         beomz_app_url: project.beomz_app_url ?? null,
+        // BEO-576: custom domain active status (DB-persisted)
+        custom_domain: project.custom_domain ?? null,
+        domain_status: project.domain_status ?? null,
       });
     } catch (err) {
       console.error("[GET /projects/:id] error:", err);
@@ -365,6 +371,9 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
         published: Boolean(row.published),
         published_slug: row.published_slug ?? null,
         beomz_app_url: row.beomz_app_url ?? null,
+        // BEO-576: custom domain active status (DB-persisted)
+        custom_domain: row.custom_domain ?? null,
+        domain_status: row.domain_status ?? null,
       }));
       const plan = orgContext.org.plan ?? "free";
       const planLimit = PLAN_LIMITS[plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.free;
@@ -710,6 +719,39 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       byo_db_service_key: null,
       supabase_oauth_access_token: null,
       supabase_oauth_refresh_token: null,
+    });
+
+    return c.json({ ok: true });
+  });
+
+  // BEO-576: Remove the active custom domain from Vercel + clear DB fields
+  projectsRoute.delete("/:id/domain", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    const orgContext = c.get("orgContext") as OrgContext;
+    const projectId = c.req.param("id");
+
+    const project = await orgContext.db.findProjectById(projectId);
+    if (!project || project.org_id !== orgContext.org.id) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const activeDomain = typeof project.custom_domain === "string" ? project.custom_domain.trim() : null;
+    if (!activeDomain) {
+      return c.json({ error: "no_active_domain" }, 400);
+    }
+
+    // Remove domain from Vercel (non-fatal)
+    try {
+      await deleteProjectDomainFn(activeDomain);
+    } catch (err) {
+      console.error("[domain/delete] Vercel cleanup failed (non-fatal):", activeDomain, err);
+    }
+
+    // Remove from custom_domains array and clear active-domain fields
+    const updatedDomains = readProjectCustomDomains(project).filter((d) => d !== activeDomain);
+    await orgContext.db.updateProject(projectId, {
+      custom_domains: updatedDomains,
+      custom_domain: null,
+      domain_status: null,
     });
 
     return c.json({ ok: true });
