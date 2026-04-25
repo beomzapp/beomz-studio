@@ -900,6 +900,7 @@ function CollapsibleUserMessage({
 export function ChatMessageView({
   message,
   onRetry,
+  onReportIssue,
   onPopulateInput,
   onImplementPlan,
   userAvatarUrl,
@@ -907,6 +908,7 @@ export function ChatMessageView({
 }: {
   message: ChatMessage;
   onRetry?: () => void;
+  onReportIssue?: () => void;
   onPopulateInput?: (text: string) => void;
   /** BEO-461/462: handles both chat_response "Implement" and image_intent CTA */
   onImplementPlan?: (plan: string, imageUrl?: string) => void;
@@ -997,7 +999,34 @@ export function ChatMessageView({
       );
 
     case "error":
-      return <p className="text-sm text-red-400">{message.content}</p>;
+      return (
+        <AIMessage>
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
+            <p className="text-sm font-medium text-red-600">Build ran into an issue</p>
+            {message.content && (
+              <p className="mt-1 text-xs text-red-400/80 leading-relaxed">{message.content}</p>
+            )}
+            <div className="mt-2.5 flex gap-2">
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  className="rounded-lg bg-[#F97316] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#ea6c10]"
+                >
+                  Retry
+                </button>
+              )}
+              {onReportIssue && (
+                <button
+                  onClick={onReportIssue}
+                  className="rounded-lg border border-[#e5e5e5] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[rgba(0,0,0,0.02)]"
+                >
+                  Report issue
+                </button>
+              )}
+            </div>
+          </div>
+        </AIMessage>
+      );
 
     case "server_restarting":
       return <ServerRestartedCard onRetry={onRetry ?? (() => {})} />;

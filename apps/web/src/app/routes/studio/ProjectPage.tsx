@@ -105,6 +105,7 @@ export function ProjectPage() {
     sendMessage,
     retryLastBuild,
     stopBuild,
+    reportIssue,
     buildDoneRef,
     subscribeToExistingBuild,
     notifyPreviewServerReady,
@@ -978,6 +979,7 @@ export function ProjectPage() {
               onForceStop={handleForceStop}
               isStopPending={isStopPending}
               onRetry={retryLastBuild}
+              onReportIssue={reportIssue}
               width={chatPanelWidth}
               suggestionChips={suggestionChips}
               onDismissChips={() => setSuggestionChips([])}

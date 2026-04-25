@@ -54,6 +54,8 @@ interface ChatPanelProps {
   /** BEO-587: true from stop click until isBuilding settles to false */
   isStopPending?: boolean;
   onRetry?: () => void;
+  /** BEO-589: opens mailto report with project + prompt context */
+  onReportIssue?: () => void;
   width?: number;
   suggestionChips?: string[];
   onDismissChips?: () => void;
@@ -95,6 +97,7 @@ export function ChatPanel({
   onForceStop,
   isStopPending,
   onRetry,
+  onReportIssue,
   width = 380,
   suggestionChips,
   onDismissChips,
@@ -377,6 +380,7 @@ export function ChatPanel({
                 <ChatMessageView
                   message={msg}
                   onRetry={onRetry}
+                  onReportIssue={onReportIssue}
                   onPopulateInput={populateInputWithoutSend}
                   onImplementPlan={onImplementPlan}
                   userAvatarUrl={userAvatarUrl}

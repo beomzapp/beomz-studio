@@ -1651,11 +1651,24 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       // BEO-462: if an image is attached, flag that we're analysing it until
       // image_intent or a real build stage fires and clears this flag.
       if (imageUrl) setIsAnalysingImage(true);
-      setMessages(prev => [
-        ...prev.filter(m => m.type !== "server_restarting"),
-        { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date(), isSystem: isSystem || undefined },
-        { id: `thinking-${makeId()}`, type: "thinking" },
-      ]);
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.type !== "server_restarting");
+        // BEO-589 Bug 3: skip duplicate user message if identical content sent within 5s
+        const lastUserMsg = filtered.slice().reverse().find(m => m.type === "user") as Extract<ChatMessage, { type: "user" }> | undefined;
+        if (lastUserMsg && lastUserMsg.content === text) {
+          const ts = lastUserMsg.timestamp instanceof Date
+            ? lastUserMsg.timestamp.getTime()
+            : (lastUserMsg.timestamp ? new Date(String(lastUserMsg.timestamp)).getTime() : NaN);
+          if (!isNaN(ts) && Date.now() - ts < 5_000) {
+            return [...filtered, { id: `thinking-${makeId()}`, type: "thinking" }];
+          }
+        }
+        return [
+          ...filtered,
+          { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date(), isSystem: isSystem || undefined },
+          { id: `thinking-${makeId()}`, type: "thinking" },
+        ];
+      });
 
       void startAndStreamBuild({
         body: {
@@ -1771,6 +1784,69 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     };
   }, [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers]);
 
+  // ─── BEO-589: Silent retry — restart the last build without pushing a new user message ───
+
+  const startBuildSilently = useCallback(
+    (prompt: string) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      buildDoneRef.current = false;
+      activeBuildingMsgIdRef.current = null;
+      buildStartedAtRef.current = null;
+      try {
+        sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+      } catch { /* ignore */ }
+      clearPreambleAndStageTimers();
+      // Clear error/restarting cards and add thinking dots — no user message pushed
+      setMessages(prev => [
+        ...prev.filter(m => m.type !== "error" && m.type !== "server_restarting" && m.type !== "thinking"),
+        { id: `thinking-${makeId()}`, type: "thinking" },
+      ]);
+      void startAndStreamBuild({
+        body: {
+          prompt,
+          projectId: resolvedProjectIdRef.current || undefined,
+          model: "claude-sonnet-4-6",
+          existingFiles:
+            existingFilesRef.current.length > 0 ? existingFilesRef.current : undefined,
+        },
+        signal: controller.signal,
+        onBuildStarted: response => {
+          resolvedProjectIdRef.current = response.project.id;
+          lastEventBuildIdRef.current = response.build.id;
+          optionsRef.current.onProjectIdResolved?.(
+            response.project.id,
+            response.project.name,
+            response.project.icon ?? null,
+          );
+          optionsRef.current.onBuildStarted?.(response);
+        },
+        onBuildStatus: status => { optionsRef.current.onBuildStatus?.(status); },
+        onEvent: handleEvent,
+      }).catch(err => {
+        if (controller.signal.aborted) return;
+        if (err instanceof NetworkDisconnectError) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.type !== "thinking");
+            if (filtered.some(m => m.type === "server_restarting")) return filtered;
+            return [...filtered, { id: makeId(), type: "server_restarting" }];
+          });
+        } else {
+          const content = err instanceof Error ? err.message : "Failed to start build.";
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "error", content },
+          ]);
+        }
+        setIsBuilding(false);
+        buildDoneRef.current = false;
+      });
+    },
+    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers],
+  );
+
   // ─── BEO-587: Stop build — abort immediately and return to idle ──────────
 
   const stopBuild = useCallback(() => {
@@ -1800,11 +1876,18 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const retryLastBuild = useCallback(() => {
     const prompt = lastUserPromptRef.current;
     if (!prompt) return;
-    setMessages(prev =>
-      prev.filter(m => m.type !== "error" && m.type !== "server_restarting"),
+    startBuildSilently(prompt);
+  }, [startBuildSilently]);
+
+  // ─── BEO-589: Report issue — mailto with project + prompt context ────────────
+
+  const handleReportIssue = useCallback(() => {
+    const subject = encodeURIComponent("Beomz Build Issue");
+    const body = encodeURIComponent(
+      `Project: ${resolvedProjectIdRef.current || "unknown"}\nPrompt: ${lastUserPromptRef.current}\nError: build failed`,
     );
-    sendMessage(prompt);
-  }, [sendMessage]);
+    window.open(`mailto:hello@beomz.com?subject=${subject}&body=${body}`);
+  }, []);
 
   const subscribeToExistingBuild = useCallback(
     async (buildId: string, lastEventId: string | null, signal: AbortSignal) => {
@@ -1872,6 +1955,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     retryLastBuild,
     // BEO-587: immediate abort + idle
     stopBuild,
+    // BEO-589: report issue via mailto
+    reportIssue: handleReportIssue,
     buildDoneRef,
     subscribeToExistingBuild,
     notifyPreviewServerReady,
