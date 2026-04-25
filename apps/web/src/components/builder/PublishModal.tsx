@@ -651,6 +651,7 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
   const [addError, setAddError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [removingDomain, setRemovingDomain] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -713,6 +714,15 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
   // Cleanup on unmount
   useEffect(() => () => clearPoll(), [clearPoll]);
 
+  useEffect(() => {
+    if (!removingDomain) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRemovingDomain(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [removingDomain]);
+
   const handleAdd = useCallback(async () => {
     const cleaned = sanitizeDomainInput(addInput);
     if (!cleaned) return;
@@ -756,7 +766,6 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
 
   const handleRemove = useCallback(
     async (domain: string) => {
-      if (!window.confirm(`Remove ${domain}?`)) return;
       setRemoving(domain);
       try {
         await removeCustomDomain(projectId, domain);
@@ -788,6 +797,7 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
   const canAddMore = domains.length < MAX_CUSTOM_DOMAINS;
 
   return (
+    <>
     <div className="mt-5 border-t border-[#e5e5e5] pt-4">
       <div className="flex items-start justify-between gap-2">
         <div>
@@ -835,7 +845,7 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
                 copied={copied}
                 onCopy={handleCopy}
                 onVerify={() => handleVerify(d.domain)}
-                onRemove={() => handleRemove(d.domain)}
+                onRemove={() => setRemovingDomain(d.domain)}
               />
             ))}
 
@@ -891,6 +901,56 @@ function CustomDomainsSection({ projectId, plan, onCloseModal }: CustomDomainsSe
         </div>
       )}
     </div>
+
+    {removingDomain && (
+      <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+        <div
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setRemovingDomain(null)}
+          role="presentation"
+        />
+        <div
+          className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="remove-domain-title"
+        >
+          <h3
+            id="remove-domain-title"
+            className="text-base font-semibold text-[#1a1a1a]"
+          >
+            Remove domain
+          </h3>
+          <p className="mt-2 text-sm text-[#6b7280]">
+            Are you sure you want to remove{" "}
+            <strong className="font-semibold text-[#1a1a1a]">{removingDomain}</strong> from
+            this app? This cannot be undone.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setRemovingDomain(null)}
+              className="rounded-lg border border-[#e5e5e5] bg-white px-4 py-2 text-sm font-medium text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!removingDomain) return;
+                const d = removingDomain;
+                setRemovingDomain(null);
+                void handleRemove(d);
+              }}
+              className="rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+            >
+              Remove domain
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
