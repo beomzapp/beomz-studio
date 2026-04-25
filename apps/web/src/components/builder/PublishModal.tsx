@@ -34,6 +34,7 @@ import {
   addCustomDomain,
   verifyCustomDomain,
   removeCustomDomain,
+  checkDomainReachable,
   type CustomDomain,
 } from "../../lib/api";
 import { usePricingModal } from "../../contexts/PricingModalContext";
@@ -903,6 +904,15 @@ interface DomainRowProps {
   onRemove: () => void;
 }
 
+/**
+ * BEO-563 — Three domain states:
+ *   pending-verification  verified=false, TXT record needed (rare)
+ *   dns-setup             verified=true by Vercel but domain not yet reachable
+ *   active                verified=true AND reachable
+ *
+ * Default for any newly-verified domain is dns-setup (safe default).
+ * A background reachability check upgrades to active if it passes.
+ */
 function DomainRow({
   domain,
   verifying,
@@ -912,38 +922,83 @@ function DomainRow({
   onVerify,
   onRemove,
 }: DomainRowProps) {
-  console.log("[DomainRow] domain:", JSON.stringify(domain));
-  const isVerified =
-    domain.status === "verified" || domain.verified === true;
-  const showVerificationCard = Boolean(
-    !domain.verified &&
-      domain.verification &&
-      domain.verification.length > 0,
-  );
+  const isVerifiedByVercel = domain.status === "verified" || domain.verified === true;
+  const showTxtCard = Boolean(!isVerifiedByVercel && domain.verification?.length);
   const txt = domain.verification?.[0];
+
+  // Reachability: default false so we never show Active prematurely.
+  const [reachable, setReachable] = useState(false);
+  const [checkingDns, setCheckingDns] = useState(false);
+  const reachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const doReachCheck = useCallback(async () => {
+    setCheckingDns(true);
+    try {
+      const ok = await checkDomainReachable(domain.domain);
+      setReachable(ok);
+    } finally {
+      setCheckingDns(false);
+    }
+  }, [domain.domain]);
+
+  // On mount (or when Vercel verification flips to true): run first check.
+  useEffect(() => {
+    if (!isVerifiedByVercel) return;
+    void doReachCheck();
+  }, [isVerifiedByVercel, doReachCheck]);
+
+  // Auto-poll every 30s while verified-but-not-reachable (State 2).
+  useEffect(() => {
+    if (!isVerifiedByVercel || reachable) {
+      if (reachPollRef.current) {
+        clearInterval(reachPollRef.current);
+        reachPollRef.current = null;
+      }
+      return;
+    }
+    if (reachPollRef.current) return;
+    reachPollRef.current = setInterval(() => void doReachCheck(), 30_000);
+    return () => {
+      if (reachPollRef.current) {
+        clearInterval(reachPollRef.current);
+        reachPollRef.current = null;
+      }
+    };
+  }, [isVerifiedByVercel, reachable, doReachCheck]);
+
+  const displayState: "pending-verification" | "dns-setup" | "active" =
+    !isVerifiedByVercel ? "pending-verification" : reachable ? "active" : "dns-setup";
 
   return (
     <div className="rounded-lg border border-[#e5e5e5] bg-white p-3">
+      {/* ── Header row ── */}
       <div className="flex items-center gap-2">
         <Globe
           size={14}
-          className={`flex-none ${isVerified ? "text-emerald-500" : "text-[#9ca3af]"}`}
+          className={`flex-none ${displayState === "active" ? "text-emerald-500" : "text-[#9ca3af]"}`}
         />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#1a1a1a]">
           {domain.domain}
         </span>
-        {isVerified ? (
+        {displayState === "active" && (
           <span className="flex-none rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
             Active
           </span>
-        ) : (
+        )}
+        {displayState === "dns-setup" && (
+          <span className="flex-none rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">
+            DNS setup required
+          </span>
+        )}
+        {displayState === "pending-verification" && (
           <span className="flex-none rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">
             Pending verification
           </span>
         )}
       </div>
 
-      {isVerified ? (
+      {/* ── State 3: Active ── */}
+      {displayState === "active" && (
         <div className="mt-3 flex items-center gap-3 text-xs">
           <a
             href={`https://${domain.domain}`}
@@ -961,9 +1016,86 @@ function DomainRow({
             {removing ? "Removing…" : "Remove"}
           </button>
         </div>
-      ) : (
+      )}
+
+      {/* ── State 2: DNS setup required ── */}
+      {displayState === "dns-setup" && (
         <>
-          {showVerificationCard && txt && (
+          <div className="mt-3 rounded-lg border border-[#f0e6d6] bg-[#fef7ea] p-3">
+            <p className="mb-2 text-xs font-medium text-[#92400e]">
+              Point your domain to Vercel by adding these DNS records:
+            </p>
+            <div className="mb-2 overflow-hidden rounded-md border border-[#f0e6d6]">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-[#f0e6d6] bg-[#fdf0dc]">
+                    <th className="py-1.5 pl-3 pr-2 text-left font-medium text-[#6b7280]">Type</th>
+                    <th className="py-1.5 px-2 text-left font-medium text-[#6b7280]">Host</th>
+                    <th className="py-1.5 px-2 text-left font-medium text-[#6b7280]">Value</th>
+                    <th className="w-8 py-1.5 pr-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-[#f0e6d6]">
+                    <td className="py-1.5 pl-3 pr-2 font-mono text-[#1a1a1a]">A</td>
+                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">@</td>
+                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">76.76.21.21</td>
+                    <td className="py-1.5 pr-2">
+                      <CopyBtn
+                        text="76.76.21.21"
+                        k={`${domain.domain}:arecord`}
+                        copied={copied}
+                        onCopy={onCopy}
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pl-3 pr-2 font-mono text-[#1a1a1a]">CNAME</td>
+                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">www</td>
+                    <td className="py-1.5 px-2 font-mono text-[#1a1a1a]">cname.vercel-dns.com</td>
+                    <td className="py-1.5 pr-2">
+                      <CopyBtn
+                        text="cname.vercel-dns.com"
+                        k={`${domain.domain}:cname`}
+                        copied={copied}
+                        onCopy={onCopy}
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-[#92400e]/70">
+              Changes may take up to 24 hours to propagate.
+            </p>
+          </div>
+          <div className="mt-3 flex items-center gap-3 text-xs">
+            <button
+              onClick={() => void doReachCheck()}
+              disabled={checkingDns}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#e5e5e5] bg-white px-2.5 py-1 font-medium text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6] disabled:opacity-50"
+            >
+              {checkingDns ? (
+                <><Loader size={11} className="animate-spin" /> Checking…</>
+              ) : (
+                <><RefreshCw size={11} /> Check DNS</>
+              )}
+            </button>
+            <button
+              onClick={onRemove}
+              disabled={removing}
+              className="text-[#9ca3af] transition-colors hover:text-red-500 disabled:opacity-50"
+            >
+              {removing ? "Removing…" : "Remove"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── State 1: Pending TXT verification ── */}
+      {displayState === "pending-verification" && (
+        <>
+          {showTxtCard && txt && (
             <div className="mt-3 rounded-lg border border-[#f0e6d6] bg-[#fef7ea] p-3">
               <p className="mb-2 text-xs font-medium text-[#92400e]">
                 Add this TXT record to your DNS:
@@ -975,9 +1107,7 @@ function DomainRow({
                 </div>
                 <div className="flex items-center gap-2">
                   <dt className="w-14 flex-none font-medium text-[#6b7280]">Name</dt>
-                  <dd className="min-w-0 flex-1 break-all font-mono text-[#1a1a1a]">
-                    {txt.domain}
-                  </dd>
+                  <dd className="min-w-0 flex-1 break-all font-mono text-[#1a1a1a]">{txt.domain}</dd>
                   <CopyBtn
                     text={txt.domain}
                     k={`${domain.domain}:name`}
@@ -987,9 +1117,7 @@ function DomainRow({
                 </div>
                 <div className="flex items-center gap-2">
                   <dt className="w-14 flex-none font-medium text-[#6b7280]">Value</dt>
-                  <dd className="min-w-0 flex-1 break-all font-mono text-[#1a1a1a]">
-                    {txt.value}
-                  </dd>
+                  <dd className="min-w-0 flex-1 break-all font-mono text-[#1a1a1a]">{txt.value}</dd>
                   <CopyBtn
                     text={txt.value}
                     k={`${domain.domain}:value`}
@@ -1010,13 +1138,9 @@ function DomainRow({
               className="inline-flex items-center gap-1.5 rounded-md border border-[#e5e5e5] bg-white px-2.5 py-1 font-medium text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6] disabled:opacity-50"
             >
               {verifying ? (
-                <>
-                  <Loader size={11} className="animate-spin" /> Checking…
-                </>
+                <><Loader size={11} className="animate-spin" /> Checking…</>
               ) : (
-                <>
-                  <RefreshCw size={11} /> Check verification
-                </>
+                <><RefreshCw size={11} /> Check verification</>
               )}
             </button>
             <button

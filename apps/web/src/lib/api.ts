@@ -820,6 +820,24 @@ export async function removeCustomDomain(
   );
 }
 
+/**
+ * BEO-563: Lightweight client-side check to determine if a custom domain is
+ * reachable. Returns true only when the domain resolves and serves a 200-level
+ * response. A network failure (DNS not yet propagated, timeout, CORS) returns
+ * false — this is the safe/expected default for newly-added domains.
+ */
+export async function checkDomainReachable(domain: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://${domain}`, {
+      method: "HEAD",
+      signal: AbortSignal.timeout(5000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Fix API ────────────────────────────────────────────────────
 
 export async function fixFile(args: {
