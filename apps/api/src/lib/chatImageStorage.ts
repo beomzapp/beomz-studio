@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 
 import {
-  buildStudioAssetProxyUrl,
+  buildAssetProxyUrl,
   createStudioStorageClient,
 } from "./studioAssetProxy.js";
 
@@ -74,7 +74,7 @@ export function createChatImagePath(input: {
 }
 
 export function buildChatImageProxyUrl(path: string): string {
-  return buildStudioAssetProxyUrl(CHAT_IMAGES_BUCKET, path);
+  return buildAssetProxyUrl(CHAT_IMAGES_BUCKET, path);
 }
 
 export async function ensureChatImagesBucket(): Promise<void> {

@@ -14,8 +14,8 @@ export function isStudioProxyableBucket(value: string): value is StudioProxyable
   return STUDIO_PROXYABLE_BUCKETS.includes(value as StudioProxyableBucket);
 }
 
-export function buildStudioAssetProxyUrl(
-  bucket: StudioProxyableBucket,
+export function buildAssetProxyUrl(
+  bucket: string,
   path: string,
 ): string {
   const params = new URLSearchParams({ bucket, path });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  buildStudioAssetProxyUrl,
+  buildAssetProxyUrl,
   createStudioStorageClient,
 } from "./studioAssetProxy.js";
 
@@ -63,7 +63,7 @@ export function createProjectAssetPath(
 }
 
 export function buildProjectAssetPublicUrl(path: string): string {
-  return buildStudioAssetProxyUrl(PROJECT_ASSETS_BUCKET, path);
+  return buildAssetProxyUrl(PROJECT_ASSETS_BUCKET, path);
 }
 
 export async function ensureProjectAssetsBucket(): Promise<void> {

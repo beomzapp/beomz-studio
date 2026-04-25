@@ -7,13 +7,13 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const {
   STUDIO_ASSET_PROXY_BASE_URL,
-  buildStudioAssetProxyUrl,
+  buildAssetProxyUrl,
   isStudioProxyableBucket,
 } = await import("./studioAssetProxy.js");
 
-test("buildStudioAssetProxyUrl returns a beomz API proxy URL", () => {
+test("buildAssetProxyUrl returns a beomz API proxy URL", () => {
   assert.equal(
-    buildStudioAssetProxyUrl("project-assets", "project-123/logo.png"),
+    buildAssetProxyUrl("project-assets", "project-123/logo.png"),
     `${STUDIO_ASSET_PROXY_BASE_URL}?bucket=project-assets&path=project-123%2Flogo.png`,
   );
 });

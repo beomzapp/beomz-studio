@@ -5,11 +5,12 @@ import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 import {
-  buildChatImageProxyUrl,
+  CHAT_IMAGES_BUCKET,
   uploadChatImage,
   CHAT_IMAGE_MAX_BYTES,
   isAllowedChatImageMimeType,
 } from "../../lib/chatImageStorage.js";
+import { buildAssetProxyUrl } from "../../lib/studioAssetProxy.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -88,8 +89,8 @@ export function createBuildsUploadImageRoute(deps: UploadImageRouteDeps = {}) {
         });
 
         return c.json({
-          imageUrl: buildChatImageProxyUrl(result.path),
-          url: buildChatImageProxyUrl(result.path),
+          imageUrl: buildAssetProxyUrl(CHAT_IMAGES_BUCKET, result.path),
+          url: buildAssetProxyUrl(CHAT_IMAGES_BUCKET, result.path),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown upload error.";
