@@ -54,6 +54,16 @@ function classifyFile(path: string, kind?: string): FileSection {
   return "OTHER";
 }
 
+/** BEO-570: has an active Vercel deployment when the API sends vercel_deployment_id or a beomz.app URL exists. */
+function projectHasActiveVercelDeployment(
+  project: BuildStatusResponse["project"],
+  beomzAppUrlFallback: string | null,
+): boolean {
+  const id = (project as { vercel_deployment_id?: string | null }).vercel_deployment_id;
+  if (typeof id === "string" && id.trim().length > 0) return true;
+  return Boolean(beomzAppUrlFallback?.trim());
+}
+
 export function ProjectPage() {
   const { id } = useParams({ from: "/studio/project/$id" });
   const navigate = useNavigate();
@@ -102,6 +112,7 @@ export function ProjectPage() {
   const {
     messages,
     isBuilding,
+    isIterationBuild,
     sendMessage,
     retryLastBuild,
     stopBuild,
@@ -115,7 +126,6 @@ export function ProjectPage() {
     implementSuggestion,
     dismissImplementSuggestion,
     isAnalysingImage,
-    isIterationBuild,
   } = useBuildChat(id, {
     onEvent: handleLegacyEvent,
     onProjectIdResolved: (newId, name, icon) => {
@@ -215,6 +225,8 @@ export function ProjectPage() {
   const [isPublished, setIsPublished] = useState(false);
   const [beomzAppUrl, setBeomzAppUrl] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  /** BEO-570: preview ahead of last live Vercel deploy; cleared on successful redeploy (local only). */
+  const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   // BEO-576: DB-backed custom domain state (sourced from project record on load)
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
@@ -316,6 +328,14 @@ export function ProjectPage() {
                 setBuildFailed(true);
                 setBuildErrorMessage("Build completed but no files were generated. Please try again.");
                 return;
+              }
+
+              // BEO-570: iteration on a project with a live Vercel deploy — preview is ahead until redeploy
+              if (
+                isIterationBuild
+                && projectHasActiveVercelDeployment(status.project, beomzAppUrl)
+              ) {
+                setHasUnsyncedChanges(true);
               }
 
               if (status.project.name && status.project.name !== "Untitled project") {
@@ -943,10 +963,12 @@ export function ProjectPage() {
         activeView={activeView}
         onActiveViewChange={handleActiveViewChange}
         isPublished={Boolean(beomzAppUrl) || isPublished}
+        hasUnpublishedChanges={hasUnsyncedChanges}
         onPublish={() => setShowPublishModal(true)}
         onExportZip={handleExportZip}
         isExporting={isExporting}
         beomzAppUrl={beomzAppUrl}
+        hasUnsyncedChanges={hasUnsyncedChanges}
         plan={credits?.plan ?? "free"}
         versionHistoryOpen={showVersionHistory}
         onToggleVersionHistory={handleToggleVersionHistory}
@@ -1065,6 +1087,7 @@ export function ProjectPage() {
           onClose={() => setShowPublishModal(false)}
           onVercelDeployed={url => {
             setBeomzAppUrl(url);
+            setHasUnsyncedChanges(false);
           }}
           onVercelUnpublished={() => {
             setBeomzAppUrl(null);

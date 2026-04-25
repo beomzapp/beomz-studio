@@ -70,6 +70,8 @@ interface TopBarProps {
   onExportZip?: () => void;
   isExporting?: boolean;
   beomzAppUrl?: string | null;
+  /** BEO-570: local flag — true when preview is ahead of live Vercel (iteration after publish) */
+  hasUnsyncedChanges?: boolean;
   phaseMode?: boolean;
   currentPhase?: number;
   phasesTotal?: number;
@@ -112,6 +114,7 @@ export function TopBar({
   onExportZip,
   isExporting = false,
   beomzAppUrl,
+  hasUnsyncedChanges = false,
   phaseMode = false,
   currentPhase = 0,
   phasesTotal = 0,
@@ -311,15 +314,22 @@ export function TopBar({
           )}
         </div>
 
-        {/* beomz.app pill */}
+        {/* beomz.app pill + BEO-570 unsynced indicator */}
         {beomzAppUrl && (
-          <button
-            onClick={() => window.open(beomzAppUrl.startsWith("http") ? beomzAppUrl : `https://${beomzAppUrl}`, "_blank")}
-            className="flex items-center gap-1 rounded-full bg-[#111] px-2.5 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-[#333]"
-          >
-            <span className="text-[10px]">▲</span>
-            beomz.app
-          </button>
+          <div className="flex max-w-[120px] flex-col items-stretch gap-0.5 sm:max-w-none sm:flex-row sm:items-center sm:gap-1">
+            {hasUnsyncedChanges && (
+              <span className="whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-center text-[10px] font-medium text-amber-800">
+                Not synced
+              </span>
+            )}
+            <button
+              onClick={() => window.open(beomzAppUrl.startsWith("http") ? beomzAppUrl : `https://${beomzAppUrl}`, "_blank")}
+              className="flex items-center justify-center gap-1 rounded-full bg-[#111] px-2.5 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-[#333]"
+            >
+              <span className="text-[10px]">▲</span>
+              beomz.app
+            </button>
+          </div>
         )}
 
         {/* Publish button with states */}
