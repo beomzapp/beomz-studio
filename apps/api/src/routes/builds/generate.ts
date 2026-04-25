@@ -26,7 +26,6 @@ import type {
   BuilderV3Operation,
   BuilderV3DoneEvent,
   BuilderV3ErrorEvent,
-  BuilderV3ImageIntentEvent,
   BuilderV3NextStepsEvent,
   BuilderV3PreambleEvent,
   BuilderV3StatusEvent,
@@ -48,7 +47,6 @@ import { apiConfig } from "../../config.js";
 import { activeBuilds } from "../../lib/activeBuilds.js";
 import { generateNextStepsWithUsage, generateStagePreambleWithUsage } from "../../lib/buildNarration.js";
 import { createBuildStageEmitter } from "../../lib/buildStageEvents.js";
-import { classifyImageIntent } from "../../lib/classifyImageIntent.js";
 import {
   CONVERSATIONAL_COST,
   NEGATIVE_FLOOR_CONST,
@@ -2151,8 +2149,8 @@ function buildIterationSelection(
 
   const optimizedUserContent = imageUrl
     ? [
-        { type: "text", text: optimizedText, cache_control: { type: "ephemeral" } } as any,
         buildAnthropicImageBlock(imageUrl),
+        { type: "text", text: optimizedText, cache_control: { type: "ephemeral" } } as any,
       ]
     : [
         { type: "text", text: optimizedText, cache_control: { type: "ephemeral" } } as any,
@@ -2364,12 +2362,12 @@ function buildBaselineIterationAnthropicUserContent(
   }
 
   return [
+    buildAnthropicImageBlock(imageUrl),
     {
       type: "text",
       text: filesContext,
       cache_control: { type: "ephemeral" },
     } as any,
-    buildAnthropicImageBlock(imageUrl),
     { type: "text", text: editRequest },
   ];
 }
@@ -3209,6 +3207,7 @@ function mapIntentToBuildIntent(intent: Intent, hasExistingProject: boolean): Bu
 export async function detectIntent(
   prompt: string,
   hasExistingProject: boolean,
+  hasImage = false,
   projectName?: string,
   originalPrompt?: string,
 ): Promise<BuildIntent> {
@@ -3218,7 +3217,7 @@ export async function detectIntent(
         ? `${prompt}\n\nProject: ${projectName}\nOriginal prompt: ${originalPrompt}`
         : prompt,
       hasExistingProject,
-      false,
+      hasImage,
     );
     return mapIntentToBuildIntent(classified.intent, hasExistingProject);
   } catch (err) {
@@ -3445,16 +3444,13 @@ Example: "Done — I've darkened the sidebar to a deeper grey and improved the i
 export async function runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
-  deps: {
-    classifyImageIntent?: typeof classifyImageIntent;
-  } = {},
 ): Promise<void> {
   const { buildId, projectId, prompt, templateId, model, requestedAt, userId } = input;
 
   activeBuilds.add(buildId);
 
   try {
-    await _runBuildInBackground(input, db, deps);
+    await _runBuildInBackground(input, db);
   } finally {
     activeBuilds.delete(buildId);
   }
@@ -3463,14 +3459,10 @@ export async function runBuildInBackground(
 async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
-  deps: {
-    classifyImageIntent?: typeof classifyImageIntent;
-  } = {},
 ): Promise<void> {
   const { buildId, projectId, orgId, userEmail, templateId, model, requestedAt, userId } = input;
   // BEO-372: use let so we can override with a combined prompt for clarification answers.
   let prompt = input.prompt;
-  const imageIntentClassifier = deps.classifyImageIntent ?? classifyImageIntent;
   const op = input.isIteration ? "iteration" : ("initial_build" as const);
   let eventSeq = 10; // start at 10; start.ts already wrote event 1 (queued)
   const nextId = () => String(eventSeq++);
@@ -3484,7 +3476,6 @@ async function _runBuildInBackground(
     nextId,
     emit: (event) => appendEventToDb(db, buildId, event as unknown as BuilderV3StatusEvent),
   });
-  const imageConfirmationPending = Boolean(input.imageUrl && !input.confirmedIntent);
   const imageConfirmed = Boolean(input.imageUrl && input.confirmedIntent);
   let projectChatHistory: ProjectChatHistoryEntry[] = [];
   let projectChatSummary: string | null = null;
@@ -3503,65 +3494,6 @@ async function _runBuildInBackground(
   }
 
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
-
-  if (!input.phaseOverride && !input.confirmedScope && imageConfirmationPending && input.imageUrl) {
-    await appendSessionEventToDb(db, buildId, {
-      type: "user",
-      content: input.sourcePrompt,
-      imageUrl: input.imageUrl,
-    });
-
-    const imageIntent = await imageIntentClassifier({
-      imageUrl: input.imageUrl,
-      userText: input.sourcePrompt,
-    });
-
-    const imageIntentEvent: BuilderV3ImageIntentEvent = {
-      type: "image_intent",
-      id: nextId(),
-      timestamp: ts(),
-      operation: op,
-      intent: imageIntent.intent,
-      description: imageIntent.description,
-      imageUrl: input.imageUrl,
-    };
-
-    await appendEventToDb(db, buildId, imageIntentEvent);
-    await appendSessionEventToDb(db, buildId, {
-      type: "image_intent",
-      intent: imageIntent.intent,
-      confidence: imageIntent.confidence,
-      description: imageIntent.description,
-      imageUrl: input.imageUrl,
-    });
-    await appendEventToDb(
-      db,
-      buildId,
-      {
-        type: "done",
-        id: nextId(),
-        timestamp: ts(),
-        operation: op,
-        buildId,
-        projectId,
-        code: "awaiting_image_confirmation",
-        message: "Image intent detected — awaiting confirmation.",
-        fallbackUsed: false,
-        conversational: true,
-      },
-      {
-        completed_at: ts(),
-        status: "completed",
-        summary: "Image intent detected — awaiting confirmation.",
-      },
-    );
-    console.log("[generate] image intent detected — awaiting confirmation.", {
-      buildId,
-      intent: imageIntent.intent,
-      confidence: imageIntent.confidence,
-    });
-    return;
-  }
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
   // If the previous completed generation for this project ended with a
@@ -3607,7 +3539,16 @@ async function _runBuildInBackground(
     } else {
       // BEO-371: pass project context so Haiku classifies recommendation/suggestion
       // messages as "question" rather than "build" when a project is already open.
-      detectedIntent = await detectIntent(prompt, hasExistingProject, input.projectName, input.sourcePrompt);
+      detectedIntent = await detectIntent(
+        prompt,
+        hasExistingProject,
+        Boolean(input.imageUrl),
+        input.projectName,
+        input.sourcePrompt,
+      );
+      if (input.imageUrl && detectedIntent === "ambiguous") {
+        detectedIntent = hasExistingProject ? "edit" : "build";
+      }
     }
     console.log("[generate] intent detected:", detectedIntent, {
       buildId,

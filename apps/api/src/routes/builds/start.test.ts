@@ -461,10 +461,12 @@ test("/builds/start skips plan summaries for iteration intents and queues the bu
   assert.equal(capturedBuildPrompt, "Update the app to use a red and blue theme throughout.");
 });
 
-test("/builds/start treats confirmed image intents as immediate build confirmations", async () => {
+test("/builds/start classifies image-attached requests normally and queues the build without clarification", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
+  let classifyIntentCalls = 0;
+  let capturedHasImage: boolean | null = null;
   let capturedConfirmedIntent: string | null = null;
   let capturedImageUrl: string | null = null;
   const project = {
@@ -525,7 +527,16 @@ test("/builds/start treats confirmed image intents as immediate build confirmati
             warnings: [],
           }),
           findLatestGenerationByProjectId: async () => ({
-            files: [],
+            files: [
+              {
+                path: "apps/web/src/app/generated/brand-refresh/App.tsx",
+                kind: "route",
+                language: "tsx",
+                content: "export default function App() { return null; }",
+                source: "ai",
+                locked: false,
+              },
+            ],
             metadata: {},
           }),
           findProjectById: async () => project,
@@ -547,8 +558,14 @@ test("/builds/start treats confirmed image intents as immediate build confirmati
       });
       await next();
     },
-    classifyIntent: async () => {
-      throw new Error("confirmed image intent should bypass intent detection");
+    classifyIntent: async (_prompt, _hasExistingFiles, hasImage) => {
+      classifyIntentCalls += 1;
+      capturedHasImage = hasImage;
+      return {
+        intent: "image_ref",
+        confidence: 0.95,
+        reason: "Image attached reference.",
+      };
     },
     runBuildInBackground: async (input) => {
       runBuildCalls += 1;
@@ -566,19 +583,23 @@ test("/builds/start treats confirmed image intents as immediate build confirmati
       prompt: "Yes, use it in the header and favicon",
       projectId: project.id,
       imageUrl: "https://storage.example.com/signed/logo.png",
-      confirmedIntent: "logo",
     }),
   });
 
   assert.equal(response.status, 202);
   const payload = await response.json() as {
     build: { status: string; summary: string | null };
+    trace: { events: Array<{ type: string }> };
   };
 
   assert.equal(payload.build.status, "queued");
-  assert.equal(payload.build.summary, "Queued initial build for Brand Refresh.");
+  assert.equal(payload.build.summary, "Queued requested changes for Brand Refresh.");
+  assert.equal(payload.trace.events.some((event) => event.type === "clarifying_question"), false);
+  assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
+  assert.equal(classifyIntentCalls, 1);
+  assert.equal(capturedHasImage, true);
   assert.equal(runBuildCalls, 1);
-  assert.equal(capturedConfirmedIntent, "logo");
+  assert.equal(capturedConfirmedIntent, null);
   assert.equal(capturedImageUrl, "https://storage.example.com/signed/logo.png");
 });
 

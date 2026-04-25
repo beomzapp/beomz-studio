@@ -613,7 +613,6 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
 
   const hasExistingIterationContext = Boolean(projectRow && existingFiles.length > 0);
   const isIteration = forceIteration || hasExistingIterationContext;
-  const isImageIntentConfirmation = Boolean(imageUrl && confirmedIntent);
 
   // BEO-465: feed the classifier the last few turns so it can accumulate
   // context across the conversation (e.g. user first says "I want a website",
@@ -629,11 +628,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && sourcePromptForComparison
     && storedImplementPlan === sourcePromptForComparison,
   );
-  const isImplementConfirmation = explicitImplementSignal || matchingStoredImplementPlan || isImageIntentConfirmation;
+  const isImplementConfirmation = explicitImplementSignal || matchingStoredImplementPlan;
   const confirmedBuildPrompt = explicitImplementPrompt
     ?? (matchingStoredImplementPlan ? storedImplementPlan : null)
     ?? (explicitImplementSignal ? sourcePromptForComparison : null);
-  const implementConfirmationIntent: Intent = (isIteration || isImageIntentConfirmation) ? "iteration" : "build_new";
+  const implementConfirmationIntent: Intent = isIteration ? "iteration" : "build_new";
   const intentDecision = forceIteration
     ? {
         intent: "iteration" as const,
@@ -745,7 +744,6 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     isImplementConfirmation,
     explicitImplementSignal,
     isIteration,
-    isImageIntentConfirmation,
     hasUserFeaturePreferences,
     hasUrlResearch: Boolean(urlResearchResult),
     hasUrlContextForConfidenceCap: Boolean(urlContextForConfidenceCap),
@@ -1087,7 +1085,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   // Only runs when the org is exhausted or already too negative so we avoid
   // the extra Haiku intent call for healthy balances. Question/ambiguous
   // prompts still pass through because they don't start a build here.
-  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable <= 0 && !(imageUrl && !confirmedIntent)) {
+  if (!isAdminEmail(userEmail) && !isIteration && totalAvailable <= 0) {
     if (legacyIntent === "build" || legacyIntent === "edit") {
       const reason = totalAvailable <= NEGATIVE_FLOOR_CONST
         ? "negative_floor_reached"

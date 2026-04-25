@@ -39,6 +39,22 @@ test("classifyIntent treats image-only messages as image_ref", async () => {
   assert.match(result.reason, /image-only/i);
 });
 
+test("classifyIntent routes image-attached edit prompts straight to iteration", async () => {
+  const result = await classifyIntent("use this as the logo", true, true);
+
+  assert.equal(result.intent, "iteration");
+  assert.equal(result.confidence, 0.95);
+  assert.match(result.reason, /image-attached edit/i);
+});
+
+test("classifyIntent routes image-attached new build prompts to image_ref", async () => {
+  const result = await classifyIntent("build around this visual", false, true);
+
+  assert.equal(result.intent, "image_ref");
+  assert.equal(result.confidence, 0.95);
+  assert.match(result.reason, /image-attached reference/i);
+});
+
 test("classifyIntent fallback detects research from URL-like content", async () => {
   const result = await classifyIntent("research https://mybos.com", false, false);
 

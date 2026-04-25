@@ -218,6 +218,16 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
   assert.match(source, /workingPrompt = input\.isIteration \? promptWithUrlGrounding : await enrichPrompt\(promptWithUrlGrounding\);/);
 });
 
+test("image attachments are passed directly into Anthropic content blocks with the image first", async () => {
+  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(source, /return \[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{ type: "text", text: userMessage \},\s*\];/);
+  assert.match(source, /const optimizedUserContent = imageUrl\s*\?\s*\[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{ type: "text", text: optimizedText, cache_control: \{ type: "ephemeral" \} \} as any,/);
+  assert.match(source, /return \[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{\s*type: "text",\s*text: filesContext,/);
+  assert.doesNotMatch(source, /awaiting_image_confirmation/);
+  assert.doesNotMatch(source, /type:\s*"image_intent"/);
+});
+
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
 

@@ -220,6 +220,17 @@ export async function classifyIntent(
     };
   }
 
+  if (hasImage) {
+    return {
+      intent: hasExistingFiles ? "iteration" : "image_ref",
+      confidence: 0.95,
+      reason: hasExistingFiles
+        ? "Hard-coded image-attached edit rule."
+        : "Hard-coded image-attached reference rule.",
+      accumulatedContext: trimmed.length > 0 ? trimmed : undefined,
+    };
+  }
+
   if (trimmed.length <= 6) {
     return {
       intent: "greeting",
