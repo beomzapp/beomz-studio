@@ -17,6 +17,7 @@ import {
   getApiBaseUrl,
   getBuildStatus,
   getLatestBuildForProject,
+  handleUnauthorizedResponse,
   NetworkDisconnectError,
   type BuildStatusResponse,
   type StartBuildResponse,
@@ -1391,6 +1392,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               signal: controller.signal,
             });
 
+            if (!resp.ok) {
+              await handleUnauthorizedResponse(resp);
+            }
+
             if (!resp.ok || !resp.body) {
               throw new Error(`Chat request failed with ${resp.status}`);
             }
@@ -1570,7 +1575,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           },
           body: JSON.stringify({ messages: thread }),
         });
-        if (!resp.ok) throw new Error(`Summarise failed with ${resp.status}`);
+        if (!resp.ok) {
+          await handleUnauthorizedResponse(resp);
+          throw new Error(`Summarise failed with ${resp.status}`);
+        }
         const data = await resp.json() as { prompt: string };
         prompt = data.prompt;
       } catch (err) {

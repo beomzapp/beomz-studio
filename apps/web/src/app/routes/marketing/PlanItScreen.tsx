@@ -19,7 +19,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Send } from "lucide-react";
-import { getApiBaseUrl } from "../../../lib/api";
+import { getApiBaseUrl, handleUnauthorizedResponse } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
@@ -186,7 +186,10 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
           },
           body: JSON.stringify({ prompt, history }),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          await handleUnauthorizedResponse(res);
+          return null;
+        }
         return (await res.json()) as AnalyzeResult;
       } catch {
         return null;

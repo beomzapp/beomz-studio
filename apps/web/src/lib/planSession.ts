@@ -8,6 +8,7 @@ import type {
 
 import {
   createPlanSession,
+  handleUnauthorizedResponse,
   getAccessToken,
   getApiBaseUrl,
   getLatestActivePlanSession,
@@ -65,6 +66,7 @@ async function streamPlanJson<T>(input: {
   });
 
   if (!response.ok) {
+    await handleUnauthorizedResponse(response);
     const errorBody = await response.json().catch(() => null) as
       | { error?: string }
       | null;

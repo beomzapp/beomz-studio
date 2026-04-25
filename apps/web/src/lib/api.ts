@@ -62,6 +62,7 @@ export interface StartBuildResponse {
 
 const DEFAULT_API_BASE_URL = "https://beomz-studioapi-production.up.railway.app";
 let accessTokenPromise: Promise<string> | null = null;
+let signOutPromise: Promise<void> | null = null;
 
 function normalizeRequiredString(value: unknown, label: string): string {
   if (typeof value !== "string") {
@@ -159,6 +160,32 @@ export async function getAccessToken(): Promise<string> {
   return accessTokenPromise;
 }
 
+export async function signOutAndRedirectToLogin(): Promise<void> {
+  if (!signOutPromise) {
+    signOutPromise = (async () => {
+      try {
+        await supabase.auth.signOut();
+      } catch (error) {
+        console.error("[auth] Failed to sign out after 401:", error);
+      }
+
+      if (typeof window !== "undefined" && window.location.pathname !== "/auth/login") {
+        window.location.assign("/auth/login");
+      }
+    })().finally(() => {
+      signOutPromise = null;
+    });
+  }
+
+  return signOutPromise;
+}
+
+export async function handleUnauthorizedResponse(response: Pick<Response, "status">): Promise<void> {
+  if (response.status === 401) {
+    await signOutAndRedirectToLogin();
+  }
+}
+
 async function requestJson<TResponse>(
   path: string,
   init: RequestInit,
@@ -192,6 +219,7 @@ async function requestJson<TResponse>(
   }
 
   if (!response.ok) {
+    await handleUnauthorizedResponse(response);
     const errorBody = await response.json().catch(() => null) as
       | { error?: string; details?: unknown }
       | null;
@@ -231,6 +259,7 @@ export async function uploadImage(
     body: form,
   });
   if (!resp.ok) {
+    await handleUnauthorizedResponse(resp);
     const text = await resp.text().catch(() => "Upload failed");
     throw new Error(text || `Upload failed with ${resp.status}`);
   }
@@ -698,6 +727,7 @@ export async function exportProjectZip(projectId: string): Promise<Blob> {
     headers: { authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) {
+    await handleUnauthorizedResponse(response);
     const errorBody = await response.json().catch(() => null) as { error?: string } | null;
     throw new Error(errorBody?.error ?? `Export failed with ${response.status}.`);
   }
@@ -892,6 +922,7 @@ export async function startNextPhase(projectId: string): Promise<Response> {
     },
   });
   if (!response.ok) {
+    await handleUnauthorizedResponse(response);
     const errorBody = await response.json().catch(() => null) as { error?: string } | null;
     throw new Error(errorBody?.error ?? `Next phase failed with ${response.status}.`);
   }
@@ -980,6 +1011,7 @@ export async function uploadUserAvatar(file: File): Promise<{ avatar_url: string
     body: form,
   });
   if (!resp.ok) {
+    await handleUnauthorizedResponse(resp);
     const body = await resp.json().catch(() => null) as { error?: string } | null;
     throw new Error(body?.error ?? `Avatar upload failed with ${resp.status}.`);
   }
@@ -1133,6 +1165,7 @@ export async function streamBuildEvents(args: {
   }
 
   if (!response.ok) {
+    await handleUnauthorizedResponse(response);
     const errorBody = await response.json().catch(() => null) as Record<string, unknown> | null;
     throw new StreamHttpError(response.status, errorBody);
   }

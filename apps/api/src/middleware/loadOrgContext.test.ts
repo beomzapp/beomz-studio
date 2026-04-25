@@ -60,9 +60,10 @@ function buildOrg(overrides: Partial<OrgRow> = {}): OrgRow {
 function createApp(options: {
   authStore: {
     ensureOrgMembership: (input: { org_id: string; role: string; user_id: string }) => Promise<void>;
+    findAuthUserById: (authUserId: string) => Promise<{ id: string } | null>;
     findMembershipByUserId: (userId: string) => Promise<OrgMembershipRow | null>;
     findUserByEmail: (email: string) => Promise<UserRow | null>;
-    upsertUserByEmail: (input: { email: string; platformUserId: string }) => Promise<UserRow>;
+    upsertUserByEmail: (input: { email: string; platformUserId: string }) => Promise<UserRow | null>;
   };
   db: {
     createOrg: (input: { credits: number; name: string; owner_id: string }) => Promise<OrgRow>;
@@ -115,6 +116,10 @@ test("reuses the existing org when Google OAuth resolves an existing email", asy
       authStore: {
         ensureOrgMembership: async () => {
           throw new Error("membership should not be created");
+        },
+        findAuthUserById: async (authUserId) => {
+          assert.equal(authUserId, "google-user-2");
+          return { id: authUserId };
         },
         findMembershipByUserId: async () => membership,
         findUserByEmail: async (email) => {
@@ -191,6 +196,10 @@ test("creates the first org only for a genuine first signup", async () => {
       authStore: {
         ensureOrgMembership: async (input) => {
           membershipCreates.push(input);
+        },
+        findAuthUserById: async (authUserId) => {
+          assert.equal(authUserId, "google-user-3");
+          return { id: authUserId };
         },
         findMembershipByUserId: async (userId) => {
           membershipLookups.push(userId);
@@ -277,6 +286,10 @@ test("updates the stored email when the platform user already exists", async () 
         ensureOrgMembership: async () => {
           throw new Error("membership should not be created");
         },
+        findAuthUserById: async (authUserId) => {
+          assert.equal(authUserId, "platform-user-1");
+          return { id: authUserId };
+        },
         findMembershipByUserId: async () => membership,
         findUserByEmail: async () => {
           throw new Error("email lookup should not be needed");
@@ -325,4 +338,102 @@ test("updates the stored email when the platform user already exists", async () 
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test("returns 401 when the Supabase auth user no longer exists", async () => {
+  const app = createApp({
+    authStore: {
+      ensureOrgMembership: async () => {
+        throw new Error("membership should not be created");
+      },
+      findAuthUserById: async (authUserId) => {
+        assert.equal(authUserId, "deleted-auth-user");
+        return null;
+      },
+      findMembershipByUserId: async () => {
+        throw new Error("membership lookup should not run");
+      },
+      findUserByEmail: async () => {
+        throw new Error("email lookup should not run");
+      },
+      upsertUserByEmail: async () => {
+        throw new Error("upsert should not run");
+      },
+    },
+    db: {
+      createOrg: async () => {
+        throw new Error("org should not be created");
+      },
+      findOrgById: async () => {
+        throw new Error("org lookup should not run");
+      },
+      findUserByPlatformUserId: async () => {
+        throw new Error("user lookup should not run");
+      },
+      updateUserEmail: async () => {
+        throw new Error("email should not be updated");
+      },
+    },
+    jwt: {
+      email: "deleted@example.com",
+      sub: "deleted-auth-user",
+    },
+  });
+
+  const response = await app.request("http://localhost/");
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "User not found" });
+});
+
+test("returns 401 when user upsert resolves no platform user row", async () => {
+  const app = createApp({
+    authStore: {
+      ensureOrgMembership: async () => {
+        throw new Error("membership should not be created");
+      },
+      findAuthUserById: async (authUserId) => {
+        assert.equal(authUserId, "google-user-4");
+        return { id: authUserId };
+      },
+      findMembershipByUserId: async () => {
+        throw new Error("membership lookup should not run");
+      },
+      findUserByEmail: async (email) => {
+        assert.equal(email, "missing@example.com");
+        return null;
+      },
+      upsertUserByEmail: async (input) => {
+        assert.deepEqual(input, {
+          email: "missing@example.com",
+          platformUserId: "google-user-4",
+        });
+        return null;
+      },
+    },
+    db: {
+      createOrg: async () => {
+        throw new Error("org should not be created");
+      },
+      findOrgById: async () => {
+        throw new Error("org lookup should not run");
+      },
+      findUserByPlatformUserId: async (platformUserId) => {
+        assert.equal(platformUserId, "google-user-4");
+        return null;
+      },
+      updateUserEmail: async () => {
+        throw new Error("email should not be updated");
+      },
+    },
+    jwt: {
+      email: "missing@example.com",
+      sub: "google-user-4",
+    },
+  });
+
+  const response = await app.request("http://localhost/");
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "User not found" });
 });

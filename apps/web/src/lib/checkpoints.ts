@@ -5,7 +5,7 @@
  * direct Supabase client queries, avoiding RLS policy requirements.
  */
 
-import { getApiBaseUrl, getAccessToken } from "./api";
+import { getApiBaseUrl, getAccessToken, handleUnauthorizedResponse } from "./api";
 
 export interface Checkpoint {
   id: string;
@@ -37,6 +37,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
   });
 
   if (!res.ok) {
+    await handleUnauthorizedResponse(res);
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ?? `Request failed (${res.status})`);
   }

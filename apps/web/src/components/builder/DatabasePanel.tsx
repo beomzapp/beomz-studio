@@ -67,6 +67,7 @@ import {
   getLatestBuildForProject,
   getApiBaseUrl,
   getAccessToken,
+  handleUnauthorizedResponse,
   type DbTable,
   type StorageAddonInfo,
   type SupabaseOAuthProject,
@@ -182,6 +183,7 @@ async function upgradeToByo(
     body: JSON.stringify({ supabaseUrl, supabaseAnonKey }),
   });
   if (!resp.ok) {
+    await handleUnauthorizedResponse(resp);
     const body = (await resp.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `Upgrade failed with ${resp.status}.`);
   }
@@ -2267,4 +2269,3 @@ function ConnectedHeader({
     </div>
   );
 }
-

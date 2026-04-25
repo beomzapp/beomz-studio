@@ -49,9 +49,10 @@ interface UserUpsertInput {
 
 interface AuthBootstrapStore {
   ensureOrgMembership(input: OrgMembershipInsert): Promise<void>;
+  findAuthUserById(authUserId: string): Promise<{ id: string } | null>;
   findMembershipByUserId(userId: string): Promise<OrgMembershipRow | null>;
   findUserByEmail(email: string): Promise<UserRow | null>;
-  upsertUserByEmail(input: UserUpsertInput): Promise<UserRow>;
+  upsertUserByEmail(input: UserUpsertInput): Promise<UserRow | null>;
 }
 
 interface LoadOrgContextDeps {
@@ -95,6 +96,20 @@ function createAuthBootstrapStore(): AuthBootstrapStore {
         throw new Error(response.error.message);
       }
     },
+    async findAuthUserById(authUserId) {
+      const response = await client.auth.admin.getUserById(authUserId);
+
+      if (response.error) {
+        const message = response.error.message.toLowerCase();
+        if (message.includes("not found") || message.includes("user") && message.includes("exist")) {
+          return null;
+        }
+
+        throw new Error(response.error.message);
+      }
+
+      return response.data.user ? { id: response.data.user.id } : null;
+    },
     async findMembershipByUserId(userId) {
       const response = await client
         .from("org_members")
@@ -132,29 +147,19 @@ function createAuthBootstrapStore(): AuthBootstrapStore {
             onConflict: "email",
           })
           .select("*")
-          .single<UserRow>();
+          .maybeSingle<UserRow>();
 
         return unwrapMaybeSingle(response);
       };
 
       try {
-        const user = await upsert(true);
-        if (!user) {
-          throw new Error("Expected user row from auth upsert.");
-        }
-
-        return user;
+        return await upsert(true);
       } catch (error) {
         if (!isMissingColumnError(error, "updated_at")) {
           throw error;
         }
 
-        const user = await upsert(false);
-        if (!user) {
-          throw new Error("Expected user row from auth upsert.");
-        }
-
-        return user;
+        return upsert(false);
       }
     },
   };
@@ -174,6 +179,11 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
       const db = createDbClient();
       const authStore = createAuthStore();
       const email = buildUserFallbackEmail(jwt);
+      const authUser = await authStore.findAuthUserById(jwt.sub);
+
+      if (!authUser) {
+        return c.json({ error: "User not found" }, 401);
+      }
 
       let user = await db.findUserByPlatformUserId(jwt.sub);
       let isNew = false;
@@ -185,6 +195,9 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
           email,
           platformUserId: jwt.sub,
         });
+        if (!user) {
+          return c.json({ error: "User not found" }, 401);
+        }
       } else if (user.email !== email) {
         user = await db.updateUserEmail(user.id, email);
       }

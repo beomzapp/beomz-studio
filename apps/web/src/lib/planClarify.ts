@@ -5,7 +5,7 @@
  * The server handles AI calls with its own API key.
  */
 
-import { getApiBaseUrl } from "./api";
+import { getApiBaseUrl, handleUnauthorizedResponse } from "./api";
 import { supabase } from "./supabase";
 
 export interface ClarifyOption {
@@ -85,7 +85,10 @@ export async function getClarifyQuestions(
       body: JSON.stringify({ prompt }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) throw new Error(`${res.status}`);
+    if (!res.ok) {
+      await handleUnauthorizedResponse(res);
+      throw new Error(`${res.status}`);
+    }
     const data = await res.json();
     return (data.questions ?? data) as ClarifyQuestion[];
   } catch {
@@ -113,7 +116,10 @@ export async function generatePlan(
       body: JSON.stringify({ prompt, answers }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) throw new Error(`${res.status}`);
+    if (!res.ok) {
+      await handleUnauthorizedResponse(res);
+      throw new Error(`${res.status}`);
+    }
     const data = await res.json();
     return (data.plan ?? data) as PlanBullet[];
   } catch {

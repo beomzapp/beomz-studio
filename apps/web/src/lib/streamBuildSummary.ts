@@ -3,7 +3,7 @@
  * The API key stays on the server; no VITE_ANTHROPIC_API_KEY needed.
  * Yields text deltas as an async generator for typewriter rendering.
  */
-import { getAccessToken, getApiBaseUrl } from "./api";
+import { getAccessToken, getApiBaseUrl, handleUnauthorizedResponse } from "./api";
 
 export async function* streamBuildSummary(
   userPrompt: string,
@@ -27,7 +27,12 @@ export async function* streamBuildSummary(
     signal,
   });
 
-  if (!res.ok || !res.body) return;
+  if (!res.ok) {
+    await handleUnauthorizedResponse(res);
+    return;
+  }
+
+  if (!res.body) return;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
