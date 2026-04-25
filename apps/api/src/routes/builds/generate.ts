@@ -865,11 +865,9 @@ function buildIterationImageEmbeddingInstruction(
   }
 
   return [
-    "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI using the EXACT image data that has been provided to you in this message. Do NOT redraw, recreate, approximate, or describe the image in any way. Do NOT use emoji or SVG as a substitute.",
-    "The correct usage is:",
-    `  As an img tag: <img src="data:${imageBlock.source.media_type};base64,${imageBlock.source.data}" alt="logo" />`,
-    `  As CSS: background-image: url('data:${imageBlock.source.media_type};base64,${imageBlock.source.data}')`,
-    "The base64 data is already available to you in this message — use it directly.",
+    "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI. The image data is already provided to you as a vision input in this message — extract that exact data from what you can see.",
+    `Embed it as: <img src="data:${imageBlock.source.media_type};base64,..." /> where the base64 value comes from the image you received, NOT a placeholder.`,
+    "Do NOT redraw, recreate, approximate, or describe the image. Use the actual data.",
   ].join("\n");
 }
 

@@ -126,18 +126,17 @@ test("iteration system prompt appends explicit data URI embedding instructions f
     null,
     false,
     [
-      "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI using the EXACT image data that has been provided to you in this message. Do NOT redraw, recreate, approximate, or describe the image in any way. Do NOT use emoji or SVG as a substitute.",
-      "The correct usage is:",
-      "  As an img tag: <img src=\"data:image/png;base64,abc123\" alt=\"logo\" />",
-      "  As CSS: background-image: url('data:image/png;base64,abc123')",
-      "The base64 data is already available to you in this message — use it directly.",
+      "CRITICAL: The user has attached an image. You MUST embed it directly in the code as a base64 data URI. The image data is already provided to you as a vision input in this message — extract that exact data from what you can see.",
+      "Embed it as: <img src=\"data:image/png;base64,...\" /> where the base64 value comes from the image you received, NOT a placeholder.",
+      "Do NOT redraw, recreate, approximate, or describe the image. Use the actual data.",
     ].join("\n"),
   );
 
   assert.match(prompt, /CRITICAL: The user has attached an image\./);
-  assert.match(prompt, /Do NOT redraw, recreate, approximate, or describe the image in any way\./);
-  assert.match(prompt, /<img src="data:image\/png;base64,abc123" alt="logo" \/>/);
-  assert.match(prompt, /background-image: url\('data:image\/png;base64,abc123'\)/);
+  assert.match(prompt, /vision input in this message/);
+  assert.match(prompt, /<img src="data:image\/png;base64,\.\.\." \/>/);
+  assert.match(prompt, /NOT a placeholder/);
+  assert.doesNotMatch(prompt, /abc123/);
 });
 
 test("iteration user message includes a project manifest, seed files, and the edit request", () => {
@@ -257,8 +256,9 @@ test("iteration flow resolves attached images to base64 and injects the exact da
   assert.match(source, /resolvedImageBlock = await resolveAnthropicImageBlock\(imageUrl\);/);
   assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(resolvedImageBlock\);/);
   assert.match(source, /const systemPrompt = buildIterationSystemPrompt\([\s\S]*imageEmbeddingInstructionBlock,\s*\);/);
-  assert.match(source, /As an img tag: <img src="data:\$\{imageBlock\.source\.media_type\};base64,\$\{imageBlock\.source\.data\}" alt="logo" \/>/);
-  assert.match(source, /As CSS: background-image: url\('data:\$\{imageBlock\.source\.media_type\};base64,\$\{imageBlock\.source\.data\}'\)/);
+  assert.match(source, /Embed it as: <img src="data:\$\{imageBlock\.source\.media_type\};base64,\.\.\." \/> where the base64 value comes from the image you received, NOT a placeholder\./);
+  assert.doesNotMatch(source, /imageBlock\.source\.data\}" alt="logo"/);
+  assert.doesNotMatch(source, /background-image: url\('data:\$\{imageBlock\.source\.media_type\};base64,\$\{imageBlock\.source\.data\}'\)/);
 });
 
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {
