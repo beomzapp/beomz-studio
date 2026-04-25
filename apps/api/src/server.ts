@@ -47,6 +47,7 @@ import {
   publicSlugRoute,
   publishRoute,
 } from "./routes/projects/publish.js";
+import projectVersionsRoute from "./routes/projects/versions.js";
 import { vercelDeployRoute, vercelDomainsRoute } from "./routes/projects/vercel.js";
 import nextPhaseRoute from "./routes/projects/next-phase.js";
 import supabaseIntegrationsRoute from "./routes/integrations/supabase.js";
@@ -189,6 +190,7 @@ app.route("/projects/:id/db", dbRouter);
 // BEO-262: Publish
 app.route("/projects/:id/publish", publishRoute);
 app.route("/projects/:id/export", exportRoute);
+app.route("/projects/:id/versions", projectVersionsRoute);
 app.route("/projects/check-slug", checkSlugRoute);
 app.route("/p", publicSlugRoute);
 // Vercel deploy — slug.beomz.app

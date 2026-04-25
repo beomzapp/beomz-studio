@@ -99,6 +99,7 @@ import {
 } from "../../lib/chatPrompts.js";
 import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
 import { uploadProjectAsset } from "../../lib/uploadProjectAsset.js";
+import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -4387,6 +4388,13 @@ async function _runBuildInBackground(
         existingFiles: iterFinalFiles,
         projectName: input.projectName,
       });
+      void saveProjectVersion(
+        projectId,
+        input.sourcePrompt.slice(0, 100),
+        studioFilesToVersionFiles(iterFinalFiles),
+      ).catch((err) => {
+        console.error("[versions] auto-save failed:", err);
+      });
       return;
     }
 
@@ -4704,6 +4712,13 @@ async function _runBuildInBackground(
     await persistProjectChatHistory(db, projectId, input.sourcePrompt, buildHistoryReply, {
       existingFiles: finalFiles,
       projectName: input.projectName,
+    });
+    void saveProjectVersion(
+      projectId,
+      input.sourcePrompt.slice(0, 100),
+      studioFilesToVersionFiles(finalFiles),
+    ).catch((err) => {
+      console.error("[versions] auto-save failed:", err);
     });
 
     // ── 5. Telemetry (non-fatal) ───────────────────────────────────────────
