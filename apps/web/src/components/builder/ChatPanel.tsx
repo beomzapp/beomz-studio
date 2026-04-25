@@ -49,6 +49,10 @@ interface ChatPanelProps {
   isBuilding: boolean;
   onSendMessage: (text: string, imageUrl?: string) => void;
   onStopStreaming?: () => void;
+  /** BEO-587: hard kill WebContainer + reset all state */
+  onForceStop?: () => void;
+  /** BEO-587: true from stop click until isBuilding settles to false */
+  isStopPending?: boolean;
   onRetry?: () => void;
   width?: number;
   suggestionChips?: string[];
@@ -88,6 +92,8 @@ export function ChatPanel({
   isBuilding,
   onSendMessage,
   onStopStreaming,
+  onForceStop,
+  isStopPending,
   onRetry,
   width = 380,
   suggestionChips,
@@ -114,6 +120,23 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const userScrolledUp = useRef(false);
+
+  // BEO-587: stop button state — turn red immediately on click, show force stop after 2s
+  const [stopClicked, setStopClicked] = useState(false);
+  const [showForceStop, setShowForceStop] = useState(false);
+  const forceStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset stop state once the build fully settles to idle
+  useEffect(() => {
+    if (!isBuilding && !isStopPending) {
+      setStopClicked(false);
+      setShowForceStop(false);
+      if (forceStopTimerRef.current) {
+        clearTimeout(forceStopTimerRef.current);
+        forceStopTimerRef.current = null;
+      }
+    }
+  }, [isBuilding, isStopPending]);
 
   // ─── BEO-182: Image state ─────────────────────────────────────────────────
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
@@ -510,13 +533,48 @@ export function ChatPanel({
             </div>
 
             {isBuilding ? (
-              <button
-                onClick={onStopStreaming}
-                className="rounded-lg bg-[#1a1a1a] p-1.5 text-white transition-colors hover:bg-[#333]"
-                title="Stop generating"
-              >
-                <Square size={14} />
-              </button>
+              <div className="flex flex-col items-end gap-1">
+                {/* Stop button — turns red immediately on click */}
+                <button
+                  onClick={() => {
+                    setStopClicked(true);
+                    // Arm force-stop reveal after 2s
+                    if (forceStopTimerRef.current) clearTimeout(forceStopTimerRef.current);
+                    forceStopTimerRef.current = setTimeout(() => {
+                      forceStopTimerRef.current = null;
+                      setShowForceStop(true);
+                    }, 2000);
+                    onStopStreaming?.();
+                  }}
+                  className={cn(
+                    "rounded-lg p-1.5 text-white transition-colors",
+                    stopClicked
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-[#1a1a1a] hover:bg-[#333]",
+                  )}
+                  title="Stop generating"
+                >
+                  <Square size={14} />
+                </button>
+                {/* Force stop — appears 2s after stop click if still building */}
+                {showForceStop && (
+                  <button
+                    onClick={() => {
+                      if (forceStopTimerRef.current) {
+                        clearTimeout(forceStopTimerRef.current);
+                        forceStopTimerRef.current = null;
+                      }
+                      setStopClicked(false);
+                      setShowForceStop(false);
+                      onForceStop?.();
+                    }}
+                    className="rounded px-2 py-0.5 text-[11px] font-medium text-red-500 ring-1 ring-red-500/60 transition-colors hover:bg-red-500 hover:text-white"
+                    title="Force stop — kills the preview container"
+                  >
+                    Force stop
+                  </button>
+                )}
+              </div>
             ) : (
               <button
                 onClick={handleSend}

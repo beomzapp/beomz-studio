@@ -30,7 +30,7 @@ import {
   type BuildPayload,
   type BuildStatusResponse,
 } from "../../../lib/api";
-import { getOrBootWebContainer, isWebContainerSupported } from "../../../lib/webcontainer";
+import { getOrBootWebContainer, isWebContainerSupported, teardownWebContainer } from "../../../lib/webcontainer";
 import { consumeProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
 import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
@@ -104,6 +104,7 @@ export function ProjectPage() {
     isBuilding,
     sendMessage,
     retryLastBuild,
+    stopBuild,
     buildDoneRef,
     subscribeToExistingBuild,
     notifyPreviewServerReady,
@@ -142,6 +143,20 @@ export function ProjectPage() {
       setShowOutOfCreditsModal(true);
     },
   });
+
+  // ─── BEO-587: Stop / force-stop state ────────────────────────────────────
+  const [isStopPending, setIsStopPending] = useState(false);
+  // Snapshot taken at the start of each iteration so we can revert if no FS writes happened.
+  const lastGoodSnapshotRef = useRef<{
+    buildResult: BuildStatusResponse["result"] | null;
+    previewGenerationId: string | null;
+  } | null>(null);
+  const filesWrittenThisBuildRef = useRef(false);
+
+  // Clear stop-pending when build settles to idle
+  useEffect(() => {
+    if (!isBuilding && isStopPending) setIsStopPending(false);
+  }, [isBuilding, isStopPending]);
 
   // ─── Build / preview state ────────────────────────────────────────────────
 
@@ -368,6 +383,7 @@ export function ProjectPage() {
   // Only lifts the overlay once the build has fully completed with real AI files.
 
   const handleFilesWrittenToWC = useCallback(() => {
+    filesWrittenThisBuildRef.current = true;
     if (!buildDoneRef.current) return;
     if (aiCustomisingTimeoutRef.current) {
       clearTimeout(aiCustomisingTimeoutRef.current);
@@ -389,6 +405,12 @@ export function ProjectPage() {
       setBuildErrorMessage(null);
       setCreditsUsed(null);
       buildDoneRef.current = false;
+      // BEO-587: snapshot current state before each new iteration so stop can revert if needed
+      lastGoodSnapshotRef.current = {
+        buildResult,
+        previewGenerationId: previewGenerationIdRef.current,
+      };
+      filesWrittenThisBuildRef.current = false;
       // BEO-374 Bug 4: snapshot the current preview ID so conversational done
       // can restore it and avoid reloading the preview for question answers.
       savedPreviewGenerationIdRef.current = previewGenerationIdRef.current;
@@ -401,7 +423,7 @@ export function ProjectPage() {
       }
       sendMessage(text, imageUrl, isSystem);
     },
-    [credits, sendMessage, buildDoneRef],
+    [credits, sendMessage, buildDoneRef, buildResult],
   );
 
   // ─── Wire to database (fires after Neon provisioning) ────────────────────
@@ -426,9 +448,49 @@ export function ProjectPage() {
   // ─── Stop streaming ───────────────────────────────────────────────────────
 
   const handleStopStreaming = useCallback(() => {
+    // BEO-587: abort the SSE stream and set idle immediately
+    stopBuild();
     setTransport("idle");
-    // The abort is handled inside useBuildChat; we just clean up local UI
-  }, [setTransport]);
+    // Clear any building overlay
+    if (aiCustomisingTimeoutRef.current) {
+      clearTimeout(aiCustomisingTimeoutRef.current);
+      aiCustomisingTimeoutRef.current = null;
+    }
+    setIsAiCustomising(false);
+    // Revert to last good snapshot if no files were written to WC yet
+    if (!filesWrittenThisBuildRef.current && lastGoodSnapshotRef.current) {
+      setBuildResult(lastGoodSnapshotRef.current.buildResult);
+      setPreviewGenerationId(lastGoodSnapshotRef.current.previewGenerationId);
+    }
+    setIsStopPending(true);
+  }, [stopBuild, setTransport]);
+
+  // ─── Force stop (BEO-587) ─────────────────────────────────────────────────
+
+  const handleForceStop = useCallback(async () => {
+    // Hard-kill the WebContainer — next build will boot fresh
+    stopBuild();
+    setTransport("idle");
+    if (aiCustomisingTimeoutRef.current) {
+      clearTimeout(aiCustomisingTimeoutRef.current);
+      aiCustomisingTimeoutRef.current = null;
+    }
+    setIsAiCustomising(false);
+    setIsStopPending(false);
+    setBuildFailed(false);
+    setBuildErrorMessage(null);
+    setCreditsUsed(null);
+    // Restore last known good files (even if partial writes occurred)
+    if (lastGoodSnapshotRef.current) {
+      setBuildResult(lastGoodSnapshotRef.current.buildResult);
+      setPreviewGenerationId(lastGoodSnapshotRef.current.previewGenerationId);
+    } else {
+      setBuildResult(null);
+      setPreviewGenerationId(null);
+    }
+    filesWrittenThisBuildRef.current = false;
+    await teardownWebContainer();
+  }, [stopBuild, setTransport]);
 
   // ─── Data fetches ─────────────────────────────────────────────────────────
 
@@ -850,6 +912,8 @@ export function ProjectPage() {
               projectId={projectId}
               onSendMessage={handleSendMessage}
               onStopStreaming={handleStopStreaming}
+              onForceStop={handleForceStop}
+              isStopPending={isStopPending}
               onRetry={retryLastBuild}
               width={chatPanelWidth}
               suggestionChips={suggestionChips}

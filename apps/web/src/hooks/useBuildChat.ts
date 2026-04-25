@@ -1771,6 +1771,32 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     };
   }, [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers]);
 
+  // ─── BEO-587: Stop build — abort immediately and return to idle ──────────
+
+  const stopBuild = useCallback(() => {
+    abortRef.current?.abort();
+    chatAbortRef.current?.abort();
+    clearPreambleAndStageTimers();
+    setIsBuilding(false);
+    setIsAnalysingImage(false);
+    isBuildInProgressRef.current = false;
+    buildDoneRef.current = false;
+    activeBuildingMsgIdRef.current = null;
+    // Remove the in-flight building card and thinking dots so UI returns to idle
+    setMessages(prev =>
+      prev.filter(m => {
+        if (m.type === "thinking") return false;
+        // Drop the live (unsummarised) building card — it was never completed
+        if (m.type === "building" && !(m as BuildingMsg).summary) return false;
+        return true;
+      }),
+    );
+    try {
+      sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+      sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+    } catch { /* ignore */ }
+  }, [clearPreambleAndStageTimers]);
+
   const retryLastBuild = useCallback(() => {
     const prompt = lastUserPromptRef.current;
     if (!prompt) return;
@@ -1844,6 +1870,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     isIterationBuild,
     sendMessage,
     retryLastBuild,
+    // BEO-587: immediate abort + idle
+    stopBuild,
     buildDoneRef,
     subscribeToExistingBuild,
     notifyPreviewServerReady,

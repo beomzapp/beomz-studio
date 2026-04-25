@@ -488,3 +488,13 @@ export async function getOrBootWebContainer(): Promise<WcInstance> {
 
   return bootingPromise;
 }
+
+/** BEO-587: Tear down the WebContainer singleton so the next boot is fresh. */
+export async function teardownWebContainer(): Promise<void> {
+  const inst = wcSingleton;
+  wcSingleton = null;
+  bootingPromise = null;
+  if (!inst) return;
+  try { inst.devProcess?.kill(); } catch { /* ignore */ }
+  try { await inst.wc.teardown(); } catch { /* ignore */ }
+}
