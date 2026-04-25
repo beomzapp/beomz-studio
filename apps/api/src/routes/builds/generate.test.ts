@@ -126,14 +126,15 @@ test("iteration system prompt appends explicit public URL embedding instructions
     null,
     false,
     [
-      "The user has attached an image. It is available at this public URL: https://egnkylrnmblvfpccnjps.supabase.co/storage/v1/object/public/project-assets/project-123/logo.png",
-      "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image. The URL is permanent and publicly accessible.",
+      "The user has attached an image. It is available at this Beomz-hosted image URL: https://beomz.ai/api/assets/image?bucket=project-assets&path=project-123%2Flogo.png",
+      "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). This URL is preview-safe and allowed even under COEP restrictions. Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image.",
     ].join("\n"),
   );
 
-  assert.match(prompt, /It is available at this public URL:/);
-  assert.match(prompt, /project-assets\/project-123\/logo\.png/);
+  assert.match(prompt, /It is available at this Beomz-hosted image URL:/);
+  assert.match(prompt, /bucket=project-assets/);
   assert.match(prompt, /Use this URL directly as the src attribute/);
+  assert.match(prompt, /preview-safe and allowed even under COEP restrictions/);
   assert.match(prompt, /Do NOT use a data URI/);
   assert.doesNotMatch(prompt, /base64,\.\.\./);
 });
@@ -257,7 +258,8 @@ test("iteration flow uploads attached images and injects the public asset URL in
   assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(uploadedImageUrl\);/);
   assert.match(source, /console\.log\("\[generate\] image URL to inject:", uploadedImageUrl\);/);
   assert.match(source, /const systemPrompt = buildIterationSystemPrompt\([\s\S]*imageEmbeddingInstructionBlock,\s*\);/);
-  assert.match(source, /It is available at this public URL: \$\{imageUrl\}/);
+  assert.match(source, /It is available at this Beomz-hosted image URL: \$\{imageUrl\}/);
+  assert.match(source, /preview-safe and allowed even under COEP restrictions/);
   assert.match(source, /Do NOT use a data URI/);
   assert.doesNotMatch(source, /base64,\.\.\./);
   assert.doesNotMatch(source, /imageBlock\.source\.data\}/);
@@ -271,6 +273,22 @@ test("iteration logs the source image URL before firing and warns if image conte
 
   assert.match(source, /console\.log\("\[generate\] iteration source image URL:", input\.imageUrl\);/);
   assert.match(source, /console\.warn\("\[generate\] iteration has image context but no image URL was provided\."\);/);
+});
+
+test("postProcessGeneratedFiles rewrites empty image data URIs to the uploaded asset URL", () => {
+  const { files } = postProcessGeneratedFiles([
+    {
+      path: "apps/web/src/app/generated/workspace-task/App.tsx",
+      kind: "route",
+      language: "tsx",
+      content: "export default function App(){return <img src=\"data:image/png;base64,\" alt=\"logo\" />;}\n",
+      source: "ai",
+      locked: false,
+    },
+  ], "workspace-task", "https://beomz.ai/api/assets/image?bucket=project-assets&path=project-123%2Flogo.png");
+
+  assert.equal(files[0]?.content.includes("data:image/png;base64,"), false);
+  assert.match(files[0]?.content ?? "", /https:\/\/beomz\.ai\/api\/assets\/image\?bucket=project-assets/);
 });
 
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {

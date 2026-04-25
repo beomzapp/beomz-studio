@@ -98,7 +98,7 @@ test("upload-image rejects non-image mime types", async () => {
   assert.match(await response.text(), /Only image uploads are supported/i);
 });
 
-test("upload-image returns a signed URL on success", async () => {
+test("upload-image returns a beomz proxy URL on success", async () => {
   const projectId = randomUUID();
   const route = createRoute(projectId, async () => ({
     path: `${projectId}/session/1746000000000.png`,
@@ -115,5 +115,8 @@ test("upload-image returns a signed URL on success", async () => {
   const payload = await response.json() as { url: string };
 
   assert.equal(response.status, 200);
-  assert.equal(payload.url, "https://storage.example.com/signed/chat-image");
+  assert.equal(
+    payload.url,
+    `https://beomz.ai/api/assets/image?bucket=chat-images&path=${encodeURIComponent(`${projectId}/session/1746000000000.png`)}`,
+  );
 });

@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { createClient } from "@supabase/supabase-js";
+import {
+  buildStudioAssetProxyUrl,
+  createStudioStorageClient,
+} from "./studioAssetProxy.js";
 
 export const PROJECT_ASSETS_BUCKET = "project-assets";
-export const STUDIO_PUBLIC_BASE_URL = "https://srflynvdrsdazxvcxmzb.supabase.co";
 export const STUDIO_SERVICE_ROLE_ENV_VAR = "STUDIO_SUPABASE_SERVICE_ROLE_KEY";
 
 const PROJECT_ASSET_ALLOWED_MIME_TYPES = [
@@ -17,31 +19,8 @@ type AllowedProjectAssetMimeType = (typeof PROJECT_ASSET_ALLOWED_MIME_TYPES)[num
 
 let ensureBucketPromise: Promise<void> | null = null;
 
-function getStudioSupabaseUrl(): string {
-  return STUDIO_PUBLIC_BASE_URL;
-}
-
-function getStudioServiceRoleKey(): string {
-  const key = process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!key) {
-    throw new Error(`${STUDIO_SERVICE_ROLE_ENV_VAR} is not configured`);
-  }
-
-  return key;
-}
-
 function createStorageClient() {
-  return createClient(
-    getStudioSupabaseUrl(),
-    getStudioServiceRoleKey(),
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    },
-  );
+  return createStudioStorageClient();
 }
 
 function isMissingBucketError(message: string): boolean {
@@ -84,7 +63,7 @@ export function createProjectAssetPath(
 }
 
 export function buildProjectAssetPublicUrl(path: string): string {
-  return `${STUDIO_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/${path}`;
+  return buildStudioAssetProxyUrl(PROJECT_ASSETS_BUCKET, path);
 }
 
 export async function ensureProjectAssetsBucket(): Promise<void> {
@@ -130,7 +109,7 @@ export async function uploadProjectAsset(
   console.log("[uploadProjectAsset] starting upload for project:", projectId);
   console.log(
     "[uploadProjectAsset] using key:",
-    process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ? "set" : "MISSING",
+    process.env[STUDIO_SERVICE_ROLE_ENV_VAR] ? "set" : "MISSING",
   );
 
   try {

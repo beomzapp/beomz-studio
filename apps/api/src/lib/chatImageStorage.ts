@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { extname } from "node:path";
 
-import { createClient } from "@supabase/supabase-js";
-
-import { apiConfig } from "../config.js";
+import {
+  buildStudioAssetProxyUrl,
+  createStudioStorageClient,
+} from "./studioAssetProxy.js";
 
 export const CHAT_IMAGES_BUCKET = "chat-images";
 export const CHAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-export const CHAT_IMAGE_SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 * 7;
 export const CHAT_IMAGE_ALLOWED_MIME_TYPES = [
   "image/png",
   "image/jpeg",
@@ -29,16 +29,7 @@ interface UploadChatImageInput {
 let ensureBucketPromise: Promise<void> | null = null;
 
 function createStorageClient() {
-  return createClient(
-    apiConfig.STUDIO_SUPABASE_URL,
-    apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    },
-  );
+  return createStudioStorageClient();
 }
 
 function isMissingBucketError(message: string): boolean {
@@ -80,6 +71,10 @@ export function createChatImagePath(input: {
   const timestamp = input.timestamp ?? Date.now();
   const extension = normaliseExtension(input.fileName, input.contentType);
   return `${input.projectId}/${sessionId}/${timestamp}${extension}`;
+}
+
+export function buildChatImageProxyUrl(path: string): string {
+  return buildStudioAssetProxyUrl(CHAT_IMAGES_BUCKET, path);
 }
 
 export async function ensureChatImagesBucket(): Promise<void> {
@@ -143,16 +138,8 @@ export async function uploadChatImage(input: UploadChatImageInput): Promise<{ pa
     throw new Error(uploadResult.error.message);
   }
 
-  const signedUrlResult = await client.storage
-    .from(CHAT_IMAGES_BUCKET)
-    .createSignedUrl(path, CHAT_IMAGE_SIGNED_URL_TTL_SECONDS);
-
-  if (signedUrlResult.error || !signedUrlResult.data?.signedUrl) {
-    throw new Error(signedUrlResult.error?.message ?? "Could not create signed URL.");
-  }
-
   return {
     path,
-    url: signedUrlResult.data.signedUrl,
+    url: buildChatImageProxyUrl(path),
   };
 }

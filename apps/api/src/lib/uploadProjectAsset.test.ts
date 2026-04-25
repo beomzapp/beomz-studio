@@ -7,7 +7,6 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const {
   PROJECT_ASSETS_BUCKET,
-  STUDIO_PUBLIC_BASE_URL,
   STUDIO_SERVICE_ROLE_ENV_VAR,
   buildProjectAssetPublicUrl,
   createProjectAssetPath,
@@ -32,7 +31,7 @@ test("createProjectAssetPath uses projectId and derived extension", () => {
 test("buildProjectAssetPublicUrl returns the expected public storage URL", () => {
   assert.equal(
     buildProjectAssetPublicUrl("project-123/asset-456.png"),
-    `${STUDIO_PUBLIC_BASE_URL}/storage/v1/object/public/${PROJECT_ASSETS_BUCKET}/project-123/asset-456.png`,
+    `https://beomz.ai/api/assets/image?bucket=${PROJECT_ASSETS_BUCKET}&path=project-123%2Fasset-456.png`,
   );
 });
 

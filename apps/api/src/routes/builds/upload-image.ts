@@ -4,7 +4,12 @@ import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 
-import { uploadChatImage, CHAT_IMAGE_MAX_BYTES, isAllowedChatImageMimeType } from "../../lib/chatImageStorage.js";
+import {
+  buildChatImageProxyUrl,
+  uploadChatImage,
+  CHAT_IMAGE_MAX_BYTES,
+  isAllowedChatImageMimeType,
+} from "../../lib/chatImageStorage.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -83,8 +88,8 @@ export function createBuildsUploadImageRoute(deps: UploadImageRouteDeps = {}) {
         });
 
         return c.json({
-          imageUrl: result.url,
-          url: result.url,
+          imageUrl: buildChatImageProxyUrl(result.path),
+          url: buildChatImageProxyUrl(result.path),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown upload error.";

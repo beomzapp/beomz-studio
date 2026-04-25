@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { Hono } from "hono";
 
 import { apiConfig } from "./config.js";
+import assetImageRoute from "./routes/assets/image.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
 import projectAuthRoute from "./routes/auth/project-auth.js";
@@ -136,6 +137,7 @@ app.use("*", async (c, next) => {
 
 app.get("/", (c) => c.json({ status: "ok" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
+app.route("/assets/image", assetImageRoute);
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);
 app.route("/me", meRoute);

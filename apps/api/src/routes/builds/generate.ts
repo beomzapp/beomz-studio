@@ -143,6 +143,7 @@ interface CustomiseResult {
   outputTokens: number;
   inputTokens?: number;
   iterationMetrics?: IterationMetrics;
+  attachedImageAssetUrl?: string;
 }
 
 const BYO_SUPABASE_SYSTEM_PROMPT_BLOCK = [
@@ -613,10 +614,20 @@ export function validateAndInjectStubs(
 export function postProcessGeneratedFiles(
   files: StudioFile[],
   templateId: string,
+  attachedImageAssetUrl?: string,
 ): { files: StudioFile[]; missing: string[] } {
   const rewrittenFiles = rewriteNeonImports(files);
   const { files: withStubs, missing } = validateAndInjectStubs(rewrittenFiles, templateId);
-  const filteredFiles = filterBlockedGeneratedFiles(withStubs);
+  const imageFixedFiles = !attachedImageAssetUrl
+    ? withStubs
+    : withStubs.map((file) => ({
+      ...file,
+      content: file.content.replace(
+        /data:image\/[a-zA-Z0-9.+-]+;base64,(?=(?:["')\s]|$))/g,
+        attachedImageAssetUrl,
+      ),
+    }));
+  const filteredFiles = filterBlockedGeneratedFiles(imageFixedFiles);
   return { files: filteredFiles, missing };
 }
 
@@ -866,8 +877,8 @@ function buildIterationImageEmbeddingInstruction(
   }
 
   return [
-    `The user has attached an image. It is available at this public URL: ${imageUrl}`,
-    "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image. The URL is permanent and publicly accessible.",
+    `The user has attached an image. It is available at this Beomz-hosted image URL: ${imageUrl}`,
+    "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). This URL is preview-safe and allowed even under COEP restrictions. Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image.",
   ].join("\n");
 }
 
@@ -3025,7 +3036,7 @@ async function callModelIterate(
   if (model.startsWith("claude-")) {
     console.log("[generate] iteration seed files:", selection.seedFiles.map((file) => file.basename));
     console.log("[generate] iteration manifest files:", existingFiles?.length ?? 0);
-    return callAnthropicIterateWithTools(
+    const result = await callAnthropicIterateWithTools(
       model,
       systemPrompt,
       prompt,
@@ -3035,6 +3046,10 @@ async function callModelIterate(
       instrumentation,
       resolvedImageBlock,
     );
+    return {
+      ...result,
+      attachedImageAssetUrl: uploadedImageUrl,
+    };
   }
 
   if (model.startsWith("gpt-")) {
@@ -4108,6 +4123,7 @@ async function _runBuildInBackground(
       const { files: iterPostProcessedFiles, missing: iterMissingImports } = postProcessGeneratedFiles(
         mergedIterFiles,
         templateId,
+        iterResult.attachedImageAssetUrl,
       );
       const iterFinalFiles = await injectProjectDatabaseEnv(db, projectId, iterPostProcessedFiles);
       if (iterMissingImports.length > 0) {
