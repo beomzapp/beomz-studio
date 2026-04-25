@@ -1023,7 +1023,26 @@ function DomainRow({
         <>
           <div className="mt-3 rounded-lg border border-[#f0e6d6] bg-[#fef7ea] p-3">
             <p className="mb-2 text-xs font-medium text-[#92400e]">
-              Point your domain to Vercel by adding these DNS records:
+              {domain.registrar?.trim() ? (
+                <>
+                  Your domain is registered with {domain.registrar.trim()}. Add these DNS records:
+                  {domain.docsUrl ? (
+                    <>
+                      {" "}
+                      <a
+                        href={domain.docsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-[#F97316] hover:underline"
+                      >
+                        DNS guide →
+                      </a>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                "Add these DNS records in your domain registrar's DNS settings:"
+              )}
             </p>
             <div className="mb-2 overflow-hidden rounded-md border border-[#f0e6d6]">
               <table className="w-full text-xs">

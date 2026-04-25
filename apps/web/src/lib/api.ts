@@ -746,6 +746,10 @@ export interface CustomDomain {
   /** Set when API returns a boolean (mirrors Vercel); prefer `status` in UI. */
   verified?: boolean;
   verification?: CustomDomainVerification[];
+  /** DNS registrar label from WHOIS/RDAP (BEO-566). */
+  registrar?: string | null;
+  /** Link to registrar DNS docs or management (BEO-566). */
+  docsUrl?: string | null;
 }
 
 /** API may return `verified` without `status`, or host under `name` / `hostname`. */
@@ -757,6 +761,8 @@ function normalizeCustomDomain(raw: unknown): CustomDomain {
     status?: string;
     verified?: boolean;
     verification?: CustomDomainVerification[];
+    registrar?: string | null;
+    docsUrl?: string | null;
   };
   const host =
     (typeof r.domain === "string" && r.domain) ||
@@ -777,6 +783,8 @@ function normalizeCustomDomain(raw: unknown): CustomDomain {
     /** Aligned with `status` so UI can use `!domain.verified` per API shape. */
     verified: status === "verified",
     verification: Array.isArray(r.verification) ? r.verification : undefined,
+    registrar: r.registrar,
+    docsUrl: r.docsUrl,
   };
 }
 
