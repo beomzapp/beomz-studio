@@ -11,6 +11,7 @@ process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const {
   createVercelDeployRoute,
+  injectFreePlanBeomzBadge,
   injectNeonEnvVars,
   resolveDeploySupabaseCredentials,
   replaceDeployEnvFile,
@@ -240,6 +241,96 @@ test("replaceDeployEnvFile adds src/.env.local for managed Neon deploys", () => 
     envFiles[0]?.content,
     "VITE_DATABASE_URL=postgresql://user:pass@managed.neon.tech/neondb\n",
   );
+});
+
+test("injectFreePlanBeomzBadge injects the badge into free plan index.html files", () => {
+  const next = injectFreePlanBeomzBadge(
+    [
+      {
+        filename: "index.html",
+        content: "<html><body><div id=\"root\"></div></body></html>",
+      },
+      {
+        filename: "src/App.tsx",
+        content: "export default function App() { return null; }",
+      },
+    ],
+    "free",
+  );
+
+  const indexFile = next.find((file) => file.filename === "index.html");
+  assert.ok(indexFile);
+  assert.match(indexFile.content, /Built with Beomz/);
+  assert.match(indexFile.content, /<div id="root"><\/div><a id="beomz-badge"/);
+});
+
+test("injectFreePlanBeomzBadge leaves paid plan deploys unchanged", () => {
+  const originalFiles = [
+    {
+      filename: "index.html",
+      content: "<html><body><div id=\"root\"></div></body></html>",
+    },
+  ];
+
+  const next = injectFreePlanBeomzBadge(originalFiles, "pro_starter");
+
+  assert.deepEqual(next, originalFiles);
+});
+
+test("injectFreePlanBeomzBadge skips silently when index.html is missing", () => {
+  const originalFiles = [
+    {
+      filename: "src/App.tsx",
+      content: "export default function App() { return null; }",
+    },
+  ];
+
+  const next = injectFreePlanBeomzBadge(originalFiles, "free");
+
+  assert.deepEqual(next, originalFiles);
+});
+
+test("POST /projects/:id/deploy/vercel injects the badge for free plan deploys", async () => {
+  const project = createProject();
+  const capturedDeploys: Array<{ files: Array<{ filename: string; content: string }>; slug: string }> = [];
+  const orgContext = createOrgContext(project, {
+    findLatestGenerationByProjectId: async () => ({
+      id: "gen-1",
+      files: [
+        {
+          path: "apps/web/src/app/generated/blank/App.tsx",
+          content: "export default function App() { return <div>Hello</div>; }",
+        },
+      ],
+    }),
+  });
+  orgContext.org.plan = "free";
+
+  const app = createDeployApp(orgContext, {
+    createDbClient: () => ({
+      updateProject: async () => undefined,
+    }) as unknown as ReturnType<typeof import("@beomz-studio/studio-db").createStudioDbClient>,
+    startDeploy: async ({ files, slug }) => {
+      capturedDeploys.push({ files, slug });
+      return {
+        deploymentId: "dpl_123",
+        url: "https://taskly.beomz.app",
+        _token: "token",
+        _teamId: "team",
+      };
+    },
+    pollDeployUntilReady: async () => undefined,
+  });
+
+  const response = await app.request("http://localhost/projects/project-1/deploy/vercel", {
+    method: "POST",
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(capturedDeploys.length, 1);
+  const indexFile = capturedDeploys[0]?.files.find((file) => file.filename === "index.html");
+  assert.ok(indexFile);
+  assert.match(indexFile.content, /Built with Beomz/);
 });
 
 test("DELETE /projects/:id/deploy/vercel removes Vercel domains and deployment before clearing publish fields", async () => {
