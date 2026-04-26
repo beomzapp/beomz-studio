@@ -5,14 +5,28 @@
  * Step 2: Profile setup form (name, display name, avatar, building_for, referral_source).
  * Pre-fills name + avatar from Google OAuth profile (BEO-616).
  */
-import { useState, useEffect, useRef } from "react";
-import { CheckCircle, ArrowRight, Upload, X } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { CheckCircle, ArrowRight, Upload, X, AlertTriangle } from "lucide-react";
 import {
+  getApiBaseUrl,
   getCredits,
   patchMe,
   completeOnboarding,
   uploadUserAvatar,
 } from "../lib/api";
+
+/**
+ * Google avatar URLs (lh3.googleusercontent.com) need to be proxied through
+ * the API to avoid Cross-Origin-Embedder-Policy blocking. Mirrors the logic
+ * used in GlobalNav so the avatar always renders.
+ */
+function proxiedAvatarUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.includes("googleusercontent.com")) {
+    return `${getApiBaseUrl()}/avatar?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
 
 interface Props {
   /** Called after onboarding is completed or skipped */
@@ -62,17 +76,41 @@ export function OnboardingModal({ onClose, initialName, initialAvatarUrl }: Prop
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [isSkipping, setIsSkipping] = useState(false);
 
+  // Pre-fill from Google OAuth (BEO-616). Google avatar URLs go through our
+  // /api/avatar proxy to dodge COEP blocking in the browser.
+  const initialAvatarProxied = useMemo(
+    () => proxiedAvatarUrl(initialAvatarUrl ?? null),
+    [initialAvatarUrl],
+  );
+
   // Form state
   const [fullName, setFullName] = useState(initialName?.trim() ?? "");
   const [displayName, setDisplayName] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(initialAvatarUrl ?? null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(initialAvatarProxied);
   const [buildingFor, setBuildingFor] = useState("");
   const [referralSource, setReferralSource] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<{ fullName?: string; displayName?: string }>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // If the Google profile resolves after first render (session loads async in
+  // the parent), backfill the form fields the user hasn't touched yet.
+  useEffect(() => {
+    if (initialName && fullName === "") {
+      setFullName(initialName.trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialName]);
+
+  useEffect(() => {
+    if (initialAvatarProxied && avatarPreview === null && !avatarFile) {
+      setAvatarPreview(initialAvatarProxied);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAvatarProxied]);
 
   useEffect(() => {
     getCredits()
@@ -119,6 +157,7 @@ export function OnboardingModal({ onClose, initialName, initialAvatarUrl }: Prop
   const handleSubmit = async () => {
     if (!validate()) return;
     setIsSubmitting(true);
+    setSaveError(null);
     try {
       let avatar_url: string | undefined;
       if (avatarFile) {
@@ -132,11 +171,15 @@ export function OnboardingModal({ onClose, initialName, initialAvatarUrl }: Prop
         ...(buildingFor ? { building_for: buildingFor } : {}),
         ...(referralSource ? { referral_source: referralSource } : {}),
       });
-      await completeOnboarding();
+      // Profile saved successfully — flip the onboarding flag, but don't let
+      // a transient failure here block the user. Either way we close the
+      // modal and stay on the current page.
+      await completeOnboarding().catch(() => {});
       showToast("Profile saved — let's build!");
       onClose();
-    } catch {
+    } catch (err) {
       setIsSubmitting(false);
+      setSaveError(err instanceof Error ? err.message : "Failed to save profile.");
     }
   };
 
@@ -172,10 +215,11 @@ export function OnboardingModal({ onClose, initialName, initialAvatarUrl }: Prop
             fullName={fullName}
             displayName={displayName}
             avatarPreview={avatarPreview}
-            initialAvatarUrl={initialAvatarUrl}
+            initialAvatarUrl={initialAvatarProxied}
             buildingFor={buildingFor}
             referralSource={referralSource}
             errors={errors}
+            saveError={saveError}
             isSubmitting={isSubmitting}
             fileInputRef={fileInputRef}
             getInitials={getInitials}
@@ -294,6 +338,7 @@ interface Step2Props {
   buildingFor: string;
   referralSource: string;
   errors: { fullName?: string; displayName?: string };
+  saveError: string | null;
   isSubmitting: boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   getInitials: () => string;
@@ -313,6 +358,7 @@ function Step2({
   buildingFor,
   referralSource,
   errors,
+  saveError,
   isSubmitting,
   fileInputRef,
   getInitials,
@@ -337,11 +383,7 @@ function Step2({
       <div className="mb-5 flex items-center gap-4">
         <div className="relative">
           {avatarPreview ? (
-            <img
-              src={avatarPreview}
-              alt="Avatar preview"
-              className="h-16 w-16 rounded-full object-cover ring-2 ring-[#F97316]/20"
-            />
+            <Avatar src={avatarPreview} fallback={getInitials()} />
           ) : (
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316] text-lg font-bold text-white">
               {getInitials()}
@@ -453,6 +495,13 @@ function Step2({
         </select>
       </div>
 
+      {saveError && (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+          <AlertTriangle size={14} className="mt-0.5 flex-none text-red-500" />
+          <p className="text-xs text-red-600">{saveError}</p>
+        </div>
+      )}
+
       {/* Submit */}
       <button
         type="button"
@@ -468,5 +517,28 @@ function Step2({
         )}
       </button>
     </div>
+  );
+}
+
+// Renders the avatar with a graceful fallback to initials when the proxied
+// image fails to load (e.g. transient avatar proxy hiccup, or an avatar URL
+// that the proxy refuses to serve).
+function Avatar({ src, fallback }: { src: string; fallback: string }) {
+  const [errored, setErrored] = useState(false);
+  if (errored) {
+    return (
+      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316] text-lg font-bold text-white">
+        {fallback}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt="Avatar preview"
+      referrerPolicy="no-referrer"
+      onError={() => setErrored(true)}
+      className="h-16 w-16 rounded-full object-cover ring-2 ring-[#F97316]/20"
+    />
   );
 }

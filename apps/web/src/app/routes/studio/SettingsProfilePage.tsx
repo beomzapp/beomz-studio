@@ -4,11 +4,21 @@
  * Loads real profile from GET /api/me, saves via PATCH /api/me.
  * Shows read-only email + created date, plan badge, credits balance, delete account.
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { User, Mail, Calendar, Zap, Upload, X, AlertTriangle, CheckCircle } from "lucide-react";
-import { getMe, patchMe, uploadUserAvatar } from "../../../lib/api";
+import { getApiBaseUrl, getMe, patchMe, uploadUserAvatar } from "../../../lib/api";
 import type { UserProfile } from "../../../lib/api";
+import { useAuth } from "../../../lib/useAuth";
 import { usePricingModal } from "../../../contexts/PricingModalContext";
+
+// Google avatar URLs need to be proxied through the API to avoid COEP blocking.
+function proxiedAvatarUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.includes("googleusercontent.com")) {
+    return `${getApiBaseUrl()}/avatar?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
 
 const BUILDING_FOR_OPTIONS = [
   { value: "SaaS", label: "SaaS product" },
@@ -35,8 +45,26 @@ const PLAN_LABELS: Record<string, string> = {
 
 export function SettingsProfilePage() {
   const { openPricingModal } = usePricingModal();
+  const { session } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Pull Google OAuth metadata so empty profile fields fall back to whatever
+  // the user signed up with rather than showing blanks.
+  const googleProfile = useMemo(() => {
+    const meta = (session?.user?.user_metadata ?? null) as Record<string, unknown> | null;
+    const name = typeof meta?.full_name === "string" && meta.full_name.trim().length > 0
+      ? meta.full_name.trim()
+      : typeof meta?.name === "string" && meta.name.trim().length > 0
+        ? meta.name.trim()
+        : null;
+    const avatar = typeof meta?.avatar_url === "string" && meta.avatar_url.trim().length > 0
+      ? meta.avatar_url.trim()
+      : typeof meta?.picture === "string" && meta.picture.trim().length > 0
+        ? meta.picture.trim()
+        : null;
+    return { name, avatar };
+  }, [session]);
 
   // Form state
   const [fullName, setFullName] = useState("");
@@ -60,15 +88,32 @@ export function SettingsProfilePage() {
     getMe()
       .then((data) => {
         setProfile(data);
-        setFullName(data.full_name ?? "");
+        setFullName(data.full_name ?? googleProfile.name ?? "");
         setDisplayName(data.display_name ?? "");
         setBuildingFor(data.building_for ?? "");
         setReferralSource(data.referral_source ?? "");
-        if (data.avatar_url) setAvatarPreview(data.avatar_url);
+        const avatar = data.avatar_url ?? googleProfile.avatar ?? null;
+        if (avatar) setAvatarPreview(proxiedAvatarUrl(avatar));
       })
       .catch(() => {})
       .finally(() => setIsLoading(false));
+    // googleProfile is read-only fallback; safe to omit so we don't refetch
+    // /me when the session resolves a hair after mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Backfill from Google when the session resolves after the initial /me load
+  // (race: useAuth() can return null on first render).
+  useEffect(() => {
+    if (!profile) return;
+    if (fullName === "" && googleProfile.name) {
+      setFullName(googleProfile.name);
+    }
+    if (avatarPreview === null && !avatarFile && googleProfile.avatar) {
+      setAvatarPreview(proxiedAvatarUrl(googleProfile.avatar));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleProfile.name, googleProfile.avatar, profile]);
 
   const getInitials = () => {
     const name = fullName.trim() || profile?.full_name?.trim() || (profile?.email ?? "");

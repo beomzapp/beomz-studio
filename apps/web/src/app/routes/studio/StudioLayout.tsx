@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, Outlet, useMatchRoute } from "@tanstack/react-router";
 import {
   FolderOpen,
@@ -14,6 +14,7 @@ import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { OnboardingModal } from "../../../components/OnboardingModal";
 import { getApiBaseUrl, getAccessToken, type UserProfile } from "../../../lib/api";
+import { useAuth } from "../../../lib/useAuth";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 /**
@@ -66,29 +67,47 @@ export function StudioLayout() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingUser, setOnboardingUser] = useState<UserProfile | null>(null);
   const matchRoute = useMatchRoute();
+  const { session } = useAuth();
+
+  // Pull Google OAuth metadata so the onboarding form pre-fills name + avatar
+  // even when the API row hasn't been backfilled yet (e.g. fresh signup or
+  // the Google profile metadata wasn't propagated to the DB users row).
+  const googleProfile = useMemo(() => {
+    const meta = (session?.user?.user_metadata ?? null) as Record<string, unknown> | null;
+    const name = typeof meta?.full_name === "string" && meta.full_name.trim().length > 0
+      ? meta.full_name.trim()
+      : typeof meta?.name === "string" && meta.name.trim().length > 0
+        ? meta.name.trim()
+        : null;
+    const avatar = typeof meta?.avatar_url === "string" && meta.avatar_url.trim().length > 0
+      ? meta.avatar_url.trim()
+      : typeof meta?.picture === "string" && meta.picture.trim().length > 0
+        ? meta.picture.trim()
+        : null;
+    return { name, avatar };
+  }, [session]);
 
   useEffect(() => {
     // studioRoute.beforeLoad in router.ts already guards this component behind
     // a confirmed Supabase session, so getAccessToken() is safe to call here.
-    // 1s delay ensures the DB upsert has completed before we check.
-    const timer = setTimeout(() => {
-      fetchMeWithRetry()
-        .then((data) => {
-          if (!data) return;
-          const showModal =
-            data.onboarding_completed === false ||
-            data.onboarding_completed === null ||
-            data.onboarding_completed === undefined;
-          if (showModal) {
-            setOnboardingUser(data);
-            setShowOnboarding(true);
-          }
-        })
-        .catch(() => {
-          // Silently ignore — user may not have migration yet
-        });
-    }, 1000);
-    return () => clearTimeout(timer);
+    // The /me middleware bootstraps the user row on first call, so we can
+    // fetch immediately — no upfront delay needed. fetchMeWithRetry already
+    // covers the brief 401 window with a single 800ms retry.
+    fetchMeWithRetry()
+      .then((data) => {
+        if (!data) return;
+        const showModal =
+          data.onboarding_completed === false ||
+          data.onboarding_completed === null ||
+          data.onboarding_completed === undefined;
+        if (showModal) {
+          setOnboardingUser(data);
+          setShowOnboarding(true);
+        }
+      })
+      .catch(() => {
+        // Silently ignore — user may not have migration yet
+      });
   }, []);
 
   // Hide sidebar on builder pages — they have their own TopBar + layout
@@ -191,8 +210,8 @@ export function StudioLayout() {
     </div>
     {showOnboarding && isHomePage && (
       <OnboardingModal
-        initialName={onboardingUser?.name ?? onboardingUser?.full_name}
-        initialAvatarUrl={onboardingUser?.avatar_url}
+        initialName={onboardingUser?.full_name ?? googleProfile.name ?? null}
+        initialAvatarUrl={onboardingUser?.avatar_url ?? googleProfile.avatar ?? null}
         onClose={() => setShowOnboarding(false)}
       />
     )}
