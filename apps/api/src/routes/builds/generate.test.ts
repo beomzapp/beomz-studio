@@ -242,8 +242,9 @@ test("generate build flow injects URL grounding before enrichPrompt runs", async
 
 test("image attachments are passed directly into Anthropic content blocks with the image first", async () => {
   const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const contextBuilderSource = await readFile(new URL("../../lib/build/contextBuilder.ts", import.meta.url), "utf8");
 
-  assert.match(source, /return \[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{ type: "text", text: userMessage \},\s*\];/);
+  assert.match(contextBuilderSource, /return \[\s*buildAnthropicImageBlock\(imageUrl\),\s*\{ type: "text", text: userMessage \},\s*\];/);
   assert.match(source, /const optimizedUserContent = imageBlock\s*\?\s*\[\s*imageBlock,\s*\{ type: "text", text: optimizedText, cache_control: \{ type: "ephemeral" \} \} as any,/);
   assert.match(source, /return \[\s*imageBlock,\s*\{\s*type: "text",\s*text: filesContext,/);
   assert.doesNotMatch(source, /awaiting_image_confirmation/);
@@ -251,25 +252,27 @@ test("image attachments are passed directly into Anthropic content blocks with t
 });
 
 test("iteration flow uploads attached images and injects the public asset URL into the system prompt", async () => {
-  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const generateSource = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const contextBuilderSource = await readFile(new URL("../../lib/build/contextBuilder.ts", import.meta.url), "utf8");
 
-  assert.match(source, /resolvedImageBlock = await resolveAnthropicImageBlock\(imageUrl\);/);
-  assert.match(source, /uploadedImageUrl = await uploadProjectAsset\(/);
-  assert.match(source, /imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction\(uploadedImageUrl\);/);
-  assert.match(source, /console\.log\("\[generate\] image URL to inject:", uploadedImageUrl\);/);
-  assert.match(source, /const systemPrompt = buildIterationSystemPrompt\([\s\S]*imageEmbeddingInstructionBlock,\s*\);/);
-  assert.match(source, /It is available at this Beomz-hosted image URL: \$\{imageUrl\}/);
-  assert.match(source, /preview-safe and allowed even under COEP restrictions/);
-  assert.match(source, /Do NOT use a data URI/);
-  assert.doesNotMatch(source, /base64,\.\.\./);
-  assert.doesNotMatch(source, /imageBlock\.source\.data\}/);
-  assert.doesNotMatch(source, /failed to resolve\/upload iteration image for prompt injection \(non-fatal\)/);
-  assert.match(source, /console\.error\("\[generate\] failed to resolve\/upload iteration image for prompt injection:", error\);/);
-  assert.match(source, /throw error;/);
+  assert.match(generateSource, /resolvedImageBlock = await resolveAnthropicImageBlock\(imageUrl\);/);
+  assert.match(generateSource, /uploadedImageUrl = await uploadProjectAsset\(/);
+  assert.match(generateSource, /imageEmbeddingInstructionBlock = contextBuilder\.buildIterationImageEmbeddingInstruction\(uploadedImageUrl\);/);
+  assert.match(generateSource, /console\.log\("\[generate\] image URL to inject:", uploadedImageUrl\);/);
+  assert.match(generateSource, /const systemPrompt = contextBuilder\.buildIterationSystemPrompt\(/);
+  assert.match(generateSource, /imageEmbeddingInstructionBlock,\s*\n\s*dbContextBlock,/);
+  assert.match(contextBuilderSource, /It is available at this Beomz-hosted image URL: \$\{imageUrl\}/);
+  assert.match(contextBuilderSource, /preview-safe and allowed even under COEP restrictions/);
+  assert.match(contextBuilderSource, /Do NOT use a data URI/);
+  assert.doesNotMatch(generateSource, /base64,\.\.\./);
+  assert.doesNotMatch(generateSource, /imageBlock\.source\.data\}/);
+  assert.doesNotMatch(generateSource, /failed to resolve\/upload iteration image for prompt injection \(non-fatal\)/);
+  assert.match(generateSource, /console\.error\("\[generate\] failed to resolve\/upload iteration image for prompt injection:", error\);/);
+  assert.match(generateSource, /throw error;/);
 });
 
 test("iteration logs the source image URL before firing and warns if image context has no URL", async () => {
-  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../lib/build/iterationPipeline.ts", import.meta.url), "utf8");
 
   assert.match(source, /console\.log\("\[generate\] iteration source image URL:", input\.imageUrl\);/);
   assert.match(source, /console\.warn\("\[generate\] iteration has image context but no image URL was provided\."\);/);
@@ -292,7 +295,7 @@ test("postProcessGeneratedFiles rewrites empty image data URIs to the uploaded a
 });
 
 test("iteration completion persists migrations and applies BYO Supabase OAuth migrations after the build is written", async () => {
-  const source = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../lib/build/iterationPipeline.ts", import.meta.url), "utf8");
 
   assert.match(source, /const iterationMigrations = Array\.isArray\(iterResult\.migrations\)/);
   assert.match(source, /migrations: iterationMigrations/);
@@ -561,14 +564,16 @@ test("pipeline order: rewriteNeonImports runs before validateAndInjectStubs", ()
 
 test("generate build flow aborts the Anthropic stream when the client disconnects", async () => {
   const generateSource = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const buildPipelineSource = await readFile(new URL("../../lib/build/buildPipeline.ts", import.meta.url), "utf8");
+  const iterationPipelineSource = await readFile(new URL("../../lib/build/iterationPipeline.ts", import.meta.url), "utf8");
   const eventsSource = await readFile(new URL("./events.ts", import.meta.url), "utf8");
   const activeBuildsSource = await readFile(new URL("../../lib/activeBuilds.ts", import.meta.url), "utf8");
 
   assert.match(generateSource, /const abortController = new AbortController\(\);/);
   assert.match(generateSource, /await _runBuildInBackground\(input, db, abortController\.signal\);/);
   assert.match(generateSource, /client\.messages\.stream\([\s\S]*abortSignal \? \{ signal: abortSignal \} : undefined\);/);
-  assert.match(generateSource, /if \(isAbortError\(iterErr\)\) \{\s*throw iterErr;\s*\}/);
-  assert.match(generateSource, /if \(isAbortError\(aiError\)\) \{\s*throw aiError;\s*\}/);
+  assert.match(iterationPipelineSource, /if \(isAbortError\(iterErr\)\) \{\s*throw iterErr;\s*\}/);
+  assert.match(buildPipelineSource, /if \(isAbortError\(aiError\)\) \{\s*throw aiError;\s*\}/);
   assert.match(generateSource, /console\.log\("\[generate\] client disconnected — stream aborted"\);/);
   assert.match(generateSource, /status: "cancelled"/);
   assert.match(eventsSource, /abortActiveBuild\(buildId\)/);

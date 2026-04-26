@@ -70,6 +70,9 @@ import {
 } from "../../lib/projectChat.js";
 import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
 import { upsertEnvFile } from "../../lib/envFile.js";
+import { runBuildPipeline } from "../../lib/build/buildPipeline.js";
+import * as contextBuilder from "../../lib/build/contextBuilder.js";
+import { runIterationPipeline } from "../../lib/build/iterationPipeline.js";
 import {
   buildProjectDatabaseEnvVars,
   getByoSupabaseConfig,
@@ -98,10 +101,15 @@ import {
   type StructuredChatResponse,
   type WebsiteContext,
 } from "../../lib/chatPrompts.js";
-import { classifyIntent, type Intent } from "../../lib/intentClassifier.js";
 import { uploadProjectAsset } from "../../lib/uploadProjectAsset.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
+
+export {
+  buildIterationSystemPrompt,
+  buildIterationUserMessage,
+  buildSystemPrompt,
+} from "../../lib/build/contextBuilder.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -286,63 +294,6 @@ function roundUsd(costUsd: number): number {
 
 function normaliseProjectDbType(dbType: unknown): ProjectDbType {
   return dbType === "neon" || dbType === "supabase" ? dbType : "none";
-}
-
-function buildDbContextBlock(projectId: string, dbType: ProjectDbType): string {
-  return `
-## Database & Auth Context
-- db_type: ${dbType}
-- auth_proxy_base: /api/projects/${projectId}/auth
-
-## Rules based on db_type:
-
-### If db_type === 'none':
-- Use localStorage or in-memory state only — no DB calls
-- For auth: generate mock auth with localStorage. Show a subtle
-  "Demo mode — add a database for real auth" banner in the UI
-- Never import or reference Supabase or any DB client
-- If user asks for auth/login/database features, generate the mock
-  version and add a comment: // Add a database to enable real auth
-
-### If db_type === 'neon':
-- Use VITE_DATABASE_URL with postgres/neon client for all data
-- For auth: use the Beomz auth proxy at /api/projects/${projectId}/auth/*
-  POST /auth/signup { email, password } → { user, token }
-  POST /auth/login  { email, password } → { user, token }
-  POST /auth/logout
-  GET  /auth/me (with Authorization: Bearer {token})
-- Store JWT in localStorage under 'beomz_auth_token'
-- Never use bcrypt, jsonwebtoken, or Supabase in generated app code
-- Multi-tenancy (ONLY if the user explicitly requests it):
-  - Add tenant_id UUID and user_id UUID columns on every data table
-  - Always filter all queries by the current tenant_id (application-layer enforcement)
-  - Example: WHERE tenant_id = $current_tenant_id
-- RLS: not available on Neon — enforce access in application logic only
-
-### If db_type === 'supabase':
-- Use VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY with @supabase/supabase-js
-  for ALL data operations
-- For auth: use the Beomz auth proxy at /api/projects/${projectId}/auth/*
-  (same interface as Neon — never call supabase.auth directly in app code)
-- Store auth token in localStorage under 'beomz_auth_token' (the proxy returns a Supabase access token)
-- When querying Supabase with RLS enabled, include that token as an Authorization header on the Supabase client, e.g.
-  createClient(url, anonKey, { global: { headers: { Authorization: \`Bearer ${"${token}"}\` } } })
-- RLS (ONLY when you implement auth/login/signup):
-  - For every table that has user-owned rows (has user_id), include RLS migrations:
-    ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;
-    DROP POLICY IF EXISTS "users see own data" ON public.<table>;
-    CREATE POLICY "users see own data" ON public.<table> FOR ALL USING (auth.uid()::text = user_id);
-  - Also output the same SQL as a copyable artifact file (e.g. rls.sql)
-- Multi-tenancy (ONLY when the user explicitly requests multi-tenant support):
-  - Create public.tenants and public.tenant_members
-  - Add tenant_id to all data tables
-  - Add RLS policies like:
-    USING (
-      tenant_id IN (
-        SELECT tenant_id FROM public.tenant_members WHERE user_id = auth.uid()
-      )
-    )
-`;
 }
 
 // ─── Anthropic tool definition ────────────────────────────────────────────────
@@ -919,63 +870,6 @@ function buildClarifyingSystemPrompt(
     accumulatedContext,
     nearReady,
   });
-}
-
-const IMAGE_INTENT_PROMPT_CONTEXT: Record<BuilderImageIntent, string> = {
-  logo: "The user has attached a logo image. Use it in the app header and favicon, and preserve its branding cues.",
-  reference: "The user has attached a design reference image. Match the layout, visual hierarchy, and color direction where it fits the request.",
-  error: "The user has attached an error screenshot. Diagnose the likely issue shown and prioritize fixing that problem in the code.",
-  theme: "The user has attached a theme or brand guide image. Apply its colors, typography cues, and overall style consistently across the app.",
-  general: "The user has attached an image as supporting context. Use it only where it clearly helps fulfill the request.",
-};
-
-function buildImageIntentContext(intent: BuilderImageIntent): string {
-  return IMAGE_INTENT_PROMPT_CONTEXT[intent];
-}
-
-function buildPromptWithImageIntent(
-  prompt: string,
-  confirmedIntent?: BuilderImageIntent,
-): string {
-  if (!confirmedIntent) {
-    return prompt;
-  }
-
-  const imageContext = buildImageIntentContext(confirmedIntent);
-  const basePrompt = prompt.trim();
-
-  if (!basePrompt) {
-    return imageContext;
-  }
-
-  return `${basePrompt}\n\nAttached image context: ${imageContext}`;
-}
-
-function buildAnthropicUserContent(
-  userMessage: string,
-  imageUrl?: string,
-): Anthropic.MessageParam["content"] {
-  if (!imageUrl) {
-    return userMessage;
-  }
-
-  return [
-    buildAnthropicImageBlock(imageUrl),
-    { type: "text", text: userMessage },
-  ];
-}
-
-function buildIterationImageEmbeddingInstruction(
-  imageUrl?: string,
-): string | undefined {
-  if (!imageUrl) {
-    return undefined;
-  }
-
-  return [
-    `The user has attached an image. It is available at this Beomz-hosted image URL: ${imageUrl}`,
-    "Use this URL directly as the src attribute in <img> tags or as CSS background-image url(). This URL is preview-safe and allowed even under COEP restrictions. Do NOT use a data URI. Do NOT redraw, recreate, or approximate the image.",
-  ].join("\n");
 }
 
 async function loadWebsiteContext(message: string) {
@@ -1770,134 +1664,6 @@ function buildPhaseContextBlock(
 
 // ─── Shared prompt builders ───────────────────────────────────────────────────
 
-export function buildSystemPrompt(
-  paletteId: string,
-  designSystemSpec?: string,
-  phaseContextBlock?: string,
-  imageContextBlock?: string,
-  hasByoSupabaseConfig = false,
-  dbContextBlock?: string,
-): string {
-  const designBlock = designSystemSpec
-    ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
-    : "";
-  const phaseBlock = phaseContextBlock ? `${phaseContextBlock}\n\n` : "";
-  const imageBlock = imageContextBlock ? `${imageContextBlock}\n\n` : "";
-  const byoSupabaseBlock = hasByoSupabaseConfig
-    ? `BYO SUPABASE (highest priority rule):\n${BYO_SUPABASE_SYSTEM_PROMPT_BLOCK}\nThis overrides any generic instruction elsewhere in this prompt about hardcoded arrays, sample data, or seed records.\n\n`
-    : "";
-  const dbContextPromptBlock = dbContextBlock ? `${dbContextBlock}\n` : "";
-  const themeTsContent = buildThemeTs(paletteId);
-  const variationSeed = Math.floor(Math.random() * 9000) + 1000;
-  return [
-    designBlock + phaseBlock + imageBlock + byoSupabaseBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
-    "Design the architecture from scratch based on what the app actually needs.",
-    "",
-    `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
-    "",
-    "══ STEP 1: ANALYSE THE PROMPT ══",
-    "Identify these four things before writing any code:",
-    "",
-    "1. NAVIGATION PATTERN — pick exactly one:",
-    "   sidebar  → multi-section apps: dashboards, management tools, admin panels, CRMs, trackers with 3+ independent sections",
-    "   top-nav  → marketing sites, landing pages, portfolios, simple single-topic SaaS",
-    "   tabs     → 2-4 tightly related views, mobile-style apps, single-feature apps with sub-views",
-    "   none     → single-page tools: calculators, timers, converters, games, quizzes, generators",
-    "",
-    "2. THEME:",
-    "   light → productivity apps, data/admin tools, business software, management systems, dashboards",
-    "   dark  → creative tools, entertainment, gaming, developer tools, crypto, music apps",
-    `   Palette accent: ${paletteId} — this palette's exact color tokens are in theme.ts (see STEP 4)`,
-    "",
-    PREVIEW_SHELL_ICON_CONTEXT,
-    "",
-    "3. PAGES/SECTIONS — list every distinct section the app needs.",
-    "   Asset management system → Assets, Work Orders, Team, Calendar",
-    "   CRM → Contacts, Deals, Pipeline, Reports",
-    "   Calculator → (no pages, single-page tool)",
-    "",
-    "4. DATA ENTITIES — for each page, what data does it show?",
-    "   Assets → { id, name, category, status, location, assignedTo, lastService }",
-    "   Each entity needs 4-5 realistic sample records.",
-    "",
-    "══ STEP 2: BUILD THE APP ══",
-    "Write complete, working, production-presentable code.",
-    "",
-    "SIDEBAR APPS (sidebar navigation pattern):",
-    "  App.tsx — root component containing:",
-    "    • Sidebar with nav items (lucide-react icons + label), active state highlighting",
-    "    • Main content area that renders the active page based on useState",
-    "    • Use theme.sidebar for sidebar background, theme.border for the divider",
-    "  PageName.tsx — one file per major section (e.g. AssetsPage.tsx, WorkOrdersPage.tsx)",
-    "    • Full page content: heading, toolbar (search/filter/add button), data table or card grid",
-    "    • Realistic sample data in the file as a typed const array",
-    "    • Action buttons do something (useState toggles, modals, status changes)",
-    "",
-    "TOP-NAV APPS:",
-    "  App.tsx — root with sticky topbar + page state + sections",
-    "  PageName.tsx per major section if there are 3+, otherwise inline in App.tsx",
-    "",
-    "TABS APPS:",
-    "  App.tsx — tab bar + tab panels, all inline or split by tab if complex",
-    "",
-    "SINGLE-PAGE TOOLS (no nav):",
-    "  App.tsx only — focused, clean, full functionality",
-    "",
-    "Code quality rules:",
-    "  • All imports at top: import { useState, useEffect, useCallback, useMemo } from 'react'",
-    "  • Icons: import { Home, Settings, Users } from 'lucide-react'  (ONLY lucide-react — no other icon lib)",
-    "  • When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
-    "  • Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
-    "  • Tailwind CSS for spacing/layout/typography — use theme object for ALL color values",
-    "  • import { theme } from './theme' at the top of every file that uses colors",
-    "  • Use style={{ backgroundColor: theme.surface, color: theme.textPrimary }} for layout sections",
-    "  • Use style={{ backgroundColor: theme.primary, color: '#fff' }} for primary buttons",
-    "  • Use theme.sidebar / theme.border / theme.textSecondary / theme.accent throughout",
-    "  • TypeScript interfaces for every data entity",
-    "  • Each file has a default export",
-    "  • Imports between files: import AssetsPage from './AssetsPage'  (flat directory, no subdirs)",
-    "  • NO new npm dependencies — only React, Tailwind, lucide-react are available",
-    "  • NO placeholder comments like '// TODO' or '// Add content here'",
-    "  • Seed every list/table with 4-5 realistic sample records",
-    "  • Buttons and interactions must do something (useState, not empty onClick)",
-    "  • Use correct contrast: dark text on light backgrounds, white text on colored buttons",
-    "  • Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
-    "",
-    "RESPONSIVE DESIGN (MANDATORY):",
-    "  • Every layout must work at 375px (mobile), 768px (tablet), 1280px (desktop)",
-    "  • Use Tailwind responsive prefixes on all layout elements: sm: md: lg:",
-    "  • Mobile-first: base styles for mobile, scale up with prefixes",
-    "  • Never use fixed pixel widths on containers — use w-full, max-w-*, or %",
-    "  • Navigation: collapsible hamburger menu on mobile (hidden md:flex pattern)",
-    "  • Tables: horizontally scrollable on mobile (overflow-x-auto wrapper)",
-    "  • Touch targets: minimum 44px height on all interactive elements",
-    "  • Sidebar layouts: hidden on mobile (hidden md:block), visible md: and above",
-    "  • Grid layouts: 1 col mobile → 2 cols sm: → 3+ cols lg:",
-    "  • Font sizes: never smaller than text-sm on mobile",
-    "",
-    "══ STEP 3: COEP RULES — violations break the preview, no exceptions ══",
-    "  • NO Google Fonts — no @import url('https://fonts.googleapis.com/...')",
-    "  • NO external CDN — no unpkg.com, jsdelivr, cdnjs, or any https:// URL in code",
-    "  • Do NOT include <script src=\"https://cdn.tailwindcss.com\"> or any cdn.tailwindcss.com link/script tag — Tailwind CSS v4 is already configured in the scaffold",
-    "  • Fonts: use className='font-sans' (Tailwind) — system fonts only",
-    "  • Images/avatars: colored div with initials or lucide-react icon — no <img src='https://...'>",
-    "  • NO <link>, <script>, or <style> tags referencing external URLs",
-    "",
-    "══ STEP 4: DELIVER ══",
-    "Call deliver_customised_files with:",
-    "  files[0]: theme.ts — ALWAYS include this exact file first (do not alter the structure, only tweak",
-    "            colors if needed to better match the app's aesthetic):",
-    "",
-    themeTsContent,
-    "",
-    "  files[1]: App.tsx",
-    "  files[2..]: one file per major page for multi-page apps",
-    "  summary: one sentence — 'A light-theme asset management system with sidebar navigation covering Assets, Work Orders, Team, and Calendar.'",
-    "",
-    dbContextPromptBlock,
-  ].join("\n");
-}
-
 interface PhaseScope {
   index: number;
   total: number;
@@ -2428,7 +2194,7 @@ async function callAnthropicCustomise(
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
-    buildSystemPrompt(
+    contextBuilder.buildSystemPrompt(
       paletteId,
       designSystemSpec,
       phaseContextBlock,
@@ -2436,7 +2202,7 @@ async function callAnthropicCustomise(
       hasByoSupabaseConfig,
       dbContextBlock,
     ),
-    buildAnthropicUserContent(buildUserMessage(prompt, phaseScope), imageUrl),
+    contextBuilder.buildAnthropicUserContent(contextBuilder.buildUserMessage(prompt, phaseScope), imageUrl),
     prompt,
     maxTokens,
     instrumentation,
@@ -2832,7 +2598,7 @@ async function callOpenAICompatibleCustomise(
 ): Promise<CustomiseResult> {
   return callOpenAICompatibleWithMessages(
     model, apiKey,
-    buildSystemPrompt(
+    contextBuilder.buildSystemPrompt(
       paletteId,
       designSystemSpec,
       phaseContextBlock,
@@ -2840,7 +2606,7 @@ async function callOpenAICompatibleCustomise(
       hasByoSupabaseConfig,
       dbContextBlock,
     ),
-    buildUserMessage(prompt, phaseScope),
+    contextBuilder.buildUserMessage(prompt, phaseScope),
     prompt, baseURL,
   );
 }
@@ -2863,8 +2629,8 @@ async function callModelCustomise(
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
 
-  const designSystemId = detectDesignSystem(prompt);
-  const designSystemSpec = designSystemId ? getDesignSystemSpec(designSystemId) : undefined;
+  const designSystemId = contextBuilder.detectDesignSystem(prompt);
+  const designSystemSpec = designSystemId ? contextBuilder.getDesignSystemSpec(designSystemId) : undefined;
   if (designSystemId) {
     console.log("[generate] design system spec injected:", designSystemId);
   }
@@ -2934,182 +2700,6 @@ async function callModelCustomise(
   );
 }
 
-// ─── Iteration prompts ────────────────────────────────────────────────────────
-
-export function buildIterationSystemPrompt(
-  schemaSummary?: string,
-  imageContextBlock?: string,
-  hasWiredSupabaseClient = false,
-  dbProvider: string | null = null,
-  neonAuthBaseUrl: string | null = null,
-  hasByoSupabaseConfig = false,
-  imageEmbeddingInstructionBlock?: string,
-  dbContextBlock?: string,
-): string {
-  const isPostgresWired = hasWiredSupabaseClient && (dbProvider === "neon" || dbProvider === "postgres");
-  const hasNeonAuth = dbProvider === "neon"
-    && isPostgresWired
-    && typeof neonAuthBaseUrl === "string"
-    && neonAuthBaseUrl.length > 0;
-  const dbBlock = schemaSummary
-    ? [
-        "",
-        "DATABASE SCHEMA (current live schema for this project):",
-        schemaSummary,
-        "If the requested change needs new columns or tables, include the required SQL in the migrations array:",
-        "  - ALTER TABLE \"schema\".\"table\" ADD COLUMN IF NOT EXISTS col_name col_type;",
-        "  - CREATE TABLE IF NOT EXISTS \"schema\".\"table_name\" (id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY, ...);",
-        "NEVER include DROP TABLE, DROP COLUMN, or ALTER COLUMN TYPE.",
-        "If no schema changes are needed, return an empty migrations array.",
-      ].join("\n")
-    : "";
-  const imageBlock = imageContextBlock
-    ? ["", "IMAGE CONTEXT:", imageContextBlock].join("\n")
-    : "";
-  const imageEmbeddingBlock = imageEmbeddingInstructionBlock
-    ? ["", imageEmbeddingInstructionBlock].join("\n")
-    : "";
-  const dbContextPromptBlock = dbContextBlock ? ["", dbContextBlock].join("\n") : "";
-  const byoSupabaseBlock = hasByoSupabaseConfig
-    ? [
-        "",
-        "BYO SUPABASE (highest priority rule):",
-        BYO_SUPABASE_SYSTEM_PROMPT_BLOCK,
-        "",
-        BYO_SUPABASE_MIGRATIONS_CRITICAL_BLOCK,
-      ].join("\n")
-    : "";
-  const existingSupabaseClientBlock = hasWiredSupabaseClient && !isPostgresWired
-    ? [
-        "",
-        "This project already has Supabase wired. The existing code uses inline createClient() calls — do NOT create or import from a shared supabase.ts or supabase.tsx file.",
-        "Do NOT generate any file named supabase.ts, supabase.tsx, supabase-js, or supabase-client.",
-        "Continue the same inline createClient() pattern already present in the existing project files.",
-        "Use the Supabase URL and anon key already present in the codebase.",
-      ].join("\n")
-    : "";
-  const neonDbBlock = isPostgresWired
-    ? [
-        "",
-        dbProvider === "postgres"
-          ? "This project uses a BYO Postgres database. The connection string is available as import.meta.env.VITE_DATABASE_URL."
-          : "This project uses a Neon Postgres database. The connection string is available as import.meta.env.VITE_DATABASE_URL.",
-        "Use @neondatabase/serverless (browser-safe HTTP) to connect:",
-        "  import { neon } from '@neondatabase/serverless';",
-        "  const sql = neon(import.meta.env.VITE_DATABASE_URL);",
-        "  // Query example:",
-        "  const tasks = await sql`SELECT * FROM tasks`;",
-        "  // Insert example:",
-        "  await sql`INSERT INTO tasks (title, done) VALUES (${title}, false)`;",
-        "  // CREATE TABLE example:",
-        "  await sql`CREATE TABLE IF NOT EXISTS tasks (",
-        "    id SERIAL PRIMARY KEY,",
-        "    title TEXT NOT NULL,",
-        "    done BOOLEAN DEFAULT false,",
-        "    created_at TIMESTAMPTZ DEFAULT NOW()",
-        "  )`;",
-        "Use tagged template literals: sql`...` (NOT sql('...')).",
-        "All DB calls are async — use await in useEffect or event handlers.",
-        "Create tables with CREATE TABLE IF NOT EXISTS at app startup (in a useEffect or init function that runs once on mount).",
-        "Do NOT use @supabase/supabase-js. Do NOT use createClient().",
-        "Do NOT use pg.",
-      ].join("\n")
-    : "";
-  const neonAuthBlock = hasNeonAuth
-    ? [
-        "",
-        "Authentication (Neon Auth — already provisioned):",
-        "- Use @neondatabase/neon-js for auth",
-        "- import { createAuthClient } from '@neondatabase/neon-js/auth'",
-        "- import { NeonAuthUIProvider, AuthView } from '@neondatabase/neon-js/auth/react/ui'",
-        "- const authClient = createAuthClient(import.meta.env.VITE_NEON_AUTH_URL)",
-        "- Wrap app in <NeonAuthUIProvider authClient={authClient}>",
-        "- Add sign-in page: <AuthView pathname='sign-in' />",
-        "- Auth includes Google, GitHub, and email/password by default",
-      ].join("\n")
-    : "";
-  const dbImportRules = isPostgresWired
-    ? [
-        "NEON IMPORTS:",
-        "Use: import { neon } from '@neondatabase/serverless' and import.meta.env.VITE_DATABASE_URL.",
-        "Use sql tagged templates (sql`...`) and CREATE TABLE IF NOT EXISTS at startup.",
-        "Do NOT use pg. Do NOT use @supabase/supabase-js. Do NOT use createClient().",
-      ]
-    : [
-        "SUPABASE IMPORTS:",
-        "Always use: import { createClient } from '@supabase/supabase-js'",
-        "NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
-      ];
-  return [
-    "You are making a surgical edit to an existing React app.",
-    imageBlock,
-    imageEmbeddingBlock,
-    byoSupabaseBlock,
-    "",
-    "RULES:",
-    "1. Start from the project manifest and seed files already provided.",
-    "2. If you need more context, use search_project_code and read_project_file before editing.",
-    "3. Identify the MINIMUM set of files that need to change to fulfil this request.",
-    "4. Make precise, targeted changes — do not rewrite files that don't need changing.",
-    "5. Only return files you actually modified.",
-    "6. If adding a new feature requires a new file, create it and update any imports.",
-    "7. Preserve all existing functionality — do not break what already works.",
-    "8. Match the existing code style, naming conventions, and patterns exactly.",
-    "",
-    "Think step by step:",
-    "- What is the user asking for?",
-    "- Which files need to change?",
-    "- What is the minimal change to each file?",
-    "",
-    "TOKEN BUDGET: Your entire response must stay under 8,000 output tokens for feature additions, and under 3,000 tokens for minor changes (styling, text, small UI tweaks). This is a hard limit.",
-    "Do NOT rewrite files that only need 1-2 line changes — return only the specific changed lines with minimal surrounding context (5 lines max above and below the change).",
-    "Never return a file unchanged. Only include files that have actual modifications. If a file needs no changes, do not include it.",
-    "",
-    "Additional constraints:",
-    "Keep all imports flat — e.g. import X from './X' (no subdirectory paths like './components/X').",
-    "Never add external CDN links, Google Fonts, or remote URLs (WebContainer COEP policy).",
-    "Do NOT include <script src=\"https://cdn.tailwindcss.com\"> or any cdn.tailwindcss.com link/script tag. Tailwind CSS v4 is already configured in the scaffold.",
-    ...dbImportRules,
-    "Never use hyphens in JavaScript/TypeScript function names, component names, or variable names. File names may use hyphens (e.g. supabase-client.ts) but the exported function or component inside must use camelCase or PascalCase (e.g. export default function SupabaseClient).",
-    "When using lucide-react icons, prefer these commonly used icons which are guaranteed to exist: Home, Settings, User, Users, Search, Plus, Minus, X, Check, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Edit, Edit2, Trash, Trash2, Eye, EyeOff, Lock, Unlock, Mail, Phone, Calendar, Clock, Star, Heart, Share2, Download, Upload, File, FileText, Folder, Bell, Menu, MoreVertical, Grid, List, Layout, Kanban, BarChart2, Activity, TrendingUp, AlertCircle, Info, CheckCircle2, XCircle, Circle, Square, Loader2, RefreshCw, Link, Link2, Copy, Save, Send, Tag, Filter, Globe, MapPin, Package, ShoppingCart, CreditCard, DollarSign, Code2, Terminal, Database, Server, Cloud, Monitor, Smartphone, Shield, Key, Zap, Layers, Sliders, Sun, Moon, LogIn, LogOut, Bookmark, Flag, Award, Sparkles, Rocket, Bug, Wrench, Briefcase, Building2, ExternalLink, Hash, AtSign, Percent, Play, Pause.",
-    "Do NOT use: LayoutKanban, KanbanSquare, LayoutDashboard, CheckSquare, BadgeCheck, StickyNote, ClipboardList, ListChecks, PackageSearch, ReceiptText, FileClock.",
-    "",
-    PREVIEW_SHELL_ICON_CONTEXT,
-    "",
-    "COLOR CHANGES (highest priority rule):",
-    "If the user asks to change colors, theme, accent, logo color, icon color, or visual style — ONLY return theme.ts.",
-    "Treat short requests like 'change the logo color to orange' as a theme.ts change targeting theme.accent (and accentHover if needed).",
-    "Update the relevant token values in the theme object (e.g. primary, accent, background, sidebar).",
-    "Do NOT touch App.tsx or any page files — they all import from ./theme so HMR propagates automatically.",
-    "Example: 'change to red' → set primary: '#dc2626', primaryHover: '#b91c1c', accent: '#ef4444'",
-    "Example: 'change logo color to orange' → set accent: '#F97316', accentHover: '#EA580C'",
-    "Example: 'dark mode' → set background: '#0f172a', surface: '#1e293b', sidebar: '#0f172a', textPrimary: '#f1f5f9'",
-    "",
-    "ADDING NEW PAGES OR COMPONENTS:",
-    "When the user asks to add a new page or feature that requires a new file:",
-    "  a. Create the new file (e.g. AssetDetailPage.tsx) with complete implementation.",
-    "  b. ALWAYS also return an updated App.tsx that imports the new file and adds it to the navigation/routing.",
-    "     App.tsx is a sidebar/tab app — add the new page to the sidebar nav items and the page-rendering switch.",
-    "  c. Use flat import paths: import AssetDetailPage from './AssetDetailPage' (NOT './components/AssetDetailPage').",
-    "  d. The new page file must have a default export.",
-    "  e. Fill it with realistic sample data and working interactions — no placeholder content.",
-    "  f. Import { theme } from './theme' in the new file and use theme tokens for all colors.",
-    "",
-    "FILE NAMING:",
-    "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
-    "",
-    "DELIVER: after you have enough context, call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock + neonAuthBlock + dbContextPromptBlock,
-  ].join("\n");
-}
-
-export function buildIterationUserMessage(
-  prompt: string,
-  existingFiles: readonly StudioFile[],
-): string {
-  return buildIterationSelection(prompt, existingFiles).optimizedText;
-}
-
 function buildIterationEditRequest(prompt: string): string {
   return `Edit request: ${prompt}`;
 }
@@ -3149,7 +2739,7 @@ async function callModelIterate(
           resolvedImageBlock.source.data,
           resolvedImageBlock.source.media_type,
         );
-        imageEmbeddingInstructionBlock = buildIterationImageEmbeddingInstruction(uploadedImageUrl);
+        imageEmbeddingInstructionBlock = contextBuilder.buildIterationImageEmbeddingInstruction(uploadedImageUrl);
         console.log("[generate] image URL to inject:", uploadedImageUrl);
       } else {
         console.warn("[generate] resolved image block was not base64; no upload URL available for injection.");
@@ -3160,7 +2750,7 @@ async function callModelIterate(
     }
   }
 
-  const systemPrompt = buildIterationSystemPrompt(
+  const systemPrompt = contextBuilder.buildIterationSystemPrompt(
     schemaSummary,
     imageContextBlock,
     hasWiredSupabaseClient,
@@ -3170,7 +2760,7 @@ async function callModelIterate(
     imageEmbeddingInstructionBlock,
     dbContextBlock,
   );
-  const selection = buildIterationSelection(prompt, existingFiles, resolvedImageBlock);
+  const selection = contextBuilder.buildIterationSelection(prompt, existingFiles, resolvedImageBlock);
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
   const userMessage = selection.legacyUserMessage;
 
@@ -3387,49 +2977,6 @@ function pickBestPrebuilt(
   // Forces Sonnet to build domain-specific content from scratch.
   console.log("[generate] no template match — using blank scaffold");
   return buildBlankScaffold();
-}
-
-// ─── BEO-362: 4-way intent engine ────────────────────────────────────────────
-
-function mapIntentToBuildIntent(intent: Intent, hasExistingProject: boolean): BuildIntent {
-  switch (intent) {
-    case "greeting":
-    case "question":
-    case "research":
-      return "question";
-    case "ambiguous":
-      return "ambiguous";
-    case "iteration":
-      return "edit";
-    case "image_ref":
-      return hasExistingProject ? "edit" : "build";
-    case "build_new":
-      return "build";
-    default:
-      return hasExistingProject ? "edit" : "build";
-  }
-}
-
-export async function detectIntent(
-  prompt: string,
-  hasExistingProject: boolean,
-  hasImage = false,
-  projectName?: string,
-  originalPrompt?: string,
-): Promise<BuildIntent> {
-  try {
-    const classified = await classifyIntent(
-      projectName && originalPrompt
-        ? `${prompt}\n\nProject: ${projectName}\nOriginal prompt: ${originalPrompt}`
-        : prompt,
-      hasExistingProject,
-      hasImage,
-    );
-    return mapIntentToBuildIntent(classified.intent, hasExistingProject);
-  } catch (err) {
-    console.warn("[detectIntent] failed, using fallback:", err instanceof Error ? err.message : String(err));
-    return hasExistingProject ? "edit" : "build";
-  }
 }
 
 async function generatePreBuildAck(prompt: string, intent: "edit" | "build"): Promise<NarrationTextResult> {
@@ -3705,7 +3252,7 @@ async function _runBuildInBackground(
   throwIfBuildAborted();
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
   const dbType = normaliseProjectDbType(currentProject?.db_type);
-  const dbContextBlock = buildDbContextBlock(projectId, dbType);
+  const dbContextBlock = contextBuilder.buildDbContextBlock(projectId, dbType);
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
   // If the previous completed generation for this project ended with a
@@ -3734,7 +3281,7 @@ async function _runBuildInBackground(
   }
 
   if (imageConfirmed) {
-    prompt = buildPromptWithImageIntent(prompt, input.confirmedIntent);
+    prompt = contextBuilder.buildPromptWithImageIntent(prompt, input.confirmedIntent);
     forcedIntent = input.isIteration ? "edit" : "build";
   }
 
@@ -3751,7 +3298,7 @@ async function _runBuildInBackground(
     } else {
       // BEO-371: pass project context so Haiku classifies recommendation/suggestion
       // messages as "question" rather than "build" when a project is already open.
-      detectedIntent = await detectIntent(
+      detectedIntent = await contextBuilder.detectIntent(
         prompt,
         hasExistingProject,
         Boolean(input.imageUrl),
@@ -3984,7 +3531,7 @@ async function _runBuildInBackground(
   }
   throwIfBuildAborted();
   const imageContextBlock = input.confirmedIntent
-    ? buildImageIntentContext(input.confirmedIntent)
+    ? contextBuilder.buildImageIntentContext(input.confirmedIntent)
     : undefined;
 
   // ── Phase planning (initial builds only, non-iteration) ───────────────────
@@ -4001,7 +3548,7 @@ async function _runBuildInBackground(
       activeCurrentPhase = input.phaseOverride.currentPhase;
       activePhasesTotal = input.phaseOverride.phasesTotal;
       console.log("[generate] phase override supplied:", { currentPhase: activeCurrentPhase, phasesTotal: activePhasesTotal });
-    } else if (isComplexPrompt(workingPrompt) && !input.forcedSimple) {
+    } else if (contextBuilder.isComplexPrompt(workingPrompt) && !input.forcedSimple) {
       try {
         const phases = await planPhases(workingPrompt);
         if (phases.length > 0) {
@@ -4080,793 +3627,98 @@ async function _runBuildInBackground(
   throwIfBuildAborted();
 
   try {
-    // ── ITERATION PATH ─────────────────────────────────────────────────────────
-    // For iteration (user modifying an existing project), skip template loading.
-    // Pass current files as context; AI returns only changed files.
     if (input.isIteration && input.existingFiles.length > 0) {
-      const existingFiles = filterBlockedGeneratedFiles([...input.existingFiles]);
-
-      // Load DB schema for this project if database is enabled (BEO-288)
-      let iterSchemaSummary: string | undefined;
-      let hasWiredSupabaseClient = false;
-      let hasByoSupabaseConfigForIteration = false;
-      let iterDbProvider: string | null = null;
-      let iterNeonAuthBaseUrl: string | null = null;
-      let iterProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
-      try {
-        iterProject = currentProject ?? await db.findProjectById(projectId);
-        hasWiredSupabaseClient = Boolean(iterProject?.db_wired);
-        hasByoSupabaseConfigForIteration = Boolean(getByoSupabaseConfig(iterProject));
-        const limits = iterProject?.database_enabled
-          ? await db.getProjectDbLimits(projectId).catch(() => null)
-          : null;
-        iterDbProvider = iterProject
-          ? resolveProjectDbProvider(iterProject, limits)
-          : null;
-        if (iterDbProvider === "neon") {
-          iterNeonAuthBaseUrl =
-            typeof limits?.neon_auth_base_url === "string" ? limits.neon_auth_base_url : null;
-        }
-        if (iterProject?.database_enabled && iterProject.db_schema) {
-          const tables = await getSchemaTableList(iterProject.db_schema);
-          if (tables.length > 0) {
-            iterSchemaSummary = tables
-              .map(
-                (t) =>
-                  `Table: ${t.table_name} (${t.columns.map((col) => `${col.name} ${col.type}`).join(", ")})`,
-              )
-              .join("\n");
-            console.log("[generate] iteration: DB schema loaded for project", projectId, "tables:", tables.map((t) => t.table_name));
-          }
-        }
-      } catch (schemaErr) {
-        // non-fatal — iteration proceeds without schema context
-        console.warn("[generate] iteration: failed to load DB schema (non-fatal):", schemaErr instanceof Error ? schemaErr.message : String(schemaErr));
-      }
-
-      await appendEventToDb(
-        db, buildId,
-        statusEvent("ai_iterating", "Applying changes…", "customising"),
-        { status: "running" },
-      );
-
-      await appendEventToDb(
-        db, buildId,
-        statusEvent("ai_customising", "Applying your changes with AI…", "customising"),
-      );
-
-      // Emit pre_build_ack before Sonnet fires (BEO-362)
-      if (!preBuildAckEmitted) {
-        try {
-          preBuildAckEmitted = true;
-          const ack = await generatePreBuildAck(prompt, "edit");
-          narrationUsage = addTokenUsage(narrationUsage, ack.usage);
-          await emitBuildConfirmed(db, buildId, nextId, op, ack.message, projectId);
-          await appendEventToDb(db, buildId, {
-            type: "pre_build_ack",
-            id: nextId(),
-            timestamp: ts(),
-            operation: op,
-            message: ack.message,
-          } as unknown as BuilderV3StatusEvent);
-          stageEvents.markPreBuildAck();
-          // BEO-374: await sequentially to prevent race condition (both reads getting [])
-          await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-          await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ack.message });
-        } catch {
-          // non-fatal
-        }
-      }
-      try {
-        await emitStagePreamble(input.sourcePrompt, true, imageConfirmed);
-      } catch {
-        // non-fatal
-      }
-      await stageEvents.emit("enriching");
-      let iterResult: CustomiseResult;
-      let iterErrorReason: string | null = null;
-      try {
-        await stageEvents.emit("generating");
-        throwIfBuildAborted();
-        if (input.imageUrl) {
-          console.log("[generate] iteration source image URL:", input.imageUrl);
-        } else if (imageContextBlock) {
-          console.warn("[generate] iteration has image context but no image URL was provided.");
-        }
-        iterResult = await callModelIterate(
-          prompt,
-          model,
-          projectId,
-          existingFiles,
-          { buildId, isIteration: true },
-          iterSchemaSummary,
-          imageContextBlock,
-          input.imageUrl,
-          hasWiredSupabaseClient,
-          iterDbProvider,
-          iterNeonAuthBaseUrl,
-          hasByoSupabaseConfigForIteration,
-          abortSignal,
-          dbContextBlock,
-        );
-        throwIfBuildAborted();
-        console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
-
-        // Classify returned files as "new" (not in current build) vs "updated" (overwrite existing).
-        // Both get the same transforms; the classification is purely for logging + App.tsx detection.
-        const existingBasenames = new Set(existingFiles.map((f) => f.path.replace(/^.*\//, "")));
-
-        const newFileNames: string[] = [];
-        const updatedFileNames: string[] = [];
-        for (const f of iterResult.files) {
-          const base = f.path.replace(/^.*\//, "");
-          (existingBasenames.has(base) ? updatedFileNames : newFileNames).push(base);
-        }
-
-        console.log("[generate] iteration new files from AI:", newFileNames);
-        console.log("[generate] iteration existing files matched:", updatedFileNames);
-
-        // Remap ALL returned files (new and updated alike) → flat generated directory,
-        // then apply ESM-import + relative-import fixes.
-        await stageEvents.emit("sanitising");
-        iterResult = {
-          ...iterResult,
-          files: filterBlockedGeneratedFiles(sanitiseFiles(
-            iterResult.files.map((f) => ({
-              path: remapPrebuiltPath(f.path, templateId),
-              content: f.content,
-            })),
-          )),
-        };
-
-        // If the AI added new page files but didn't update App.tsx, warn loudly.
-        // The updated iteration system prompt instructs the AI to always include App.tsx,
-        // but as a safety net we detect the gap and log it.
-        const appTsxBasename = "App.tsx";
-        const appTsxReturned = updatedFileNames.includes(appTsxBasename)
-          || newFileNames.includes(appTsxBasename);
-
-        if (newFileNames.length > 0 && !appTsxReturned) {
-          console.warn(
-            "[generate] iteration: AI added new file(s) without updating App.tsx — "
-            + "new pages may not be routable until App.tsx is updated.",
-            { newFileNames },
-          );
-        }
-
-        console.log("[generate] iteration remapped files:", iterResult.files.map((f) => f.path));
-
-        // Apply DB schema migrations returned by the AI (non-fatal — BEO-288)
-        if (iterSchemaSummary && iterResult.migrations && iterResult.migrations.length > 0) {
-          const iterProject = await db.findProjectById(projectId).catch(() => null);
-          const dbSchemaName = iterProject?.db_schema ?? "";
-          let migrationsApplied = 0;
-          for (const stmt of iterResult.migrations) {
-            const s = stmt.trim();
-            if (!s) continue;
-            if (!isAdminEmail(userEmail) && !isAllowedMigrationStatement(s, dbSchemaName)) {
-              console.warn("[generate] iteration: migration rejected by allowlist:", s.slice(0, 100));
-              continue;
-            }
-            try {
-              await runSql(s.endsWith(";") ? s : `${s};`);
-              migrationsApplied++;
-            } catch (migErr) {
-              console.error("[generate] iteration: migration failed (non-fatal):", migErr instanceof Error ? migErr.message : String(migErr));
-            }
-          }
-          if (migrationsApplied > 0) {
-            try {
-              await runSql("NOTIFY pgrst, 'reload config'; NOTIFY pgrst, 'reload schema';");
-            } catch { /* non-fatal */ }
-            console.log("[generate] iteration: migrations applied:", migrationsApplied);
-          }
-        }
-      } catch (iterErr) {
-        if (isAbortError(iterErr)) {
-          throw iterErr;
-        }
-        iterErrorReason = iterErr instanceof Error ? iterErr.message : String(iterErr);
-        console.warn("[generate] iteration AI call failed.", {
-          buildId, prompt, model, error: iterErrorReason,
-        });
-        // Graceful degradation: keep existing files unchanged, surface real reason to user
-        iterResult = {
-          files: [],
-          summary: `Could not apply changes — ${iterErrorReason}`,
-          outputTokens: 0,
-        };
-      }
-
-      // Merge: new files are added, updated files override existing ones
-      const mergedIterFiles = mergeFiles([...existingFiles], iterResult.files);
-      const { files: iterPostProcessedFiles, missing: iterMissingImports } = postProcessGeneratedFiles(
-        mergedIterFiles,
-        templateId,
-        iterResult.attachedImageAssetUrl,
-      );
-      const iterFinalFiles = await injectProjectDatabaseEnv(db, projectId, iterPostProcessedFiles);
-      if (iterMissingImports.length > 0) {
-        console.warn("[generate] WARNING: missing imports detected in iteration:", iterMissingImports);
-        console.log("[generate] generating stub files for missing components...", { count: iterMissingImports.length });
-      }
-
-      const updatedCount = iterResult.files.filter((f) =>
-        existingFiles.some((e) => e.path === f.path),
-      ).length;
-      const addedCount = iterResult.files.length - updatedCount;
-
-      console.log("[generate] iteration merge result:", {
-        updated: updatedCount,
-        added: addedCount,
-        total: iterFinalFiles.length,
-      });
-      const iterCompletedAt = ts();
-      let iterationHistoryReply = iterResult.summary;
-
-      throwIfBuildAborted();
-      await stageEvents.emit("persisting");
-      await stageEvents.emit("deploying");
-
-      // BEO-368: credit deduction runs first so iterCreditsUsed is available for the summary footer.
-      // Post-deduction for successful iteration (no charge on failure)
-      const iterInputTokens = iterResult.inputTokens ?? 0;
-      const iterTokens = iterResult.outputTokens ?? 0;
-      let iterCreditsUsed = 0;
-      let iterCostUsd: number | null = null;
-
-      // BEO-362: post-build summary via Haiku
-      if (iterResult.files.length > 0) {
-        throwIfBuildAborted();
-        try {
-          const changedPaths = iterResult.files.map((f) => f.path.replace(/^.*\//, ""));
-          const summaryResult = await generateBuildSummary(prompt, changedPaths);
-          narrationUsage = addTokenUsage(narrationUsage, summaryResult.usage);
-          if (iterTokens > 0 && !isAdminEmail(userEmail)) {
-            const isIteration = true;
-            console.log("[credits] rate:", isIteration ? "iteration" : "build");
-            const mainCost = calcIterationCreditCost(iterInputTokens, iterTokens);
-            const narrationCost = calcCreditCostHaiku(narrationUsage.inputTokens, narrationUsage.outputTokens);
-            const totalCost = mainCost + narrationCost;
-            iterCostUsd = roundUsd(
-              calcSonnetCostUsd(iterInputTokens, iterTokens)
-              + calcHaikuCostUsd(narrationUsage.inputTokens, narrationUsage.outputTokens),
-            );
-            try {
-              const deduction = await db.applyOrgUsageDeduction(orgId, totalCost, buildId, "App iteration");
-              iterCreditsUsed = deduction.deducted;
-              console.log("[generate] iteration credits deducted:", {
-                deducted: deduction.deducted,
-                mainCost,
-                narrationCost,
-                inputTokens: iterInputTokens,
-                outputTokens: iterTokens,
-                narrationUsage,
-                buildId,
-              });
-            } catch (deductErr) {
-              console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
-            }
-          }
-          const iterDurationMs = Date.now() - buildStartTime;
-          iterationHistoryReply = summaryResult.message;
-          await appendEventToDb(db, buildId, {
-            type: "build_summary",
-            id: nextId(),
-            timestamp: ts(),
-            operation: op,
-            message: summaryResult.message,
-            filesChanged: changedPaths,
-            durationMs: iterDurationMs,
-            creditsUsed: iterCreditsUsed,
-          } as unknown as BuilderV3StatusEvent);
-          // BEO-374: await so session_events is written before the function returns
-          await appendSessionEventToDb(db, buildId, {
-            type: "build_summary",
-            content: summaryResult.message,
-            filesChanged: changedPaths,
-            durationMs: iterDurationMs,
-            creditsUsed: iterCreditsUsed,
-          });
-        } catch {
-          // non-fatal
-        }
-      }
-
-      const iterDoneEvent: BuilderV3DoneEvent = {
-        type: "done",
-        id: nextId(),
-        timestamp: iterCompletedAt,
-        operation: op,
-        code: "build_completed",
-        message: iterResult.summary,
-        buildId,
-        projectId,
-        fallbackUsed: iterResult.files.length === 0,
-        fallbackReason: iterErrorReason ?? null,
-      };
-      await appendEventToDb(db, buildId, iterDoneEvent, {
-        completed_at: iterCompletedAt,
-        files: iterFinalFiles,
-        status: "completed",
-        summary: iterResult.summary,
-      });
-
-      const iterationMigrations = Array.isArray(iterResult.migrations)
-        ? iterResult.migrations.filter((statement): statement is string => typeof statement === "string" && statement.trim().length > 0)
-        : [];
-      const setupSql = hasByoSupabaseConfig
-        ? buildSupabaseSetupSqlFromFiles(iterFinalFiles)
-        : "";
-      if (iterationMigrations.length > 0 || setupSql) {
-        const latestGeneration = await db.findGenerationById(buildId).catch(() => null);
-        const currentMetadata = typeof latestGeneration?.metadata === "object" && latestGeneration.metadata !== null
-          ? latestGeneration.metadata as Record<string, unknown>
-          : {};
-        await db.updateGeneration(buildId, {
-          metadata: {
-            ...currentMetadata,
-            ...(iterationMigrations.length > 0 ? { migrations: iterationMigrations } : {}),
-            ...(setupSql ? { setupSql } : {}),
-          },
-        }).catch(() => undefined);
-      }
-
-      console.log("[generate] iteration complete.", {
-        buildId,
-        changedFiles: iterResult.files.length,
-        added: addedCount,
-        updated: updatedCount,
-        total: iterFinalFiles.length,
-      });
-
-      const completedGeneration = await db.findGenerationById(buildId).catch(() => null);
-      const completedMetadata = typeof completedGeneration?.metadata === "object" && completedGeneration.metadata !== null
-        ? completedGeneration.metadata as Record<string, unknown>
-        : {};
-      const metadataMigrations = Array.isArray(completedMetadata.migrations)
-        ? completedMetadata.migrations.filter((statement): statement is string => typeof statement === "string" && statement.trim().length > 0)
-        : [];
-
-      if (metadataMigrations.length > 0) {
-        const projectRow = await db.findProjectById(projectId).catch(() => null);
-        const byoDbUrl = typeof projectRow?.byo_db_url === "string"
-          ? projectRow.byo_db_url.trim()
-          : "";
-        let oauthAccessToken = readStoredSupabaseToken(projectRow?.supabase_oauth_access_token);
-        let oauthRefreshToken = readStoredSupabaseToken(projectRow?.supabase_oauth_refresh_token);
-
-        if (byoDbUrl && oauthAccessToken) {
-          for (const migrationSql of metadataMigrations) {
-            const sql = migrationSql.trim();
-            if (!sql) continue;
-            console.log("[supabase] running migration:", sql.substring(0, 80));
-            const migrationResult = await runSupabaseManagementQueryWithOAuth({
-              projectId,
-              supabaseUrl: byoDbUrl,
-              accessToken: oauthAccessToken,
-              refreshToken: oauthRefreshToken,
-              query: sql,
-              logPrefix: "[supabase]",
-              persistTokens: async (tokens) => {
-                try {
-                  await db.updateProject(projectId, {
-                    supabase_oauth_access_token: encryptProjectSecret(tokens.accessToken),
-                    supabase_oauth_refresh_token: encryptProjectSecret(tokens.refreshToken),
-                  });
-                } catch (error) {
-                  console.error(
-                    "[supabase] failed to persist refreshed OAuth tokens (non-fatal):",
-                    error instanceof Error ? error.message : String(error),
-                  );
-                }
-              },
-            });
-
-            oauthAccessToken = migrationResult.accessToken;
-            oauthRefreshToken = migrationResult.refreshToken;
-
-            if (migrationResult.ok) {
-              console.log("[supabase] migration applied:", sql.slice(0, 50));
-            } else {
-              console.error("[supabase] migration failed (non-fatal):", migrationResult.error ?? "Unknown error");
-            }
-          }
-        }
-      }
-
-      await db.upsertBuildTelemetry({
-        id: buildId,
-        project_id: projectId,
-        user_id: userId,
-        prompt: input.sourcePrompt,
-        template_used: templateId,
-        palette_used: "iteration",
-        files_generated: iterFinalFiles.length,
-        succeeded: iterResult.files.length > 0,
-        fallback_reason: iterErrorReason,
-        error_log: iterErrorReason ? { message: iterErrorReason } : null,
-        generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
-        credits_used: iterCreditsUsed,
-        output_tokens: iterTokens,
-        cost_usd: iterCostUsd,
-        user_iterated: true,
-        iteration_count: 0,
-        model_used: model,
-      }).catch(() => undefined);
-
-      await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
-      await persistProjectChatHistory(db, projectId, input.sourcePrompt, iterationHistoryReply, {
-        existingFiles: iterFinalFiles,
-        projectName: input.projectName,
-      });
-      void saveProjectVersion(
-        projectId,
-        input.sourcePrompt.slice(0, 100),
-        studioFilesToVersionFiles(iterFinalFiles),
-      ).catch((err) => {
-        console.error("[versions] auto-save failed:", err);
+      narrationUsage = await runIterationPipeline({
+        input: {
+          ...input,
+          isIteration: true,
+        },
+        db,
+        op: "iteration",
+        prompt,
+        buildStartTime,
+        imageConfirmed,
+        imageContextBlock,
+        dbContextBlock,
+        abortSignal,
+        narrationUsage,
+        stageEvents,
+        nextId,
+        ts,
+        throwIfBuildAborted,
+        appendEventToDb,
+        appendSessionEventToDb,
+        persistProjectChatHistory,
+        emitBuildConfirmed,
+        generatePreBuildAck,
+        generateBuildSummary,
+        emitStagePreamble,
+        addTokenUsage,
+        filterBlockedGeneratedFiles,
+        mergeFiles,
+        postProcessGeneratedFiles,
+        injectProjectDatabaseEnv,
+        callModelIterate,
+        calcSonnetCostUsd,
+        calcHaikuCostUsd,
+        roundUsd,
+        currentProject,
+        hasByoSupabaseConfig,
       });
       return;
     }
 
-    // ── 1. Status: loading ──────────────────────────────────────────────────
-    await appendEventToDb(
-      db, buildId,
-      statusEvent("template_loading", "Loading template…", "loading"),
-      { status: "running" },
-    );
-
-    // ── phases_planned SSE event (if phases were just planned) ─────────────
-    if (activePhasesData && activeCurrentPhase === 1 && !input.phaseOverride) {
-      // Emit a friendly heads-up BEFORE the phases card
-      const phaseIntroEvent = statusEvent(
-        "phases_intro",
-        "This is a large app — I'll build it in 5 progressive phases. Phase 1 builds the complete foundation and usually takes 5–10 minutes. Each phase adds a deeper layer on top.",
-        "planning",
-      );
-      await appendEventToDb(db, buildId, phaseIntroEvent);
-
-      const phasesPlannedEvent = {
-        type: "phases_planned" as const,
-        id: nextId(),
-        timestamp: ts(),
-        operation: op,
-        code: "phases_planned",
-        message: `Building in ${activePhasesTotal} phases. Starting Phase 1.`,
-        phases: activePhasesData,
-        currentPhase: 1,
-      };
-      await appendEventToDb(db, buildId, phasesPlannedEvent as unknown as BuilderV3StatusEvent);
-    }
-
-    // ── 2. Anthropic customisation ──────────────────────────────────────────
-    await appendEventToDb(
-      db, buildId,
-      statusEvent("ai_customising", "Customising with AI…", "customising"),
-    );
-
-    // Emit pre_build_ack before Sonnet fires (BEO-362)
-    if (!preBuildAckEmitted) {
-      try {
-        preBuildAckEmitted = true;
-        const ackIntent = detectedIntent === "edit" ? "edit" : "build";
-        const ack = await generatePreBuildAck(prompt, ackIntent);
-        narrationUsage = addTokenUsage(narrationUsage, ack.usage);
-        await emitBuildConfirmed(db, buildId, nextId, op, ack.message, projectId);
-        await appendEventToDb(db, buildId, {
-          type: "pre_build_ack",
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          message: ack.message,
-        } as unknown as BuilderV3StatusEvent);
-        stageEvents.markPreBuildAck();
-        // BEO-374: await sequentially to prevent race condition (both reads getting [])
-        await appendSessionEventToDb(db, buildId, { type: "user", content: input.sourcePrompt });
-        await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ack.message });
-      } catch {
-        // non-fatal
-      }
-    }
-    try {
-      await emitStagePreamble(input.sourcePrompt, false, imageConfirmed);
-    } catch {
-      // non-fatal
-    }
-    await stageEvents.emit("classifying");
-    await stageEvents.emit("enriching");
-
-    let customised: CustomiseResult;
-    let fallbackUsed = false;
-
-    // Build phase context block if in phase mode
-    const phaseContextBlock = activePhasesData
-      ? buildPhaseContextBlock(
-          activeCurrentPhase,
-          activePhasesTotal,
-          activePhasesData,
-          input.existingFiles.map((f) => f.path.replace(/^.*\//, "")),
-        )
-      : undefined;
-
-    // Scope the USER-turn instruction to this phase so Sonnet doesn't attempt
-    // the full app in a single call and hit max_tokens (BEO-197 diagnosis).
-    const activePhaseData = activePhasesData?.find((p) => p.index === activeCurrentPhase);
-    const phaseScope: PhaseScope | undefined = activePhaseData
-      ? {
-          index: activeCurrentPhase,
-          total: activePhasesTotal,
-          title: activePhaseData.title,
-          focus: activePhaseData.focus,
-        }
-      : undefined;
-    if (phaseScope) {
-      console.log("[generate] phase scope injected into user turn:", { phase: phaseScope.index, title: phaseScope.title });
-    }
-
-    try {
-      await stageEvents.emit("generating");
-      throwIfBuildAborted();
-      customised = await callModelCustomise(
-        workingPrompt,
-        model,
-        paletteId,
-        { buildId, isIteration: input.isIteration },
-        phaseContextBlock,
-        imageContextBlock,
-        input.imageUrl,
-        phaseScope,
-        input.forcedSimple ? 32000 : undefined,
-        hasByoSupabaseConfig,
-        dbContextBlock,
-        abortSignal,
-      );
-      throwIfBuildAborted();
-      console.log("[generate] Model returned files:", customised.files.map((f) => f.path));
-      // BEO-319: zero-file guard — catches both max_tokens truncation (incomplete
-      // tool JSON → input={}) and any case where Sonnet returns files:[]. Throwing
-      // here routes to the existing catch block which sets fallbackUsed:true and
-      // shows the prebuilt scaffold instead of silently serving 2 template files.
-      if (customised.files.length === 0) {
-        throw new Error(`Model returned 0 files (stop_reason likely max_tokens or empty tool response; outputTokens: ${customised.outputTokens ?? 0})`);
-      }
-      // Remap paths — Claude returns bare filenames (App.tsx, AssetsPage.tsx) which
-      // we flatten into the generated directory. Patch any residual CJS React globals.
-      await stageEvents.emit("sanitising");
-      customised = {
-        ...customised,
-        files: sanitiseFiles(
-          customised.files.map((f) => ({
-            path: remapPrebuiltPath(f.path, templateId),
-            content: f.content,
-          })),
-        ),
-      };
-      console.log("[generate] Remapped files:", customised.files.map((f) => f.path));
-    } catch (aiError) {
-      if (isAbortError(aiError)) {
-        throw aiError;
-      }
-      // Graceful degradation: show pre-built template as-is (spec requirement)
-      console.error("[generate] AI call failed — using scaffold fallback.", {
+    narrationUsage = await runBuildPipeline({
+      input: {
+        ...input,
         buildId,
+        projectId,
+        orgId,
+        userId,
+        userEmail,
+        sourcePrompt: input.sourcePrompt,
+        templateId,
         model,
-        error: aiError instanceof Error ? aiError.message : String(aiError),
-        stack: aiError instanceof Error ? aiError.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
-      });
-      await stageEvents.emit("sanitising");
-      customised = {
-        files: sanitiseFiles(
-          prebuilt.files.map((f) => ({
-            path: remapPrebuiltPath(f.path, templateId),
-            content: f.content,
-          })),
-        ),
-        summary: `${prebuilt.manifest.name} — ${prompt}`,
-        outputTokens: 0,
-      };
-      fallbackUsed = true;
-    }
-
-    // BEO-330: accumulate all previous phases' files so each phase generation
-    // contains the full app, not just its own slice. existingFiles holds the
-    // prior phase's complete set; merging them between templateFiles and
-    // customised.files means phase N = template + phases 1…N-1 + phase N.
-    const mergedFiles = mergeFiles(
-      mergeFiles(templateFiles, [...(input.existingFiles ?? [])]),
-      customised.files,
-    );
-    const { files: postProcessedFiles, missing: missingImports } = postProcessGeneratedFiles(
-      mergedFiles,
-      templateId,
-    );
-    const finalFiles = await injectProjectDatabaseEnv(db, projectId, postProcessedFiles);
-    if (missingImports.length > 0) {
-      console.warn("[generate] WARNING: missing imports detected:", missingImports);
-      console.log("[generate] generating stub files for missing components...", { count: missingImports.length });
-    }
-    const completedAt = ts();
-
-    // BEO-326: per-phase file diff — only meaningful when this is a phase build
-    // and the AI path succeeded (not fallback). Uses the remapped customised.files
-    // (what the model generated this phase) vs input.existingFiles (prior phase
-    // snapshot) to classify each path as created or modified.
-    let phaseDiff: { created: string[]; modified: string[]; unchangedCount: number } | null = null;
-    if (phaseScope && !fallbackUsed) {
-      const prevPathSet = new Set(input.existingFiles.map((f) => f.path));
-      const generatedPaths = customised.files.map((f) => f.path);
-      const created = generatedPaths.filter((p) => !prevPathSet.has(p));
-      const modified = generatedPaths.filter((p) => prevPathSet.has(p));
-      const unchangedCount = Math.max(0, prevPathSet.size - modified.length);
-      phaseDiff = { created, modified, unchangedCount };
-      console.log(`[phase ${phaseScope.index}] file diff:`, {
-        phase: phaseScope.title,
-        created,
-        modified,
-        unchanged: unchangedCount,
-        totalFiles: finalFiles.length,
-      });
-    }
-
-    throwIfBuildAborted();
-    await stageEvents.emit("persisting");
-    await stageEvents.emit("deploying");
-
-    // BEO-362: post-build summary via Haiku
-    // BEO-368: credit deduction runs first so creditsUsed is available for the summary footer.
-    const inputTokens = customised.inputTokens ?? 0;
-    const outputTokens = customised.outputTokens ?? 0;
-    let creditsUsed = 0;
-    let costUsd: number | null = null;
-
-    let buildHistoryReply = customised.summary;
-
-    if (!fallbackUsed) {
-      throwIfBuildAborted();
-      try {
-        const changedPaths = customised.files.map((f) => f.path.replace(/^.*\//, ""));
-        const summaryResult = await generateBuildSummary(prompt, changedPaths);
-        buildHistoryReply = summaryResult.message;
-        narrationUsage = addTokenUsage(narrationUsage, summaryResult.usage);
-        const nextSteps = await generateNextStepsWithUsage({
-          appDescriptor: workingPrompt,
-          fileList: finalFiles
-            .map((file) => file.path.replace(/^.*\//, ""))
-            .filter((path) => path !== "app.manifest.json"),
-          isIteration: input.isIteration,
-          prompt: input.sourcePrompt,
-        });
-        narrationUsage = addTokenUsage(narrationUsage, nextSteps.usage);
-        if (outputTokens > 0 && !isAdminEmail(userEmail)) {
-          console.log("[credits] rate:", input.isIteration ? "iteration" : "build");
-          const mainCost = calcCreditCost(inputTokens, outputTokens);
-          const narrationCost = calcCreditCostHaiku(narrationUsage.inputTokens, narrationUsage.outputTokens);
-          const totalCost = mainCost + narrationCost;
-          costUsd = roundUsd(
-            calcSonnetCostUsd(inputTokens, outputTokens)
-            + calcHaikuCostUsd(narrationUsage.inputTokens, narrationUsage.outputTokens),
-          );
-          try {
-            const deduction = await db.applyOrgUsageDeduction(orgId, totalCost, buildId, "App generation");
-            creditsUsed = deduction.deducted;
-            console.log("[generate] credits deducted:", {
-              deducted: creditsUsed,
-              mainCost,
-              narrationCost,
-              inputTokens,
-              outputTokens,
-              narrationUsage,
-              buildId,
-            });
-          } catch (deductErr) {
-            console.error("[generate] credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
-          }
-        }
-        const finalDurationMs = Date.now() - buildStartTime;
-        await appendEventToDb(db, buildId, {
-          type: "build_summary",
-          id: nextId(),
-          timestamp: ts(),
-          operation: op,
-          message: summaryResult.message,
-          filesChanged: changedPaths,
-          durationMs: finalDurationMs,
-          creditsUsed,
-        } as unknown as BuilderV3StatusEvent);
-        // BEO-374: await so session_events is written before the function returns
-        await appendSessionEventToDb(db, buildId, {
-          type: "build_summary",
-          content: summaryResult.message,
-          filesChanged: changedPaths,
-          durationMs: finalDurationMs,
-          creditsUsed,
-        });
-        if (nextSteps.payload) {
-          const nextStepsEvent: BuilderV3NextStepsEvent = {
-            type: "next_steps",
-            id: nextId(),
-            timestamp: ts(),
-            operation: op,
-            suggestions: nextSteps.payload.suggestions,
-          };
-          await appendEventToDb(db, buildId, nextStepsEvent);
-        }
-      } catch {
-        // non-fatal
-      }
-    }
-
-    // ── 4. done ─────────────────────────────────────────────────────────────
-    const doneEvent: BuilderV3DoneEvent = {
-      type: "done",
-      id: nextId(),
-      timestamp: completedAt,
-      operation: op,
-      code: "build_completed",
-      message: customised.summary,
-      buildId,
-      projectId,
-      fallbackUsed,
-      fallbackReason: fallbackUsed ? "anthropic_error" : null,
-    };
-    await appendEventToDb(db, buildId, doneEvent, {
-      completed_at: completedAt,
-      files: finalFiles,
-      status: "completed",
-      summary: customised.summary,
+        requestedAt,
+      },
+      db,
+      op: "initial_build",
+      prompt,
+      workingPrompt,
+      buildStartTime,
+      templateFiles,
+      prebuilt: prebuilt as any,
+      paletteId,
+      imageConfirmed,
+      imageContextBlock,
+      hasByoSupabaseConfig,
+      dbContextBlock,
+      abortSignal,
+      activePhasesData: activePhasesData as any,
+      activeCurrentPhase,
+      activePhasesTotal,
+      detectedIntent,
+      narrationUsage,
+      stageEvents,
+      nextId,
+      ts,
+      throwIfBuildAborted,
+      appendEventToDb,
+      appendSessionEventToDb,
+      persistProjectChatHistory,
+      emitBuildConfirmed,
+      generatePreBuildAck,
+      generateBuildSummary,
+      emitStagePreamble,
+      addTokenUsage,
+      callModelCustomise,
+      mergeFiles,
+      postProcessGeneratedFiles,
+      injectProjectDatabaseEnv,
+      calcSonnetCostUsd,
+      calcHaikuCostUsd,
+      roundUsd,
     });
-
-    console.log("[generate] Build complete.", {
-      buildId,
-      filesCount: finalFiles.length,
-      fallbackUsed,
-    });
-
-    await persistProjectChatHistory(db, projectId, input.sourcePrompt, buildHistoryReply, {
-      existingFiles: finalFiles,
-      projectName: input.projectName,
-    });
-    void saveProjectVersion(
-      projectId,
-      input.sourcePrompt.slice(0, 100),
-      studioFilesToVersionFiles(finalFiles),
-    ).catch((err) => {
-      console.error("[versions] auto-save failed:", err);
-    });
-
-    // ── 5. Telemetry (non-fatal) ───────────────────────────────────────────
-    const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
-
-    await db.upsertBuildTelemetry({
-      id: buildId,
-      project_id: projectId,
-      user_id: userId,
-      prompt: input.sourcePrompt,
-      template_used: prebuilt.manifest.id,
-      palette_used: paletteId,
-      files_generated: finalFiles.length,
-      succeeded: !fallbackUsed,
-      fallback_reason: fallbackUsed ? "anthropic_error" : null,
-      error_log: null,
-      generation_time_ms: generationMs > 0 ? generationMs : null,
-      credits_used: creditsUsed,
-      output_tokens: outputTokens,
-      cost_usd: costUsd,
-      user_iterated: input.isIteration,
-      iteration_count: 0,
-      model_used: model,
-      phase_file_diff: phaseDiff,
-    }).catch(() => undefined);
-
-    await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
-
-    // BEO-265: rename project to the AI-generated brand name (initial build only)
-    // BEO-330: guard against phase 2-5 overwriting the name set in phase 1
-    if (customised.appName && !input.phaseOverride) {
-      console.log("[generate] renaming project to AI brand name:", customised.appName);
-      await db.updateProject(projectId, { name: customised.appName }).catch(() => undefined);
-    }
   } catch (fatalError) {
     if (isAbortError(fatalError)) {
       console.log("[generate] client disconnected — stream aborted");
