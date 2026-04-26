@@ -11,6 +11,7 @@ referralsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
   try {
     const orgContext = c.get("orgContext") as OrgContext;
     const referralCode = await ensureReferralCodeForUser(orgContext.db, orgContext.user.id);
+    console.log("[referrals] code for user:", referralCode.code);
     const events = await orgContext.db.listReferralEventsByReferrerId(orgContext.user.id);
     const stats = summariseReferralStats(events);
 
