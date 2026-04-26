@@ -49,7 +49,7 @@ function buildOrg(overrides: Partial<OrgRow> = {}): OrgRow {
   };
 }
 
-test("GET /referrals returns the flat stats shape expected by the frontend", async () => {
+test("GET /referrals sums all reward credits and counts upgrade rows from raw referral events", async () => {
   const app = new Hono();
   const route = createReferralsRoute({
     authMiddleware: async (_c, next) => {
@@ -78,10 +78,34 @@ test("GET /referrals returns the flat stats shape expected by the frontend", asy
               },
               {
                 created_at: now,
-                credits_awarded: 200,
-                event: "upgrade",
+                credits_awarded: 50,
+                event: "signup",
                 id: "event-2",
+                referred_id: "user-3",
+                referrer_id: "user-1",
+              },
+              {
+                created_at: now,
+                credits_awarded: 50,
+                event: "signup",
+                id: "event-3",
+                referred_id: "user-4",
+                referrer_id: "user-1",
+              },
+              {
+                created_at: now,
+                credits_awarded: 200,
+                event_type: "upgrade",
+                id: "event-4",
                 referred_id: "user-2",
+                referrer_id: "user-1",
+              },
+              {
+                created_at: now,
+                credits_awarded: 200,
+                event_type: "upgrade",
+                id: "event-5",
+                referred_id: "user-3",
                 referrer_id: "user-1",
               },
             ];
@@ -107,19 +131,19 @@ test("GET /referrals returns the flat stats shape expected by the frontend", asy
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     code: "REFCODE1",
-    credits_earned: 250,
+    credits_earned: 550,
     link: "https://beomz.ai/signup?ref=REFCODE1",
     referral_code: "REFCODE1",
     referral_link: "https://beomz.ai/signup?ref=REFCODE1",
-    signup_count: 1,
+    signup_count: 3,
     stats: {
-      signupCapReached: false,
-      signupCredits: 50,
-      signups: 1,
-      totalCredits: 250,
-      upgradeCredits: 200,
-      upgrades: 1,
+      signupCapReached: true,
+      signupCredits: 150,
+      signups: 3,
+      totalCredits: 550,
+      upgradeCredits: 400,
+      upgrades: 2,
     },
-    upgrade_count: 1,
+    upgrade_count: 2,
   });
 });
