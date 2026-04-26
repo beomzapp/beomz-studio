@@ -8,7 +8,6 @@ import { apiConfig } from "./config.js";
 import assetImageRoute from "./routes/assets/image.js";
 import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
-import projectAuthRoute from "./routes/auth/project-auth.js";
 import meRoute from "./routes/me.js";
 import buildsEventsRoute from "./routes/builds/events.js";
 import buildsForkRoute from "./routes/builds/fork.js";
@@ -50,6 +49,7 @@ import {
 import projectVersionsRoute from "./routes/projects/versions.js";
 import { vercelDeployRoute, vercelDomainsRoute } from "./routes/projects/vercel.js";
 import nextPhaseRoute from "./routes/projects/next-phase.js";
+import projectAuthRoute, { PROJECT_AUTH_CORS_HEADERS } from "./routes/projects/auth.js";
 import supabaseIntegrationsRoute from "./routes/integrations/supabase.js";
 
 const app = new Hono();
@@ -60,6 +60,21 @@ const SSE_DRAIN_POLL_INTERVAL_MS = 500;
 
 let isShuttingDown = false;
 let shutdownPromise: Promise<void> | null = null;
+
+if (!process.env.BEOMZ_JWT_SECRET) {
+  console.warn("[auth] BEOMZ_JWT_SECRET not set — Neon auth will use fallback");
+}
+
+app.use("/projects/:id/auth/*", async (c, next) => {
+  if (c.req.method === "OPTIONS") {
+    return new Response(null, {
+      headers: PROJECT_AUTH_CORS_HEADERS,
+      status: 204,
+    });
+  }
+
+  await next();
+});
 
 app.use(
   "*",
@@ -152,7 +167,7 @@ app.route("/assets/image", assetImageRoute);
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);
 app.route("/me", meRoute);
-app.route("/projects/:projectId/auth", projectAuthRoute);
+app.route("/projects/:id/auth", projectAuthRoute);
 app.route("/builds/start", buildsStartRoute);
 app.route("/builds/upload-image", buildsUploadImageRoute);
 app.route("/builds/summary", buildsSummaryRoute);
