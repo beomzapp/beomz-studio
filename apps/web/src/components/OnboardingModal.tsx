@@ -14,6 +14,7 @@ import {
   completeOnboarding,
   uploadUserAvatar,
 } from "../lib/api";
+import { supabase } from "../lib/supabase";
 
 /**
  * Google avatar URLs (lh3.googleusercontent.com) need to be proxied through
@@ -171,6 +172,14 @@ export function OnboardingModal({ onClose, initialName, initialAvatarUrl }: Prop
         ...(buildingFor ? { building_for: buildingFor } : {}),
         ...(referralSource ? { referral_source: referralSource } : {}),
       });
+      // Sync Supabase auth metadata so GlobalNav picks up the new name/avatar
+      // without requiring a sign-out / sign-in cycle.
+      await supabase.auth.updateUser({
+        data: {
+          full_name: fullName.trim(),
+          ...(avatar_url ? { avatar_url } : {}),
+        },
+      }).catch(() => {});
       // Profile saved successfully — flip the onboarding flag, but don't let
       // a transient failure here block the user. Either way we close the
       // modal and stay on the current page.

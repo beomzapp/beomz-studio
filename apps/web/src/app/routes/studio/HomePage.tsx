@@ -26,8 +26,6 @@ import { listProjectsWithMeta, deleteProject, renameProject, getApiBaseUrl, getA
 import { useAuth } from "../../../lib/useAuth";
 import { useCredits } from "../../../lib/CreditsContext";
 import { usePricingModal } from "../../../contexts/PricingModalContext";
-import { OnboardingModal, isOnboardingCompleted, markOnboardingCompleted } from "../../../components/studio/OnboardingModal";
-import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { displayProjectName } from "../../../lib/displayProjectName";
 
 interface ProjectCard extends Project {
@@ -387,7 +385,6 @@ export function HomePage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const [showReferralToast, setShowReferralToast] = useState(false);
 
   // BEO-618: Referral bonus toast — shown once when credits_earned increases
@@ -468,12 +465,6 @@ export function HomePage() {
     })();
   }, []);
 
-  useEffect(() => {
-    if (!loading && projects.length === 0 && !isOnboardingCompleted()) {
-      setShowOnboarding(true);
-    }
-  }, [loading, projects.length]);
-
   const handleDeleteClick = useCallback((e: React.MouseEvent, project: ProjectCard) => {
     e.stopPropagation();
     e.preventDefault();
@@ -552,20 +543,6 @@ export function HomePage() {
             </button>
           </div>
         </div>
-      )}
-
-      {showOnboarding && (
-        <OnboardingModal
-          onSelect={(prompt) => {
-            setShowOnboarding(false);
-            markOnboardingCompleted();
-            if (prompt) {
-              saveProjectLaunchIntent({ prompt });
-              navigate({ to: "/studio/project/$id", params: { id: "new" } });
-            }
-          }}
-          onDismiss={() => setShowOnboarding(false)}
-        />
       )}
 
       {/* Header */}
