@@ -117,7 +117,7 @@ export function StudioLayout() {
       >
         <div className="flex h-14 items-center justify-between border-b border-[#e5e5e5] px-4">
           <Link to="/" className="flex items-center gap-2">
-            <BeomzLogo className="h-6 w-auto text-[#F97316]" />
+            <BeomzLogo className="h-6 w-auto text-[#1a1a1a]" />
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}

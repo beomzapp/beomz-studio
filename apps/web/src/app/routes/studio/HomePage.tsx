@@ -148,8 +148,7 @@ function CreditsCard() {
       : (PLAN_CREDITS[planKey] ?? 0);
 
   const balance = credits ? Math.round(credits.balance) : 0;
-  const used = Math.max(0, planCredits - balance);
-  const progressPct = planCredits > 0 ? Math.min(100, (used / planCredits) * 100) : 0;
+  const remainingPct = planCredits > 0 ? Math.min(100, (balance / planCredits) * 100) : 0;
 
   const planLabel =
     planKey === "pro_starter" ? "Pro Starter" :
@@ -165,7 +164,7 @@ function CreditsCard() {
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
           <div
             className="h-full rounded-full bg-orange-500 transition-all duration-500"
-            style={{ width: `${planCredits > 0 ? progressPct : 0}%` }}
+            style={{ width: `${remainingPct}%` }}
           />
         </div>
         <div className="mt-1.5 flex items-center justify-between">
@@ -336,7 +335,6 @@ export function HomePage() {
   const { credits, refresh: refreshCredits } = useCredits();
   const [projects, setProjects] = useState<ProjectCard[]>([]);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
-  const [canCreateMore, setCanCreateMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -391,7 +389,6 @@ export function HomePage() {
       try {
         const data = await listProjectsWithMeta();
         setProjects(data.projects.map((p) => ({ ...p })));
-        setCanCreateMore(data.canCreateMore);
       } catch {
         // ignore until authenticated
       } finally {
@@ -451,6 +448,10 @@ export function HomePage() {
   }, []);
 
   const userName = session?.user?.user_metadata?.full_name?.split(" ")[0] ?? "there";
+  // Mirror GET /projects: free cap, paid unlimited — must stay in sync with API for limit UX
+  const planKey = (credits?.plan ?? "free").toLowerCase();
+  const projectLimit = planKey === "free" ? 3 : -1;
+  const canCreateMore = projectLimit < 0 || projects.length < projectLimit;
   const publishedCount = projects.filter((p) => p.status === "published").length;
   const totalBuilds = projects.reduce((a, p) => a + p.generationCount, 0);
   const creditsBalance = credits ? Math.round(credits.balance) : "—";
