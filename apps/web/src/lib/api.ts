@@ -1070,6 +1070,13 @@ export async function restoreProjectVersion(
   );
 }
 
+export async function getBillingPortalUrl(returnUrl?: string): Promise<{ url: string }> {
+  return requestJson<{ url: string }>("/payments/portal", {
+    method: "POST",
+    body: JSON.stringify({ returnUrl: returnUrl ?? (typeof window !== "undefined" ? window.location.href : "https://beomz.ai/studio/settings") }),
+  });
+}
+
 export async function forceSimpleBuild(buildId: string): Promise<void> {
   await requestJson<{ ok: boolean }>(`/builds/${buildId}/force-simple`, {
     method: "POST",
