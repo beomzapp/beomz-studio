@@ -471,7 +471,7 @@ export function HomePage() {
   const canCreateMore = projectLimit < 0 || projects.length < projectLimit;
   const publishedCount = projects.filter((p) => p.status === "published").length;
   const totalBuilds = projects.reduce((a, p) => a + p.generationCount, 0);
-  const creditsBalance = credits ? Math.round(credits.balance) : "—";
+  const creditsBalance = credits ? Math.floor(credits.balance) : "—";
 
   const SHOW_ALL_THRESHOLD = 4;
   const showViewAll = projects.length > SHOW_ALL_THRESHOLD;
