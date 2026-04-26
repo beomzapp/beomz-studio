@@ -487,29 +487,29 @@ export function HomePage() {
       </div>
 
       {/* Stats row */}
-      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+      <div className="mb-8 grid w-full grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#9ca3af]">Apps</span>
             <FolderOpen size={16} className="text-[#F97316]" />
           </div>
           <p className="mt-2 text-2xl font-bold text-[#1a1a1a]">{projects.length}</p>
         </div>
-        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#9ca3af]">Published</span>
             <Globe size={16} className="text-emerald-500" />
           </div>
           <p className="mt-2 text-2xl font-bold" style={{ color: "#16a34a" }}>{publishedCount}</p>
         </div>
-        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#9ca3af]">Total Builds</span>
             <Zap size={16} className="text-blue-500" />
           </div>
           <p className="mt-2 text-2xl font-bold text-[#1a1a1a]">{totalBuilds}</p>
         </div>
-        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#9ca3af]">Credits</span>
             <Star size={16} className="text-amber-500" />
