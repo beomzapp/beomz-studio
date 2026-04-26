@@ -26,6 +26,19 @@ export function AuthCallback() {
     // All other flows (Google OAuth, email verify) — navigate based on session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
+        const referralCode = localStorage.getItem("referral_code");
+        if (referralCode) {
+          localStorage.removeItem("referral_code");
+          void fetch("/api/referrals/attribution", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ referral_code: referralCode }),
+          });
+        }
+
         const pendingPrompt = sessionStorage.getItem("pending_build_prompt");
         if (pendingPrompt) {
           sessionStorage.removeItem("pending_build_prompt");
