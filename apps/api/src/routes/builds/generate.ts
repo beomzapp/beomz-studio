@@ -101,7 +101,7 @@ import {
   type StructuredChatResponse,
   type WebsiteContext,
 } from "../../lib/chatPrompts.js";
-import { uploadProjectAsset } from "../../lib/uploadProjectAsset.js";
+import { uploadProjectAsset } from "../../lib/images/index.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 

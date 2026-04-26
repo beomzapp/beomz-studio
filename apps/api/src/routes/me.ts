@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { z } from "zod";
 
 import { apiConfig } from "../config.js";
-import { buildAssetProxyUrl, createStudioStorageClient } from "../lib/studioAssetProxy.js";
+import { buildAssetProxyUrl, createStudioStorageClient } from "../lib/images/index.js";
 import { loadOrgContext } from "../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../types.js";

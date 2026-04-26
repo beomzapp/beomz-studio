@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import {
   downloadStudioAsset,
   isStudioProxyableBucket,
-} from "../../lib/studioAssetProxy.js";
+} from "../../lib/images/index.js";
 
 interface AssetImageRouteDeps {
   downloadAsset?: typeof downloadStudioAsset;
