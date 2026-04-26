@@ -259,7 +259,15 @@ export function LandingPage() {
               Pricing
             </button>
             {session ? (
-              <GlobalNav variant="light" />
+              <>
+                <Link
+                  to="/studio/home"
+                  className="text-sm text-white/50 transition-colors hover:text-white/80"
+                >
+                  Dashboard
+                </Link>
+                <GlobalNav variant="light" />
+              </>
             ) : (
               <div className="flex items-center gap-3">
                 <button

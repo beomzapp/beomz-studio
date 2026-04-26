@@ -4,7 +4,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
-import { LogOut, Settings, LayoutDashboard, AlertTriangle, UserCircle, Zap } from "lucide-react";
+import { LogOut, Settings, AlertTriangle, UserCircle, Zap } from "lucide-react";
 import { useAuth } from "../../lib/useAuth";
 import { useCredits } from "../../lib/CreditsContext";
 import { supabase } from "../../lib/supabase";
@@ -121,14 +121,6 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
               )}
             </div>
 
-            <Link
-              to="/studio/home"
-              onClick={() => setDropdownOpen(false)}
-              className="flex items-center gap-2.5 px-4 py-2 text-sm text-[#374151] transition-colors hover:bg-[#f3f4f6]"
-            >
-              <LayoutDashboard size={14} />
-              Dashboard
-            </Link>
             <Link
               to="/studio/settings/profile"
               onClick={() => setDropdownOpen(false)}
