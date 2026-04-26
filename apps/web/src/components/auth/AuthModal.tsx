@@ -76,7 +76,7 @@ export function AuthModal({ open, onClose, pendingPrompt, initialMode = "signin"
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/auth/email/signup`, {
+      const res = await fetch(`${getApiBaseUrl()}/auth/email/signup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -101,7 +101,7 @@ export function AuthModal({ open, onClose, pendingPrompt, initialMode = "signin"
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/auth/email/login`, {
+      const res = await fetch(`${getApiBaseUrl()}/auth/email/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -126,7 +126,7 @@ export function AuthModal({ open, onClose, pendingPrompt, initialMode = "signin"
   const handleResend = async () => {
     setResendLoading(true);
     try {
-      await fetch(`${getApiBaseUrl()}/api/auth/email/resend-verification`, {
+      await fetch(`${getApiBaseUrl()}/auth/email/resend-verification`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),

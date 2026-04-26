@@ -26,7 +26,7 @@ export function VerifyEmailPage() {
 
     void (async () => {
       try {
-        const res = await fetch(`${getApiBaseUrl()}/api/auth/email/verify`, {
+        const res = await fetch(`${getApiBaseUrl()}/auth/email/verify`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ token }),
@@ -52,7 +52,7 @@ export function VerifyEmailPage() {
   const handleRequestNewLink = async () => {
     setRequestingNew(true);
     try {
-      await fetch(`${getApiBaseUrl()}/api/auth/email/resend-verification`, {
+      await fetch(`${getApiBaseUrl()}/auth/email/resend-verification`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),

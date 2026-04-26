@@ -29,7 +29,7 @@ export function ResetPasswordPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/auth/email/reset-password`, {
+      const res = await fetch(`${getApiBaseUrl()}/auth/email/reset-password`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token, password }),
