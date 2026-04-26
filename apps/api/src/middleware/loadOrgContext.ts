@@ -16,8 +16,28 @@ import {
   ensureReferralCodeForUser,
   getReferralCodeFromRequest,
 } from "../lib/referrals.js";
-import { extractClientIp } from "../lib/ipqs.js";
 import type { VerifiedPlatformJwt } from "./verifyPlatformJwt.js";
+
+function extractClientIp(request: {
+  header(name: string): string | undefined;
+}): string | null {
+  const cloudflareIp = request.header("cf-connecting-ip")?.trim();
+  if (cloudflareIp) {
+    return cloudflareIp;
+  }
+
+  const forwardedFor = request.header("x-forwarded-for");
+  if (!forwardedFor) {
+    return null;
+  }
+
+  const firstHop = forwardedFor
+    .split(",")
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+
+  return firstHop ?? null;
+}
 
 function buildDefaultOrgName(email: string | undefined, platformUserId: string) {
   if (email && email.includes("@")) {
@@ -328,7 +348,6 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
             const referralResult = await applySignupReferralReward({
               clientIp: extractClientIp(c.req),
               db,
-              ipqsApiKey: apiConfig.IPQS_API_KEY,
               referralCode,
               referredOrgId: org.id,
               referredUserId: user.id,

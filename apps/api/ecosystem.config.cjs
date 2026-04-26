@@ -18,7 +18,6 @@ module.exports = {
       listen_timeout: 5000,
       env: {
         NODE_ENV: "production",
-        IPQS_API_KEY: process.env.IPQS_API_KEY,
         TAVILY_API_KEY: process.env.TAVILY_API_KEY,
       },
     },

@@ -6,8 +6,6 @@ import type {
   UserRow,
 } from "@beomz-studio/studio-db";
 
-import { lookupIpqsVpnStatus } from "./ipqs.js";
-
 export const REFERRAL_SIGNUP_REWARD_CREDITS = 50;
 export const REFERRAL_UPGRADE_REWARD_CREDITS = 200;
 export const REFERRAL_SIGNUP_CAP = 3;
@@ -36,8 +34,6 @@ interface ReferralAuthUser {
 interface ApplySignupReferralRewardInput {
   clientIp?: string | null;
   db: ReferralDb;
-  fetchImpl?: typeof fetch;
-  ipqsApiKey?: string | null;
   referralCode: string;
   referredOrgId: string;
   referredUserId: string;
@@ -93,24 +89,6 @@ function hasRecentRewardFromIp(events: ReferralEventRow[], clientIp: string | nu
     const createdAtMs = Date.parse(event.created_at);
     return Number.isFinite(createdAtMs) && createdAtMs >= cutoff;
   });
-}
-
-async function isVpnOrProxyIp(
-  clientIp: string | null | undefined,
-  apiKey: string | null | undefined,
-  fetchImpl: typeof fetch,
-): Promise<"clear" | "unverified" | "vpn"> {
-  const result = await lookupIpqsVpnStatus({
-    apiKey,
-    clientIp,
-    fetchImpl,
-  });
-
-  if (result.status === "unverified") {
-    console.warn("[referral] IPQS verification unavailable, blocking signup reward:", result.message);
-  }
-
-  return result.status;
 }
 
 export function normalizeReferralCode(value: string | null | undefined): string | null {
@@ -226,14 +204,11 @@ export async function applySignupReferralReward(
 
   const clientIp = input.clientIp ?? null;
   const sameIpTriggeredRecently = hasRecentRewardFromIp(rewardedSignupEvents, clientIp);
-  const vpnStatus = await isVpnOrProxyIp(clientIp, input.ipqsApiKey, input.fetchImpl ?? fetch);
-  const isVpn = vpnStatus === "vpn";
 
-  if (sameIpTriggeredRecently || vpnStatus !== "clear") {
+  if (sameIpTriggeredRecently) {
     await input.db.createReferralEvent({
       credits_awarded: 0,
       event: "signup",
-      is_vpn: isVpn,
       referred_id: input.referredUserId,
       referrer_id: referrerId,
       signup_ip: clientIp,
@@ -258,7 +233,6 @@ export async function applySignupReferralReward(
   await input.db.createReferralEvent({
     credits_awarded: REFERRAL_SIGNUP_REWARD_CREDITS,
     event: "signup",
-    is_vpn: false,
     referred_id: input.referredUserId,
     referrer_id: referrerId,
     signup_ip: clientIp,

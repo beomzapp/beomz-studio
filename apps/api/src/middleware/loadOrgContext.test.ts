@@ -12,7 +12,6 @@ import type {
 } from "@beomz-studio/studio-db";
 
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
-process.env.IPQS_API_KEY ??= "test-ipqs-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
@@ -88,7 +87,6 @@ function createApp(options: {
     createReferralEvent?: (input: {
       credits_awarded: number;
       event: "signup" | "upgrade";
-      is_vpn?: boolean | null;
       referred_id: string;
       referrer_id: string;
       signup_ip?: string | null;
@@ -326,7 +324,6 @@ test("creates the first org only for a genuine first signup", async () => {
 });
 
 test("applies signup referral rewards from the request query on a true first signup", async () => {
-  const originalFetch = globalThis.fetch;
   const user = buildUser({ id: "user-3", email: "refd@example.com", platform_user_id: "google-user-4" });
   const membership = buildMembership({ org_id: "org-3", user_id: "user-3" });
   const createdOrg = buildOrg({ credits: 100, id: "org-3", name: "refd's Studio", owner_id: "user-3" });
@@ -335,160 +332,151 @@ test("applies signup referral rewards from the request query on a true first sig
   const orgUpdates: Array<{ credits: number; orgId: string }> = [];
   const referralEvents: ReferralEventRow[] = [];
 
-  try {
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      proxy: false,
-      success: true,
-      vpn: false,
-    }), { status: 200 })) as typeof fetch;
-
-    const app = createApp({
-      authStore: {
-        ensureOrgMembership: async () => undefined,
-        findAuthUserById: async (authUserId) => {
-          assert.equal(authUserId, "google-user-4");
-          return { id: authUserId };
-        },
-        findMembershipByUserId: async (userId) => {
-          membershipLookups.push(userId);
-          return membershipLookups.length === 1 ? null : membership;
-        },
-        findUserByEmail: async (email) => {
-          assert.equal(email, "refd@example.com");
-          return null;
-        },
-        upsertUserByEmail: async (input) => {
-          assert.deepEqual(input, {
-            email: "refd@example.com",
-            platformUserId: "google-user-4",
-          });
-          return user;
-        },
+  const app = createApp({
+    authStore: {
+      ensureOrgMembership: async () => undefined,
+      findAuthUserById: async (authUserId) => {
+        assert.equal(authUserId, "google-user-4");
+        return { id: authUserId };
       },
-      db: {
-        createReferralCode: async ({ code, user_id }) => ({
+      findMembershipByUserId: async (userId) => {
+        membershipLookups.push(userId);
+        return membershipLookups.length === 1 ? null : membership;
+      },
+      findUserByEmail: async (email) => {
+        assert.equal(email, "refd@example.com");
+        return null;
+      },
+      upsertUserByEmail: async (input) => {
+        assert.deepEqual(input, {
+          email: "refd@example.com",
+          platformUserId: "google-user-4",
+        });
+        return user;
+      },
+    },
+    db: {
+      createReferralCode: async ({ code, user_id }) => ({
+        code,
+        created_at: now,
+        id: "ref-code-2",
+        user_id,
+      }),
+      createReferralEvent: async (input) => {
+        assert.equal("is_vpn" in input, false);
+        const event: ReferralEventRow = {
+          created_at: now,
+          credits_awarded: input.credits_awarded,
+          event: input.event,
+          id: "event-1",
+          is_vpn: false,
+          referred_id: input.referred_id,
+          referrer_id: input.referrer_id,
+          signup_ip: input.signup_ip ?? null,
+        };
+        referralEvents.push(event);
+        return event;
+      },
+      createOrg: async (input) => {
+        assert.deepEqual(input, {
+          credits: PLAN_LIMITS.free.signupGrant,
+          name: "refd's Studio",
+          owner_id: "user-3",
+        });
+        return createdOrg;
+      },
+      findOrgById: async (id) => {
+        assert.equal(id, "org-3");
+        return createdOrg;
+      },
+      findPrimaryOrgByUserId: async (userId) => {
+        assert.equal(userId, "referrer-1");
+        return buildOrg({ credits: 210, id: "referrer-org", owner_id: userId });
+      },
+      findReferralCodeByCode: async (code) => {
+        assert.equal(code, "REFCODE1");
+        return {
           code,
           created_at: now,
-          id: "ref-code-2",
-          user_id,
-        }),
-        createReferralEvent: async (input) => {
-          const event: ReferralEventRow = {
-            created_at: now,
-            credits_awarded: input.credits_awarded,
-            event: input.event,
-            id: "event-1",
-            is_vpn: input.is_vpn ?? false,
-            referred_id: input.referred_id,
-            referrer_id: input.referrer_id,
-            signup_ip: input.signup_ip ?? null,
-          };
-          referralEvents.push(event);
-          return event;
-        },
-        createOrg: async (input) => {
-          assert.deepEqual(input, {
-            credits: PLAN_LIMITS.free.signupGrant,
-            name: "refd's Studio",
-            owner_id: "user-3",
-          });
-          return createdOrg;
-        },
-        findOrgById: async (id) => {
-          assert.equal(id, "org-3");
-          return createdOrg;
-        },
-        findPrimaryOrgByUserId: async (userId) => {
-          assert.equal(userId, "referrer-1");
-          return buildOrg({ credits: 210, id: "referrer-org", owner_id: userId });
-        },
-        findReferralCodeByCode: async (code) => {
-          assert.equal(code, "REFCODE1");
-          return {
-            code,
-            created_at: now,
-            id: "ref-code-existing",
-            user_id: "referrer-1",
-          };
-        },
-        findReferralCodeByUserId: async (userId) => {
-          assert.equal(userId, "user-3");
-          return null;
-        },
-        findUserById: async (userId) => {
-          assert.equal(userId, "user-3");
-          return buildUser({ email: "refd@example.com", id: userId, platform_user_id: "google-user-4" });
-        },
-        findUserByPlatformUserId: async (platformUserId) => {
-          assert.equal(platformUserId, "google-user-4");
-          return null;
-        },
-        getOrgWithBalance: async (orgId) => {
-          assert.equal(orgId, "org-3");
-          return createdOrg;
-        },
-        hasReferralEvent: async (referrerId, referredId, event) => {
-          assert.equal(referrerId, "referrer-1");
-          assert.equal(referredId, "user-3");
-          assert.equal(event, "signup");
-          return false;
-        },
-        listReferralEventsByReferrerId: async () => [],
-        updateOrg: async (orgId, patch) => {
-          orgUpdates.push({ credits: Number(patch.credits ?? 0), orgId });
-          return referrerOrg;
-        },
-        updateUser: async (userId, patch) => {
-          assert.equal(userId, "user-3");
-          assert.equal(patch.referred_by, "referrer-1");
-          return buildUser({
-            email: "refd@example.com",
-            id: userId,
-            platform_user_id: "google-user-4",
-            referred_by: "referrer-1",
-          });
-        },
-        updateUserEmail: async () => {
-          throw new Error("email should not be updated");
-        },
+          id: "ref-code-existing",
+          user_id: "referrer-1",
+        };
       },
-      jwt: {
-        email: "refd@example.com",
-        sub: "google-user-4",
+      findReferralCodeByUserId: async (userId) => {
+        assert.equal(userId, "user-3");
+        return null;
       },
-    });
+      findUserById: async (userId) => {
+        assert.equal(userId, "user-3");
+        return buildUser({ email: "refd@example.com", id: userId, platform_user_id: "google-user-4" });
+      },
+      findUserByPlatformUserId: async (platformUserId) => {
+        assert.equal(platformUserId, "google-user-4");
+        return null;
+      },
+      getOrgWithBalance: async (orgId) => {
+        assert.equal(orgId, "org-3");
+        return createdOrg;
+      },
+      hasReferralEvent: async (referrerId, referredId, event) => {
+        assert.equal(referrerId, "referrer-1");
+        assert.equal(referredId, "user-3");
+        assert.equal(event, "signup");
+        return false;
+      },
+      listReferralEventsByReferrerId: async () => [],
+      updateOrg: async (orgId, patch) => {
+        orgUpdates.push({ credits: Number(patch.credits ?? 0), orgId });
+        return referrerOrg;
+      },
+      updateUser: async (userId, patch) => {
+        assert.equal(userId, "user-3");
+        assert.equal(patch.referred_by, "referrer-1");
+        return buildUser({
+          email: "refd@example.com",
+          id: userId,
+          platform_user_id: "google-user-4",
+          referred_by: "referrer-1",
+        });
+      },
+      updateUserEmail: async () => {
+        throw new Error("email should not be updated");
+      },
+    },
+    jwt: {
+      email: "refd@example.com",
+      sub: "google-user-4",
+    },
+  });
 
-    const response = await app.request("http://localhost/?ref=refcode1", {
-      headers: {
-        "cf-connecting-ip": "203.0.113.10",
-      },
-    });
+  const response = await app.request("http://localhost/?ref=refcode1", {
+    headers: {
+      "cf-connecting-ip": "203.0.113.10",
+    },
+  });
 
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      membership,
-      org: createdOrg,
-      user: buildUser({
-        email: "refd@example.com",
-        id: "user-3",
-        platform_user_id: "google-user-4",
-        referred_by: "referrer-1",
-      }),
-    });
-    assert.deepEqual(orgUpdates, [{ credits: 260, orgId: "referrer-org" }]);
-    assert.deepEqual(referralEvents, [{
-      created_at: now,
-      credits_awarded: 50,
-      event: "signup",
-      id: "event-1",
-      is_vpn: false,
-      referred_id: "user-3",
-      referrer_id: "referrer-1",
-      signup_ip: "203.0.113.10",
-    }]);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    membership,
+    org: createdOrg,
+    user: buildUser({
+      email: "refd@example.com",
+      id: "user-3",
+      platform_user_id: "google-user-4",
+      referred_by: "referrer-1",
+    }),
+  });
+  assert.deepEqual(orgUpdates, [{ credits: 260, orgId: "referrer-org" }]);
+  assert.deepEqual(referralEvents, [{
+    created_at: now,
+    credits_awarded: 50,
+    event: "signup",
+    id: "event-1",
+    is_vpn: false,
+    referred_id: "user-3",
+    referrer_id: "referrer-1",
+    signup_ip: "203.0.113.10",
+  }]);
 });
 
 test("skips self-referral rewards silently for brand new users", async () => {

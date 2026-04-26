@@ -20,6 +20,14 @@ import {
 
 const now = new Date().toISOString();
 
+interface ReferralEventInsert {
+  credits_awarded: number;
+  event: "signup" | "upgrade";
+  referred_id: string;
+  referrer_id: string;
+  signup_ip?: string | null;
+}
+
 function buildUser(overrides: Partial<UserRow> = {}): UserRow {
   return {
     avatar_url: null,
@@ -113,7 +121,8 @@ test("applySignupReferralReward credits only the referrer while under the signup
   const db = {
     countReferralEventsByReferrerId: async () => 1,
     createReferralCode: async () => null,
-    createReferralEvent: async (input: ReferralEventRow) => {
+    createReferralEvent: async (input: ReferralEventInsert) => {
+      assert.equal("is_vpn" in input, false);
       const event = buildReferralEvent(input);
       eventInserts.push(event);
       return event;
@@ -145,8 +154,6 @@ test("applySignupReferralReward credits only the referrer while under the signup
   const result = await applySignupReferralReward({
     clientIp: "203.0.113.5",
     db: db as never,
-    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, success: true, vpn: false }), { status: 200 }),
-    ipqsApiKey: "ipqs-key",
     referredOrgId: "referred-org",
     referredUserId: "user-2",
     referralCode: "refcode1",
@@ -162,7 +169,6 @@ test("applySignupReferralReward credits only the referrer while under the signup
   assert.equal(eventInserts.length, 1);
   assert.equal(eventInserts[0]?.event, "signup");
   assert.equal(eventInserts[0]?.signup_ip, "203.0.113.5");
-  assert.equal(eventInserts[0]?.is_vpn, false);
 });
 
 test("applySignupReferralReward stores the client IP on rewarded signup events", async () => {
@@ -171,7 +177,8 @@ test("applySignupReferralReward stores the client IP on rewarded signup events",
   const db = {
     countReferralEventsByReferrerId: async () => 0,
     createReferralCode: async () => null,
-    createReferralEvent: async (input: ReferralEventRow) => {
+    createReferralEvent: async (input: ReferralEventInsert) => {
+      assert.equal("is_vpn" in input, false);
       const event = buildReferralEvent(input);
       eventInserts.push(event);
       return event;
@@ -190,15 +197,12 @@ test("applySignupReferralReward stores the client IP on rewarded signup events",
   await applySignupReferralReward({
     clientIp: "203.0.113.10",
     db: db as never,
-    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, success: true, vpn: false }), { status: 200 }),
-    ipqsApiKey: "ipqs-key",
     referredOrgId: "referred-org",
     referredUserId: "user-2",
     referralCode: "refcode1",
   });
 
   assert.equal(eventInserts[0]?.signup_ip, "203.0.113.10");
-  assert.equal(eventInserts[0]?.is_vpn, false);
 });
 
 test("applySignupReferralReward silently skips duplicate signup rewards from the same IP in 24h", async () => {
@@ -208,12 +212,12 @@ test("applySignupReferralReward silently skips duplicate signup rewards from the
   const db = {
     countReferralEventsByReferrerId: async () => 0,
     createReferralCode: async () => null,
-    createReferralEvent: async (input: ReferralEventRow) => {
+    createReferralEvent: async (input: ReferralEventInsert) => {
+      assert.equal("is_vpn" in input, false);
       const event = buildReferralEvent({
         ...input,
         credits_awarded: input.credits_awarded,
         created_at: now,
-        is_vpn: input.is_vpn ?? false,
         signup_ip: input.signup_ip ?? null,
       });
       eventInserts.push(event);
@@ -244,8 +248,6 @@ test("applySignupReferralReward silently skips duplicate signup rewards from the
   const result = await applySignupReferralReward({
     clientIp: "203.0.113.10",
     db: db as never,
-    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, success: true, vpn: false }), { status: 200 }),
-    ipqsApiKey: "ipqs-key",
     referredOrgId: "referred-org",
     referredUserId: "user-3",
     referralCode: "refcode1",
@@ -255,141 +257,6 @@ test("applySignupReferralReward silently skips duplicate signup rewards from the
   assert.deepEqual(orgUpdates, []);
   assert.equal(eventInserts[0]?.credits_awarded, 0);
   assert.equal(eventInserts[0]?.signup_ip, "203.0.113.10");
-  assert.equal(eventInserts[0]?.is_vpn, false);
-});
-
-test("applySignupReferralReward marks VPN referrals and skips the signup reward", async () => {
-  const eventInserts: ReferralEventRow[] = [];
-
-  const db = {
-    countReferralEventsByReferrerId: async () => 0,
-    createReferralCode: async () => null,
-    createReferralEvent: async (input: ReferralEventRow) => {
-      const event = buildReferralEvent({
-        ...input,
-        credits_awarded: input.credits_awarded,
-        is_vpn: input.is_vpn ?? false,
-        signup_ip: input.signup_ip ?? null,
-      });
-      eventInserts.push(event);
-      return event;
-    },
-    findPrimaryOrgByUserId: async () => {
-      throw new Error("referrer org should not be loaded for VPN-blocked signups");
-    },
-    findReferralCodeByCode: async () => buildReferralCode(),
-    findReferralCodeByUserId: async () => null,
-    findUserById: async (userId: string) => buildUser({ id: userId }),
-    getOrgWithBalance: async (orgId: string) => buildOrg({ credits: 100, id: orgId, owner_id: "user-2" }),
-    hasReferralEvent: async () => false,
-    listReferralEventsByReferrerId: async () => [],
-    updateOrg: async () => {
-      throw new Error("org should not be updated for VPN-blocked signups");
-    },
-    updateUser: async (userId: string, patch: { referred_by?: string | null }) => buildUser({ id: userId, referred_by: patch.referred_by ?? null }),
-  };
-
-  const result = await applySignupReferralReward({
-    clientIp: "203.0.113.20",
-    db: db as never,
-    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, vpn: true }), { status: 200 }),
-    ipqsApiKey: "ipqs-key",
-    referredOrgId: "referred-org",
-    referredUserId: "user-2",
-    referralCode: "refcode1",
-  });
-
-  assert.equal(result.referrerRewarded, false);
-  assert.equal(eventInserts[0]?.credits_awarded, 0);
-  assert.equal(eventInserts[0]?.is_vpn, true);
-  assert.equal(eventInserts[0]?.signup_ip, "203.0.113.20");
-});
-
-test("applySignupReferralReward blocks signup rewards when IPQS errors", async () => {
-  const eventInserts: ReferralEventRow[] = [];
-
-  const db = {
-    countReferralEventsByReferrerId: async () => 0,
-    createReferralCode: async () => null,
-    createReferralEvent: async (input: ReferralEventRow) => {
-      const event = buildReferralEvent(input);
-      eventInserts.push(event);
-      return event;
-    },
-    findPrimaryOrgByUserId: async (userId: string) => buildOrg({ credits: 200, id: "referrer-org", owner_id: userId }),
-    findReferralCodeByCode: async () => buildReferralCode(),
-    findReferralCodeByUserId: async () => null,
-    findUserById: async (userId: string) => buildUser({ id: userId }),
-    getOrgWithBalance: async (orgId: string) => buildOrg({ credits: 100, id: orgId, owner_id: "user-2" }),
-    hasReferralEvent: async () => false,
-    listReferralEventsByReferrerId: async () => [],
-    updateOrg: async (orgId: string, patch: { credits?: number }) => buildOrg({ credits: Number(patch.credits ?? 0), id: orgId, owner_id: "referrer-1" }),
-    updateUser: async (userId: string, patch: { referred_by?: string | null }) => buildUser({ id: userId, referred_by: patch.referred_by ?? null }),
-  };
-
-  const result = await applySignupReferralReward({
-    clientIp: "203.0.113.25",
-    db: db as never,
-    fetchImpl: async () => {
-      throw new Error("network down");
-    },
-    ipqsApiKey: "ipqs-key",
-    referredOrgId: "referred-org",
-    referredUserId: "user-2",
-    referralCode: "refcode1",
-  });
-
-  assert.equal(result.referrerRewarded, false);
-  assert.equal(eventInserts[0]?.credits_awarded, 0);
-});
-
-test("applySignupReferralReward uses strictness=1 and blocks unsuccessful IPQS responses", async () => {
-  const eventInserts: ReferralEventRow[] = [];
-  let capturedUrl: string | null = null;
-
-  const db = {
-    countReferralEventsByReferrerId: async () => 0,
-    createReferralCode: async () => null,
-    createReferralEvent: async (input: ReferralEventRow) => {
-      const event = buildReferralEvent(input);
-      eventInserts.push(event);
-      return event;
-    },
-    findPrimaryOrgByUserId: async () => {
-      throw new Error("referrer org should not be loaded for unverified signups");
-    },
-    findReferralCodeByCode: async () => buildReferralCode(),
-    findReferralCodeByUserId: async () => null,
-    findUserById: async (userId: string) => buildUser({ id: userId }),
-    getOrgWithBalance: async (orgId: string) => buildOrg({ credits: 100, id: orgId, owner_id: "user-2" }),
-    hasReferralEvent: async () => false,
-    listReferralEventsByReferrerId: async () => [],
-    updateOrg: async () => {
-      throw new Error("org should not be updated for unverified signups");
-    },
-    updateUser: async (userId: string, patch: { referred_by?: string | null }) => buildUser({ id: userId, referred_by: patch.referred_by ?? null }),
-  };
-
-  const result = await applySignupReferralReward({
-    clientIp: "178.132.108.41",
-    db: db as never,
-    fetchImpl: async (input) => {
-      capturedUrl = typeof input === "string" ? input : input.toString();
-      return new Response(JSON.stringify({
-        message: "You have insufficient credits to make this query.",
-        success: false,
-        vpn: false,
-      }), { status: 200 });
-    },
-    ipqsApiKey: "ipqs-key",
-    referredOrgId: "referred-org",
-    referredUserId: "user-2",
-    referralCode: "refcode1",
-  });
-
-  assert.equal(result.referrerRewarded, false);
-  assert.match(capturedUrl ?? "", /strictness=1/);
-  assert.equal(eventInserts[0]?.credits_awarded, 0);
 });
 
 test("applyUpgradeReferralReward is idempotent and only rewards once", async () => {
@@ -435,7 +302,7 @@ test("applyUpgradeReferralReward is idempotent and only rewards once", async () 
 
 test("summariseReferralStats ignores zero-credit audit rows", () => {
   const stats = summariseReferralStats([
-    buildReferralEvent({ credits_awarded: 0, event: "signup", id: "event-0", is_vpn: true }),
+    buildReferralEvent({ credits_awarded: 0, event: "signup", id: "event-0" }),
     buildReferralEvent({ credits_awarded: 50, event: "signup" }),
     buildReferralEvent({ credits_awarded: 200, event: "upgrade", id: "event-2" }),
   ]);
