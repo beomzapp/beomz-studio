@@ -16,6 +16,52 @@ import { usePricingModal } from "../../../contexts/PricingModalContext";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 import { enhancePrompt } from "../../../lib/api";
 
+const MAX_ATTACHMENTS = 3;
+
+function AttachmentPill({
+  file,
+  onRemove,
+}: {
+  file: File;
+  onRemove: () => void;
+}) {
+  const isImage = file.type.startsWith("image/");
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isImage) return;
+    const url = URL.createObjectURL(file);
+    setObjectUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImage]);
+
+  return (
+    <div className="flex items-center gap-2 rounded-full border border-border bg-white/5 pl-1.5 pr-3 py-1 text-sm text-white/60 max-w-[240px]">
+      {isImage && objectUrl ? (
+        <img
+          src={objectUrl}
+          alt={file.name}
+          className="rounded-full object-cover shrink-0"
+          style={{ height: 24, width: 24, maxHeight: 80 }}
+        />
+      ) : (
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/10 shrink-0">
+          <Paperclip size={12} className="text-orange" />
+        </span>
+      )}
+      <span className="truncate leading-none">{file.name}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-auto shrink-0 text-white/30 hover:text-white transition-colors"
+        aria-label={`Remove ${file.name}`}
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 const SUGGESTION_POOL = [
   "a SaaS dashboard", "a marketing website", "a task manager",
   "a CRM system", "an e-commerce store", "a project tracker",
@@ -57,7 +103,7 @@ export function LandingPage() {
   const [planMode, setPlanMode] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   const editableRef = useRef<HTMLSpanElement>(null);
@@ -234,18 +280,26 @@ export function LandingPage() {
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) setAttachedFile(file);
+      if (file) {
+        setAttachedFiles((prev) =>
+          prev.length < MAX_ATTACHMENTS ? [...prev, file] : prev,
+        );
+      }
       e.target.value = "";
     },
     [],
   );
+
+  const removeAttachedFile = useCallback((index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   useEffect(() => {
     editableRef.current?.focus();
   }, []);
 
   return (
-    <div className="h-screen overflow-hidden bg-bg">
+    <div className="h-screen bg-bg">
       <div className="relative h-screen">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
@@ -291,7 +345,7 @@ export function LandingPage() {
         </nav>
 
         {/* Hero section */}
-        <section className="relative flex h-full flex-col items-center justify-center overflow-hidden px-4">
+        <section className="relative flex h-full flex-col items-center justify-center overflow-x-hidden overflow-y-auto px-4 py-20">
           {/* Gradient sphere */}
           <div
             className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
@@ -302,19 +356,16 @@ export function LandingPage() {
             }}
           />
 
-          {/* Attached file pill */}
-          {attachedFile && (
-            <div className="relative z-10 mb-4 flex items-center gap-2 rounded-full border border-border bg-white/5 px-3 py-1.5 text-sm text-white/60">
-              <Paperclip size={14} className="text-orange" />
-              <span className="max-w-[200px] truncate">
-                {attachedFile.name}
-              </span>
-              <button
-                onClick={() => setAttachedFile(null)}
-                className="ml-1 text-white/30 hover:text-white"
-              >
-                <X size={14} />
-              </button>
+          {/* Attachment pills */}
+          {attachedFiles.length > 0 && (
+            <div className="relative z-10 mb-4 flex max-w-2xl flex-wrap justify-center gap-2">
+              {attachedFiles.map((file, i) => (
+                <AttachmentPill
+                  key={i}
+                  file={file}
+                  onRemove={() => removeAttachedFile(i)}
+                />
+              ))}
             </div>
           )}
 
@@ -389,8 +440,14 @@ export function LandingPage() {
 
             {/* File upload */}
             <button
-              onMouseDown={(e) => { e.preventDefault(); fileInputRef.current?.click(); }}
-              className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-white/40 transition-all hover:border-white/20 hover:text-white/60"
+              onMouseDown={(e) => { e.preventDefault(); if (attachedFiles.length < MAX_ATTACHMENTS) fileInputRef.current?.click(); }}
+              disabled={attachedFiles.length >= MAX_ATTACHMENTS}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                attachedFiles.length >= MAX_ATTACHMENTS
+                  ? "border-border text-white/20 cursor-not-allowed"
+                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
+              )}
             >
               <Paperclip size={14} />
             </button>
