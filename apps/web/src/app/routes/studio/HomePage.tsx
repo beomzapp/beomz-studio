@@ -147,14 +147,26 @@ function CreditsCard() {
       ? credits.planCredits
       : (PLAN_CREDITS[planKey] ?? 0);
 
-  const balance = credits ? Math.round(credits.balance) : 0;
-  const remainingPct = planCredits > 0 ? Math.min(100, (balance / planCredits) * 100) : 0;
+  // Bug 3: use Math.floor to match the popover (avoids +1 rounding discrepancy)
+  const balance = credits ? Math.floor(credits.balance) : 0;
+  // Bug 1: total = base plan allocation + remaining topup credits
+  const topup = credits ? Math.round(credits.topup) : 0;
+  const total = planCredits + topup;
+  const remainingPct = total > 0 ? Math.min(100, (balance / total) * 100) : 0;
 
   const planLabel =
     planKey === "pro_starter" ? "Pro Starter" :
     planKey === "pro_builder" ? "Pro Builder" :
     planKey === "business" ? "Business" :
     "Free";
+
+  // Bug 2: free plan label reflects top-up state
+  const subLabel =
+    planKey === "free" && topup > 0
+      ? "Free plan · topped up"
+      : planKey === "free"
+        ? "Free plan · one-time credits"
+        : `${planLabel} · resets ${nextMonthReset()}`;
 
   return (
     <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
@@ -169,18 +181,14 @@ function CreditsCard() {
         </div>
         <div className="mt-1.5 flex items-center justify-between">
           <span className="text-[12px] text-[#9ca3af]">{balance} remaining</span>
-          <span className="text-[12px] text-[#9ca3af]">{planCredits > 0 ? planCredits : "—"} total</span>
+          <span className="text-[12px] text-[#9ca3af]">{total > 0 ? total : "—"} total</span>
         </div>
       </div>
 
       <div className="my-3 border-t border-[#f3f4f6]" />
 
       <div className="flex items-center justify-between">
-        <span className="text-[12px] text-[#9ca3af]">
-          {planKey === "free"
-            ? "Free plan · one-time credits"
-            : `${planLabel} · resets ${nextMonthReset()}`}
-        </span>
+        <span className="text-[12px] text-[#9ca3af]">{subLabel}</span>
         <button
           onClick={openPricingModal}
           className="text-[12px] font-medium transition-colors hover:opacity-80"
