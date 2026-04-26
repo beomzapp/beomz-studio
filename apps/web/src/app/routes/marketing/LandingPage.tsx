@@ -251,13 +251,15 @@ export function LandingPage() {
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
           <BeomzLogo className="h-6 w-auto text-white" />
           <div className="flex items-center gap-6">
-            <button
-              type="button"
-              onClick={openPricingModal}
-              className="text-sm text-white/50 transition-colors hover:text-white/80"
-            >
-              Pricing
-            </button>
+            {!session && (
+              <button
+                type="button"
+                onClick={openPricingModal}
+                className="text-sm text-white/50 transition-colors hover:text-white/80"
+              >
+                Pricing
+              </button>
+            )}
             {session ? (
               <>
                 <Link
