@@ -106,28 +106,50 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
     if (!email || !password) return;
     setLoading(true);
     setError(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
     try {
       const res = await fetch(`${getApiBaseUrl()}/auth/email/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+
       const data = (await res.json()) as { access_token?: string; refresh_token?: string; error?: string };
+      console.log("[AuthModal] login response", { ok: res.ok, hasAccessToken: !!data.access_token, hasRefreshToken: !!data.refresh_token });
+
       if (!res.ok) {
         setError(data.error ?? "Sign in failed. Please check your credentials.");
-        setLoading(false);
         return;
       }
+
       if (data.access_token && data.refresh_token) {
-        await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+        });
+        if (sessionError) {
+          setError(sessionError.message);
+          return;
+        }
       }
+
       if (onSuccess) {
         onSuccess();
       } else {
         onClose();
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === "AbortError") {
+        setError("Request timed out. Please try again.");
+      } else {
+        setError("Network error. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
