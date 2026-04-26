@@ -1,30 +1,48 @@
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 
 import { ensureReferralCodeForUser, summariseReferralStats } from "../lib/referrals.js";
 import { loadOrgContext } from "../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../types.js";
 
-const referralsRoute = new Hono();
+interface ReferralsRouteDeps {
+  authMiddleware?: MiddlewareHandler;
+  loadOrgContextMiddleware?: MiddlewareHandler;
+}
 
-referralsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
-  try {
-    const orgContext = c.get("orgContext") as OrgContext;
-    const referralCode = await ensureReferralCodeForUser(orgContext.db, orgContext.user.id);
-    console.log("[referrals] code for user:", referralCode.code);
-    const events = await orgContext.db.listReferralEventsByReferrerId(orgContext.user.id);
-    const stats = summariseReferralStats(events);
+export function createReferralsRoute(deps: ReferralsRouteDeps = {}) {
+  const referralsRoute = new Hono();
+  const authMiddleware = deps.authMiddleware ?? verifyPlatformJwt;
+  const loadOrgContextMiddleware = deps.loadOrgContextMiddleware ?? loadOrgContext;
 
-    return c.json({
-      code: referralCode.code,
-      link: `https://beomz.ai/signup?ref=${referralCode.code}`,
-      referral_code: referralCode.code,
-      stats,
-    });
-  } catch (error) {
-    console.error("[GET /referrals] error:", error);
-    return c.json({ error: "Failed to load referrals." }, 500);
-  }
-});
+  referralsRoute.get("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    try {
+      const orgContext = c.get("orgContext") as OrgContext;
+      const referralCode = await ensureReferralCodeForUser(orgContext.db, orgContext.user.id);
+      const referralLink = `https://beomz.ai/signup?ref=${referralCode.code}`;
+      console.log("[referrals] code for user:", referralCode.code);
+      const events = await orgContext.db.listReferralEventsByReferrerId(referralCode.user_id);
+      const stats = summariseReferralStats(events);
+
+      return c.json({
+        code: referralCode.code,
+        credits_earned: stats.totalCredits,
+        link: referralLink,
+        referral_code: referralCode.code,
+        referral_link: referralLink,
+        signup_count: stats.signups,
+        stats,
+        upgrade_count: stats.upgrades,
+      });
+    } catch (error) {
+      console.error("[GET /referrals] error:", error);
+      return c.json({ error: "Failed to load referrals." }, 500);
+    }
+  });
+
+  return referralsRoute;
+}
+
+const referralsRoute = createReferralsRoute();
 
 export default referralsRoute;

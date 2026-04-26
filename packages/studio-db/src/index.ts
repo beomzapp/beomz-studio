@@ -29,6 +29,8 @@ export interface UserRow extends Record<string, unknown> {
   id: string;
   platform_user_id: string;
   email: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
   referred_by?: string | null;
   created_at: string;
 }
@@ -171,12 +173,16 @@ export interface UserInsert extends Record<string, unknown> {
   id?: string;
   email: string;
   platform_user_id: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
   created_at?: string;
 }
 
 export interface UserUpdate extends Record<string, unknown> {
   email?: string;
   platform_user_id?: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
   referred_by?: string | null;
 }
 
@@ -202,6 +208,8 @@ export interface ReferralEventRow extends Record<string, unknown> {
   referred_id: string;
   event: ReferralEventType;
   credits_awarded: number;
+  signup_ip?: string | null;
+  is_vpn?: boolean | null;
   created_at: string;
 }
 
@@ -211,6 +219,8 @@ export interface ReferralEventInsert extends Record<string, unknown> {
   referred_id: string;
   event: ReferralEventType;
   credits_awarded: number;
+  signup_ip?: string | null;
+  is_vpn?: boolean | null;
   created_at?: string;
 }
 
@@ -1422,7 +1432,8 @@ export class StudioDbClient {
       .from("referral_events")
       .select("id", { count: "exact", head: true })
       .eq("referrer_id", referrerId)
-      .eq("event", event);
+      .eq("event", event)
+      .gt("credits_awarded", 0);
 
     if (response.error) {
       throw new Error(response.error.message);

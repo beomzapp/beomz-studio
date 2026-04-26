@@ -52,6 +52,7 @@ const envSchema = z.object({
   SUPABASE_MANAGEMENT_API_KEY: z.string().min(1).optional(),
   SUPABASE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   SUPABASE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
+  IPQS_API_KEY: z.string().min(1).optional(),
   // Vercel deploy — published apps at slug.beomz.app
   VERCEL_TOKEN: z.string().min(1).optional(),
   VERCEL_PROJECT_ID: z.string().min(1).optional(),

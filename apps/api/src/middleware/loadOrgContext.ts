@@ -47,8 +47,63 @@ function createStudioAdminClient() {
   });
 }
 
+function readProfileString(
+  metadata: Record<string, unknown> | null | undefined,
+  keys: string[],
+): string | null {
+  if (!metadata) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function extractUserProfile(authUser: {
+  app_metadata?: Record<string, unknown> | null;
+  user_metadata?: Record<string, unknown> | null;
+}) {
+  return {
+    avatarUrl:
+      readProfileString(authUser.user_metadata, ["avatar_url", "picture", "avatarUrl"])
+      ?? readProfileString(authUser.app_metadata, ["avatar_url", "picture", "avatarUrl"]),
+    fullName:
+      readProfileString(authUser.user_metadata, ["name", "full_name", "fullName"])
+      ?? readProfileString(authUser.app_metadata, ["name", "full_name", "fullName"]),
+  };
+}
+
+function extractClientIp(request: {
+  header(name: string): string | undefined;
+}): string | null {
+  const cloudflareIp = request.header("cf-connecting-ip")?.trim();
+  if (cloudflareIp) {
+    return cloudflareIp;
+  }
+
+  const forwardedFor = request.header("x-forwarded-for");
+  if (!forwardedFor) {
+    return null;
+  }
+
+  const firstHop = forwardedFor
+    .split(",")
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+
+  return firstHop ?? null;
+}
+
 interface UserUpsertInput {
+  avatarUrl?: string | null;
   email: string;
+  fullName?: string | null;
   platformUserId: string;
 }
 
@@ -152,19 +207,24 @@ function createAuthBootstrapStore(): AuthBootstrapStore {
       return unwrapMaybeSingle(response);
     },
     async upsertUserByEmail(input) {
-      const upsert = async (includeUpdatedAt: boolean) => {
-        const payload: Record<string, unknown> = {
-          email: input.email,
-          platform_user_id: input.platformUserId,
-        };
+      const payload: Record<string, unknown> = {
+        avatar_url: input.avatarUrl,
+        email: input.email,
+        full_name: input.fullName,
+        platform_user_id: input.platformUserId,
+        updated_at: new Date().toISOString(),
+      };
 
-        if (includeUpdatedAt) {
-          payload.updated_at = new Date().toISOString();
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === null || payload[key] === undefined || payload[key] === "") {
+          delete payload[key];
         }
+      });
 
+      const upsert = async (currentPayload: Record<string, unknown>) => {
         const response = await client
           .from("users")
-          .upsert(payload, {
+          .upsert(currentPayload, {
             onConflict: "email",
           })
           .select("*")
@@ -173,14 +233,20 @@ function createAuthBootstrapStore(): AuthBootstrapStore {
         return unwrapMaybeSingle(response);
       };
 
-      try {
-        return await upsert(true);
-      } catch (error) {
-        if (!isMissingColumnError(error, "updated_at")) {
-          throw error;
-        }
+      while (true) {
+        try {
+          return await upsert(payload);
+        } catch (error) {
+          const missingColumn = Object.keys(payload).find((columnName) =>
+            !["email", "platform_user_id"].includes(columnName) && isMissingColumnError(error, columnName),
+          );
 
-        return upsert(false);
+          if (!missingColumn) {
+            throw error;
+          }
+
+          delete payload[missingColumn];
+        }
       }
     },
   };
@@ -201,6 +267,7 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
       const authStore = createAuthStore();
       const email = buildUserFallbackEmail(jwt);
       const authUser = await authStore.findAuthUserById(jwt.sub);
+      const profile = authUser ? extractUserProfile(authUser) : { avatarUrl: null, fullName: null };
 
       if (!authUser) {
         return c.json({ error: "User not found" }, 401);
@@ -212,10 +279,20 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
       if (!user) {
         const existingUser = await authStore.findUserByEmail(email);
         isNew = !existingUser;
-        user = await authStore.upsertUserByEmail({
+        const upsertInput: UserUpsertInput = {
           email,
           platformUserId: jwt.sub,
-        });
+        };
+
+        if (profile.avatarUrl) {
+          upsertInput.avatarUrl = profile.avatarUrl;
+        }
+
+        if (profile.fullName) {
+          upsertInput.fullName = profile.fullName;
+        }
+
+        user = await authStore.upsertUserByEmail(upsertInput);
         if (!user) {
           return c.json({ error: "User not found" }, 401);
         }
@@ -265,19 +342,26 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
 
         const referralCode = getReferralCodeFromRequest(c.req.url, authUser);
         if (referralCode) {
-          const referralResult = await applySignupReferralReward({
-            db,
-            referredOrgId: org.id,
-            referredUserId: user.id,
-            referralCode,
-          });
+          const referralCodeOwner = await db.findReferralCodeByCode(referralCode);
 
-          if (referralResult.referredUser) {
-            user = referralResult.referredUser;
-          }
+          if (referralCodeOwner && referralCodeOwner.user_id !== user.id) {
+            const referralResult = await applySignupReferralReward({
+              clientIp: extractClientIp(c.req),
+              db,
+              ipqsApiKey: apiConfig.IPQS_API_KEY,
+              referralCode,
+              referredOrgId: org.id,
+              referredUserId: user.id,
+              referrerId: referralCodeOwner.user_id,
+            });
 
-          if (referralResult.referredOrg) {
-            org = referralResult.referredOrg;
+            if (referralResult.referredUser) {
+              user = referralResult.referredUser;
+            }
+
+            if (referralResult.referredOrg) {
+              org = referralResult.referredOrg;
+            }
           }
         }
       }

@@ -32,10 +32,14 @@ interface ReferralAuthUser {
 }
 
 interface ApplySignupReferralRewardInput {
+  clientIp?: string | null;
   db: ReferralDb;
+  fetchImpl?: typeof fetch;
+  ipqsApiKey?: string | null;
   referralCode: string;
   referredOrgId: string;
   referredUserId: string;
+  referrerId?: string | null;
 }
 
 interface ApplySignupReferralRewardResult {
@@ -62,6 +66,58 @@ function readMetadataReferralCode(metadata: Record<string, unknown> | null | und
   }
 
   return null;
+}
+
+function isRewardedReferralEvent(event: ReferralEventRow): boolean {
+  return Number(event.credits_awarded ?? 0) > 0;
+}
+
+function hasRecentRewardFromIp(events: ReferralEventRow[], clientIp: string | null | undefined): boolean {
+  if (!clientIp) {
+    return false;
+  }
+
+  const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+
+  return events.some((event) => {
+    if (event.event !== "signup" || !isRewardedReferralEvent(event)) {
+      return false;
+    }
+
+    if (event.signup_ip !== clientIp) {
+      return false;
+    }
+
+    const createdAtMs = Date.parse(event.created_at);
+    return Number.isFinite(createdAtMs) && createdAtMs >= cutoff;
+  });
+}
+
+async function isVpnOrProxyIp(
+  clientIp: string | null | undefined,
+  apiKey: string | null | undefined,
+  fetchImpl: typeof fetch,
+): Promise<boolean> {
+  if (!clientIp || !apiKey) {
+    return false;
+  }
+
+  try {
+    const response = await fetchImpl(
+      `https://www.ipqualityscore.com/api/json/ip/${encodeURIComponent(apiKey)}/${encodeURIComponent(clientIp)}`,
+      { signal: AbortSignal.timeout(3000) },
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    return payload?.vpn === true || payload?.proxy === true;
+  } catch (error) {
+    console.warn("[referral] IPQS check failed, allowing referral reward:", error instanceof Error ? error.message : String(error));
+    return false;
+  }
 }
 
 export function normalizeReferralCode(value: string | null | undefined): string | null {
@@ -130,8 +186,11 @@ export async function applySignupReferralReward(
     };
   }
 
-  const codeRow = await input.db.findReferralCodeByCode(normalizedCode);
-  if (!codeRow || codeRow.user_id === input.referredUserId) {
+  const referrerId = input.referrerId
+    ?? (await input.db.findReferralCodeByCode(normalizedCode))?.user_id
+    ?? null;
+
+  if (!referrerId || referrerId === input.referredUserId) {
     return {
       referredOrg: await input.db.getOrgWithBalance(input.referredOrgId),
       referredUser: await input.db.findUserById(input.referredUserId),
@@ -140,18 +199,13 @@ export async function applySignupReferralReward(
   }
 
   const referredUser = await input.db.updateUser(input.referredUserId, {
-    referred_by: codeRow.user_id,
+    referred_by: referrerId,
   });
 
-  const currentReferredOrg = await input.db.getOrgWithBalance(input.referredOrgId);
-  const referredOrg = currentReferredOrg
-    ? await input.db.updateOrg(input.referredOrgId, {
-      credits: Number(currentReferredOrg.credits ?? 0) + REFERRAL_SIGNUP_REWARD_CREDITS,
-    })
-    : null;
+  const referredOrg = await input.db.getOrgWithBalance(input.referredOrgId);
 
   const existingSignupReward = await input.db.hasReferralEvent(
-    codeRow.user_id,
+    referrerId,
     input.referredUserId,
     "signup",
   );
@@ -164,8 +218,12 @@ export async function applySignupReferralReward(
     };
   }
 
-  const signupCount = await input.db.countReferralEventsByReferrerId(codeRow.user_id, "signup");
-  if (signupCount >= REFERRAL_SIGNUP_CAP) {
+  const existingEvents = await input.db.listReferralEventsByReferrerId(referrerId);
+  const rewardedSignupEvents = existingEvents.filter((event) =>
+    event.event === "signup" && isRewardedReferralEvent(event),
+  );
+
+  if (rewardedSignupEvents.length >= REFERRAL_SIGNUP_CAP) {
     return {
       referredOrg,
       referredUser,
@@ -173,7 +231,28 @@ export async function applySignupReferralReward(
     };
   }
 
-  const referrerOrg = await input.db.findPrimaryOrgByUserId(codeRow.user_id);
+  const clientIp = input.clientIp ?? null;
+  const sameIpTriggeredRecently = hasRecentRewardFromIp(rewardedSignupEvents, clientIp);
+  const isVpn = await isVpnOrProxyIp(clientIp, input.ipqsApiKey, input.fetchImpl ?? fetch);
+
+  if (sameIpTriggeredRecently || isVpn) {
+    await input.db.createReferralEvent({
+      credits_awarded: 0,
+      event: "signup",
+      is_vpn: isVpn,
+      referred_id: input.referredUserId,
+      referrer_id: referrerId,
+      signup_ip: clientIp,
+    });
+
+    return {
+      referredOrg,
+      referredUser,
+      referrerRewarded: false,
+    };
+  }
+
+  const referrerOrg = await input.db.findPrimaryOrgByUserId(referrerId);
   if (!referrerOrg) {
     return {
       referredOrg,
@@ -185,8 +264,10 @@ export async function applySignupReferralReward(
   await input.db.createReferralEvent({
     credits_awarded: REFERRAL_SIGNUP_REWARD_CREDITS,
     event: "signup",
+    is_vpn: false,
     referred_id: input.referredUserId,
-    referrer_id: codeRow.user_id,
+    referrer_id: referrerId,
+    signup_ip: clientIp,
   });
 
   await input.db.updateOrg(referrerOrg.id, {
@@ -243,15 +324,20 @@ export function summariseReferralStats(events: ReferralEventRow[]) {
   let upgradeCredits = 0;
 
   for (const event of events) {
+    const credits = Number(event.credits_awarded ?? 0);
+    if (credits <= 0) {
+      continue;
+    }
+
     if (event.event === "signup") {
       signups += 1;
-      signupCredits += Number(event.credits_awarded ?? 0);
+      signupCredits += credits;
       continue;
     }
 
     if (event.event === "upgrade") {
       upgrades += 1;
-      upgradeCredits += Number(event.credits_awarded ?? 0);
+      upgradeCredits += credits;
     }
   }
 

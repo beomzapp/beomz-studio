@@ -22,8 +22,10 @@ const now = new Date().toISOString();
 
 function buildUser(overrides: Partial<UserRow> = {}): UserRow {
   return {
+    avatar_url: null,
     id: "user-1",
     email: "omar@example.com",
+    full_name: null,
     platform_user_id: "platform-user-1",
     created_at: now,
     ...overrides,
@@ -66,18 +68,29 @@ function buildOrg(overrides: Partial<OrgRow> = {}): OrgRow {
 function createApp(options: {
   authStore: {
     ensureOrgMembership: (input: { org_id: string; role: string; user_id: string }) => Promise<void>;
-    findAuthUserById: (authUserId: string) => Promise<{ id: string } | null>;
+    findAuthUserById: (authUserId: string) => Promise<{
+      app_metadata?: Record<string, unknown> | null;
+      id: string;
+      user_metadata?: Record<string, unknown> | null;
+    } | null>;
     findMembershipByUserId: (userId: string) => Promise<OrgMembershipRow | null>;
     findUserByEmail: (email: string) => Promise<UserRow | null>;
-    upsertUserByEmail: (input: { email: string; platformUserId: string }) => Promise<UserRow | null>;
+    upsertUserByEmail: (input: {
+      avatarUrl?: string | null;
+      email: string;
+      fullName?: string | null;
+      platformUserId: string;
+    }) => Promise<UserRow | null>;
   };
   db: {
     countReferralEventsByReferrerId?: (referrerId: string, event: "signup" | "upgrade") => Promise<number>;
     createReferralEvent?: (input: {
       credits_awarded: number;
       event: "signup" | "upgrade";
+      is_vpn?: boolean | null;
       referred_id: string;
       referrer_id: string;
+      signup_ip?: string | null;
     }) => Promise<ReferralEventRow>;
     createReferralCode?: (input: { code: string; user_id: string }) => Promise<ReferralCodeRow | null>;
     createOrg: (input: { credits: number; name: string; owner_id: string }) => Promise<OrgRow>;
@@ -222,7 +235,13 @@ test("creates the first org only for a genuine first signup", async () => {
         },
         findAuthUserById: async (authUserId) => {
           assert.equal(authUserId, "google-user-3");
-          return { id: authUserId };
+          return {
+            id: authUserId,
+            user_metadata: {
+              name: "First User",
+              picture: "https://example.com/google-avatar.png",
+            },
+          };
         },
         findMembershipByUserId: async (userId) => {
           membershipLookups.push(userId);
@@ -234,7 +253,9 @@ test("creates the first org only for a genuine first signup", async () => {
         },
         upsertUserByEmail: async (input) => {
           assert.deepEqual(input, {
+            avatarUrl: "https://example.com/google-avatar.png",
             email: "first@example.com",
+            fullName: "First User",
             platformUserId: "google-user-3",
           });
           return user;
@@ -307,7 +328,6 @@ test("applies signup referral rewards from the request query on a true first sig
   const user = buildUser({ id: "user-3", email: "refd@example.com", platform_user_id: "google-user-4" });
   const membership = buildMembership({ org_id: "org-3", user_id: "user-3" });
   const createdOrg = buildOrg({ credits: 100, id: "org-3", name: "refd's Studio", owner_id: "user-3" });
-  const rewardedOrg = buildOrg({ credits: 150, id: "org-3", name: "refd's Studio", owner_id: "user-3" });
   const referrerOrg = buildOrg({ credits: 260, id: "referrer-org", owner_id: "referrer-1" });
   const membershipLookups: string[] = [];
   const orgUpdates: Array<{ credits: number; orgId: string }> = [];
@@ -337,11 +357,6 @@ test("applies signup referral rewards from the request query on a true first sig
       },
     },
     db: {
-      countReferralEventsByReferrerId: async (referrerId, event) => {
-        assert.equal(referrerId, "referrer-1");
-        assert.equal(event, "signup");
-        return 0;
-      },
       createReferralCode: async ({ code, user_id }) => ({
         code,
         created_at: now,
@@ -354,8 +369,10 @@ test("applies signup referral rewards from the request query on a true first sig
           credits_awarded: input.credits_awarded,
           event: input.event,
           id: "event-1",
+          is_vpn: input.is_vpn ?? false,
           referred_id: input.referred_id,
           referrer_id: input.referrer_id,
+          signup_ip: input.signup_ip ?? null,
         };
         referralEvents.push(event);
         return event;
@@ -410,9 +427,6 @@ test("applies signup referral rewards from the request query on a true first sig
       listReferralEventsByReferrerId: async () => [],
       updateOrg: async (orgId, patch) => {
         orgUpdates.push({ credits: Number(patch.credits ?? 0), orgId });
-        if (orgId === "org-3") {
-          return rewardedOrg;
-        }
         return referrerOrg;
       },
       updateUser: async (userId, patch) => {
@@ -435,12 +449,16 @@ test("applies signup referral rewards from the request query on a true first sig
     },
   });
 
-  const response = await app.request("http://localhost/?ref=refcode1");
+  const response = await app.request("http://localhost/?ref=refcode1", {
+    headers: {
+      "cf-connecting-ip": "203.0.113.10",
+    },
+  });
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     membership,
-    org: rewardedOrg,
+    org: createdOrg,
     user: buildUser({
       email: "refd@example.com",
       id: "user-3",
@@ -448,18 +466,84 @@ test("applies signup referral rewards from the request query on a true first sig
       referred_by: "referrer-1",
     }),
   });
-  assert.deepEqual(orgUpdates, [
-    { credits: 150, orgId: "org-3" },
-    { credits: 260, orgId: "referrer-org" },
-  ]);
+  assert.deepEqual(orgUpdates, [{ credits: 260, orgId: "referrer-org" }]);
   assert.deepEqual(referralEvents, [{
     created_at: now,
     credits_awarded: 50,
     event: "signup",
     id: "event-1",
+    is_vpn: false,
     referred_id: "user-3",
     referrer_id: "referrer-1",
+    signup_ip: "203.0.113.10",
   }]);
+});
+
+test("skips self-referral rewards silently for brand new users", async () => {
+  const user = buildUser({ id: "user-9", email: "self@example.com", platform_user_id: "google-user-9" });
+  const membership = buildMembership({ org_id: "org-9", user_id: "user-9" });
+  const org = buildOrg({ credits: 100, id: "org-9", name: "self's Studio", owner_id: "user-9" });
+  const membershipLookups: string[] = [];
+
+  const app = createApp({
+    authStore: {
+      ensureOrgMembership: async () => undefined,
+      findAuthUserById: async () => ({ id: "google-user-9" }),
+      findMembershipByUserId: async (userId) => {
+        membershipLookups.push(userId);
+        return membershipLookups.length === 1 ? null : membership;
+      },
+      findUserByEmail: async () => null,
+      upsertUserByEmail: async () => user,
+    },
+    db: {
+      createReferralCode: async ({ code, user_id }) => ({
+        code,
+        created_at: now,
+        id: "ref-self",
+        user_id,
+      }),
+      createReferralEvent: async () => {
+        throw new Error("self referrals should not create events");
+      },
+      createOrg: async () => org,
+      findOrgById: async () => org,
+      findReferralCodeByCode: async () => ({
+        code: "SELFREF1",
+        created_at: now,
+        id: "ref-self-existing",
+        user_id: "user-9",
+      }),
+      findReferralCodeByUserId: async () => null,
+      findUserById: async () => user,
+      findUserByPlatformUserId: async () => null,
+      getOrgWithBalance: async () => org,
+      hasReferralEvent: async () => false,
+      listReferralEventsByReferrerId: async () => [],
+      updateOrg: async () => {
+        throw new Error("self referrals should not update org credits");
+      },
+      updateUser: async () => {
+        throw new Error("self referrals should not update referred_by");
+      },
+      updateUserEmail: async () => {
+        throw new Error("email should not be updated");
+      },
+    },
+    jwt: {
+      email: "self@example.com",
+      sub: "google-user-9",
+    },
+  });
+
+  const response = await app.request("http://localhost/?ref=selfref1");
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    membership,
+    org,
+    user,
+  });
 });
 
 test("updates the stored email when the platform user already exists", async () => {
