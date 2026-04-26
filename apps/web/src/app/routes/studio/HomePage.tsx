@@ -344,6 +344,34 @@ Earn 200 credits every time a referral upgrades — no limit.`}
   );
 }
 
+const REFERRAL_CREDITS_KEY = "beomz_last_referral_credits";
+
+function ReferralBonusToast({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed z-[200] flex max-w-xs items-start gap-3 rounded-xl border border-orange-200 bg-white p-4 shadow-lg"
+      style={{ bottom: 24, right: 24 }}
+    >
+      <span className="mt-0.5 flex-shrink-0 text-xl">🎉</span>
+      <div className="flex-1">
+        <p className="text-[13px] font-semibold text-[#1a1a1a]">
+          Referral bonus! +50 credits
+        </p>
+        <p className="mt-0.5 text-[12px] text-[#6b7280]">
+          Someone signed up using your referral link.
+        </p>
+      </div>
+      <button
+        onClick={onClose}
+        className="flex-shrink-0 text-[#9ca3af] transition-colors hover:text-[#6b7280]"
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export function HomePage() {
@@ -360,6 +388,32 @@ export function HomePage() {
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showReferralToast, setShowReferralToast] = useState(false);
+
+  // BEO-618: Referral bonus toast — shown once when credits_earned increases
+  useEffect(() => {
+    let dismissTimer: ReturnType<typeof setTimeout> | undefined;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        const resp = await fetch(`${getApiBaseUrl()}/referrals`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) return;
+        const data = await resp.json() as { credits_earned?: number };
+        const earned = data.credits_earned ?? 0;
+        const stored = parseInt(localStorage.getItem(REFERRAL_CREDITS_KEY) ?? "0", 10);
+        if (earned > stored) {
+          setShowReferralToast(true);
+          localStorage.setItem(REFERRAL_CREDITS_KEY, String(earned));
+          dismissTimer = setTimeout(() => setShowReferralToast(false), 5000);
+        }
+      } catch {
+        // silently ignore
+      }
+    })();
+    return () => clearTimeout(dismissTimer);
+  }, []);
 
   // BEO-352: Stripe checkout redirect
   useEffect(() => {
@@ -727,6 +781,12 @@ export function HomePage() {
             );
           })()}
         </div>,
+        document.body,
+      )}
+
+      {/* BEO-618: Referral bonus toast */}
+      {showReferralToast && createPortal(
+        <ReferralBonusToast onClose={() => setShowReferralToast(false)} />,
         document.body,
       )}
 

@@ -95,7 +95,7 @@ export function StudioLayout() {
   const isProjectPage = !!matchRoute({ to: "/studio/project/$id", fuzzy: true });
   const isVersionPreviewPage = !!matchRoute({ to: "/studio/version-preview", fuzzy: true });
   // Onboarding modal must only appear on the home dashboard
-  const isHomePage = !!matchRoute({ to: "/studio/home" });
+  const isHomePage = !!matchRoute({ to: "/studio/home", fuzzy: true });
 
   if (isProjectPage || isVersionPreviewPage) {
     return (
