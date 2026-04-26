@@ -1,14 +1,13 @@
 /**
- * AuthModal — full-screen overlay with sign in / sign up.
+ * AuthModal — full-screen overlay with sign in / sign up / forgot password.
  * Triggered from LandingPage when an unsigned user hits Enter or "Get started".
  * Does NOT navigate away — it overlays the landing page.
  * For Google OAuth, saves the pending prompt to sessionStorage so callback.tsx
  * can navigate to /plan after auth completes.
  */
 import { useState } from "react";
-import { X, Loader2, Eye, EyeOff, Mail } from "lucide-react";
+import { X, Loader2, Eye, EyeOff, Mail, ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { getApiBaseUrl } from "../../lib/api";
 import BeomzLogo from "../../assets/beomz-logo.svg?react";
 
 interface AuthModalProps {
@@ -29,7 +28,7 @@ interface AuthModalProps {
   initialMode?: "signin" | "signup";
 }
 
-type Screen = "main" | "check-email";
+type Screen = "main" | "check-email" | "forgot-password";
 
 export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode = "signin" }: AuthModalProps) {
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
@@ -42,6 +41,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
+  const [forgotSubmitted, setForgotSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
@@ -82,15 +82,9 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/auth/email/signup`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        setError((data as { error?: string }).error ?? "Sign up failed. Please try again.");
-        setLoading(false);
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) {
+        setError(error.message);
         return;
       }
       setScreen("check-email");
@@ -106,57 +100,19 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
     if (!email || !password) return;
     setLoading(true);
     setError(null);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-
     try {
-      const res = await fetch(`${getApiBaseUrl()}/auth/email/login`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      const data = (await res.json()) as { access_token?: string; refresh_token?: string; error?: string };
-      console.log("[AuthModal] login response", { ok: res.ok, hasAccessToken: !!data.access_token, hasRefreshToken: !!data.refresh_token });
-
-      if (!res.ok) {
-        setError(data.error ?? "Sign in failed. Please check your credentials.");
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setError(error.message);
         return;
       }
-
-      if (data.access_token && data.refresh_token) {
-        // Store the custom JWT in localStorage so the studio route guard and
-        // getAccessToken() can find it regardless of supabase.auth.setSession()
-        // compatibility.
-        localStorage.setItem("beomz_access_token", data.access_token);
-        localStorage.setItem("beomz_refresh_token", data.refresh_token);
-        // Attempt to also set a Supabase session for Supabase-issued tokens;
-        // silently ignore failures for custom JWTs.
-        try {
-          await supabase.auth.setSession({
-            access_token: data.access_token,
-            refresh_token: data.refresh_token,
-          });
-        } catch {
-          // Custom JWT — Supabase rejected it; localStorage fallback is sufficient.
-        }
-      }
-
       if (onSuccess) {
         onSuccess();
       } else {
         onClose();
       }
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err instanceof Error && err.name === "AbortError") {
-        setError("Request timed out. Please try again.");
-      } else {
-        setError("Network error. Please try again.");
-      }
+    } catch {
+      setError("Network error. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -165,16 +121,33 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
   const handleResend = async () => {
     setResendLoading(true);
     try {
-      await fetch(`${getApiBaseUrl()}/auth/email/resend-verification`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
+      await supabase.auth.resend({ type: "signup", email });
       setResendSent(true);
     } catch {
       // silently ignore
     } finally {
       setResendLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: "https://beomz.ai/auth/callback",
+      });
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      setForgotSubmitted(true);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -228,6 +201,78 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
           >
             Back to sign in
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Forgot-password screen ──────────────────────────────────────────────────
+  if (screen === "forgot-password") {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 backdrop-blur-md"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="relative w-full max-w-sm rounded-2xl bg-[#faf9f6] p-10 shadow-xl">
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-[#9ca3af] transition-colors hover:bg-black/5 hover:text-[#6b7280]"
+          >
+            <X size={16} />
+          </button>
+
+          <BeomzLogo className="mx-auto mb-6 block h-7 w-auto text-[#1a1a1a]" />
+
+          {forgotSubmitted ? (
+            <div className="text-center">
+              <h2 className="mb-2 text-lg font-semibold text-[#1a1a1a]">Check your email</h2>
+              <p className="mb-6 text-sm text-[#6b7280]">If that email exists, a reset link has been sent.</p>
+              <button
+                onClick={() => { setScreen("main"); setMode("signin"); setForgotSubmitted(false); setError(null); }}
+                className="text-sm text-[#F97316] hover:underline"
+              >
+                Back to sign in
+              </button>
+            </div>
+          ) : (
+            <>
+              <h2 className="mb-1 text-center text-lg font-semibold text-[#1a1a1a]">Reset your password</h2>
+              <p className="mb-6 text-center text-sm text-[#9ca3af]">
+                Enter your email and we'll send a reset link.
+              </p>
+
+              <form onSubmit={(e) => void handleForgotPassword(e)} className="space-y-3">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email"
+                  autoComplete="email"
+                  autoFocus
+                  className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                />
+
+                {error && <p className="text-xs text-red-500">{error}</p>}
+
+                <button
+                  type="submit"
+                  disabled={loading || !email}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+                >
+                  {loading && <Loader2 size={14} className="animate-spin" />}
+                  Send reset link
+                </button>
+              </form>
+
+              <button
+                onClick={() => { setScreen("main"); setError(null); }}
+                className="mt-4 flex w-full items-center justify-center gap-1 text-sm text-[#9ca3af] hover:text-[#F97316]"
+              >
+                <ArrowLeft size={13} />
+                Back to sign in
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -373,12 +418,13 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
             </div>
 
             <div className="flex justify-end">
-              <a
-                href="/forgot-password"
+              <button
+                type="button"
+                onClick={() => { setScreen("forgot-password"); setError(null); }}
                 className="text-xs text-[#9ca3af] hover:text-[#F97316]"
               >
                 Forgot password?
-              </a>
+              </button>
             </div>
 
             {error && <p className="text-xs text-red-500">{error}</p>}

@@ -85,15 +85,6 @@ const SignupPage = lazy(() =>
 const AuthCallback = lazy(() =>
   import("./app/routes/auth/callback").then(m => ({ default: m.AuthCallback })),
 );
-const VerifyEmailPage = lazy(() =>
-  import("./app/routes/auth/verify-email").then(m => ({ default: m.VerifyEmailPage })),
-);
-const ForgotPasswordPage = lazy(() =>
-  import("./app/routes/auth/forgot-password").then(m => ({ default: m.ForgotPasswordPage })),
-);
-const ResetPasswordPage = lazy(() =>
-  import("./app/routes/auth/reset-password").then(m => ({ default: m.ResetPasswordPage })),
-);
 const PublicAppPage = lazy(() =>
   import("./app/routes/public/PublicAppPage").then(m => ({ default: m.PublicAppPage })),
 );
@@ -178,24 +169,6 @@ const authCallbackRoute = createRoute({
   component: withSuspense(AuthCallback),
 });
 
-const verifyEmailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/verify-email",
-  component: withSuspense(VerifyEmailPage),
-});
-
-const forgotPasswordRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/forgot-password",
-  component: withSuspense(ForgotPasswordPage),
-});
-
-const resetPasswordRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/reset-password",
-  component: withSuspense(ResetPasswordPage),
-});
-
 const publicAppRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/p/$slug",
@@ -255,15 +228,8 @@ const studioRoute = createRoute({
   path: "/studio",
   component: withSuspense(StudioLayout),
   beforeLoad: async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    // Allow custom email-auth tokens stored by the API's email/password flow.
-    const emailAuthToken =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("beomz_access_token")
-        : null;
-    if (!session && !emailAuthToken) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
       throw redirect({ to: "/auth/login" });
     }
   },
@@ -384,9 +350,6 @@ const routeTree = rootRoute.addChildren([
   authLoginRoute,
   authSignupRoute,
   authCallbackRoute,
-  verifyEmailRoute,
-  forgotPasswordRoute,
-  resetPasswordRoute,
   termsRoute,
   privacyRoute,
   faqRoute,

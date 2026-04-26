@@ -144,14 +144,6 @@ export async function getAccessToken(): Promise<string> {
         if (session?.access_token) {
           return session.access_token;
         }
-        // Fall back to custom email auth token issued by the Beomz API.
-        const emailToken =
-          typeof localStorage !== "undefined"
-            ? localStorage.getItem("beomz_access_token")
-            : null;
-        if (emailToken) {
-          return emailToken;
-        }
         console.error("[getAccessToken] No access token. Session object:", JSON.stringify(session, null, 2));
         throw new Error("A valid platform session is required.");
       })
