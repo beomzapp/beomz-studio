@@ -88,6 +88,7 @@ test("GET /me returns the current user profile with plan and total credits", asy
       building_for: "SaaS",
       referral_source: "Twitter/X",
       onboarding_completed: false,
+      workspace_knowledge: "Always optimize for fast launch cycles.",
     }),
   });
 
@@ -106,6 +107,7 @@ test("GET /me returns the current user profile with plan and total credits", asy
     building_for: "SaaS",
     referral_source: "Twitter/X",
     onboarding_completed: false,
+    workspace_knowledge: "Always optimize for fast launch cycles.",
     created_at: "2026-04-19T00:00:00.000Z",
     plan: "starter",
     credits: 45,
@@ -134,6 +136,7 @@ test("PATCH /me validates display_name and updates the user profile", async () =
         building_for: "Agency",
         referral_source: null,
         onboarding_completed: false,
+        workspace_knowledge: "Prefer polished dashboards.",
       };
     },
   });
@@ -155,6 +158,7 @@ test("PATCH /me validates display_name and updates the user profile", async () =
     body: JSON.stringify({
       display_name: "omar-builds",
       building_for: "Agency",
+      workspace_knowledge: "Prefer polished dashboards.",
     }),
   });
 
@@ -163,6 +167,7 @@ test("PATCH /me validates display_name and updates the user profile", async () =
     {
       display_name: "omar-builds",
       building_for: "Agency",
+      workspace_knowledge: "Prefer polished dashboards.",
     },
   ]);
   assert.deepEqual(await validResponse.json(), {
@@ -174,6 +179,7 @@ test("PATCH /me validates display_name and updates the user profile", async () =
     building_for: "Agency",
     referral_source: null,
     onboarding_completed: false,
+    workspace_knowledge: "Prefer polished dashboards.",
     created_at: "2026-04-19T00:00:00.000Z",
     plan: "starter",
     credits: 45,

@@ -25,6 +25,7 @@ const patchMeSchema = z.object({
   avatar_url: z.string().trim().url().max(500).optional(),
   building_for: z.string().trim().min(1).max(100).optional(),
   referral_source: z.string().trim().min(1).max(100).optional(),
+  workspace_knowledge: z.string().trim().max(20_000).optional(),
 }).strict();
 
 interface UserProfileRow {
@@ -37,6 +38,7 @@ interface UserProfileRow {
   building_for: string | null;
   referral_source: string | null;
   onboarding_completed: boolean;
+  workspace_knowledge: string | null;
 }
 
 interface MeRouteDeps {
@@ -45,10 +47,12 @@ interface MeRouteDeps {
   fetchUserProfile?: (userId: string) => Promise<UserProfileRow | null>;
   updateUserProfile?: (
     userId: string,
-    patch: Partial<Pick<UserProfileRow, "full_name" | "display_name" | "avatar_url" | "building_for" | "referral_source">>,
+    patch: Partial<Pick<UserProfileRow, "full_name" | "display_name" | "avatar_url" | "building_for" | "referral_source" | "workspace_knowledge">>,
   ) => Promise<UserProfileRow | null>;
   completeOnboarding?: (userId: string) => Promise<void>;
 }
+
+type UserProfilePatch = Partial<Pick<UserProfileRow, "full_name" | "display_name" | "avatar_url" | "building_for" | "referral_source" | "workspace_knowledge">>;
 
 function createStudioAdminClient() {
   return createClient(apiConfig.STUDIO_SUPABASE_URL, apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY, {
@@ -70,14 +74,43 @@ function normaliseUserProfileRow(row: Record<string, unknown>): UserProfileRow {
     building_for: typeof row.building_for === "string" ? row.building_for : null,
     referral_source: typeof row.referral_source === "string" ? row.referral_source : null,
     onboarding_completed: row.onboarding_completed === true,
+    workspace_knowledge: typeof row.workspace_knowledge === "string" ? row.workspace_knowledge : null,
   };
 }
 
-function isMigrationMissingError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isMissingColumnError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
   return message.includes("column")
     && (message.includes("does not exist") || message.includes("could not find"));
+}
+
+function extractMissingColumnName(error: unknown): string | null {
+  const message = getErrorMessage(error);
+  const match = message.match(/column ['"]?([a-zA-Z0-9_]+)['"]?/i)
+    ?? message.match(/could not find the ['"]([a-zA-Z0-9_]+)['"] column/i);
+  return match?.[1] ?? null;
+}
+
+async function fetchBaseUserProfileFromDb(supabase: ReturnType<typeof createStudioAdminClient>, userId: string) {
+  const response = await supabase
+    .from("users")
+    .select("id,email,created_at")
+    .eq("id", userId)
+    .maybeSingle<Record<string, unknown>>();
+
+  if (response.error) {
+    throw new Error(getErrorMessage(response.error));
+  }
+
+  return response.data ? normaliseUserProfileRow(response.data) : null;
 }
 
 async function fetchUserProfileFromDb(userId: string): Promise<UserProfileRow | null> {
@@ -89,7 +122,10 @@ async function fetchUserProfileFromDb(userId: string): Promise<UserProfileRow | 
     .maybeSingle<Record<string, unknown>>();
 
   if (response.error) {
-    throw new Error(response.error.message);
+    if (isMissingColumnError(response.error)) {
+      return fetchBaseUserProfileFromDb(supabase, userId);
+    }
+    throw new Error(getErrorMessage(response.error));
   }
 
   return response.data ? normaliseUserProfileRow(response.data) : null;
@@ -97,21 +133,35 @@ async function fetchUserProfileFromDb(userId: string): Promise<UserProfileRow | 
 
 async function updateUserProfileInDb(
   userId: string,
-  patch: Partial<Pick<UserProfileRow, "full_name" | "display_name" | "avatar_url" | "building_for" | "referral_source">>,
+  patch: UserProfilePatch,
 ): Promise<UserProfileRow | null> {
   const supabase = createStudioAdminClient();
-  const response = await supabase
-    .from("users")
-    .update(patch)
-    .eq("id", userId)
-    .select("*")
-    .maybeSingle<Record<string, unknown>>();
+  const safePatch: UserProfilePatch = { ...patch };
 
-  if (response.error) {
-    throw new Error(response.error.message);
+  while (true) {
+    if (Object.keys(safePatch).length === 0) {
+      return fetchUserProfileFromDb(userId);
+    }
+
+    const response = await supabase
+      .from("users")
+      .update(safePatch)
+      .eq("id", userId)
+      .select("*")
+      .maybeSingle<Record<string, unknown>>();
+
+    if (!response.error) {
+      return response.data ? normaliseUserProfileRow(response.data) : null;
+    }
+
+    const missingColumn = extractMissingColumnName(response.error);
+    if (!missingColumn || !(missingColumn in safePatch)) {
+      throw new Error(getErrorMessage(response.error));
+    }
+
+    console.warn(`[me] users.${missingColumn} missing from schema; skipping profile field update.`);
+    delete safePatch[missingColumn as keyof UserProfilePatch];
   }
-
-  return response.data ? normaliseUserProfileRow(response.data) : null;
 }
 
 async function completeOnboardingInDb(userId: string): Promise<void> {
@@ -122,7 +172,11 @@ async function completeOnboardingInDb(userId: string): Promise<void> {
     .eq("id", userId);
 
   if (response.error) {
-    throw new Error(response.error.message);
+    if (extractMissingColumnName(response.error) === "onboarding_completed") {
+      console.warn("[me] users.onboarding_completed missing from schema; skipping onboarding completion write.");
+      return;
+    }
+    throw new Error(getErrorMessage(response.error));
   }
 }
 
@@ -143,6 +197,7 @@ function buildMeResponse(
     building_for: user.building_for,
     referral_source: user.referral_source,
     onboarding_completed: user.onboarding_completed,
+    workspace_knowledge: user.workspace_knowledge,
     created_at: user.created_at,
     plan: org.plan,
     credits: Number(org.credits ?? 0) + Number(org.topup_credits ?? 0),
@@ -172,10 +227,8 @@ export function createMeRoute(deps: MeRouteDeps = {}) {
 
       return c.json(buildMeResponse(user, org));
     } catch (error) {
-      if (isMigrationMissingError(error)) {
-        return c.json({ error: "Migration 011 not applied." }, 503);
-      }
-      throw error;
+      console.error("[GET /me] error:", error);
+      return c.json({ error: "Failed to load user profile." }, 500);
     }
   });
 
@@ -191,7 +244,7 @@ export function createMeRoute(deps: MeRouteDeps = {}) {
 
       const patch = Object.fromEntries(
         Object.entries(parsed.data).filter(([, value]) => value !== undefined),
-      ) as Partial<Pick<UserProfileRow, "full_name" | "display_name" | "avatar_url" | "building_for" | "referral_source">>;
+      ) as UserProfilePatch;
 
       if (Object.keys(patch).length === 0) {
         return c.json({ error: "At least one profile field is required." }, 400);
@@ -209,10 +262,8 @@ export function createMeRoute(deps: MeRouteDeps = {}) {
 
       return c.json(buildMeResponse(updatedUser, org));
     } catch (error) {
-      if (isMigrationMissingError(error)) {
-        return c.json({ error: "Migration 011 not applied." }, 503);
-      }
-      throw error;
+      console.error("[PATCH /me] error:", error);
+      return c.json({ error: "Failed to update user profile." }, 500);
     }
   });
 
@@ -267,10 +318,8 @@ export function createMeRoute(deps: MeRouteDeps = {}) {
 
       return c.json({ avatar_url });
     } catch (error) {
-      if (isMigrationMissingError(error)) {
-        return c.json({ error: "Migration 011 not applied." }, 503);
-      }
-      throw error;
+      console.error("[POST /me/avatar] error:", error);
+      return c.json({ error: "Failed to save avatar." }, 500);
     }
   });
 
@@ -280,10 +329,8 @@ export function createMeRoute(deps: MeRouteDeps = {}) {
       await completeOnboarding(orgContext.user.id);
       return c.json({ success: true });
     } catch (error) {
-      if (isMigrationMissingError(error)) {
-        return c.json({ error: "Migration 011 not applied." }, 503);
-      }
-      throw error;
+      console.error("[POST /me/complete-onboarding] error:", error);
+      return c.json({ error: "Failed to complete onboarding." }, 500);
     }
   });
 

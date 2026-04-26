@@ -30,7 +30,12 @@ export interface UserRow extends Record<string, unknown> {
   platform_user_id: string;
   email: string;
   full_name?: string | null;
+  display_name?: string | null;
   avatar_url?: string | null;
+  building_for?: string | null;
+  referral_source?: string | null;
+  onboarding_completed?: boolean;
+  workspace_knowledge?: string | null;
   referred_by?: string | null;
   email_verified?: boolean;
   last_credits_low_email?: string | null;
@@ -184,7 +189,12 @@ export interface UserInsert extends Record<string, unknown> {
   email: string;
   platform_user_id: string;
   full_name?: string | null;
+  display_name?: string | null;
   avatar_url?: string | null;
+  building_for?: string | null;
+  referral_source?: string | null;
+  onboarding_completed?: boolean;
+  workspace_knowledge?: string | null;
   password_hash?: string | null;
   email_verified?: boolean;
   email_verify_token?: string | null;
@@ -199,7 +209,12 @@ export interface UserUpdate extends Record<string, unknown> {
   email?: string;
   platform_user_id?: string;
   full_name?: string | null;
+  display_name?: string | null;
   avatar_url?: string | null;
+  building_for?: string | null;
+  referral_source?: string | null;
+  onboarding_completed?: boolean;
+  workspace_knowledge?: string | null;
   referred_by?: string | null;
   password_hash?: string | null;
   email_verified?: boolean;
@@ -1579,115 +1594,56 @@ export class StudioDbClient {
 
   async listRecentActivityByOrgId(orgId: string, limit: number): Promise<RecentActivityRow[]> {
     const normalizedLimit = Math.max(1, limit);
-    const rawClient = this.client as SupabaseClient<any>;
+    const projects = await this.findProjectsByOrgId(orgId);
+    if (projects.length === 0) {
+      return [];
+    }
 
-    try {
-      const response = await rawClient
-        .from("sessions")
-        .select("id, created_at, event_type, project_id, projects!inner(name, org_id)")
-        .eq("projects.org_id", orgId)
-        .order("created_at", { ascending: false })
-        .limit(normalizedLimit);
+    const projectIds = projects.map((project) => project.id);
+    const projectsById = new Map(projects.map((project) => [project.id, project]));
+    const generationResponse = await this.client
+      .from("generations")
+      .select("id, project_id, operation_id, started_at, completed_at")
+      .in("project_id", projectIds)
+      .eq("status", "completed")
+      .order("started_at", { ascending: false })
+      .limit(Math.max(10, normalizedLimit * 5));
 
-      if (response.error) {
-        throw response.error;
-      }
+    if (generationResponse.error) {
+      throw new Error(generationResponse.error.message);
+    }
 
-      return (response.data ?? []).map((row: Record<string, unknown>) => {
-        const projectPayload = (
-          Array.isArray(row.projects)
-            ? row.projects[0]
-            : row.projects
-        ) as Record<string, unknown> | null;
+    const generationActivity = (generationResponse.data ?? []).flatMap((row) => {
+      const projectId = String(row.project_id);
+      const project = projectsById.get(projectId);
+      if (!project) return [];
 
-        return {
-          id: String(row.id),
-          project_id: String(row.project_id),
-          project_name: String(projectPayload?.name ?? "Untitled project"),
-          created_at: String(row.created_at),
-          event_type: typeof row.event_type === "string" ? row.event_type : null,
-        };
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-      const sessionTableUnavailable = message.includes("sessions");
-      const missingEventType = message.includes("event_type") && message.includes("column");
+      return [{
+        id: String(row.id),
+        project_id: projectId,
+        project_name: project.name,
+        created_at: typeof row.completed_at === "string" ? row.completed_at : String(row.started_at),
+        event_type: row.operation_id === "projectIteration" ? "iteration_complete" : "build_complete",
+      } satisfies RecentActivityRow];
+    });
 
-      if (!sessionTableUnavailable && !missingEventType) {
-        throw error;
-      }
-
-      if (!sessionTableUnavailable) {
-        const response = await rawClient
-          .from("sessions")
-          .select("id, created_at, project_id, projects!inner(name, org_id)")
-          .eq("projects.org_id", orgId)
-          .order("created_at", { ascending: false })
-          .limit(Math.max(10, normalizedLimit * 5));
-
-        if (response.error) {
-          throw new Error(response.error.message);
-        }
-
-        const latestByProject = new Map<string, RecentActivityRow>();
-        for (const row of response.data ?? []) {
-          const projectId = String(row.project_id);
-          const projectPayload = (
-            Array.isArray(row.projects)
-              ? row.projects[0]
-              : row.projects
-          ) as Record<string, unknown> | null;
-
-          if (latestByProject.has(projectId)) continue;
-          latestByProject.set(projectId, {
-            id: String(row.id),
-            project_id: projectId,
-            project_name: String(projectPayload?.name ?? "Untitled project"),
-            created_at: String(row.created_at),
-            event_type: null,
-          });
-          if (latestByProject.size >= normalizedLimit) break;
-        }
-
-        return Array.from(latestByProject.values());
-      }
-
-      const projects = await this.findProjectsByOrgId(orgId);
-      if (projects.length === 0) {
+    const publishedActivity = projects.flatMap((project) => {
+      if (!project.published || !project.published_at) {
         return [];
       }
 
-      const generationResponse = await this.client
-        .from("generations")
-        .select("id, project_id, started_at")
-        .in("project_id", projects.map((project) => project.id))
-        .order("started_at", { ascending: false })
-        .limit(Math.max(10, normalizedLimit * 5));
+      return [{
+        id: `${project.id}:published`,
+        project_id: project.id,
+        project_name: project.name,
+        created_at: project.published_at,
+        event_type: "published",
+      } satisfies RecentActivityRow];
+    });
 
-      if (generationResponse.error) {
-        throw new Error(generationResponse.error.message);
-      }
-
-      const projectsById = new Map(projects.map((project) => [project.id, project]));
-      const latestByProject = new Map<string, RecentActivityRow>();
-
-      for (const row of generationResponse.data ?? []) {
-        const projectId = String(row.project_id);
-        if (latestByProject.has(projectId)) continue;
-        const project = projectsById.get(projectId);
-        if (!project) continue;
-        latestByProject.set(projectId, {
-          id: String(row.id),
-          project_id: projectId,
-          project_name: project.name,
-          created_at: String(row.started_at),
-          event_type: "build_complete",
-        });
-        if (latestByProject.size >= normalizedLimit) break;
-      }
-
-      return Array.from(latestByProject.values());
-    }
+    return [...generationActivity, ...publishedActivity]
+      .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+      .slice(0, normalizedLimit);
   }
 
   // ── BEO-329: Project DB limits ────────────────────────────────────────────
