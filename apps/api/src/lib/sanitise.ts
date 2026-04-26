@@ -22,10 +22,15 @@ import dynamicIconImports from "lucide-react/dynamicIconImports.mjs";
 // never sees paths like ./serverless.
 
 const NEON_IMPORT_REWRITES: [RegExp, string][] = [
+  // LLMs often invent a local ./serverless helper when they really mean the Neon package.
   [/from\s+['"]\.\.?\/serverless['"]/g, "from '@neondatabase/serverless'"],
+  // Some generations shorten the Neon client import to ./neon, which breaks in the flat output.
   [/from\s+['"]\.\.?\/neon['"]/g, "from '@neondatabase/serverless'"],
+  // A generic ./db alias is another hallucinated shortcut for the Neon serverless client.
   [/from\s+['"]\.\.?\/db['"]/g, "from '@neondatabase/serverless'"],
+  // Neon auth imports sometimes get flattened into a fake local module instead of the real package path.
   [/from\s+['"]\.\.?\/neon-auth['"]/g, "from '@neondatabase/neon-js/auth'"],
+  // Some models guess a relative ./neon-js path even though the package is published under @neondatabase/neon-js.
   [/from\s+['"]\.\.?\/neon-js['"]/g, "from '@neondatabase/neon-js'"],
 ];
 
@@ -493,15 +498,25 @@ const invalidLucideIcon: Fixer = {
 //   invalidLucideIcon — replace non-existent lucide-react imports with a safe fallback
 
 const PIPELINE: readonly Fixer[] = [
+  // Force the correct npm package before any later import-path cleanup runs.
   supabaseImport,
+  // Strip broken raw REST calls so generated apps fall back to the supported client path.
   supabaseRestFetch,
+  // Convert WebContainer-only React globals into real ESM imports before path rewriting.
   reactGlobals,
+  // Collapse deep or aliased imports to the flat generated file layout.
   flatImports,
+  // Repair invalid escape sequences that make JSX attribute parsing fail.
   jsxQuotes,
+  // Remove Tailwind CDN tags that are redundant in the scaffold and blocked by COEP.
   tailwindCdnScript,
+  // Remove any remaining external URLs that would break preview isolation.
   externalUrls,
+  // Swap unsafe single-quoted contractions into valid double-quoted strings.
   apostropheStrings,
+  // Rename invalid kebab-case function exports to legal PascalCase identifiers.
   hyphenatedFunctionName,
+  // Replace Lucide icons that do not exist in the installed version with a safe fallback.
   invalidLucideIcon,
 ];
 
