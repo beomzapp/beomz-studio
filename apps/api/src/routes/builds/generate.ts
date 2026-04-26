@@ -171,6 +171,17 @@ const BYO_SUPABASE_MIGRATIONS_CRITICAL_BLOCK = [
   '  "ALTER TABLE todos ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ"',
   '  "ALTER TABLE todos ADD COLUMN IF NOT EXISTS image_url TEXT"',
   "",
+  "Auth + RLS (only when you implement login/signup/auth):",
+  "- For every table that contains user-owned data (has user_id), include RLS migrations:",
+  '  "ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;"',
+  '  "DROP POLICY IF EXISTS \\"users see own data\\" ON public.<table>;"',
+  '  "CREATE POLICY \\"users see own data\\" ON public.<table> FOR ALL USING (auth.uid()::text = user_id);"',
+  "- Also include a copyable SQL artifact file (e.g. rls.sql) containing the exact RLS statements.",
+  "",
+  "Multi-tenancy (ONLY when the user explicitly requests multi-tenant support):",
+  "- Create tenants + tenant_members tables, add tenant_id to data tables, and add RLS policies that restrict rows by tenant membership.",
+  "- Include both the schema + RLS policies in migrations, and include a copyable SQL artifact file (e.g. multi_tenant.sql).",
+  "",
   "Storage buckets (REQUIRED whenever you use supabase.storage):",
   "  \"INSERT INTO storage.buckets (id, name, public) VALUES ('bucket-name', 'bucket-name', true) ON CONFLICT (id) DO NOTHING\"",
   "",
@@ -302,7 +313,10 @@ function buildDbContextBlock(projectId: string, dbType: ProjectDbType): string {
   GET  /auth/me (with Authorization: Bearer {token})
 - Store JWT in localStorage under 'beomz_auth_token'
 - Never use bcrypt, jsonwebtoken, or Supabase in generated app code
-- Multi-tenancy: use tenant_id UUID column + WHERE clauses (app-level)
+- Multi-tenancy (ONLY if the user explicitly requests it):
+  - Add tenant_id UUID and user_id UUID columns on every data table
+  - Always filter all queries by the current tenant_id (application-layer enforcement)
+  - Example: WHERE tenant_id = $current_tenant_id
 - RLS: not available on Neon — enforce access in application logic only
 
 ### If db_type === 'supabase':
@@ -310,9 +324,24 @@ function buildDbContextBlock(projectId: string, dbType: ProjectDbType): string {
   for ALL data operations
 - For auth: use the Beomz auth proxy at /api/projects/${projectId}/auth/*
   (same interface as Neon — never call supabase.auth directly in app code)
-- Multi-tenancy: use auth.uid() in RLS policies
-- RLS: generate ENABLE ROW LEVEL SECURITY + CREATE POLICY statements
-  as SQL migration blocks in the code
+- Store auth token in localStorage under 'beomz_auth_token' (the proxy returns a Supabase access token)
+- When querying Supabase with RLS enabled, include that token as an Authorization header on the Supabase client, e.g.
+  createClient(url, anonKey, { global: { headers: { Authorization: \`Bearer ${"${token}"}\` } } })
+- RLS (ONLY when you implement auth/login/signup):
+  - For every table that has user-owned rows (has user_id), include RLS migrations:
+    ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "users see own data" ON public.<table>;
+    CREATE POLICY "users see own data" ON public.<table> FOR ALL USING (auth.uid()::text = user_id);
+  - Also output the same SQL as a copyable artifact file (e.g. rls.sql)
+- Multi-tenancy (ONLY when the user explicitly requests multi-tenant support):
+  - Create public.tenants and public.tenant_members
+  - Add tenant_id to all data tables
+  - Add RLS policies like:
+    USING (
+      tenant_id IN (
+        SELECT tenant_id FROM public.tenant_members WHERE user_id = auth.uid()
+      )
+    )
 `;
 }
 

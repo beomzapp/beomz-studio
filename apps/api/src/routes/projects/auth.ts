@@ -87,6 +87,7 @@ function respondWithAuthError(
   if (error instanceof AuthTierError) {
     return new Response(JSON.stringify({ error: error.message }), {
       headers: {
+        ...PROJECT_AUTH_CORS_HEADERS,
         "content-type": "application/json",
       },
       status: error.status,
