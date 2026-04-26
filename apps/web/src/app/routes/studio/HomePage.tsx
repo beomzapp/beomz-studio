@@ -22,9 +22,10 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import type { Project } from "@beomz-studio/contracts";
 import { cn } from "../../../lib/cn";
-import { listProjectsWithMeta, deleteProject, renameProject, getMe, getApiBaseUrl, getAccessToken } from "../../../lib/api";
+import { listProjectsWithMeta, deleteProject, renameProject, getApiBaseUrl, getAccessToken } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
 import { useCredits } from "../../../lib/CreditsContext";
+import { usePricingModal } from "../../../contexts/PricingModalContext";
 import { OnboardingModal, isOnboardingCompleted, markOnboardingCompleted } from "../../../components/studio/OnboardingModal";
 import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { displayProjectName } from "../../../lib/displayProjectName";
@@ -126,29 +127,35 @@ function SkeletonRow() {
   );
 }
 
+// Plan credit allowances — fallback when API returns 0
+const PLAN_CREDITS: Record<string, number> = {
+  free: 200,
+  pro_starter: 300,
+  pro_builder: 750,
+  business: 4000,
+};
+
 // ─── Right-panel cards ───────────────────────────────────────────────────────
 
 function CreditsCard() {
   const { credits } = useCredits();
-  const [planName, setPlanName] = useState<string | null>(null);
-  const navigate = useNavigate();
+  const { openPricingModal } = usePricingModal();
 
-  useEffect(() => {
-    getMe().then((me) => setPlanName(me.plan)).catch(() => {});
-  }, []);
+  const planKey = (credits?.plan ?? "free").toLowerCase();
+  const planCredits =
+    credits?.planCredits && credits.planCredits > 0
+      ? credits.planCredits
+      : (PLAN_CREDITS[planKey] ?? 0);
 
-  const total = credits?.planCredits ?? 0;
   const balance = credits ? Math.round(credits.balance) : 0;
-  const used = credits?.used ?? Math.max(0, total - balance);
-  const progressPct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+  const used = Math.max(0, planCredits - balance);
+  const progressPct = planCredits > 0 ? Math.min(100, (used / planCredits) * 100) : 0;
 
-  const displayPlan = planName ?? credits?.plan ?? "Free";
   const planLabel =
-    displayPlan === "pro_starter" ? "Pro Starter" :
-    displayPlan === "pro_builder" ? "Pro Builder" :
-    displayPlan === "business" ? "Business" :
-    displayPlan === "free" ? "Free" :
-    displayPlan;
+    planKey === "pro_starter" ? "Pro Starter" :
+    planKey === "pro_builder" ? "Pro Builder" :
+    planKey === "business" ? "Business" :
+    "Free";
 
   return (
     <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
@@ -158,12 +165,12 @@ function CreditsCard() {
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
           <div
             className="h-full rounded-full bg-orange-500 transition-all duration-500"
-            style={{ width: `${progressPct}%` }}
+            style={{ width: `${planCredits > 0 ? progressPct : 0}%` }}
           />
         </div>
         <div className="mt-1.5 flex items-center justify-between">
           <span className="text-[12px] text-[#9ca3af]">{balance} remaining</span>
-          <span className="text-[12px] text-[#9ca3af]">{total} total</span>
+          <span className="text-[12px] text-[#9ca3af]">{planCredits > 0 ? planCredits : "—"} total</span>
         </div>
       </div>
 
@@ -174,7 +181,7 @@ function CreditsCard() {
           {planLabel} · resets {nextMonthReset()}
         </span>
         <button
-          onClick={() => navigate({ to: "/plan", search: { q: undefined } })}
+          onClick={openPricingModal}
           className="text-[12px] font-medium transition-colors hover:opacity-80"
           style={{ color: "#F97316" }}
         >
@@ -188,6 +195,12 @@ function CreditsCard() {
 function ActivityCard() {
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setTimedOut(true), 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -210,20 +223,23 @@ function ActivityCard() {
     })();
   }, []);
 
+  const showSkeleton = loading && !timedOut;
+  const showEmpty = !showSkeleton && (events === null || events.length === 0);
+
   return (
     <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
       <p className="text-[13px] font-medium text-[#1a1a1a]">Recent activity</p>
       <div className="mt-3 space-y-2">
-        {(loading || events === null) ? (
+        {showSkeleton ? (
           <>
             <SkeletonRow />
             <SkeletonRow />
             <SkeletonRow />
           </>
-        ) : events.length === 0 ? (
-          <p className="text-[12px] text-[#9ca3af]">No activity yet.</p>
+        ) : showEmpty ? (
+          <p className="py-3 text-center text-[12px] text-[#9ca3af]">No activity yet</p>
         ) : (
-          events.map((ev, i) => {
+          events!.map((ev, i) => {
             const isLatest = i === 0;
             const ts = ev.createdAt ?? ev.timestamp ?? null;
             const label =
@@ -519,9 +535,9 @@ export function HomePage() {
       </div>
 
       {/* Two-column layout */}
-      <div className="flex gap-5">
-        {/* ── Left column: app list (62%) ── */}
-        <div className="min-w-0" style={{ flex: "0 0 62%" }}>
+      <div className="grid grid-cols-[62fr_38fr] gap-5">
+        {/* ── Left column: app list ── */}
+        <div className="min-w-0">
           <div className="rounded-xl border border-[#e5e7eb] bg-white">
             {/* List header */}
             <div className="flex items-center justify-between px-4 pt-4 pb-3">
@@ -651,8 +667,8 @@ export function HomePage() {
           </div>
         </div>
 
-        {/* ── Right column: context panel (38%) ── */}
-        <div className="flex flex-col gap-3" style={{ flex: "0 0 38%" }}>
+        {/* ── Right column: context panel ── */}
+        <div className="flex flex-col gap-3">
           <CreditsCard />
           <ActivityCard />
           <ReferralCard />
