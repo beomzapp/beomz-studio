@@ -61,10 +61,13 @@ export function SettingsReferralsPage() {
             Refer friends, earn credits
           </h1>
           <p className="mt-1.5 text-sm leading-relaxed text-[#6b7280]">
-            Share your link and earn {SIGNUP_REWARD_CR} credits for each of your first{" "}
+            Share your link and earn{" "}
+            <span className="font-medium text-[#1a1a1a]">{SIGNUP_REWARD_CR} credits</span> for each of your first{" "}
             {MAX_SIGNUP_REWARDS} signups.
             <br />
-            Earn {UPGRADE_REWARD_CR} credits whenever any referral upgrades — no limit.
+            Earn{" "}
+            <span className="font-medium text-[#1a1a1a]">{UPGRADE_REWARD_CR} credits</span> whenever any referral
+            upgrades to a paid plan — no cap.
           </p>
         </div>
 
@@ -251,14 +254,15 @@ export function SettingsReferralsPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-[#1a1a1a]">
-                  Friend signs up → you get{" "}
+                  Friend signs up → you earn{" "}
                   <span className="font-semibold text-[#F97316]">
                     {SIGNUP_REWARD_CR} credits
                   </span>
                 </p>
                 <p className="mt-0.5 text-sm text-[#6b7280]">
-                  This reward applies to your first {MAX_SIGNUP_REWARDS} signups only (
-                  {SIGNUP_REWARD_CR * MAX_SIGNUP_REWARDS} credits max from signups).
+                  Capped at your first {MAX_SIGNUP_REWARDS} signups (
+                  {SIGNUP_REWARD_CR * MAX_SIGNUP_REWARDS} cr max from signups). New users receive
+                  the standard {SIGNUP_REWARD_CR * 2} cr free account — no extra bonus.
                 </p>
               </div>
             </div>
@@ -273,14 +277,14 @@ export function SettingsReferralsPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-[#1a1a1a]">
-                  Friend upgrades → you get{" "}
+                  Friend upgrades → you earn{" "}
                   <span className="font-semibold text-[#F97316]">
                     {UPGRADE_REWARD_CR} credits
                   </span>
                 </p>
                 <p className="mt-0.5 text-sm text-[#6b7280]">
-                  Unlimited — every referral that upgrades to any paid plan earns you{" "}
-                  {UPGRADE_REWARD_CR} credits, no cap.
+                  No cap — every referral that upgrades to any paid plan earns you{" "}
+                  {UPGRADE_REWARD_CR} credits, unlimited.
                 </p>
               </div>
             </div>

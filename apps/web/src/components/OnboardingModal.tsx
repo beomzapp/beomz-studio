@@ -3,6 +3,7 @@
  * 2-step slide-up modal shown to new users whose onboarding_completed = false.
  * Step 1: Welcome screen with credit balance.
  * Step 2: Profile setup form (name, display name, avatar, building_for, referral_source).
+ * Pre-fills name + avatar from Google OAuth profile (BEO-616).
  */
 import { useState, useEffect, useRef } from "react";
 import { CheckCircle, ArrowRight, Upload, X } from "lucide-react";
@@ -12,6 +13,28 @@ import {
   completeOnboarding,
   uploadUserAvatar,
 } from "../lib/api";
+
+interface Props {
+  /** Called after onboarding is completed or skipped */
+  onClose: () => void;
+  /** Google OAuth display name to pre-fill the Full name field */
+  initialName?: string | null;
+  /** Google OAuth avatar URL to show in the avatar circle */
+  initialAvatarUrl?: string | null;
+}
+
+function showToast(msg: string) {
+  const el = document.createElement("div");
+  el.textContent = msg;
+  el.className =
+    "fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] rounded-lg bg-[#1a1a1a] px-4 py-2 text-sm text-white shadow-lg";
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = "0";
+    el.style.transition = "opacity 200ms";
+    setTimeout(() => el.remove(), 200);
+  }, 2500);
+}
 
 interface Props {
   /** Called after onboarding is completed or skipped */
@@ -34,16 +57,16 @@ const REFERRAL_OPTIONS = [
   { value: "Other", label: "Other" },
 ];
 
-export function OnboardingModal({ onClose }: Props) {
+export function OnboardingModal({ onClose, initialName, initialAvatarUrl }: Props) {
   const [step, setStep] = useState(1);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [isSkipping, setIsSkipping] = useState(false);
 
   // Form state
-  const [fullName, setFullName] = useState("");
+  const [fullName, setFullName] = useState(initialName?.trim() ?? "");
   const [displayName, setDisplayName] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(initialAvatarUrl ?? null);
   const [buildingFor, setBuildingFor] = useState("");
   const [referralSource, setReferralSource] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,7 +77,7 @@ export function OnboardingModal({ onClose }: Props) {
   useEffect(() => {
     getCredits()
       .then((data) => setCreditBalance(data.balance))
-      .catch(() => setCreditBalance(50));
+      .catch(() => setCreditBalance(100));
   }, []);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,6 +133,7 @@ export function OnboardingModal({ onClose }: Props) {
         ...(referralSource ? { referral_source: referralSource } : {}),
       });
       await completeOnboarding();
+      showToast("Profile saved — let's build!");
       onClose();
     } catch {
       setIsSubmitting(false);
@@ -148,6 +172,7 @@ export function OnboardingModal({ onClose }: Props) {
             fullName={fullName}
             displayName={displayName}
             avatarPreview={avatarPreview}
+            initialAvatarUrl={initialAvatarUrl}
             buildingFor={buildingFor}
             referralSource={referralSource}
             errors={errors}
@@ -192,7 +217,7 @@ interface Step1Props {
 }
 
 function Step1({ creditBalance, onNext, onSkip, isSkipping }: Step1Props) {
-  const balance = creditBalance ?? 50;
+  const balance = creditBalance ?? 100;
   return (
     <div>
       {/* Header */}
@@ -214,8 +239,7 @@ function Step1({ creditBalance, onNext, onSkip, isSkipping }: Step1Props) {
       <div className="mt-5 space-y-3">
         {[
           { text: `${balance} credits added to your account — start building now` },
-          { text: "Daily bonus credits when you come back and build" },
-          { text: "Free plan includes 30 credits every month, forever" },
+          { text: "Upgrade anytime for monthly credits and more projects" },
           {
             text: "✦ Invite friends — 50 credits per signup (first 3 only),\n200 credits when they upgrade (unlimited)",
             referral: true,
@@ -266,6 +290,7 @@ interface Step2Props {
   fullName: string;
   displayName: string;
   avatarPreview: string | null;
+  initialAvatarUrl?: string | null;
   buildingFor: string;
   referralSource: string;
   errors: { fullName?: string; displayName?: string };
@@ -341,7 +366,9 @@ function Step2({
             <Upload size={12} />
             {avatarPreview ? "Change photo" : "Upload photo"}
           </button>
-          <p className="mt-1 text-[11px] text-[#9ca3af]">Optional. PNG, JPEG, WebP.</p>
+          <p className="mt-1 text-[11px] text-[#9ca3af]">
+            Optional. PNG, JPEG, WebP.
+          </p>
         </div>
         <input
           ref={fileInputRef}

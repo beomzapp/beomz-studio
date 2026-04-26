@@ -981,6 +981,8 @@ export async function createTopupCheckout(
 export interface UserProfile {
   id: string;
   email: string;
+  /** Google OAuth display name — returned by GET /api/me, used to pre-fill onboarding form */
+  name?: string | null;
   full_name: string | null;
   display_name: string | null;
   avatar_url: string | null;

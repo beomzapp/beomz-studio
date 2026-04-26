@@ -64,6 +64,7 @@ const NAV_ITEMS: NavItem[] = [
 export function StudioLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingUser, setOnboardingUser] = useState<UserProfile | null>(null);
   const matchRoute = useMatchRoute();
 
   useEffect(() => {
@@ -74,13 +75,12 @@ export function StudioLayout() {
       fetchMeWithRetry()
         .then((data) => {
           if (!data) return;
-          console.log('[onboarding] GET /api/me response:', JSON.stringify(data));
           const showModal =
             data.onboarding_completed === false ||
             data.onboarding_completed === null ||
             data.onboarding_completed === undefined;
-          console.log('[onboarding] will show modal:', showModal);
           if (showModal) {
+            setOnboardingUser(data);
             setShowOnboarding(true);
           }
         })
@@ -94,19 +94,16 @@ export function StudioLayout() {
   // Hide sidebar on builder pages — they have their own TopBar + layout
   const isProjectPage = !!matchRoute({ to: "/studio/project/$id", fuzzy: true });
   const isVersionPreviewPage = !!matchRoute({ to: "/studio/version-preview", fuzzy: true });
+  // Onboarding modal must only appear on the home dashboard
+  const isHomePage = !!matchRoute({ to: "/studio/home" });
 
   if (isProjectPage || isVersionPreviewPage) {
     return (
-      <>
-        <div className="flex h-screen flex-col">
-          <main className="flex-1 overflow-hidden">
-            <Outlet />
-          </main>
-        </div>
-        {showOnboarding && (
-          <OnboardingModal onClose={() => setShowOnboarding(false)} />
-        )}
-      </>
+      <div className="flex h-screen flex-col">
+        <main className="flex-1 overflow-hidden">
+          <Outlet />
+        </main>
+      </div>
     );
   }
 
@@ -192,8 +189,12 @@ export function StudioLayout() {
         </main>
       </div>
     </div>
-    {showOnboarding && (
-      <OnboardingModal onClose={() => setShowOnboarding(false)} />
+    {showOnboarding && isHomePage && (
+      <OnboardingModal
+        initialName={onboardingUser?.name ?? onboardingUser?.full_name}
+        initialAvatarUrl={onboardingUser?.avatar_url}
+        onClose={() => setShowOnboarding(false)}
+      />
     )}
     </>
   );

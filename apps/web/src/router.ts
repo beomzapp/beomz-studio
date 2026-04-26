@@ -73,6 +73,9 @@ const SettingsWalletPage = lazy(() =>
 const SettingsReferralsPage = lazy(() =>
   import("./app/routes/studio/SettingsReferralsPage").then(m => ({ default: m.SettingsReferralsPage })),
 );
+const SignupRedirectPage = lazy(() =>
+  import("./app/routes/public/SignupRedirectPage").then(m => ({ default: m.SignupRedirectPage })),
+);
 const LoginPage = lazy(() =>
   import("./app/routes/auth/login").then(m => ({ default: m.LoginPage })),
 );
@@ -203,7 +206,8 @@ const supportRoute = createRoute({
   component: withSuspense(SupportPage),
 });
 
-// BEO-610: /signup?ref=CODE — save referral code then redirect to home
+// BEO-610: /signup?ref=CODE — save referral code then check VPN before redirecting to home
+// BEO-616: VPN check added — shows warning overlay if VPN detected
 const signupRedirectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/signup",
@@ -214,9 +218,9 @@ const signupRedirectRoute = createRoute({
     if (search.ref) {
       localStorage.setItem("referral_code", search.ref);
     }
-    throw redirect({ to: "/" });
+    // Do NOT redirect here — SignupRedirectPage handles VPN check + redirect
   },
-  component: () => null,
+  component: withSuspense(SignupRedirectPage),
 });
 
 const studioRoute = createRoute({
