@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
 import { apiConfig } from "../config.js";
+import { buildClarificationTrackingState } from "./clarificationTracking.js";
 import type { ProjectChatHistoryEntry } from "./projectChat.js";
 
 export type Intent =
@@ -52,26 +53,7 @@ const classifierResponseSchema = z.object({
 });
 
 function countClarifyingQuestions(history: readonly ProjectChatHistoryEntry[] | undefined): number {
-  if (!history || history.length === 0) {
-    return 0;
-  }
-
-  let count = 0;
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (entry.role !== "assistant") {
-      continue;
-    }
-
-    if (entry.content.trim().endsWith("?")) {
-      count += 1;
-      continue;
-    }
-
-    break;
-  }
-
-  return count;
+  return buildClarificationTrackingState(history).askedCount;
 }
 
 function estimateBuildConfidence(message: string): number {
@@ -210,7 +192,8 @@ export async function classifyIntent(
   recentHistory?: readonly ProjectChatHistoryEntry[],
 ): Promise<IntentResult> {
   const trimmed = message.trim();
-  const clarifyingQuestionCount = countClarifyingQuestions(recentHistory);
+  const clarificationState = buildClarificationTrackingState(recentHistory);
+  const clarifyingQuestionCount = clarificationState.askedCount;
 
   if (hasImage && trimmed.length === 0) {
     return {
@@ -276,6 +259,10 @@ export async function classifyIntent(
               "## Recent conversation (last 5 turns)",
               formatRecentHistory(recentHistory),
               `Clarifying questions already asked: ${clarifyingQuestionCount}`,
+              `Clarifying questions already answered: ${clarificationState.answeredCount}`,
+              clarificationState.answeredQuestions.length > 0
+                ? `Answered clarifying questions:\n${clarificationState.answeredQuestions.map((question) => `- ${question}`).join("\n")}`
+                : "Answered clarifying questions:\n(none)",
               "",
               `## Latest user message`,
               `"${message}"`,
@@ -311,6 +298,7 @@ export async function classifyIntent(
               "Questions, greetings, and research intents can safely return 0.9+ once the ask is clear.",
               "Iterations on an existing app: a specific direction (e.g. \"add a contact form\",",
               "\"make the header dark\") is 0.9+. Vague iterations (\"make it better\") stay below 0.7.",
+              "Never act as if an already answered clarifying question is still missing.",
               `If clarifying questions already asked >= ${MAX_CLARIFYING_QUESTIONS}, be generous and return at least 0.95 when any concrete app direction exists.`,
               "",
               "## accumulatedContext",

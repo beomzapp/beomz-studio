@@ -16,6 +16,7 @@ import {
   ensureReferralCodeForUser,
   getReferralCodeFromRequest,
 } from "../lib/referrals.js";
+import { extractClientIp } from "../lib/ipqs.js";
 import type { VerifiedPlatformJwt } from "./verifyPlatformJwt.js";
 
 function buildDefaultOrgName(email: string | undefined, platformUserId: string) {
@@ -77,27 +78,6 @@ function extractUserProfile(authUser: {
       readProfileString(authUser.user_metadata, ["name", "full_name", "fullName"])
       ?? readProfileString(authUser.app_metadata, ["name", "full_name", "fullName"]),
   };
-}
-
-function extractClientIp(request: {
-  header(name: string): string | undefined;
-}): string | null {
-  const cloudflareIp = request.header("cf-connecting-ip")?.trim();
-  if (cloudflareIp) {
-    return cloudflareIp;
-  }
-
-  const forwardedFor = request.header("x-forwarded-for");
-  if (!forwardedFor) {
-    return null;
-  }
-
-  const firstHop = forwardedFor
-    .split(",")
-    .map((value) => value.trim())
-    .find((value) => value.length > 0);
-
-  return firstHop ?? null;
 }
 
 interface UserUpsertInput {

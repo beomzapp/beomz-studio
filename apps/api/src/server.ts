@@ -10,6 +10,7 @@ import authLoginRoute from "./routes/auth/login.js";
 import authMeRoute from "./routes/auth/me.js";
 import meRoute from "./routes/me.js";
 import activityRoute from "./routes/activity.js";
+import checkVpnRoute from "./routes/check-vpn.js";
 import buildsEventsRoute from "./routes/builds/events.js";
 import buildsForkRoute from "./routes/builds/fork.js";
 import buildsLatestRoute from "./routes/builds/latest.js";
@@ -165,6 +166,7 @@ app.use("*", async (c, next) => {
 
 app.get("/", (c) => c.json({ status: "ok" }));
 app.get("/health", (c) => c.json({ status: "ok" }));
+app.route("/check-vpn", checkVpnRoute);
 app.route("/assets/image", assetImageRoute);
 app.route("/auth/login", authLoginRoute);
 app.route("/auth/me", authMeRoute);

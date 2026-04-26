@@ -143,7 +143,10 @@ test("applySignupReferralReward credits only the referrer while under the signup
   };
 
   const result = await applySignupReferralReward({
+    clientIp: "203.0.113.5",
     db: db as never,
+    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, success: true, vpn: false }), { status: 200 }),
+    ipqsApiKey: "ipqs-key",
     referredOrgId: "referred-org",
     referredUserId: "user-2",
     referralCode: "refcode1",
@@ -158,7 +161,7 @@ test("applySignupReferralReward credits only the referrer while under the signup
   }]);
   assert.equal(eventInserts.length, 1);
   assert.equal(eventInserts[0]?.event, "signup");
-  assert.equal(eventInserts[0]?.signup_ip ?? null, null);
+  assert.equal(eventInserts[0]?.signup_ip, "203.0.113.5");
   assert.equal(eventInserts[0]?.is_vpn, false);
 });
 
@@ -187,6 +190,8 @@ test("applySignupReferralReward stores the client IP on rewarded signup events",
   await applySignupReferralReward({
     clientIp: "203.0.113.10",
     db: db as never,
+    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, success: true, vpn: false }), { status: 200 }),
+    ipqsApiKey: "ipqs-key",
     referredOrgId: "referred-org",
     referredUserId: "user-2",
     referralCode: "refcode1",
@@ -239,6 +244,8 @@ test("applySignupReferralReward silently skips duplicate signup rewards from the
   const result = await applySignupReferralReward({
     clientIp: "203.0.113.10",
     db: db as never,
+    fetchImpl: async () => new Response(JSON.stringify({ proxy: false, success: true, vpn: false }), { status: 200 }),
+    ipqsApiKey: "ipqs-key",
     referredOrgId: "referred-org",
     referredUserId: "user-3",
     referralCode: "refcode1",
@@ -298,7 +305,7 @@ test("applySignupReferralReward marks VPN referrals and skips the signup reward"
   assert.equal(eventInserts[0]?.signup_ip, "203.0.113.20");
 });
 
-test("applySignupReferralReward fails open when IPQS errors", async () => {
+test("applySignupReferralReward blocks signup rewards when IPQS errors", async () => {
   const eventInserts: ReferralEventRow[] = [];
 
   const db = {
@@ -332,8 +339,57 @@ test("applySignupReferralReward fails open when IPQS errors", async () => {
     referralCode: "refcode1",
   });
 
-  assert.equal(result.referrerRewarded, true);
-  assert.equal(eventInserts[0]?.credits_awarded, 50);
+  assert.equal(result.referrerRewarded, false);
+  assert.equal(eventInserts[0]?.credits_awarded, 0);
+});
+
+test("applySignupReferralReward uses strictness=1 and blocks unsuccessful IPQS responses", async () => {
+  const eventInserts: ReferralEventRow[] = [];
+  let capturedUrl: string | null = null;
+
+  const db = {
+    countReferralEventsByReferrerId: async () => 0,
+    createReferralCode: async () => null,
+    createReferralEvent: async (input: ReferralEventRow) => {
+      const event = buildReferralEvent(input);
+      eventInserts.push(event);
+      return event;
+    },
+    findPrimaryOrgByUserId: async () => {
+      throw new Error("referrer org should not be loaded for unverified signups");
+    },
+    findReferralCodeByCode: async () => buildReferralCode(),
+    findReferralCodeByUserId: async () => null,
+    findUserById: async (userId: string) => buildUser({ id: userId }),
+    getOrgWithBalance: async (orgId: string) => buildOrg({ credits: 100, id: orgId, owner_id: "user-2" }),
+    hasReferralEvent: async () => false,
+    listReferralEventsByReferrerId: async () => [],
+    updateOrg: async () => {
+      throw new Error("org should not be updated for unverified signups");
+    },
+    updateUser: async (userId: string, patch: { referred_by?: string | null }) => buildUser({ id: userId, referred_by: patch.referred_by ?? null }),
+  };
+
+  const result = await applySignupReferralReward({
+    clientIp: "178.132.108.41",
+    db: db as never,
+    fetchImpl: async (input) => {
+      capturedUrl = typeof input === "string" ? input : input.toString();
+      return new Response(JSON.stringify({
+        message: "You have insufficient credits to make this query.",
+        success: false,
+        vpn: false,
+      }), { status: 200 });
+    },
+    ipqsApiKey: "ipqs-key",
+    referredOrgId: "referred-org",
+    referredUserId: "user-2",
+    referralCode: "refcode1",
+  });
+
+  assert.equal(result.referrerRewarded, false);
+  assert.match(capturedUrl ?? "", /strictness=1/);
+  assert.equal(eventInserts[0]?.credits_awarded, 0);
 });
 
 test("applyUpgradeReferralReward is idempotent and only rewards once", async () => {

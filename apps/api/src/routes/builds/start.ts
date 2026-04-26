@@ -43,6 +43,10 @@ import {
   readProjectChatHistory,
   shouldRefreshProjectChatSummary,
 } from "../../lib/projectChat.js";
+import {
+  buildClarificationTrackingState,
+  normaliseClarifyingQuestion,
+} from "../../lib/clarificationTracking.js";
 import { generateProjectChatSummary } from "../../lib/projectChatSummary.js";
 import {
   generatePlanSummary as generatePlanSummaryMessage,
@@ -258,29 +262,6 @@ function readPendingImplementPlan(metadata: unknown): string | null {
   return typeof implementPlan === "string" && implementPlan.trim().length > 0
     ? implementPlan
     : null;
-}
-
-function countRecentClarifyingQuestions(history: readonly ReturnType<typeof readProjectChatHistory>[number][]): number {
-  if (!history || history.length === 0) {
-    return 0;
-  }
-
-  let count = 0;
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (entry.role !== "assistant") {
-      continue;
-    }
-
-    if (entry.content.trim().endsWith("?")) {
-      count += 1;
-      continue;
-    }
-
-    break;
-  }
-
-  return count;
 }
 
 function buildAccumulatedContextFallback(
@@ -620,7 +601,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const recentHistory = projectRow
     ? readProjectChatHistory(projectRow.chat_history)
     : [];
-  const clarifyingQuestionCount = countRecentClarifyingQuestions(recentHistory);
+  const clarificationState = buildClarificationTrackingState(recentHistory);
+  const clarifyingQuestionCount = clarificationState.askedCount;
   const storedImplementPlan = normalisePromptForComparison(readPendingImplementPlan(latestGeneration?.metadata));
   const sourcePromptForComparison = normalisePromptForComparison(sourcePrompt);
   const matchingStoredImplementPlan = Boolean(
@@ -736,6 +718,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     cappedConfidence,
     reason: intentDecision.reason,
     clarifyingQuestionCount,
+    answeredClarifyingQuestionCount: clarificationState.answeredCount,
     forcedPlanSummary,
     needsClarification,
     isNearReady,
@@ -913,27 +896,46 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       });
     }
 
-    const assistantMessage = shouldOfferPlanSummary
-      ? await generatePlanSummaryFn(implementPlan ?? effectivePrompt, projectName)
-      : eventType === "clarifying_question"
-      ? await generateClarifyingQuestionFn({
-          chatHistory,
-          chatSummary,
-          currentMessage: sourcePrompt,
-          existingFiles,
-          projectName,
-          websiteContext,
-          accumulatedContext: accumulatedBuildContext ?? null,
-          nearReady: isNearReady,
-        })
-      : (await generateConversationalAnswerFn({
-          chatHistory,
-          chatSummary,
-          currentMessage: sourcePrompt,
-          existingFiles,
-          projectName,
-          websiteContext,
-        })).message;
+    let finalEventType: "clarifying_question" | "conversational_response" = eventType;
+    let finalImplementPlan = implementPlan;
+    let assistantMessage: string;
+
+    if (shouldOfferPlanSummary) {
+      assistantMessage = await generatePlanSummaryFn(finalImplementPlan ?? effectivePrompt, projectName);
+    } else if (eventType === "clarifying_question") {
+      const generatedQuestion = await generateClarifyingQuestionFn({
+        chatHistory,
+        chatSummary,
+        currentMessage: sourcePrompt,
+        existingFiles,
+        projectName,
+        websiteContext,
+        accumulatedContext: accumulatedBuildContext ?? null,
+        nearReady: isNearReady,
+      });
+      const generatedQuestionKey = normaliseClarifyingQuestion(generatedQuestion);
+      const isDuplicateClarifyingQuestion = Boolean(
+        generatedQuestionKey
+        && clarificationState.askedQuestionKeys.has(generatedQuestionKey),
+      );
+
+      if (isDuplicateClarifyingQuestion && !isIteration) {
+        finalEventType = "conversational_response";
+        finalImplementPlan = accumulatedBuildContext ?? effectivePrompt;
+        assistantMessage = await generatePlanSummaryFn(finalImplementPlan, projectName);
+      } else {
+        assistantMessage = generatedQuestion;
+      }
+    } else {
+      assistantMessage = (await generateConversationalAnswerFn({
+        chatHistory,
+        chatSummary,
+        currentMessage: sourcePrompt,
+        existingFiles,
+        projectName,
+        websiteContext,
+      })).message;
+    }
     const trace = buildImmediateTrace({
       buildId,
       intent: legacyIntent,
@@ -941,10 +943,10 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       operation,
       projectId,
       urlResearch: urlResearchEventPayload,
-      readyToImplement: Boolean(implementPlan),
-      implementPlan,
+      readyToImplement: Boolean(finalImplementPlan),
+      implementPlan: finalImplementPlan,
       requestedAt,
-      type: eventType,
+      type: finalEventType,
     });
 
     if (urlResearchEventPayload) {
@@ -964,9 +966,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       metadata: {
         ...initialMetadata,
         builderTrace: trace,
-        implementPlan: implementPlan ?? undefined,
+        implementPlan: finalImplementPlan ?? undefined,
         phase: "completed",
-        readyToImplement: Boolean(implementPlan),
+        readyToImplement: Boolean(finalImplementPlan),
         resultSource: "ai",
       },
       operation_id: operationId,
@@ -977,24 +979,24 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       session_events: [
         { type: "user", content: sourcePrompt, timestamp: requestedAt },
         {
-          type: eventType === "clarifying_question" ? "clarifying_question" : "question_answer",
+          type: finalEventType === "clarifying_question" ? "clarifying_question" : "question_answer",
           content: assistantMessage,
           timestamp: requestedAt,
-          ...(implementPlan ? { implementPlan } : {}),
+          ...(finalImplementPlan ? { implementPlan: finalImplementPlan } : {}),
         },
       ],
       started_at: requestedAt,
       status: "completed",
-      summary: implementPlan
+      summary: finalImplementPlan
         ? "Plan summary ready - awaiting build confirmation."
-        : eventType === "clarifying_question"
+        : finalEventType === "clarifying_question"
         ? "Clarifying question sent - awaiting user response."
         : "Question answered - no build started.",
       template_id: selectedTemplateId as TemplateId,
       warnings: [],
     });
 
-    if (eventType === "conversational_response") {
+    if (finalEventType === "conversational_response") {
       await persistConversationalProjectMemory(
         orgContext.db,
         projectId,

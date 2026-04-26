@@ -7,6 +7,7 @@ import {
   buildProjectMemoryPrompt,
   type ProjectChatHistoryEntry,
 } from "./projectChat.js";
+import { buildClarificationTrackingState } from "./clarificationTracking.js";
 
 export interface WebsiteContext {
   content: string | null;
@@ -163,12 +164,28 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
   );
 
   const accumulated = input.accumulatedContext?.trim();
+  const clarificationState = buildClarificationTrackingState(input.chatHistory);
   const accumulatedBlock = accumulated && accumulated.length > 0
     ? [
         "## What you already know",
         accumulated,
         "Do NOT repeat these facts back as a question. Build on them.",
       ].join("\n")
+    : "";
+  const priorClarificationBlock = clarificationState.askedCount > 0
+    ? [
+        "## Clarifying questions already asked",
+        clarificationState.askedQuestions.map((question) => `- ${question}`).join("\n"),
+        clarificationState.answeredCount > 0
+          ? [
+              "",
+              "## Clarifying questions already answered",
+              clarificationState.answeredQuestions.map((question) => `- ${question}`).join("\n"),
+            ].join("\n")
+          : "",
+        "",
+        "Never ask any question listed above again. Move to the next missing detail only.",
+      ].filter((section) => section.length > 0).join("\n")
     : "";
 
   // BEO-465: priority for choosing the single missing piece to ask about.
@@ -212,6 +229,7 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     "Ask exactly ONE short, natural question to gather the most important missing information.",
     "Ask ONE question at a time. Maximum one sentence.",
     "Do NOT use bullet points. Do NOT ask multiple questions. Do NOT repeat what the user already told you.",
+    "Do NOT repeat or paraphrase any previously asked clarifying question.",
     "Keep it under 20 words. Conversational tone. No filler. No apologies. No preamble.",
     "No preamble. Never start with 'I can see...', 'Based on...', or any context explanation. Ask the question directly.",
     "Never wrap your question in parentheses.",
@@ -225,6 +243,7 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     questionPriority,
     "",
     accumulatedBlock,
+    priorClarificationBlock,
     memoryBlock,
     websiteBlock,
   ]

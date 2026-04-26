@@ -1354,6 +1354,143 @@ test("/builds/start forces a plan summary after four clarifying questions even b
   assert.equal(runBuildCalls, 0);
 });
 
+test("/builds/start promotes a duplicate clarifying question to a plan summary instead of re-asking it", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let runBuildCalls = 0;
+  const project = {
+    id: "45454545-4545-4545-4545-454545454545",
+    name: "Creator Hub",
+    org_id: "org-1",
+    status: "ready",
+    template: "marketing-website",
+    icon: "Globe",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [
+      { role: "user", content: "I need a social media website", timestamp: new Date().toISOString() },
+      { role: "assistant", content: "Which social platforms are you focusing on?", timestamp: new Date().toISOString() },
+      { role: "user", content: "Instagram and TikTok", timestamp: new Date().toISOString() },
+    ],
+    chat_summary: "Social media builder discovery.",
+  };
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          applyOrgUsageDeduction: async () => ({
+            deducted: 1,
+            credits: 9,
+            topup_credits: 0,
+          }),
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: (input.session_events as Record<string, unknown>[] | undefined) ?? [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: (input.warnings as string[] | undefined) ?? [],
+          }),
+          findLatestGenerationByProjectId: async () => ({
+            files: [],
+            metadata: {},
+          }),
+          findProjectById: async () => project,
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            ...project,
+            ...patch,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.74,
+      reason: "Needs one more detail.",
+      accumulatedContext: "Build a social media website focused on Instagram and TikTok creators.",
+    }),
+    generateClarifyingQuestion: async () => "Which social platforms are you focusing on?",
+    generatePlanSummary: async () => "Here's what I'll do:\n**Creator Hub**\n- Creator-focused homepage\n- Instagram and TikTok sections",
+    runBuildInBackground: async () => {
+      runBuildCalls += 1;
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "Instagram and TikTok",
+      projectId: project.id,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  const payload = await response.json() as {
+    build: { summary: string | null; status: string };
+    trace: {
+      events: Array<{ implementPlan?: string; message?: string; readyToImplement?: boolean; type: string }>;
+      lastEventId: string | null;
+    };
+  };
+
+  assert.equal(payload.build.status, "completed");
+  assert.equal(payload.build.summary, "Plan summary ready - awaiting build confirmation.");
+  assert.equal(payload.trace.events.some((event) => event.type === "clarifying_question"), false);
+  assert.equal(payload.trace.events.some((event) => event.readyToImplement === true), true);
+  assert.equal(
+    payload.trace.events.some((event) => event.implementPlan === "Build a social media website focused on Instagram and TikTok creators."),
+    true,
+  );
+  assert.equal(runBuildCalls, 0);
+});
+
 test("/builds/start injects Tavily research context for research intent without a URL", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
   const {

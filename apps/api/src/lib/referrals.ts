@@ -6,6 +6,8 @@ import type {
   UserRow,
 } from "@beomz-studio/studio-db";
 
+import { lookupIpqsVpnStatus } from "./ipqs.js";
+
 export const REFERRAL_SIGNUP_REWARD_CREDITS = 50;
 export const REFERRAL_UPGRADE_REWARD_CREDITS = 200;
 export const REFERRAL_SIGNUP_CAP = 3;
@@ -97,27 +99,18 @@ async function isVpnOrProxyIp(
   clientIp: string | null | undefined,
   apiKey: string | null | undefined,
   fetchImpl: typeof fetch,
-): Promise<boolean> {
-  if (!clientIp || !apiKey) {
-    return false;
+): Promise<"clear" | "unverified" | "vpn"> {
+  const result = await lookupIpqsVpnStatus({
+    apiKey,
+    clientIp,
+    fetchImpl,
+  });
+
+  if (result.status === "unverified") {
+    console.warn("[referral] IPQS verification unavailable, blocking signup reward:", result.message);
   }
 
-  try {
-    const response = await fetchImpl(
-      `https://www.ipqualityscore.com/api/json/ip/${encodeURIComponent(apiKey)}/${encodeURIComponent(clientIp)}`,
-      { signal: AbortSignal.timeout(3000) },
-    );
-
-    if (!response.ok) {
-      return false;
-    }
-
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-    return payload?.vpn === true || payload?.proxy === true;
-  } catch (error) {
-    console.warn("[referral] IPQS check failed, allowing referral reward:", error instanceof Error ? error.message : String(error));
-    return false;
-  }
+  return result.status;
 }
 
 export function normalizeReferralCode(value: string | null | undefined): string | null {
@@ -233,9 +226,10 @@ export async function applySignupReferralReward(
 
   const clientIp = input.clientIp ?? null;
   const sameIpTriggeredRecently = hasRecentRewardFromIp(rewardedSignupEvents, clientIp);
-  const isVpn = await isVpnOrProxyIp(clientIp, input.ipqsApiKey, input.fetchImpl ?? fetch);
+  const vpnStatus = await isVpnOrProxyIp(clientIp, input.ipqsApiKey, input.fetchImpl ?? fetch);
+  const isVpn = vpnStatus === "vpn";
 
-  if (sameIpTriggeredRecently || isVpn) {
+  if (sameIpTriggeredRecently || vpnStatus !== "clear") {
     await input.db.createReferralEvent({
       credits_awarded: 0,
       event: "signup",
