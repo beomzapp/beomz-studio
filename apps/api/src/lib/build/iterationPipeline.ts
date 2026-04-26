@@ -10,6 +10,7 @@ import {
   calcIterationCreditCost,
   isAdminEmail,
 } from "../credits.js";
+import { maybeSendCreditsLowEmailForUser } from "../email/service.js";
 import { encryptProjectSecret } from "../projectSecrets.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../projectVersions.js";
 import { readStoredSupabaseToken, runSupabaseManagementQueryWithOAuth } from "../supabaseManagement.js";
@@ -554,6 +555,13 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
   }).catch(() => undefined);
 
   await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
+  await maybeSendCreditsLowEmailForUser({
+    db,
+    orgId,
+    userId,
+  }).catch((error) => {
+    console.error("[email] failed to send low credits email:", error);
+  });
   await persistProjectChatHistory(db, projectId, sourcePrompt, iterationHistoryReply, {
     existingFiles: iterFinalFiles,
     projectName: input.projectName,

@@ -16,6 +16,8 @@ const envSchema = z.object({
   STUDIO_SUPABASE_URL: z.string().url(),
   STUDIO_SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   PROJECT_JWT_SECRET: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  FROM_EMAIL: z.string().optional(),
   PORT: z.number().int().positive(),
   // Stripe — all optional so the API boots without payments configured
   STRIPE_SECRET_KEY: z.string().optional(),

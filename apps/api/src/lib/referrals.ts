@@ -6,6 +6,8 @@ import type {
   UserRow,
 } from "@beomz-studio/studio-db";
 
+import { sendReferralRewardEmail } from "./email/service.js";
+
 export const REFERRAL_SIGNUP_REWARD_CREDITS = 50;
 export const REFERRAL_UPGRADE_REWARD_CREDITS = 200;
 export const REFERRAL_SIGNUP_CAP = 3;
@@ -241,6 +243,21 @@ export async function applySignupReferralReward(
   await input.db.updateOrg(referrerOrg.id, {
     credits: Number(referrerOrg.credits ?? 0) + REFERRAL_SIGNUP_REWARD_CREDITS,
   });
+
+  try {
+    const referrerUser = await input.db.findUserById(referrerId);
+    if (referrerUser?.email) {
+      void sendReferralRewardEmail({
+        credits: REFERRAL_SIGNUP_REWARD_CREDITS,
+        email: referrerUser.email,
+        name: referrerUser.full_name ?? null,
+      }).catch((error) => {
+        console.error("[referral] failed to send reward email:", error);
+      });
+    }
+  } catch (error) {
+    console.error("[referral] failed to load referrer for reward email:", error);
+  }
 
   return {
     referredOrg,

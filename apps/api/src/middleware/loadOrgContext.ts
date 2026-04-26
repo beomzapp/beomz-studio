@@ -266,10 +266,13 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
       const db = createDbClient();
       const authStore = createAuthStore();
       const email = buildUserFallbackEmail(jwt);
-      const authUser = await authStore.findAuthUserById(jwt.sub);
+      const isLocalEmailToken = jwt.tokenSource === "local";
+      const authUser = isLocalEmailToken
+        ? null
+        : await authStore.findAuthUserById(jwt.sub);
       const profile = authUser ? extractUserProfile(authUser) : { avatarUrl: null, fullName: null };
 
-      if (!authUser) {
+      if (!authUser && !isLocalEmailToken) {
         return c.json({ error: "User not found" }, 401);
       }
 
@@ -277,6 +280,10 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
       let isNew = false;
 
       if (!user) {
+        if (isLocalEmailToken) {
+          return c.json({ error: "User not found" }, 401);
+        }
+
         const existingUser = await authStore.findUserByEmail(email);
         isNew = !existingUser;
         const upsertInput: UserUpsertInput = {

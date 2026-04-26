@@ -9,7 +9,9 @@ import type {
 
 export interface PlatformJwtPayload extends JWTPayload {
   email?: string;
+  provider?: string;
   sub: string;
+  tokenSource?: "local" | "supabase";
 }
 
 export interface OrgContext {

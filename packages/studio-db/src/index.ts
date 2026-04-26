@@ -32,7 +32,17 @@ export interface UserRow extends Record<string, unknown> {
   full_name?: string | null;
   avatar_url?: string | null;
   referred_by?: string | null;
+  email_verified?: boolean;
+  last_credits_low_email?: string | null;
   created_at: string;
+}
+
+export interface EmailAuthUserRow extends UserRow {
+  password_hash?: string | null;
+  email_verify_token?: string | null;
+  email_verify_expires?: string | null;
+  password_reset_token?: string | null;
+  password_reset_expires?: string | null;
 }
 
 export interface OrgRow extends Record<string, unknown> {
@@ -175,6 +185,13 @@ export interface UserInsert extends Record<string, unknown> {
   platform_user_id: string;
   full_name?: string | null;
   avatar_url?: string | null;
+  password_hash?: string | null;
+  email_verified?: boolean;
+  email_verify_token?: string | null;
+  email_verify_expires?: string | null;
+  password_reset_token?: string | null;
+  password_reset_expires?: string | null;
+  last_credits_low_email?: string | null;
   created_at?: string;
 }
 
@@ -184,6 +201,13 @@ export interface UserUpdate extends Record<string, unknown> {
   full_name?: string | null;
   avatar_url?: string | null;
   referred_by?: string | null;
+  password_hash?: string | null;
+  email_verified?: boolean;
+  email_verify_token?: string | null;
+  email_verify_expires?: string | null;
+  password_reset_token?: string | null;
+  password_reset_expires?: string | null;
+  last_credits_low_email?: string | null;
 }
 
 export interface ReferralCodeRow extends Record<string, unknown> {
@@ -612,6 +636,28 @@ export interface StudioDatabase {
 
 export type StudioSupabaseClient = SupabaseClient<StudioDatabase>;
 
+function toPublicUserRow(row: Record<string, unknown> | null | undefined): UserRow | null {
+  if (!row) {
+    return null;
+  }
+
+  const hasLastCreditsLowEmail = Object.prototype.hasOwnProperty.call(row, "last_credits_low_email");
+
+  return {
+    id: String(row.id),
+    platform_user_id: String(row.platform_user_id),
+    email: String(row.email),
+    full_name: typeof row.full_name === "string" ? row.full_name : null,
+    avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
+    referred_by: typeof row.referred_by === "string" ? row.referred_by : null,
+    email_verified: typeof row.email_verified === "boolean" ? row.email_verified : undefined,
+    last_credits_low_email: hasLastCreditsLowEmail
+      ? (typeof row.last_credits_low_email === "string" ? row.last_credits_low_email : null)
+      : undefined,
+    created_at: String(row.created_at),
+  };
+}
+
 function isGenerationsSchemaCacheError(message: string): boolean {
   const normalizedMessage = message.toLowerCase();
   return normalizedMessage.includes("schema cache")
@@ -661,7 +707,7 @@ export class StudioDbClient {
       throw new Error(response.error.message);
     }
 
-    return response.data;
+    return toPublicUserRow(response.data);
   }
 
   async createUser(
@@ -673,7 +719,7 @@ export class StudioDbClient {
       .select("*")
       .single();
 
-    return unwrapSingle(response);
+    return toPublicUserRow(await unwrapSingle(response))!;
   }
 
   async findUserById(id: string): Promise<UserRow | null> {
@@ -687,7 +733,7 @@ export class StudioDbClient {
       throw new Error(response.error.message);
     }
 
-    return response.data;
+    return toPublicUserRow(response.data);
   }
 
   async updateUserEmail(id: string, email: string): Promise<UserRow> {
@@ -702,7 +748,67 @@ export class StudioDbClient {
       .select("*")
       .single();
 
-    return unwrapSingle(response);
+    return toPublicUserRow(await unwrapSingle(response))!;
+  }
+
+  async findUserByEmail(email: string): Promise<UserRow | null> {
+    const response = await this.client
+      .from("users")
+      .select("*")
+      .eq("email", email)
+      .limit(1)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return toPublicUserRow(response.data);
+  }
+
+  async findEmailAuthUserByEmail(email: string): Promise<EmailAuthUserRow | null> {
+    const response = await this.client
+      .from("users")
+      .select("*")
+      .eq("email", email)
+      .limit(1)
+      .maybeSingle<EmailAuthUserRow>();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async findEmailAuthUserByVerifyToken(token: string): Promise<EmailAuthUserRow | null> {
+    const response = await this.client
+      .from("users")
+      .select("*")
+      .eq("email_verify_token", token)
+      .limit(1)
+      .maybeSingle<EmailAuthUserRow>();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async findEmailAuthUserByResetToken(token: string): Promise<EmailAuthUserRow | null> {
+    const response = await this.client
+      .from("users")
+      .select("*")
+      .eq("password_reset_token", token)
+      .limit(1)
+      .maybeSingle<EmailAuthUserRow>();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
   }
 
   async createOrg(
