@@ -1,6 +1,12 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import { z } from "zod";
 
-import { ensureReferralCodeForUser, REFERRAL_SIGNUP_CAP } from "../lib/referrals.js";
+import {
+  applySignupReferralReward,
+  ensureReferralCodeForUser,
+  normalizeReferralCode,
+  REFERRAL_SIGNUP_CAP,
+} from "../lib/referrals.js";
 import { loadOrgContext } from "../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../types.js";
@@ -8,6 +14,31 @@ import type { OrgContext } from "../types.js";
 interface ReferralsRouteDeps {
   authMiddleware?: MiddlewareHandler;
   loadOrgContextMiddleware?: MiddlewareHandler;
+}
+
+const attributionSchema = z.object({
+  referral_code: z.string().trim().min(1).max(100),
+}).strict();
+
+function extractClientIp(request: {
+  header(name: string): string | undefined;
+}): string | null {
+  const cloudflareIp = request.header("cf-connecting-ip")?.trim();
+  if (cloudflareIp) {
+    return cloudflareIp;
+  }
+
+  const forwardedFor = request.header("x-forwarded-for");
+  if (!forwardedFor) {
+    return null;
+  }
+
+  const firstHop = forwardedFor
+    .split(",")
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+
+  return firstHop ?? null;
 }
 
 function readEventType(event: Record<string, unknown>): string | null {
@@ -83,6 +114,45 @@ export function createReferralsRoute(deps: ReferralsRouteDeps = {}) {
     } catch (error) {
       console.error("[GET /referrals] error:", error);
       return c.json({ error: "Failed to load referrals." }, 500);
+    }
+  });
+
+  referralsRoute.post("/attribution", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    try {
+      const body = await c.req.json().catch(() => null);
+      const parsed = attributionSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ error: "Invalid referral attribution payload." }, 400);
+      }
+
+      const orgContext = c.get("orgContext") as OrgContext;
+      if (orgContext.user.referred_by) {
+        return c.json({ ok: true });
+      }
+
+      const referralCode = normalizeReferralCode(parsed.data.referral_code);
+      if (!referralCode) {
+        return c.json({ ok: true });
+      }
+
+      const referrer = await orgContext.db.findReferralCodeByCode(referralCode);
+      if (!referrer || referrer.user_id === orgContext.user.id) {
+        return c.json({ ok: true });
+      }
+
+      await applySignupReferralReward({
+        clientIp: extractClientIp(c.req),
+        db: orgContext.db,
+        referralCode,
+        referredOrgId: orgContext.org.id,
+        referredUserId: orgContext.user.id,
+        referrerId: referrer.user_id,
+      });
+
+      return c.json({ ok: true });
+    } catch (error) {
+      console.error("[POST /referrals/attribution] error:", error);
+      return c.json({ error: "Failed to attribute referral." }, 500);
     }
   });
 
