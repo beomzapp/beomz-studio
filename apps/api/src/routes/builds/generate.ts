@@ -226,6 +226,8 @@ interface NarrationTextResult {
   usage: TokenUsage;
 }
 
+type ProjectDbType = "none" | "neon" | "supabase";
+
 type IterationImageBlock =
   | ReturnType<typeof buildAnthropicImageBlock>
   | Awaited<ReturnType<typeof resolveAnthropicImageBlock>>;
@@ -269,6 +271,49 @@ function calcHaikuCostUsd(inputTokens: number, outputTokens: number): number {
 
 function roundUsd(costUsd: number): number {
   return Math.round(costUsd * 10000) / 10000;
+}
+
+function normaliseProjectDbType(dbType: unknown): ProjectDbType {
+  return dbType === "neon" || dbType === "supabase" ? dbType : "none";
+}
+
+function buildDbContextBlock(projectId: string, dbType: ProjectDbType): string {
+  return `
+## Database & Auth Context
+- db_type: ${dbType}
+- auth_proxy_base: /api/projects/${projectId}/auth
+
+## Rules based on db_type:
+
+### If db_type === 'none':
+- Use localStorage or in-memory state only — no DB calls
+- For auth: generate mock auth with localStorage. Show a subtle
+  "Demo mode — add a database for real auth" banner in the UI
+- Never import or reference Supabase or any DB client
+- If user asks for auth/login/database features, generate the mock
+  version and add a comment: // Add a database to enable real auth
+
+### If db_type === 'neon':
+- Use VITE_DATABASE_URL with postgres/neon client for all data
+- For auth: use the Beomz auth proxy at /api/projects/${projectId}/auth/*
+  POST /auth/signup { email, password } → { user, token }
+  POST /auth/login  { email, password } → { user, token }
+  POST /auth/logout
+  GET  /auth/me (with Authorization: Bearer {token})
+- Store JWT in localStorage under 'beomz_auth_token'
+- Never use bcrypt, jsonwebtoken, or Supabase in generated app code
+- Multi-tenancy: use tenant_id UUID column + WHERE clauses (app-level)
+- RLS: not available on Neon — enforce access in application logic only
+
+### If db_type === 'supabase':
+- Use VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY with @supabase/supabase-js
+  for ALL data operations
+- For auth: use the Beomz auth proxy at /api/projects/${projectId}/auth/*
+  (same interface as Neon — never call supabase.auth directly in app code)
+- Multi-tenancy: use auth.uid() in RLS policies
+- RLS: generate ENABLE ROW LEVEL SECURITY + CREATE POLICY statements
+  as SQL migration blocks in the code
+`;
 }
 
 // ─── Anthropic tool definition ────────────────────────────────────────────────
@@ -1702,6 +1747,7 @@ export function buildSystemPrompt(
   phaseContextBlock?: string,
   imageContextBlock?: string,
   hasByoSupabaseConfig = false,
+  dbContextBlock?: string,
 ): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
@@ -1711,6 +1757,7 @@ export function buildSystemPrompt(
   const byoSupabaseBlock = hasByoSupabaseConfig
     ? `BYO SUPABASE (highest priority rule):\n${BYO_SUPABASE_SYSTEM_PROMPT_BLOCK}\nThis overrides any generic instruction elsewhere in this prompt about hardcoded arrays, sample data, or seed records.\n\n`
     : "";
+  const dbContextPromptBlock = dbContextBlock ? `${dbContextBlock}\n` : "";
   const themeTsContent = buildThemeTs(paletteId);
   const variationSeed = Math.floor(Math.random() * 9000) + 1000;
   return [
@@ -1817,6 +1864,8 @@ export function buildSystemPrompt(
     "  files[1]: App.tsx",
     "  files[2..]: one file per major page for multi-page apps",
     "  summary: one sentence — 'A light-theme asset management system with sidebar navigation covering Assets, Work Orders, Team, and Calendar.'",
+    "",
+    dbContextPromptBlock,
   ].join("\n");
 }
 
@@ -2345,11 +2394,19 @@ async function callAnthropicCustomise(
   phaseScope?: PhaseScope,
   maxTokens?: number,
   hasByoSupabaseConfig = false,
+  dbContextBlock?: string,
   abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
-    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock, hasByoSupabaseConfig),
+    buildSystemPrompt(
+      paletteId,
+      designSystemSpec,
+      phaseContextBlock,
+      imageContextBlock,
+      hasByoSupabaseConfig,
+      dbContextBlock,
+    ),
     buildAnthropicUserContent(buildUserMessage(prompt, phaseScope), imageUrl),
     prompt,
     maxTokens,
@@ -2742,10 +2799,18 @@ async function callOpenAICompatibleCustomise(
   imageContextBlock?: string,
   phaseScope?: PhaseScope,
   hasByoSupabaseConfig = false,
+  dbContextBlock?: string,
 ): Promise<CustomiseResult> {
   return callOpenAICompatibleWithMessages(
     model, apiKey,
-    buildSystemPrompt(paletteId, designSystemSpec, phaseContextBlock, imageContextBlock, hasByoSupabaseConfig),
+    buildSystemPrompt(
+      paletteId,
+      designSystemSpec,
+      phaseContextBlock,
+      imageContextBlock,
+      hasByoSupabaseConfig,
+      dbContextBlock,
+    ),
     buildUserMessage(prompt, phaseScope),
     prompt, baseURL,
   );
@@ -2764,6 +2829,7 @@ async function callModelCustomise(
   phaseScope?: PhaseScope,
   maxTokens?: number,
   hasByoSupabaseConfig = false,
+  dbContextBlock?: string,
   abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   console.log("[generate] calling model:", model);
@@ -2787,6 +2853,7 @@ async function callModelCustomise(
       phaseScope,
       maxTokens,
       hasByoSupabaseConfig,
+      dbContextBlock,
       abortSignal,
     );
   }
@@ -2805,6 +2872,7 @@ async function callModelCustomise(
       imageContextBlock,
       phaseScope,
       hasByoSupabaseConfig,
+      dbContextBlock,
     );
   }
 
@@ -2814,7 +2882,7 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
-      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope, hasByoSupabaseConfig,
+      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope, hasByoSupabaseConfig, dbContextBlock,
     );
   }
 
@@ -2832,6 +2900,7 @@ async function callModelCustomise(
     phaseScope,
     maxTokens,
     hasByoSupabaseConfig,
+    dbContextBlock,
     abortSignal,
   );
 }
@@ -2846,6 +2915,7 @@ export function buildIterationSystemPrompt(
   neonAuthBaseUrl: string | null = null,
   hasByoSupabaseConfig = false,
   imageEmbeddingInstructionBlock?: string,
+  dbContextBlock?: string,
 ): string {
   const isPostgresWired = hasWiredSupabaseClient && (dbProvider === "neon" || dbProvider === "postgres");
   const hasNeonAuth = dbProvider === "neon"
@@ -2870,6 +2940,7 @@ export function buildIterationSystemPrompt(
   const imageEmbeddingBlock = imageEmbeddingInstructionBlock
     ? ["", imageEmbeddingInstructionBlock].join("\n")
     : "";
+  const dbContextPromptBlock = dbContextBlock ? ["", dbContextBlock].join("\n") : "";
   const byoSupabaseBlock = hasByoSupabaseConfig
     ? [
         "",
@@ -2999,7 +3070,7 @@ export function buildIterationSystemPrompt(
     "Return files with filename only (e.g. App.tsx, AssetDetailPage.tsx) — no directory prefix.",
     "",
     "DELIVER: after you have enough context, call deliver_customised_files with the changed + new files and their complete updated content.",
-    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock + neonAuthBlock,
+    "The summary should briefly describe what changed, e.g. 'Updated theme.ts to red accent.' or 'Added AssetDetailPage with analytics.'" + dbBlock + existingSupabaseClientBlock + neonDbBlock + neonAuthBlock + dbContextPromptBlock,
   ].join("\n");
 }
 
@@ -3030,6 +3101,7 @@ async function callModelIterate(
   neonAuthBaseUrl: string | null = null,
   hasByoSupabaseConfig = false,
   abortSignal?: AbortSignal,
+  dbContextBlock?: string,
 ): Promise<CustomiseResult> {
   console.log("[generate] iterating with model:", model);
   throwIfAborted(abortSignal);
@@ -3067,6 +3139,7 @@ async function callModelIterate(
     neonAuthBaseUrl,
     hasByoSupabaseConfig,
     imageEmbeddingInstructionBlock,
+    dbContextBlock,
   );
   const selection = buildIterationSelection(prompt, existingFiles, resolvedImageBlock);
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
@@ -3602,6 +3675,8 @@ async function _runBuildInBackground(
 
   throwIfBuildAborted();
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
+  const dbType = normaliseProjectDbType(currentProject?.db_type);
+  const dbContextBlock = buildDbContextBlock(projectId, dbType);
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
   // If the previous completed generation for this project ended with a
@@ -4083,6 +4158,7 @@ async function _runBuildInBackground(
           iterNeonAuthBaseUrl,
           hasByoSupabaseConfigForIteration,
           abortSignal,
+          dbContextBlock,
         );
         throwIfBuildAborted();
         console.log("[generate] iteration model returned files:", iterResult.files.map((f) => f.path));
@@ -4514,6 +4590,7 @@ async function _runBuildInBackground(
         phaseScope,
         input.forcedSimple ? 32000 : undefined,
         hasByoSupabaseConfig,
+        dbContextBlock,
         abortSignal,
       );
       throwIfBuildAborted();
