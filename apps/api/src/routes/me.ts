@@ -39,6 +39,7 @@ interface UserProfileRow {
   referral_source: string | null;
   onboarding_completed: boolean;
   workspace_knowledge: string | null;
+  is_admin: boolean;
 }
 
 interface MeRouteDeps {
@@ -75,6 +76,7 @@ function normaliseUserProfileRow(row: Record<string, unknown>): UserProfileRow {
     referral_source: typeof row.referral_source === "string" ? row.referral_source : null,
     onboarding_completed: row.onboarding_completed === true,
     workspace_knowledge: typeof row.workspace_knowledge === "string" ? row.workspace_knowledge : null,
+    is_admin: row.is_admin === true,
   };
 }
 
@@ -201,6 +203,7 @@ function buildMeResponse(
     created_at: user.created_at,
     plan: org.plan,
     credits: Number(org.credits ?? 0) + Number(org.topup_credits ?? 0),
+    is_admin: user.is_admin,
   };
 }
 

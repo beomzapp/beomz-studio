@@ -21,5 +21,12 @@ module.exports = {
         TAVILY_API_KEY: process.env.TAVILY_API_KEY,
       },
     },
+    {
+      name: "beomz-admin",
+      script: "npx",
+      args: "serve -s apps/admin/dist -l 3003",
+      cwd: "/root/beomz-studio",
+      env: { NODE_ENV: "production" },
+    },
   ],
 };
