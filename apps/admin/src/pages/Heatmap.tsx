@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+import { ComposableMap, Geographies, Geography, Marker, type Geography as GeoType } from "react-simple-maps";
 import { Globe, RefreshCw } from "lucide-react";
 import { supabase } from "../lib/supabase.ts";
 import { fetchAdminHeatmap, type HeatmapEntry, type HeatmapRange } from "../lib/api.ts";
@@ -202,8 +202,8 @@ export default function HeatmapPage() {
           style={{ width: "100%", height: "100%" }}
         >
           <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map(geo => (
+            {({ geographies }: { geographies: GeoType[] }) =>
+              geographies.map((geo: GeoType) => (
                 <Geography
                   key={geo.rsmKey}
                   geography={geo}
