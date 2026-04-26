@@ -156,6 +156,29 @@ export async function fetchAdminBuildStats(accessToken: string): Promise<AdminBu
   return res.json() as Promise<AdminBuildStats>;
 }
 
+// ── Admin: Heatmap ────────────────────────────────────────────────────────────
+
+export type HeatmapRange = "1h" | "24h" | "7d" | "all";
+
+export interface HeatmapEntry {
+  country_code: string;
+  country_name: string;
+  lat: number;
+  lng: number;
+  count: number;
+}
+
+export async function fetchAdminHeatmap(
+  accessToken: string,
+  range: HeatmapRange,
+): Promise<HeatmapEntry[]> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/heatmap?range=${range}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<HeatmapEntry[]>;
+}
+
 // ── Admin: Credit Ledger ──────────────────────────────────────────────────────
 
 export type CreditSource = "build" | "referral" | "manual_admin" | "stripe";
