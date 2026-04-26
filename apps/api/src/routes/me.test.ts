@@ -114,7 +114,7 @@ test("GET /me returns the current user profile with plan and total credits", asy
   });
 });
 
-test("PATCH /me validates display_name and updates the user profile", async () => {
+test("PATCH /me validates display_name and updates full_name and display_name separately", async () => {
   const orgContext = createOrgContext();
   const updates: unknown[] = [];
   const route = createMeRoute({
@@ -156,6 +156,7 @@ test("PATCH /me validates display_name and updates the user profile", async () =
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      full_name: "Omar Fareda",
       display_name: "omar-builds",
       building_for: "Agency",
       workspace_knowledge: "Prefer polished dashboards.",
@@ -165,6 +166,7 @@ test("PATCH /me validates display_name and updates the user profile", async () =
   assert.equal(validResponse.status, 200);
   assert.deepEqual(updates, [
     {
+      full_name: "Omar Fareda",
       display_name: "omar-builds",
       building_for: "Agency",
       workspace_knowledge: "Prefer polished dashboards.",
