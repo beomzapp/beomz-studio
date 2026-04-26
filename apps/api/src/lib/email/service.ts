@@ -12,6 +12,10 @@ interface EmailContent {
   subject: string;
 }
 
+function redactSensitiveEmailHtml(html: string): string {
+  return html.replaceAll(/([?&](?:token|code)=)[^"'&<\s]+/gi, "$1[redacted]");
+}
+
 function normalizeDisplayName(name: string | null | undefined, email: string): string {
   const trimmedName = name?.trim();
   if (trimmedName) {
@@ -24,10 +28,22 @@ function normalizeDisplayName(name: string | null | undefined, email: string): s
 }
 
 async function sendEmail(to: string, content: EmailContent): Promise<void> {
+  const html = content.html.trim();
+  console.log("[email] generated html", {
+    to,
+    subject: content.subject,
+    htmlLength: html.length,
+    html: redactSensitiveEmailHtml(html),
+  });
+
+  if (html.length === 0) {
+    throw new Error(`Email template rendered empty HTML for subject "${content.subject}"`);
+  }
+
   const resend = getResendClient();
   const response = await resend.emails.send({
     from: getFromEmail(),
-    html: content.html,
+    html,
     subject: content.subject,
     to,
   });
