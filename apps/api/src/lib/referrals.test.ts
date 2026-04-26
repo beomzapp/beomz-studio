@@ -14,6 +14,7 @@ import {
   ensureReferralCodeForUser,
   REFERRAL_SIGNUP_REWARD_CREDITS,
   REFERRAL_UPGRADE_REWARD_CREDITS,
+  getReferralCodeFromRequest,
   summariseReferralStats,
 } from "./referrals.js";
 
@@ -89,6 +90,17 @@ test("ensureReferralCodeForUser reuses an existing code", async () => {
 
   const result = await ensureReferralCodeForUser(db as never, "user-1");
   assert.deepEqual(result, existingCode);
+});
+
+test("getReferralCodeFromRequest prefers the request query param", () => {
+  const result = getReferralCodeFromRequest(
+    "https://beomz.ai/api/credits?ref=refcode1",
+    {
+      user_metadata: { referral_code: "ignored" },
+    },
+  );
+
+  assert.equal(result, "REFCODE1");
 });
 
 test("applySignupReferralReward credits both sides while under the signup cap", async () => {

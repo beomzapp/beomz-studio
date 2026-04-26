@@ -263,7 +263,7 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
       if (isNew) {
         await ensureReferralCodeForUser(db, user.id);
 
-        const referralCode = getReferralCodeFromRequest(c.req.raw.url, authUser);
+        const referralCode = getReferralCodeFromRequest(c.req.url, authUser);
         if (referralCode) {
           const referralResult = await applySignupReferralReward({
             db,

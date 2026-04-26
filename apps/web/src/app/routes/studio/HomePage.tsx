@@ -129,7 +129,7 @@ function SkeletonRow() {
 
 // Plan credit allowances — fallback when API returns 0
 const PLAN_CREDITS: Record<string, number> = {
-  free: 200,
+  free: 100,
   pro_starter: 300,
   pro_builder: 750,
   business: 4000,

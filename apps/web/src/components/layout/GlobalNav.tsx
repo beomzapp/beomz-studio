@@ -12,7 +12,7 @@ import { getApiBaseUrl } from "../../lib/api";
 import { usePricingModal } from "../../contexts/PricingModalContext";
 
 const PLAN_CREDITS: Record<string, number> = {
-  free: 200,
+  free: 100,
   pro_starter: 300,
   pro_builder: 750,
   business: 4000,
@@ -240,6 +240,10 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
     planKey === "pro_builder" ? "Pro Builder" :
     planKey === "business" ? "Business" :
     "Free";
+  const subLabel =
+    planKey === "free"
+      ? "Free plan · one-time credits"
+      : `${planLabel} · resets ${nextMonthReset()}`;
 
   return (
     <div className="group relative">
@@ -312,8 +316,7 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
           {/* Plan name + reset date — replaces "Monthly · N" */}
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 flex-none rounded-full bg-blue-500" />
-            <span className="flex-1 text-zinc-500">{planLabel} plan</span>
-            <span className="text-zinc-400">resets {nextMonthReset()}</span>
+            <span className="flex-1 text-zinc-500">{subLabel}</span>
           </div>
           {rollover > 0 && (
             <div className="flex items-center gap-2">
