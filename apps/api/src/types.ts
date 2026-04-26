@@ -11,7 +11,7 @@ export interface PlatformJwtPayload extends JWTPayload {
   email?: string;
   provider?: string;
   sub: string;
-  tokenSource?: "local" | "supabase";
+  tokenSource?: "supabase";
 }
 
 export interface OrgContext {

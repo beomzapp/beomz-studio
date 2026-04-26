@@ -3,8 +3,6 @@ import type { OrgRow, StudioDbClient, UserRow } from "@beomz-studio/studio-db";
 import { getFromEmail, getResendClient } from "./resend.js";
 import { buildCreditsLowEmail } from "./templates/credits-low.js";
 import { buildReferralRewardEmail } from "./templates/referral-reward.js";
-import { buildResetPasswordEmail } from "./templates/reset.js";
-import { buildVerifyEmail } from "./templates/verify.js";
 import { buildWelcomeEmail } from "./templates/welcome.js";
 
 interface EmailContent {
@@ -55,34 +53,6 @@ async function sendEmail(to: string, content: EmailContent): Promise<void> {
 
 export function getUserDisplayName(user: Pick<UserRow, "email" | "full_name">): string {
   return normalizeDisplayName(user.full_name, user.email);
-}
-
-export async function sendVerificationEmail(input: {
-  email: string;
-  name?: string | null;
-  verifyUrl: string;
-}): Promise<void> {
-  await sendEmail(
-    input.email,
-    buildVerifyEmail({
-      name: normalizeDisplayName(input.name, input.email),
-      verifyUrl: input.verifyUrl,
-    }),
-  );
-}
-
-export async function sendResetPasswordEmail(input: {
-  email: string;
-  name?: string | null;
-  resetUrl: string;
-}): Promise<void> {
-  await sendEmail(
-    input.email,
-    buildResetPasswordEmail({
-      name: normalizeDisplayName(input.name, input.email),
-      resetUrl: input.resetUrl,
-    }),
-  );
 }
 
 export async function sendWelcomeEmail(input: {

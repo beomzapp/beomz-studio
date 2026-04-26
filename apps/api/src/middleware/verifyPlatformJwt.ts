@@ -2,13 +2,12 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import type { Context, MiddlewareHandler } from "hono";
 
 import { apiConfig } from "../config.js";
-import { verifyLocalPlatformJwt } from "../lib/auth/platformJwt.js";
 
 export interface VerifiedPlatformJwt extends JWTPayload {
   email?: string;
   provider?: string;
   sub: string;
-  tokenSource: "local" | "supabase";
+  tokenSource: "supabase";
 }
 
 const jwks = createRemoteJWKSet(new URL(apiConfig.PLATFORM_JWKS_URL));
@@ -42,15 +41,6 @@ export const verifyPlatformJwt: MiddlewareHandler = async (c, next) => {
     await next();
     return;
   } catch {
-    const localPayload = verifyLocalPlatformJwt(token);
-    if (!localPayload) {
-      return unauthorized(c, "Invalid bearer token.");
-    }
-
-    c.set("platformJwt", {
-      ...localPayload,
-      tokenSource: "local",
-    });
-    await next();
+    return unauthorized(c, "Invalid bearer token.");
   }
 };
