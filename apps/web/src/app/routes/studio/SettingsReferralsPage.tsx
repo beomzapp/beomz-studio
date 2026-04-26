@@ -29,7 +29,9 @@ export function SettingsReferralsPage() {
       .finally(() => setIsLoading(false));
   }, []);
 
-  const referralLink = stats?.referral_link ?? null;
+  const referralLink =
+    stats?.referral_link ??
+    (stats?.referral_code ? `https://beomz.ai/signup?ref=${stats.referral_code}` : null);
   const displayLink = referralLink ?? "beomz.ai/signup?ref=yourcode";
 
   const handleCopy = useCallback(() => {

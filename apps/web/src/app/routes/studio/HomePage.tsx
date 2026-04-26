@@ -177,7 +177,9 @@ function CreditsCard() {
 
       <div className="flex items-center justify-between">
         <span className="text-[12px] text-[#9ca3af]">
-          {planLabel} · resets {nextMonthReset()}
+          {planKey === "free"
+            ? "Free plan · one-time credits"
+            : `${planLabel} · resets ${nextMonthReset()}`}
         </span>
         <button
           onClick={openPricingModal}
