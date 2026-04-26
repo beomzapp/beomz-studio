@@ -315,7 +315,7 @@ function ReferralCard() {
         className="mt-1.5 text-[12px] leading-relaxed"
         style={{ color: "#92400E" }}
       >
-        Earn 200 credits per signup, 500 when they upgrade
+        Earn 50 credits per signup (first 3), 200 when they upgrade
       </p>
       <button
         onClick={() => void handleCopy()}

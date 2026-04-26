@@ -73,7 +73,8 @@ export function OnboardingModal({ onSelect, onDismiss }: OnboardingModalProps) {
           <h2 className="text-xl font-bold text-[#1a1a1a]">Welcome to Beomz</h2>
           <p className="mt-1 text-sm text-[#9ca3af]">What are you building today?</p>
           <p className="mt-2 text-xs text-[#9ca3af]">
-            200 free credits to start building · Refer friends, earn 200 credits per signup
+            200 free credits to start building · Invite friends — earn 50 credits per signup
+            (first 3), 200 when they upgrade
           </p>
         </div>
 

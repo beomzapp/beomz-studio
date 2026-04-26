@@ -216,6 +216,9 @@ function Step1({ creditBalance, onNext, onSkip, isSkipping }: Step1Props) {
           { text: `${balance} credits added to your account — start building now` },
           { text: "Daily bonus credits when you come back and build" },
           { text: "Free plan includes 30 credits every month, forever" },
+          {
+            text: "Invite friends — earn 50 credits per signup (first 3), 200 when they upgrade",
+          },
         ].map(({ text }, i) => (
           <div key={i} className="flex items-start gap-3">
             <CheckCircle size={16} className="mt-0.5 flex-none text-[#F97316]" />
