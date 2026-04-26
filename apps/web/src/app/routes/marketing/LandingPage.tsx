@@ -294,6 +294,22 @@ export function LandingPage() {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const fileItems = Array.from(e.clipboardData.items).filter(
+      (item) => item.kind === "file",
+    );
+    if (fileItems.length === 0) return;
+    e.preventDefault();
+    fileItems.forEach((item) => {
+      const file = item.getAsFile();
+      if (file) {
+        setAttachedFiles((prev) =>
+          prev.length < MAX_ATTACHMENTS ? [...prev, file] : prev,
+        );
+      }
+    });
+  }, []);
+
   useEffect(() => {
     editableRef.current?.focus();
   }, []);
@@ -386,6 +402,7 @@ export function LandingPage() {
               suppressContentEditableWarning
               onKeyDown={handleKeyDown}
               onInput={handleInput}
+              onPaste={handlePaste}
               data-placeholder="Build "
               className={cn(
                 "outline-none caret-orange inline-block min-w-[1ch] text-center",
