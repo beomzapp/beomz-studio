@@ -9,8 +9,20 @@ import { useAuth } from "../../lib/useAuth";
 import { useCredits } from "../../lib/CreditsContext";
 import { supabase } from "../../lib/supabase";
 import { getApiBaseUrl } from "../../lib/api";
-import { CreditBar } from "../CreditBar";
 import { usePricingModal } from "../../contexts/PricingModalContext";
+
+const PLAN_CREDITS: Record<string, number> = {
+  free: 200,
+  pro_starter: 300,
+  pro_builder: 750,
+  business: 4000,
+};
+
+function nextMonthReset(): string {
+  const d = new Date();
+  const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  return next.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 interface GlobalNavProps {
   /** When true, uses light text (for dark backgrounds like landing page). Default false (dark text). */
@@ -201,6 +213,8 @@ interface CreditPillProps {
     topup: number;
     rollover?: number;
     used?: number;
+    plan?: string;
+    planCredits?: number;
   };
   isLight: boolean;
   onUpgrade: () => void;
@@ -208,13 +222,24 @@ interface CreditPillProps {
 
 function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
   const totalBalance = Math.floor(credits.balance);
-  const monthly = Math.round(credits.monthly ?? 0);
   const rollover = Math.round(credits.rollover ?? 0);
   const topup = Math.round(credits.topup ?? 0);
   const used = Math.round(credits.used ?? 0);
   const buildsRemaining = Math.max(0, Math.floor(totalBalance / 3));
   const isLow = totalBalance > 0 && totalBalance < 5;
   const isEmpty = totalBalance === 0;
+
+  const planKey = (credits.plan ?? "free").toLowerCase();
+  const planTotal =
+    credits.planCredits && credits.planCredits > 0
+      ? credits.planCredits
+      : (PLAN_CREDITS[planKey] ?? 0);
+  const remainingPct = planTotal > 0 ? Math.min(100, (totalBalance / planTotal) * 100) : 0;
+  const planLabel =
+    planKey === "pro_starter" ? "Pro Starter" :
+    planKey === "pro_builder" ? "Pro Builder" :
+    planKey === "business" ? "Business" :
+    "Free";
 
   return (
     <div className="group relative">
@@ -233,27 +258,19 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
         }
       >
         {isLow && <AlertTriangle size={10} className="flex-none" />}
-        <CreditBar
-          monthly={monthly}
-          rollover={rollover}
-          topup={topup}
-          balance={totalBalance}
-          size="mini"
-          className="w-20"
-          showTooltips={false}
-        />
+        {/* Simple remaining bar — matches dashboard Credits card */}
+        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-200">
+          <div
+            className="h-full rounded-full bg-orange-500 transition-all duration-300"
+            style={{ width: `${remainingPct}%` }}
+          />
+        </div>
         <span className="font-mono tabular-nums">{totalBalance}</span>
       </button>
 
       {/* Hover popover — full breakdown */}
       <div
-        className={
-          // BEO-355: no mt gap — panel sits flush with the button so the
-          // cursor can reach it without losing hover. pt-4 inside the panel
-          // keeps the visible top-padding we want, while an extra invisible
-          // strip above the content (via -mt-2 wrapper) bridges the seam.
-          "pointer-events-none absolute right-0 top-full z-50 w-64 origin-top-right rounded-xl border border-zinc-200 bg-white pt-4 pb-3 px-3 opacity-0 shadow-lg transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
-        }
+        className="pointer-events-none absolute right-0 top-full z-50 w-64 origin-top-right rounded-xl border border-zinc-200 bg-white pt-4 pb-3 px-3 opacity-0 shadow-lg transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
         role="tooltip"
       >
         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -269,16 +286,18 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
           &asymp; {buildsRemaining} build{buildsRemaining === 1 ? "" : "s"} remaining
         </p>
 
-        {/* Full-size bar */}
+        {/* Simple remaining bar — identical to dashboard Credits card */}
         <div className="mt-3">
-          <CreditBar
-            used={used}
-            monthly={monthly}
-            rollover={rollover}
-            topup={topup}
-            balance={totalBalance}
-            size="medium"
-          />
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+            <div
+              className="h-full rounded-full bg-orange-500 transition-all duration-500"
+              style={{ width: `${remainingPct}%` }}
+            />
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-[11px] text-zinc-500">{totalBalance} remaining</span>
+            <span className="text-[11px] text-zinc-400">{planTotal > 0 ? planTotal : "—"} total</span>
+          </div>
         </div>
 
         {/* Breakdown rows */}
@@ -290,13 +309,12 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
               <span className="tabular-nums text-zinc-700">{used}</span>
             </div>
           )}
-          {monthly > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 flex-none rounded-full bg-blue-500" />
-              <span className="flex-1 text-zinc-500">Monthly</span>
-              <span className="tabular-nums text-zinc-700">{monthly}</span>
-            </div>
-          )}
+          {/* Plan name + reset date — replaces "Monthly · N" */}
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 flex-none rounded-full bg-blue-500" />
+            <span className="flex-1 text-zinc-500">{planLabel} plan</span>
+            <span className="text-zinc-400">resets {nextMonthReset()}</span>
+          </div>
           {rollover > 0 && (
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 flex-none rounded-full bg-purple-500" />

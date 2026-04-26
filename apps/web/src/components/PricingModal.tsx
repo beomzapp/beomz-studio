@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { Check, Info, Loader, X, Zap } from "lucide-react";
 import { cn } from "../lib/cn";
 import { usePricingModal } from "../contexts/PricingModalContext";
+import { useCredits } from "../lib/CreditsContext";
 import { createCheckoutSession, createTopupCheckout } from "../lib/api";
 
 interface Plan {
@@ -98,11 +99,22 @@ function formatPrice(plan: Plan, annual: boolean): { price: string; period: stri
 
 export function PricingModal() {
   const { isOpen, closePricingModal } = usePricingModal();
+  const { credits } = useCredits();
   // Annual pricing disabled until STRIPE_*_YEARLY_PRICE_IDs are configured (BEO-327)
   const annual = false;
   // BEO-327: loading + error state for Stripe checkout redirect
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  // Map credits.plan API value → PLANS id
+  const currentPlanId: Plan["id"] | null = (() => {
+    const plan = credits?.plan;
+    if (!plan) return null;
+    if (plan === "pro_starter") return "starter";
+    if (plan === "pro_builder") return "builder";
+    if (plan === "free" || plan === "business") return plan as Plan["id"];
+    return null;
+  })();
 
   // Close on Escape
   useEffect(() => {
@@ -135,6 +147,7 @@ export function PricingModal() {
   // - business → mailto contact-sales
   // - starter / builder → POST /payments/checkout, redirect to Stripe
   const handlePlanSelect = async (plan: Plan) => {
+    if (currentPlanId === plan.id) return; // already on this plan
     if (plan.id === "business") {
       window.location.href = "mailto:hello@beomz.com?subject=Business plan enquiry";
       return;
@@ -189,23 +202,31 @@ export function PricingModal() {
 
           {/* Plan grid */}
           <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {PLANS.map((plan) => {
+          {PLANS.map((plan) => {
               const { price, period } = formatPrice(plan, annual);
+              const isCurrent = currentPlanId !== null && plan.id === currentPlanId;
               return (
                 <div
                   key={plan.id}
                   className={cn(
                     "relative flex flex-col rounded-xl border p-5 transition-colors",
-                    plan.popular
-                      ? "border-[#F97316] bg-orange-50"
-                      : "border-zinc-200 bg-white hover:border-zinc-300",
+                    isCurrent
+                      ? "border-zinc-300 bg-zinc-50"
+                      : plan.popular
+                        ? "border-[#F97316] bg-orange-50"
+                        : "border-zinc-200 bg-white hover:border-zinc-300",
                   )}
                 >
-                  {plan.popular && (
+                  {/* "Your plan" badge takes priority over "Most Popular" */}
+                  {isCurrent ? (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-zinc-500 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                      Your plan
+                    </div>
+                  ) : plan.popular ? (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#F97316] px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                       Most Popular
                     </div>
-                  )}
+                  ) : null}
 
                   <div className="mb-1 text-sm font-semibold text-zinc-900">{plan.name}</div>
                   <div className="mb-4 flex items-baseline gap-1">
@@ -241,18 +262,22 @@ export function PricingModal() {
 
                   {/* CTA */}
                   <button
-                    onClick={() => handlePlanSelect(plan)}
-                    disabled={loadingPlanId !== null}
+                    onClick={() => { if (!isCurrent) void handlePlanSelect(plan); }}
+                    disabled={loadingPlanId !== null || isCurrent}
                     className={cn(
-                      "flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                      plan.popular
-                        ? "bg-[#F97316] text-white hover:bg-[#ea6c0e]"
-                        : plan.id === "business"
-                          ? "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                          : "bg-zinc-900 text-white hover:bg-zinc-700",
+                      "flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed",
+                      isCurrent
+                        ? "bg-zinc-100 text-zinc-400"
+                        : plan.popular
+                          ? "bg-[#F97316] text-white hover:bg-[#ea6c0e] disabled:opacity-60"
+                          : plan.id === "business"
+                            ? "border border-zinc-300 text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                            : "bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-60",
                     )}
                   >
-                    {loadingPlanId === plan.id ? (
+                    {isCurrent ? (
+                      "Current plan"
+                    ) : loadingPlanId === plan.id ? (
                       <>
                         <Loader size={14} className="animate-spin" />
                         Redirecting&hellip;
