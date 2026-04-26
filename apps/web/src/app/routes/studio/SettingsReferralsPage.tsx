@@ -135,7 +135,7 @@ export function SettingsReferralsPage() {
             <div className="mb-3 flex items-center gap-2">
               <Users size={16} className="text-[#F97316]" />
               <p className="text-xs font-medium uppercase tracking-wider text-[#9ca3af]">
-                Signups
+                Signup Bonus
               </p>
             </div>
             {isLoading ? (
@@ -173,7 +173,7 @@ export function SettingsReferralsPage() {
             <div className="mb-3 flex items-center gap-2">
               <TrendingUp size={16} className="text-[#F97316]" />
               <p className="text-xs font-medium uppercase tracking-wider text-[#9ca3af]">
-                Upgrades
+                Upgrade Bonus
               </p>
             </div>
             {isLoading ? (
