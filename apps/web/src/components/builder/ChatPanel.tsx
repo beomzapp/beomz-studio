@@ -329,16 +329,11 @@ export function ChatPanel({
   );
 
   const hasMessages = messages.length > 0;
-  // While a build is in progress, suppress only the ACTIVE (in-flight) building
-  // card and replace it with BuildingShimmer. Completed building messages
-  // (those with a .summary) must stay visible — hiding them is what caused all
-  // prior messages to disappear when the user sent a new iteration prompt.
+  // While a build is in progress, suppress all in-flight building cards — they are
+  // replaced by BuildingShimmer. After BEO-459, type:"building" is always in-flight,
+  // so a simple type filter is sufficient (no need to check for .summary).
   const visibleMessages = isBuilding
-    ? messages.filter(m => {
-        if (m.type !== "building") return true;
-        // Keep building cards that have already completed (they carry a summary)
-        return !!(m as Extract<ChatMessage, { type: "building" }>).summary;
-      })
+    ? messages.filter(m => m.type !== "building")
     : messages;
   const showBuildingShimmer = isBuilding;
 

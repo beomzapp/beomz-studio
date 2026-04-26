@@ -200,13 +200,6 @@ function applyStageToChecklist(
   });
 }
 
-function markAllChecklistDone(
-  items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
-): { id: string; label: string; status: ChatChecklistStatus }[] {
-  const base = items ?? makeInitialChecklist();
-  return base.map(i => ({ ...i, status: "done" as const }));
-}
-
 function markDeployingDone(
   items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
 ): { id: string; label: string; status: ChatChecklistStatus }[] | undefined {
@@ -859,7 +852,6 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           } catch { /* ignore */ }
           buildStartedAtRef.current = null;
 
-          const frozenAt = Date.now();
           const bid = activeBuildingMsgIdRef.current;
           latestStageChecklistRef.current = null;
           latestStagePhaseRef.current = undefined;
@@ -876,20 +868,18 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             },
           ];
 
+          // BEO-459: convert in-flight building message → build_summary on completion.
+          // After this point type:"building" = always in-flight, type:"build_summary" = always done.
           const finalizeBuilding = (prev: ChatMessage[], idx: number): ChatMessage[] => {
             const next = [...prev];
             const existing = next[idx] as BuildingMsg;
             next[idx] = {
-              ...existing,
-              checklist: markAllChecklistDone(existing.checklist),
-              summary: {
-                content: event.message,
-                filesChanged: event.filesChanged,
-                durationMs: event.durationMs,
-                creditsUsed: event.creditsUsed,
-              },
-              buildFrozenAt: frozenAt,
-              phase: "completed",
+              id: existing.id,
+              type: "build_summary" as const,
+              content: event.message,
+              filesChanged: event.filesChanged,
+              durationMs: event.durationMs,
+              creditsUsed: event.creditsUsed,
             };
             return next;
           };
@@ -1016,33 +1006,29 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                         if (prev.some(m => m.type === "build_summary")) return prev;
                         if (prev.some(m => m.type === "building" && (m as BuildingMsg).summary))
                           return prev;
-                        const frozenAt = Date.now();
                         const liveBuildingIdx = prev.findIndex(
                           m => m.type === "building" && !(m as BuildingMsg).summary,
                         );
                         if (liveBuildingIdx !== -1) {
                           const next = [...prev];
                           const existing = next[liveBuildingIdx] as BuildingMsg;
+                          // BEO-459: normalise to build_summary (same as build_summary SSE path)
                           next[liveBuildingIdx] = {
-                            ...existing,
-                            checklist: markAllChecklistDone(existing.checklist),
-                            summary: {
-                              content:
-                                typeof summaryEv.content === "string" ? summaryEv.content : "",
-                              filesChanged: Array.isArray(summaryEv.filesChanged)
-                                ? summaryEv.filesChanged.map(String)
-                                : [],
-                              durationMs:
-                                typeof summaryEv.durationMs === "number"
-                                  ? summaryEv.durationMs
-                                  : undefined,
-                              creditsUsed:
-                                typeof summaryEv.creditsUsed === "number"
-                                  ? summaryEv.creditsUsed
-                                  : undefined,
-                            },
-                            buildFrozenAt: frozenAt,
-                            phase: "completed",
+                            id: existing.id,
+                            type: "build_summary" as const,
+                            content:
+                              typeof summaryEv.content === "string" ? summaryEv.content : "",
+                            filesChanged: Array.isArray(summaryEv.filesChanged)
+                              ? summaryEv.filesChanged.map(String)
+                              : [],
+                            durationMs:
+                              typeof summaryEv.durationMs === "number"
+                                ? summaryEv.durationMs
+                                : undefined,
+                            creditsUsed:
+                              typeof summaryEv.creditsUsed === "number"
+                                ? summaryEv.creditsUsed
+                                : undefined,
                           };
                           return next;
                         }
