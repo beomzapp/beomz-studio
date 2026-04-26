@@ -112,3 +112,88 @@ export async function postCreditAdjustment(
     throw new Error(err.message ?? `HTTP ${res.status}`);
   }
 }
+
+// ── Admin: Builds ─────────────────────────────────────────────────────────────
+
+export type BuildStatus = "building" | "success" | "failed";
+
+export interface AdminBuild {
+  id: string;
+  user_email: string;
+  status: BuildStatus;
+  started_at: string;
+  completed_at: string | null;
+  duration_ms: number | null;
+  tokens_used: number | null;
+  error_reason: string | null;
+}
+
+export interface AdminBuildsResponse {
+  in_flight: AdminBuild[];
+  recent: AdminBuild[];
+}
+
+export interface AdminBuildStats {
+  today_total: number;
+  today_success: number;
+  today_failed: number;
+  success_rate: number;
+}
+
+export async function fetchAdminBuilds(accessToken: string): Promise<AdminBuildsResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/builds`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<AdminBuildsResponse>;
+}
+
+export async function fetchAdminBuildStats(accessToken: string): Promise<AdminBuildStats> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/builds/stats`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<AdminBuildStats>;
+}
+
+// ── Admin: Credit Ledger ──────────────────────────────────────────────────────
+
+export type CreditSource = "build" | "referral" | "manual_admin" | "stripe";
+
+export interface AdminCreditTransaction {
+  id: string;
+  user_email: string;
+  delta: number;
+  source: CreditSource | string;
+  reason: string;
+  created_at: string;
+}
+
+export interface AdminCreditsResponse {
+  transactions: AdminCreditTransaction[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AdminCreditsParams {
+  source?: string;
+  page?: number;
+  limit?: number;
+}
+
+export async function fetchAdminCredits(
+  accessToken: string,
+  params: AdminCreditsParams = {},
+): Promise<AdminCreditsResponse> {
+  const q = new URLSearchParams();
+  if (params.source) q.set("source", params.source);
+  if (params.page !== undefined) q.set("page", String(params.page));
+  if (params.limit !== undefined) q.set("limit", String(params.limit));
+
+  const res = await fetch(`${getApiBaseUrl()}/admin/credits?${q}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<AdminCreditsResponse>;
+}
