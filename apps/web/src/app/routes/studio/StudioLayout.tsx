@@ -8,6 +8,7 @@ import {
   Menu,
   X,
   Lock,
+  Gift,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
@@ -46,6 +47,7 @@ const NAV_ITEMS = [
   { to: "/studio/images", label: "Images", icon: Image, locked: true },
   { to: "/studio/agents", label: "Agents", icon: Bot, locked: true },
   { to: "/studio/settings", label: "Settings", icon: Settings, locked: false },
+  { to: "/studio/settings/referrals", label: "Referrals", icon: Gift, locked: false },
 ] as const;
 
 export function StudioLayout() {

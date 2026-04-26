@@ -1018,6 +1018,20 @@ export async function uploadUserAvatar(file: File): Promise<{ avatar_url: string
   return resp.json() as Promise<{ avatar_url: string }>;
 }
 
+// ── Referrals API (BEO-438) ───────────────────────────────────
+
+export interface ReferralStats {
+  referral_code: string;
+  referral_link: string;
+  signup_count: number;
+  upgrade_count: number;
+  credits_earned: number;
+}
+
+export async function getReferrals(): Promise<ReferralStats> {
+  return requestJson<ReferralStats>("/referrals", { method: "GET" });
+}
+
 // ── Version History API (BEO-588) ─────────────────────────────
 
 export interface ProjectVersion {

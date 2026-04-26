@@ -49,6 +49,9 @@ const VersionPreviewPage = lazy(() =>
 const SettingsProfilePage = lazy(() =>
   import("./app/routes/studio/SettingsProfilePage").then(m => ({ default: m.SettingsProfilePage })),
 );
+const SettingsReferralsPage = lazy(() =>
+  import("./app/routes/studio/SettingsReferralsPage").then(m => ({ default: m.SettingsReferralsPage })),
+);
 const LoginPage = lazy(() =>
   import("./app/routes/auth/login").then(m => ({ default: m.LoginPage })),
 );
@@ -241,6 +244,12 @@ const settingsProfileRoute = createRoute({
   component: withSuspense(SettingsProfilePage),
 });
 
+const settingsReferralsRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: "/settings/referrals",
+  component: withSuspense(SettingsReferralsPage),
+});
+
 const routeTree = rootRoute.addChildren([
   landingRoute,
   planRoute,
@@ -260,6 +269,7 @@ const routeTree = rootRoute.addChildren([
     agentsRoute,
     settingsRoute,
     settingsProfileRoute,
+    settingsReferralsRoute,
     profileRoute,
     versionPreviewRoute,
   ]),
