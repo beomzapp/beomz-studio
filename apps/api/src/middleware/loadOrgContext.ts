@@ -16,6 +16,11 @@ import {
   ensureReferralCodeForUser,
   getReferralCodeFromRequest,
 } from "../lib/referrals.js";
+import {
+  extractLoginEventIp,
+  queueLoginEvent as queueLoginEventDefault,
+  type QueueLoginEventInput,
+} from "../lib/loginEvents.js";
 import type { VerifiedPlatformJwt } from "./verifyPlatformJwt.js";
 
 function extractClientIp(request: {
@@ -37,6 +42,15 @@ function extractClientIp(request: {
     .find((value) => value.length > 0);
 
   return firstHop ?? null;
+}
+
+function readBearerToken(authorizationHeader: string | undefined): string | null {
+  if (!authorizationHeader?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authorizationHeader.slice("Bearer ".length).trim();
+  return token.length > 0 ? token : null;
 }
 
 function buildDefaultOrgName(email: string | undefined, platformUserId: string) {
@@ -122,6 +136,7 @@ interface AuthBootstrapStore {
 interface LoadOrgContextDeps {
   createAuthBootstrapStore?: () => AuthBootstrapStore;
   createDbClient?: typeof createStudioDbClient;
+  queueLoginEvent?: (input: QueueLoginEventInput) => void;
 }
 
 function unwrapMaybeSingle<T extends Record<string, unknown>>(response: {
@@ -255,6 +270,7 @@ function createAuthBootstrapStore(): AuthBootstrapStore {
 export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareHandler {
   const createDbClient = deps.createDbClient ?? createStudioDbClient;
   const createAuthStore = deps.createAuthBootstrapStore ?? createAuthBootstrapStore;
+  const queueLoginEvent = deps.queueLoginEvent ?? queueLoginEventDefault;
 
   return async (c, next) => {
     try {
@@ -372,6 +388,20 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
         org,
         user,
       });
+
+      const accessToken = readBearerToken(c.req.header("authorization"));
+      const ip = extractLoginEventIp(c);
+      if (accessToken && ip) {
+        try {
+          queueLoginEvent({
+            accessToken,
+            ip,
+            userId: user.id,
+          });
+        } catch (error) {
+          console.error("[loadOrgContext] failed to queue login event:", error);
+        }
+      }
 
       await next();
     } catch (err) {

@@ -110,6 +110,7 @@ function createApp(options: {
     email?: string;
     sub: string;
   };
+  queueLoginEvent?: (input: { accessToken: string; ip: string; userId: string }) => void;
 }) {
   const app = new Hono();
 
@@ -121,6 +122,7 @@ function createApp(options: {
   app.use("*", createLoadOrgContext({
     createAuthBootstrapStore: () => options.authStore,
     createDbClient: () => options.db as never,
+    queueLoginEvent: options.queueLoginEvent,
   }));
 
   app.get("/", (c) => {
@@ -614,6 +616,58 @@ test("updates the stored email when the platform user already exists", async () 
   } finally {
     console.log = originalConsoleLog;
   }
+});
+
+test("queues a login event asynchronously after the authenticated org context is resolved", async () => {
+  const user = buildUser();
+  const membership = buildMembership();
+  const org = buildOrg();
+  const queuedEvents: Array<{ accessToken: string; ip: string; userId: string }> = [];
+
+  const app = createApp({
+    authStore: {
+      ensureOrgMembership: async () => {
+        throw new Error("membership should not be created");
+      },
+      findAuthUserById: async () => ({ id: "platform-user-1" }),
+      findMembershipByUserId: async () => membership,
+      findUserByEmail: async () => {
+        throw new Error("email lookup should not be needed");
+      },
+      upsertUserByEmail: async () => {
+        throw new Error("upsert should not be needed");
+      },
+    },
+    db: {
+      createOrg: async () => {
+        throw new Error("org should not be created");
+      },
+      findOrgById: async () => org,
+      findUserByPlatformUserId: async () => user,
+      updateUserEmail: async () => user,
+    },
+    jwt: {
+      email: "omar@example.com",
+      sub: "platform-user-1",
+    },
+    queueLoginEvent: (input) => {
+      queuedEvents.push(input);
+    },
+  });
+
+  const response = await app.request("http://localhost/", {
+    headers: {
+      authorization: "Bearer platform-token-1",
+      "x-forwarded-for": "203.0.113.7, 10.0.0.1",
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(queuedEvents, [{
+    accessToken: "platform-token-1",
+    ip: "203.0.113.7",
+    userId: "user-1",
+  }]);
 });
 
 test("returns 401 when the Supabase auth user no longer exists", async () => {
