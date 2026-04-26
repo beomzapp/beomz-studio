@@ -19,7 +19,7 @@ import {
   ChevronRight,
   Database,
 } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { Project } from "@beomz-studio/contracts";
 import { cn } from "../../../lib/cn";
 import { listProjectsWithMeta, deleteProject, renameProject, getApiBaseUrl, getAccessToken } from "../../../lib/api";
@@ -324,6 +324,12 @@ Earn 200 credits every time a referral upgrades — no limit.`}
       >
         {copied ? "Copied!" : "Copy referral link"}
       </button>
+      <Link
+        to="/studio/settings/referrals"
+        className="mt-2 block text-center text-[12px] font-normal text-[#C2410C]/75 transition-colors hover:text-[#C2410C] hover:underline"
+      >
+        View referrals →
+      </Link>
     </div>
   );
 }
