@@ -38,10 +38,15 @@ export function VerifyEmailPage() {
           return;
         }
         if (data.access_token && data.refresh_token) {
-          await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
+          try {
+            await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
+          } catch {
+            // setSession rejected — tokens may be malformed but email is verified;
+            // continue to redirect so the route guard handles auth state.
+          }
         }
         setStatus("success");
-        setTimeout(() => void navigate({ to: "/studio/home" }), 1500);
+        void navigate({ to: "/studio/home" });
       } catch {
         setErrorMessage("Network error. Please try again.");
         setStatus("error");

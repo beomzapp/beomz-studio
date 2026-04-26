@@ -15,6 +15,12 @@ interface AuthModalProps {
   open: boolean;
   onClose: () => void;
   /**
+   * Called after a successful email/password sign-in. When provided the modal
+   * will call this instead of onClose so the parent can redirect explicitly
+   * (e.g. to /studio/home) rather than relying on history.back().
+   */
+  onSuccess?: () => void;
+  /**
    * The prompt the user typed. Saved to sessionStorage before Google OAuth
    * so it can be restored by /auth/callback → /plan.
    */
@@ -25,7 +31,7 @@ interface AuthModalProps {
 
 type Screen = "main" | "check-email";
 
-export function AuthModal({ open, onClose, pendingPrompt, initialMode = "signin" }: AuthModalProps) {
+export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode = "signin" }: AuthModalProps) {
   const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [screen, setScreen] = useState<Screen>("main");
   const [email, setEmail] = useState("");
@@ -115,7 +121,11 @@ export function AuthModal({ open, onClose, pendingPrompt, initialMode = "signin"
       if (data.access_token && data.refresh_token) {
         await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
       }
-      onClose();
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        onClose();
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {

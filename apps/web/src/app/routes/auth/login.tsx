@@ -22,7 +22,7 @@ export function LoginPage() {
           Password updated — please sign in.
         </div>
       )}
-      <AuthModal open={true} onClose={handleClose} initialMode="signin" />
+      <AuthModal open={true} onClose={handleClose} onSuccess={() => void navigate({ to: "/studio/home" })} initialMode="signin" />
     </div>
   );
 }
