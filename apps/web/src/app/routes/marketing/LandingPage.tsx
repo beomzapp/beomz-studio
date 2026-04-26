@@ -105,6 +105,7 @@ export function LandingPage() {
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
 
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -164,6 +165,7 @@ export function LandingPage() {
       if (!session) {
         // Not signed in — show auth modal, preserve prompt
         pendingPromptRef.current = prompt;
+        setAuthModalMode("signup");
         setShowAuthModal(true);
         return;
       }
@@ -213,6 +215,7 @@ export function LandingPage() {
         if (!session) {
           // Not signed in — show auth overlay, keep prompt in input
           pendingPromptRef.current = prompt;
+          setAuthModalMode("signup");
           setShowAuthModal(true);
           return;
         }
@@ -344,13 +347,13 @@ export function LandingPage() {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowAuthModal(true)}
+                  onClick={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
                   className="text-sm text-white/50 transition-colors hover:text-white/80"
                 >
                   Sign in
                 </button>
                 <button
-                  onClick={() => setShowAuthModal(true)}
+                  onClick={() => { setAuthModalMode("signup"); setShowAuthModal(true); }}
                   className="text-sm text-white/30 transition-colors hover:text-white/50"
                 >
                   Get started
@@ -539,7 +542,9 @@ export function LandingPage() {
       <AuthModal
         open={showAuthModal}
         onClose={() => setShowAuthModal(false)}
+        onSuccess={() => void navigate({ to: "/studio/home" })}
         pendingPrompt={pendingPromptRef.current ?? ""}
+        initialMode={authModalMode}
       />
     </div>
   );

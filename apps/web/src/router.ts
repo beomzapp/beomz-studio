@@ -258,7 +258,12 @@ const studioRoute = createRoute({
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    if (!session) {
+    // Allow custom email-auth tokens stored by the API's email/password flow.
+    const emailAuthToken =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("beomz_access_token")
+        : null;
+    if (!session && !emailAuthToken) {
       throw redirect({ to: "/auth/login" });
     }
   },

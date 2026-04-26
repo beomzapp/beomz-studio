@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { Loader2, CheckCircle, XCircle, RefreshCw } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
 import { getApiBaseUrl } from "../../../lib/api";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 type Status = "loading" | "success" | "error";
 
 export function VerifyEmailPage() {
-  const navigate = useNavigate();
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState<string>("Verification failed. The link may have expired.");
   const [requestingNew, setRequestingNew] = useState(false);
@@ -38,21 +35,19 @@ export function VerifyEmailPage() {
           return;
         }
         if (data.access_token && data.refresh_token) {
-          try {
-            await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token });
-          } catch {
-            // setSession rejected — tokens may be malformed but email is verified;
-            // continue to redirect so the route guard handles auth state.
-          }
+          localStorage.setItem("beomz_access_token", data.access_token);
+          localStorage.setItem("beomz_refresh_token", data.refresh_token);
         }
         setStatus("success");
-        void navigate({ to: "/studio/home" });
+        // Use a full-page navigation so the studio route guard picks up the
+        // freshly stored token rather than a stale React router state.
+        window.location.href = "/studio/home";
       } catch {
         setErrorMessage("Network error. Please try again.");
         setStatus("error");
       }
     })();
-  }, [navigate]);
+  }, []);
 
   const handleRequestNewLink = async () => {
     setRequestingNew(true);

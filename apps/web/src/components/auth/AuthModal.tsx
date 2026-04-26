@@ -128,13 +128,20 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
       }
 
       if (data.access_token && data.refresh_token) {
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-        });
-        if (sessionError) {
-          setError(sessionError.message);
-          return;
+        // Store the custom JWT in localStorage so the studio route guard and
+        // getAccessToken() can find it regardless of supabase.auth.setSession()
+        // compatibility.
+        localStorage.setItem("beomz_access_token", data.access_token);
+        localStorage.setItem("beomz_refresh_token", data.refresh_token);
+        // Attempt to also set a Supabase session for Supabase-issued tokens;
+        // silently ignore failures for custom JWTs.
+        try {
+          await supabase.auth.setSession({
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+          });
+        } catch {
+          // Custom JWT — Supabase rejected it; localStorage fallback is sufficient.
         }
       }
 

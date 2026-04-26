@@ -141,12 +141,19 @@ export async function getAccessToken(): Promise<string> {
     accessTokenPromise = supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
-        if (!session?.access_token) {
-          console.error("[getAccessToken] No access token. Session object:", JSON.stringify(session, null, 2));
-          throw new Error("A valid platform session is required.");
+        if (session?.access_token) {
+          return session.access_token;
         }
-
-        return session.access_token;
+        // Fall back to custom email auth token issued by the Beomz API.
+        const emailToken =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem("beomz_access_token")
+            : null;
+        if (emailToken) {
+          return emailToken;
+        }
+        console.error("[getAccessToken] No access token. Session object:", JSON.stringify(session, null, 2));
+        throw new Error("A valid platform session is required.");
       })
       .catch((error) => {
         console.error("[getAccessToken] Failed:", error?.message ?? error, "| Full error:", error);
