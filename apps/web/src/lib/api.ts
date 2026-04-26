@@ -974,6 +974,7 @@ export interface UserProfile {
   created_at: string;
   plan: string;
   credits: number;
+  workspace_knowledge?: string | null;
 }
 
 export async function getMe(): Promise<UserProfile> {
@@ -986,6 +987,7 @@ export async function patchMe(body: {
   avatar_url?: string;
   building_for?: string;
   referral_source?: string;
+  workspace_knowledge?: string;
 }): Promise<UserProfile> {
   return requestJson<UserProfile>("/me", {
     method: "PATCH",

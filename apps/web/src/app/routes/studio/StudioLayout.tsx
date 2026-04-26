@@ -42,13 +42,24 @@ async function fetchMeWithRetry(): Promise<UserProfile | null> {
   return fetchMeRaw().catch(() => null);
 }
 
-const NAV_ITEMS = [
+import type { ForwardRefExoticComponent, RefAttributes } from "react";
+import type { LucideProps } from "lucide-react";
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>;
+  locked: boolean;
+  activeFor?: string;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { to: "/studio/home", label: "Projects", icon: FolderOpen, locked: false },
   { to: "/studio/images", label: "Images", icon: Image, locked: true },
   { to: "/studio/agents", label: "Agents", icon: Bot, locked: true },
-  { to: "/studio/settings", label: "Settings", icon: Settings, locked: false },
+  { to: "/studio/settings/profile", label: "Settings", icon: Settings, locked: false, activeFor: "/studio/settings" },
   { to: "/studio/settings/referrals", label: "Referrals", icon: Gift, locked: false },
-] as const;
+];
 
 export function StudioLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -131,7 +142,7 @@ export function StudioLayout() {
 
         <nav className="flex-1 space-y-1 p-3">
           {NAV_ITEMS.map((item) => {
-            const active = matchRoute({ to: item.to, fuzzy: true });
+            const active = matchRoute({ to: item.activeFor ?? item.to, fuzzy: true });
             return (
               <Link
                 key={item.to}

@@ -37,17 +37,38 @@ const ImagesPage = lazy(() =>
 const AgentsPage = lazy(() =>
   import("./app/routes/studio/AgentsPage").then(m => ({ default: m.AgentsPage })),
 );
-const SettingsPage = lazy(() =>
-  import("./app/routes/studio/SettingsPage").then(m => ({ default: m.SettingsPage })),
-);
 const ProfilePage = lazy(() =>
   import("./app/routes/studio/ProfilePage").then(m => ({ default: m.ProfilePage })),
 );
 const VersionPreviewPage = lazy(() =>
   import("./app/routes/studio/VersionPreviewPage").then(m => ({ default: m.VersionPreviewPage })),
 );
+const SettingsLayout = lazy(() =>
+  import("./app/routes/studio/SettingsLayout").then(m => ({ default: m.SettingsLayout })),
+);
 const SettingsProfilePage = lazy(() =>
   import("./app/routes/studio/SettingsProfilePage").then(m => ({ default: m.SettingsProfilePage })),
+);
+const SettingsBillingPage = lazy(() =>
+  import("./app/routes/studio/SettingsBillingPage").then(m => ({ default: m.SettingsBillingPage })),
+);
+const SettingsIntegrationsPage = lazy(() =>
+  import("./app/routes/studio/SettingsIntegrationsPage").then(m => ({ default: m.SettingsIntegrationsPage })),
+);
+const SettingsAIPersonalityPage = lazy(() =>
+  import("./app/routes/studio/SettingsAIPersonalityPage").then(m => ({ default: m.SettingsAIPersonalityPage })),
+);
+const SettingsNotificationsPage = lazy(() =>
+  import("./app/routes/studio/SettingsNotificationsPage").then(m => ({ default: m.SettingsNotificationsPage })),
+);
+const SettingsWorkspaceKnowledgePage = lazy(() =>
+  import("./app/routes/studio/SettingsWorkspaceKnowledgePage").then(m => ({ default: m.SettingsWorkspaceKnowledgePage })),
+);
+const SettingsSecurityPage = lazy(() =>
+  import("./app/routes/studio/SettingsSecurityPage").then(m => ({ default: m.SettingsSecurityPage })),
+);
+const SettingsWalletPage = lazy(() =>
+  import("./app/routes/studio/SettingsWalletPage").then(m => ({ default: m.SettingsWalletPage })),
 );
 const SettingsReferralsPage = lazy(() =>
   import("./app/routes/studio/SettingsReferralsPage").then(m => ({ default: m.SettingsReferralsPage })),
@@ -220,10 +241,74 @@ const agentsRoute = createRoute({
   component: withSuspense(AgentsPage),
 });
 
+// Settings layout route — renders SettingsLayout (sidebar + outlet).
+// The beforeLoad redirect handles bare /studio/settings → /studio/settings/profile.
 const settingsRoute = createRoute({
   getParentRoute: () => studioRoute,
   path: "/settings",
-  component: withSuspense(SettingsPage),
+  component: withSuspense(SettingsLayout),
+  beforeLoad: ({ location }) => {
+    const p = location.pathname;
+    if (p === "/studio/settings" || p === "/studio/settings/") {
+      throw redirect({ to: "/studio/settings/profile" });
+    }
+  },
+});
+
+// Settings sub-pages (all render inside SettingsLayout's <Outlet />)
+const settingsProfileRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/profile",
+  component: withSuspense(SettingsProfilePage),
+});
+
+const settingsBillingRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/billing",
+  component: withSuspense(SettingsBillingPage),
+});
+
+const settingsIntegrationsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/integrations",
+  component: withSuspense(SettingsIntegrationsPage),
+});
+
+const settingsAIPersonalityRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/ai-personality",
+  component: withSuspense(SettingsAIPersonalityPage),
+});
+
+const settingsNotificationsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/notifications",
+  component: withSuspense(SettingsNotificationsPage),
+});
+
+const settingsWorkspaceKnowledgeRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/workspace-knowledge",
+  component: withSuspense(SettingsWorkspaceKnowledgePage),
+});
+
+const settingsSecurityRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/security",
+  component: withSuspense(SettingsSecurityPage),
+});
+
+const settingsWalletRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: "/wallet",
+  component: withSuspense(SettingsWalletPage),
+});
+
+// Referrals stays as a direct child of studioRoute (no settings sidebar)
+const settingsReferralsRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: "/settings/referrals",
+  component: withSuspense(SettingsReferralsPage),
 });
 
 const profileRoute = createRoute({
@@ -236,18 +321,6 @@ const versionPreviewRoute = createRoute({
   getParentRoute: () => studioRoute,
   path: "/version-preview",
   component: withSuspense(VersionPreviewPage),
-});
-
-const settingsProfileRoute = createRoute({
-  getParentRoute: () => studioRoute,
-  path: "/settings/profile",
-  component: withSuspense(SettingsProfilePage),
-});
-
-const settingsReferralsRoute = createRoute({
-  getParentRoute: () => studioRoute,
-  path: "/settings/referrals",
-  component: withSuspense(SettingsReferralsPage),
 });
 
 const routeTree = rootRoute.addChildren([
@@ -267,8 +340,16 @@ const routeTree = rootRoute.addChildren([
     projectRoute,
     imagesRoute,
     agentsRoute,
-    settingsRoute,
-    settingsProfileRoute,
+    settingsRoute.addChildren([
+      settingsProfileRoute,
+      settingsBillingRoute,
+      settingsIntegrationsRoute,
+      settingsAIPersonalityRoute,
+      settingsNotificationsRoute,
+      settingsWorkspaceKnowledgeRoute,
+      settingsSecurityRoute,
+      settingsWalletRoute,
+    ]),
     settingsReferralsRoute,
     profileRoute,
     versionPreviewRoute,
