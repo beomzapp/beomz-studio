@@ -312,10 +312,11 @@ function ReferralCard() {
         Invite friends
       </p>
       <p
-        className="mt-1.5 text-[12px] leading-relaxed"
+        className="mt-1.5 whitespace-pre-line text-[12px] leading-relaxed"
         style={{ color: "#92400E" }}
       >
-        Earn 50 credits per signup (first 3), 200 when they upgrade
+        {`Earn 50 credits for each of your first 3 referrals.
+Earn 200 credits every time a referral upgrades — no limit.`}
       </p>
       <button
         onClick={() => void handleCopy()}

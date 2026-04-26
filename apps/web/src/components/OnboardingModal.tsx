@@ -217,14 +217,24 @@ function Step1({ creditBalance, onNext, onSkip, isSkipping }: Step1Props) {
           { text: "Daily bonus credits when you come back and build" },
           { text: "Free plan includes 30 credits every month, forever" },
           {
-            text: "Invite friends — earn 50 credits per signup (first 3), 200 when they upgrade",
+            text: "✦ Invite friends — 50 credits per signup (first 3 only),\n200 credits when they upgrade (unlimited)",
+            referral: true,
           },
-        ].map(({ text }, i) => (
-          <div key={i} className="flex items-start gap-3">
-            <CheckCircle size={16} className="mt-0.5 flex-none text-[#F97316]" />
-            <p className="text-sm text-[#374151]">{text}</p>
-          </div>
-        ))}
+        ].map((item, i) => {
+          const referral = "referral" in item && item.referral;
+          return (
+            <div key={i} className="flex items-start gap-3">
+              {referral ? (
+                <div className="w-4 flex-none" aria-hidden />
+              ) : (
+                <CheckCircle size={16} className="mt-0.5 flex-none text-[#F97316]" />
+              )}
+              <p className={`text-sm text-[#374151]${referral ? " whitespace-pre-line" : ""}`}>
+                {item.text}
+              </p>
+            </div>
+          );
+        })}
       </div>
 
       {/* CTA */}
