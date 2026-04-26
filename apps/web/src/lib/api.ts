@@ -191,7 +191,19 @@ async function requestJson<TResponse>(
   init: RequestInit,
 ): Promise<TResponse> {
   const accessToken = await getAccessToken();
-  const url = `${getApiBaseUrl()}${path}`;
+  const urlObj = new URL(`${getApiBaseUrl()}${path}`);
+
+  // BEO-610: forward stored referral code so loadOrgContext credits the
+  // referrer on first sign-in. The code is cleared after the first
+  // successful authenticated request so it doesn't linger forever.
+  const storedRef = typeof localStorage !== "undefined"
+    ? localStorage.getItem("referral_code")
+    : null;
+  if (storedRef) {
+    urlObj.searchParams.set("ref", storedRef);
+  }
+
+  const url = urlObj.toString();
   const method = (init.method ?? "GET").toUpperCase();
   const headers = {
     authorization: `Bearer ${accessToken}`,
@@ -224,6 +236,10 @@ async function requestJson<TResponse>(
       | { error?: string; details?: unknown }
       | null;
     throw new Error(errorBody?.error ?? `Request failed with ${response.status}.`);
+  }
+
+  if (storedRef && typeof localStorage !== "undefined") {
+    localStorage.removeItem("referral_code");
   }
 
   return response.json() as Promise<TResponse>;

@@ -203,6 +203,22 @@ const supportRoute = createRoute({
   component: withSuspense(SupportPage),
 });
 
+// BEO-610: /signup?ref=CODE — save referral code then redirect to home
+const signupRedirectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/signup",
+  validateSearch: (search: Record<string, unknown>) => ({
+    ref: typeof search.ref === "string" ? search.ref : undefined,
+  }),
+  beforeLoad: ({ search }) => {
+    if (search.ref) {
+      localStorage.setItem("referral_code", search.ref);
+    }
+    throw redirect({ to: "/" });
+  },
+  component: () => null,
+});
+
 const studioRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/studio",
@@ -327,6 +343,7 @@ const routeTree = rootRoute.addChildren([
   landingRoute,
   planRoute,
   pricingRoute,
+  signupRedirectRoute,
   publicAppRoute,
   authLoginRoute,
   authSignupRoute,
