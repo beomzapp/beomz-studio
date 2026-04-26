@@ -5,6 +5,7 @@ import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
 import { CREDIT_PACKS, PLAN_LIMITS } from "../../lib/credits.js";
 import { getFeatureLimits } from "../../lib/features.js";
+import { applyUpgradeReferralReward } from "../../lib/referrals.js";
 
 // Maps Stripe price ID → plan key — populated from env vars.
 // Supports both legacy keys (starter/pro) and new 4-plan keys (pro_starter/pro_builder).
@@ -184,6 +185,7 @@ webhookRoute.post("/", async (c) => {
 
           // BEO-329: Sync DB limits for all DB-enabled projects in this org
           await syncOrgProjectDbLimits(db, orgId, plan);
+          await maybeRewardReferralUpgradeForOrg(db, orgId);
           break;
         }
 
@@ -264,6 +266,10 @@ webhookRoute.post("/", async (c) => {
           console.log("[webhook] subscription.updated: downgrade scheduled to", newPlan, { orgId });
         } else {
           // Immediate upgrade — apply new plan + rollover cap now
+          const wasUpgrade =
+            (planOrder[newPlan] ?? 0) > (planOrder[currentPlan] ?? 0)
+            && newPlan !== "free";
+
           await db.updateOrg(orgId, {
             plan: newPlan,
             stripe_subscription_id: sub.id,
@@ -277,6 +283,9 @@ webhookRoute.post("/", async (c) => {
 
           // BEO-329: Sync DB limits for all DB-enabled projects in this org
           await syncOrgProjectDbLimits(db, orgId, newPlan);
+          if (wasUpgrade) {
+            await maybeRewardReferralUpgradeForOrg(db, orgId);
+          }
         }
 
         void prevSub; // suppress unused var warning
@@ -406,6 +415,20 @@ async function resolveOrgByCustomer(
 ): Promise<string | null> {
   const org = await db.findOrgByStripeCustomerId(customerId);
   return org?.id ?? null;
+}
+
+async function maybeRewardReferralUpgradeForOrg(
+  db: ReturnType<typeof createStudioDbClient>,
+  orgId: string,
+): Promise<void> {
+  const org = await db.findOrgById(orgId);
+  const referredUserId = org?.owner_id ?? null;
+
+  if (!referredUserId) {
+    return;
+  }
+
+  await applyUpgradeReferralReward(db, referredUserId);
 }
 
 /**

@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { Hono } from "hono";
 
-import type { OrgMembershipRow, OrgRow, UserRow } from "@beomz-studio/studio-db";
+import type {
+  OrgMembershipRow,
+  OrgRow,
+  ReferralCodeRow,
+  UserRow,
+} from "@beomz-studio/studio-db";
 
 process.env.ANTHROPIC_API_KEY ??= "test-anthropic-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
@@ -66,8 +71,10 @@ function createApp(options: {
     upsertUserByEmail: (input: { email: string; platformUserId: string }) => Promise<UserRow | null>;
   };
   db: {
+    createReferralCode?: (input: { code: string; user_id: string }) => Promise<ReferralCodeRow | null>;
     createOrg: (input: { credits: number; name: string; owner_id: string }) => Promise<OrgRow>;
     findOrgById: (id: string) => Promise<OrgRow | null>;
+    findReferralCodeByUserId?: (userId: string) => Promise<ReferralCodeRow | null>;
     findUserByPlatformUserId: (platformUserId: string) => Promise<UserRow | null>;
     updateUserEmail: (id: string, email: string) => Promise<UserRow>;
   };
@@ -218,6 +225,12 @@ test("creates the first org only for a genuine first signup", async () => {
         },
       },
       db: {
+        createReferralCode: async ({ code, user_id }) => ({
+          code,
+          created_at: now,
+          id: "ref-code-1",
+          user_id,
+        }),
         createOrg: async (input) => {
           assert.deepEqual(input, {
             credits: PLAN_LIMITS.free.signupGrant,
@@ -229,6 +242,10 @@ test("creates the first org only for a genuine first signup", async () => {
         findOrgById: async (id) => {
           assert.equal(id, "org-2");
           return org;
+        },
+        findReferralCodeByUserId: async (userId) => {
+          assert.equal(userId, "user-2");
+          return null;
         },
         findUserByPlatformUserId: async (platformUserId) => {
           assert.equal(platformUserId, "google-user-3");

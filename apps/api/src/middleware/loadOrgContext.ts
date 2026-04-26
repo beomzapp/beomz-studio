@@ -11,6 +11,11 @@ import {
 
 import { apiConfig } from "../config.js";
 import { PLAN_LIMITS } from "../lib/credits.js";
+import {
+  applySignupReferralReward,
+  ensureReferralCodeForUser,
+  getReferralCodeFromRequest,
+} from "../lib/referrals.js";
 import type { VerifiedPlatformJwt } from "./verifyPlatformJwt.js";
 
 function buildDefaultOrgName(email: string | undefined, platformUserId: string) {
@@ -49,7 +54,11 @@ interface UserUpsertInput {
 
 interface AuthBootstrapStore {
   ensureOrgMembership(input: OrgMembershipInsert): Promise<void>;
-  findAuthUserById(authUserId: string): Promise<{ id: string } | null>;
+  findAuthUserById(authUserId: string): Promise<{
+    app_metadata?: Record<string, unknown> | null;
+    id: string;
+    user_metadata?: Record<string, unknown> | null;
+  } | null>;
   findMembershipByUserId(userId: string): Promise<OrgMembershipRow | null>;
   findUserByEmail(email: string): Promise<UserRow | null>;
   upsertUserByEmail(input: UserUpsertInput): Promise<UserRow | null>;
@@ -108,7 +117,19 @@ function createAuthBootstrapStore(): AuthBootstrapStore {
         throw new Error(response.error.message);
       }
 
-      return response.data.user ? { id: response.data.user.id } : null;
+      return response.data.user
+        ? {
+          app_metadata:
+            typeof response.data.user.app_metadata === "object" && response.data.user.app_metadata !== null
+              ? response.data.user.app_metadata as Record<string, unknown>
+              : null,
+          id: response.data.user.id,
+          user_metadata:
+            typeof response.data.user.user_metadata === "object" && response.data.user.user_metadata !== null
+              ? response.data.user.user_metadata as Record<string, unknown>
+              : null,
+        }
+        : null;
     },
     async findMembershipByUserId(userId) {
       const response = await client
@@ -237,6 +258,28 @@ export function createLoadOrgContext(deps: LoadOrgContextDeps = {}): MiddlewareH
 
       if (!org) {
         throw new Error(`Org missing for membership ${membership.org_id}.`);
+      }
+
+      if (isNew) {
+        await ensureReferralCodeForUser(db, user.id);
+
+        const referralCode = getReferralCodeFromRequest(c.req.raw.url, authUser);
+        if (referralCode) {
+          const referralResult = await applySignupReferralReward({
+            db,
+            referredOrgId: org.id,
+            referredUserId: user.id,
+            referralCode,
+          });
+
+          if (referralResult.referredUser) {
+            user = referralResult.referredUser;
+          }
+
+          if (referralResult.referredOrg) {
+            org = referralResult.referredOrg;
+          }
+        }
       }
 
       c.set("orgContext", {

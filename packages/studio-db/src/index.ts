@@ -29,6 +29,7 @@ export interface UserRow extends Record<string, unknown> {
   id: string;
   platform_user_id: string;
   email: string;
+  referred_by?: string | null;
   created_at: string;
 }
 
@@ -176,6 +177,49 @@ export interface UserInsert extends Record<string, unknown> {
 export interface UserUpdate extends Record<string, unknown> {
   email?: string;
   platform_user_id?: string;
+  referred_by?: string | null;
+}
+
+export interface ReferralCodeRow extends Record<string, unknown> {
+  id: string;
+  user_id: string;
+  code: string;
+  created_at: string;
+}
+
+export interface ReferralCodeInsert extends Record<string, unknown> {
+  id?: string;
+  user_id: string;
+  code: string;
+  created_at?: string;
+}
+
+export type ReferralEventType = "signup" | "upgrade";
+
+export interface ReferralEventRow extends Record<string, unknown> {
+  id: string;
+  referrer_id: string;
+  referred_id: string;
+  event: ReferralEventType;
+  credits_awarded: number;
+  created_at: string;
+}
+
+export interface ReferralEventInsert extends Record<string, unknown> {
+  id?: string;
+  referrer_id: string;
+  referred_id: string;
+  event: ReferralEventType;
+  credits_awarded: number;
+  created_at?: string;
+}
+
+export interface RecentActivityRow {
+  id: string;
+  project_id: string;
+  project_name: string;
+  created_at: string;
+  event_type: string | null;
 }
 
 export interface OrgInsert extends Record<string, unknown> {
@@ -534,6 +578,18 @@ export interface StudioDatabase {
         Update: UserUpdate;
         Relationships: [];
       };
+      referral_codes: {
+        Row: ReferralCodeRow;
+        Insert: ReferralCodeInsert;
+        Update: Partial<ReferralCodeInsert>;
+        Relationships: [];
+      };
+      referral_events: {
+        Row: ReferralEventRow;
+        Insert: ReferralEventInsert;
+        Update: Partial<ReferralEventInsert>;
+        Relationships: [];
+      };
       project_db_limits: {
         Row: ProjectDbLimitsRow;
         Insert: ProjectDbLimitsInsert;
@@ -610,10 +666,28 @@ export class StudioDbClient {
     return unwrapSingle(response);
   }
 
-  async updateUserEmail(id: string, email: string): Promise<UserRow> {
+  async findUserById(id: string): Promise<UserRow | null> {
     const response = await this.client
       .from("users")
-      .update({ email })
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async updateUserEmail(id: string, email: string): Promise<UserRow> {
+    return this.updateUser(id, { email });
+  }
+
+  async updateUser(id: string, patch: UserUpdate): Promise<UserRow> {
+    const response = await this.client
+      .from("users")
+      .update(patch)
       .eq("id", id)
       .select("*")
       .single();
@@ -671,6 +745,39 @@ export class StudioDbClient {
     }
 
     return response.data;
+  }
+
+  async findPrimaryOrgByUserId(userId: string): Promise<OrgRow | null> {
+    const membershipResponse = await this.client
+      .from("org_members")
+      .select("org_id, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle<{ org_id: string; created_at: string }>();
+
+    if (membershipResponse.error) {
+      throw new Error(membershipResponse.error.message);
+    }
+
+    const orgId = membershipResponse.data?.org_id;
+    if (orgId) {
+      return this.findOrgById(orgId);
+    }
+
+    const orgResponse = await this.client
+      .from("orgs")
+      .select("*")
+      .eq("owner_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (orgResponse.error) {
+      throw new Error(orgResponse.error.message);
+    }
+
+    return orgResponse.data;
   }
 
   async createProject(
@@ -1243,6 +1350,227 @@ export class StudioDbClient {
     }
 
     return response.data ?? [];
+  }
+
+  async findReferralCodeByUserId(userId: string): Promise<ReferralCodeRow | null> {
+    const response = await this.client
+      .from("referral_codes")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async findReferralCodeByCode(code: string): Promise<ReferralCodeRow | null> {
+    const response = await this.client
+      .from("referral_codes")
+      .select("*")
+      .eq("code", code)
+      .limit(1)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async createReferralCode(input: ReferralCodeInsert): Promise<ReferralCodeRow | null> {
+    const response = await this.client
+      .from("referral_codes")
+      .insert(input)
+      .select("*")
+      .maybeSingle();
+
+    if (response.error) {
+      if (response.error.code === "23505") {
+        return null;
+      }
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
+  async listReferralEventsByReferrerId(referrerId: string): Promise<ReferralEventRow[]> {
+    const response = await this.client
+      .from("referral_events")
+      .select("*")
+      .eq("referrer_id", referrerId)
+      .order("created_at", { ascending: false });
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data ?? [];
+  }
+
+  async countReferralEventsByReferrerId(
+    referrerId: string,
+    event: ReferralEventType,
+  ): Promise<number> {
+    const response = await this.client
+      .from("referral_events")
+      .select("id", { count: "exact", head: true })
+      .eq("referrer_id", referrerId)
+      .eq("event", event);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.count ?? 0;
+  }
+
+  async hasReferralEvent(
+    referrerId: string,
+    referredId: string,
+    event: ReferralEventType,
+  ): Promise<boolean> {
+    const response = await this.client
+      .from("referral_events")
+      .select("id", { count: "exact", head: true })
+      .eq("referrer_id", referrerId)
+      .eq("referred_id", referredId)
+      .eq("event", event);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return (response.count ?? 0) > 0;
+  }
+
+  async createReferralEvent(input: ReferralEventInsert): Promise<ReferralEventRow> {
+    const response = await this.client
+      .from("referral_events")
+      .insert(input)
+      .select("*")
+      .single();
+
+    return unwrapSingle(response);
+  }
+
+  async listRecentActivityByOrgId(orgId: string, limit: number): Promise<RecentActivityRow[]> {
+    const normalizedLimit = Math.max(1, limit);
+    const rawClient = this.client as SupabaseClient<any>;
+
+    try {
+      const response = await rawClient
+        .from("sessions")
+        .select("id, created_at, event_type, project_id, projects!inner(name, org_id)")
+        .eq("projects.org_id", orgId)
+        .order("created_at", { ascending: false })
+        .limit(normalizedLimit);
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      return (response.data ?? []).map((row: Record<string, unknown>) => {
+        const projectPayload = (
+          Array.isArray(row.projects)
+            ? row.projects[0]
+            : row.projects
+        ) as Record<string, unknown> | null;
+
+        return {
+          id: String(row.id),
+          project_id: String(row.project_id),
+          project_name: String(projectPayload?.name ?? "Untitled project"),
+          created_at: String(row.created_at),
+          event_type: typeof row.event_type === "string" ? row.event_type : null,
+        };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      const sessionTableUnavailable = message.includes("sessions");
+      const missingEventType = message.includes("event_type") && message.includes("column");
+
+      if (!sessionTableUnavailable && !missingEventType) {
+        throw error;
+      }
+
+      if (!sessionTableUnavailable) {
+        const response = await rawClient
+          .from("sessions")
+          .select("id, created_at, project_id, projects!inner(name, org_id)")
+          .eq("projects.org_id", orgId)
+          .order("created_at", { ascending: false })
+          .limit(Math.max(10, normalizedLimit * 5));
+
+        if (response.error) {
+          throw new Error(response.error.message);
+        }
+
+        const latestByProject = new Map<string, RecentActivityRow>();
+        for (const row of response.data ?? []) {
+          const projectId = String(row.project_id);
+          const projectPayload = (
+            Array.isArray(row.projects)
+              ? row.projects[0]
+              : row.projects
+          ) as Record<string, unknown> | null;
+
+          if (latestByProject.has(projectId)) continue;
+          latestByProject.set(projectId, {
+            id: String(row.id),
+            project_id: projectId,
+            project_name: String(projectPayload?.name ?? "Untitled project"),
+            created_at: String(row.created_at),
+            event_type: null,
+          });
+          if (latestByProject.size >= normalizedLimit) break;
+        }
+
+        return Array.from(latestByProject.values());
+      }
+
+      const projects = await this.findProjectsByOrgId(orgId);
+      if (projects.length === 0) {
+        return [];
+      }
+
+      const generationResponse = await this.client
+        .from("generations")
+        .select("id, project_id, started_at")
+        .in("project_id", projects.map((project) => project.id))
+        .order("started_at", { ascending: false })
+        .limit(Math.max(10, normalizedLimit * 5));
+
+      if (generationResponse.error) {
+        throw new Error(generationResponse.error.message);
+      }
+
+      const projectsById = new Map(projects.map((project) => [project.id, project]));
+      const latestByProject = new Map<string, RecentActivityRow>();
+
+      for (const row of generationResponse.data ?? []) {
+        const projectId = String(row.project_id);
+        if (latestByProject.has(projectId)) continue;
+        const project = projectsById.get(projectId);
+        if (!project) continue;
+        latestByProject.set(projectId, {
+          id: String(row.id),
+          project_id: projectId,
+          project_name: project.name,
+          created_at: String(row.started_at),
+          event_type: "build_complete",
+        });
+        if (latestByProject.size >= normalizedLimit) break;
+      }
+
+      return Array.from(latestByProject.values());
+    }
   }
 
   // ── BEO-329: Project DB limits ────────────────────────────────────────────
