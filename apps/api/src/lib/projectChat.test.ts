@@ -99,7 +99,7 @@ test("buildProjectMemoryPrompt treats no files as greenfield even if DB has a pl
   });
   assert.match(prompt, /There is no saved project context yet/i);
   assert.doesNotMatch(prompt, /existing app called "Interactive Tool"/i);
-  assert.match(prompt, /Welcome to Beomz/i);
+  assert.match(prompt, /Hey! 👋 Ready to build something awesome\? What's the idea\?/);
 });
 
 test("buildProjectMemoryPrompt injects app name, files, summary, recent conversation, and behavior rules", () => {

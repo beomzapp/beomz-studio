@@ -6,7 +6,7 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 process.env.TAVILY_API_KEY ??= "test-tavily-key";
 
-import {
+const {
   buildUrlReferenceContextBlock,
   extractResearchQuery,
   extractUrlLike,
@@ -17,7 +17,7 @@ import {
   resetTavilyClientFactoryForTests,
   setUrlResearchSynthesisForTests,
   setTavilyClientFactoryForTests,
-} from "./webFetch.js";
+} = await import("./webFetch.js");
 
 test("extractUrlLike returns explicit https URLs", () => {
   assert.equal(

@@ -160,7 +160,7 @@ test("generatePlanSummary falls back to the required plan format when Haiku is u
 
   assert.match(result, /^Here's what I'll do:/);
   assert.match(result, /\*\*PetPals\*\*/);
-  assert.match(result, /Ready when you are — or type any changes first\./);
+  assert.match(result, /Just say the word and I'll start building — or type any changes first\./);
 });
 
 test("chat prompt source forbids 'building now' phrasing in conversational and plan responses", async () => {

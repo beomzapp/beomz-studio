@@ -15,6 +15,22 @@ process.env.PROJECT_JWT_SECRET ??= "test-project-secret";
 const { createProjectsRoute } = await import("./index.js");
 const { encryptProjectSecret } = await import("../../lib/projectSecrets.js");
 
+const expectedSupabaseSetupSql = [
+  'CREATE TABLE IF NOT EXISTS public."tasks" (',
+  '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
+  '  "created_at" TIMESTAMPTZ DEFAULT now(),',
+  '  "title" TEXT',
+  ");",
+  "",
+  'ALTER TABLE public."tasks" ENABLE ROW LEVEL SECURITY;',
+  "",
+  'CREATE POLICY "Allow all for anon" ON public."tasks"',
+  "  FOR ALL",
+  "  TO anon",
+  "  USING (true)",
+  "  WITH CHECK (true);",
+].join("\n");
+
 function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
   const now = new Date().toISOString();
   return {
@@ -392,13 +408,7 @@ test("byo-db runs migration, saves Supabase credentials, and always queues auto-
     success: true,
     host: "demo-project.supabase.co",
     wiring: true,
-    setupSql: [
-      'CREATE TABLE IF NOT EXISTS public."tasks" (',
-      '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
-      '  "created_at" TIMESTAMPTZ DEFAULT now(),',
-      '  "title" TEXT',
-      ");",
-    ].join("\n"),
+    setupSql: expectedSupabaseSetupSql,
   });
   assert.equal(migrationRuns, 1);
   assert.equal(createdGenerations.length, 1);
@@ -499,13 +509,7 @@ test("byo-db queues a silent auto-wire iteration when a previous build exists", 
     success: true,
     host: "demo-project.supabase.co",
     wiring: true,
-    setupSql: [
-      'CREATE TABLE IF NOT EXISTS public."tasks" (',
-      '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
-      '  "created_at" TIMESTAMPTZ DEFAULT now(),',
-      '  "title" TEXT',
-      ");",
-    ].join("\n"),
+    setupSql: expectedSupabaseSetupSql,
   });
   assert.equal(createdGenerations.length, 1);
   assert.equal(buildRuns.length, 1);
@@ -652,13 +656,7 @@ test("byo-db returns setupSql instead of auto-creating tables when only a stored
       success: true,
       host: "demo-project.supabase.co",
       wiring: true,
-      setupSql: [
-        'CREATE TABLE IF NOT EXISTS public."tasks" (',
-        '  "id" UUID DEFAULT gen_random_uuid() PRIMARY KEY,',
-        '  "created_at" TIMESTAMPTZ DEFAULT now(),',
-        '  "title" TEXT',
-        ");",
-      ].join("\n"),
+      setupSql: expectedSupabaseSetupSql,
     });
     assert.equal(fetchCalls.length, 0);
     assert.deepEqual(updates, [
