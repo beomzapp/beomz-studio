@@ -618,7 +618,7 @@ test("updates the stored email when the platform user already exists", async () 
   }
 });
 
-test("queues a login event asynchronously after the authenticated org context is resolved", async () => {
+test("queues a login event asynchronously using the Cloudflare client IP when available", async () => {
   const user = buildUser();
   const membership = buildMembership();
   const org = buildOrg();
@@ -658,6 +658,7 @@ test("queues a login event asynchronously after the authenticated org context is
   const response = await app.request("http://localhost/", {
     headers: {
       authorization: "Bearer platform-token-1",
+      "cf-connecting-ip": "203.0.113.10",
       "x-forwarded-for": "203.0.113.7, 10.0.0.1",
     },
   });
@@ -665,7 +666,7 @@ test("queues a login event asynchronously after the authenticated org context is
   assert.equal(response.status, 200);
   assert.deepEqual(queuedEvents, [{
     accessToken: "platform-token-1",
-    ip: "203.0.113.7",
+    ip: "203.0.113.10",
     userId: "user-1",
   }]);
 });

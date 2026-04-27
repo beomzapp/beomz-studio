@@ -83,9 +83,15 @@ function normalizeIp(rawValue: string | null | undefined): string | null {
 }
 
 export function extractClientIp(input: {
+  cloudflareIp?: string | null;
   forwardedFor?: string | null;
   socketRemoteAddress?: string | null;
 }): string | null {
+  const cloudflareIp = normalizeIp(input.cloudflareIp);
+  if (cloudflareIp) {
+    return cloudflareIp;
+  }
+
   const forwardedFor = typeof input.forwardedFor === "string"
     ? input.forwardedFor
     : "";
@@ -109,6 +115,7 @@ function readSocketRemoteAddress(c: Pick<Context, "env">): string | null {
 
 export function extractLoginEventIp(c: Pick<Context, "env" | "req">): string | null {
   return extractClientIp({
+    cloudflareIp: c.req.header("cf-connecting-ip"),
     forwardedFor: c.req.header("x-forwarded-for"),
     socketRemoteAddress: readSocketRemoteAddress(c),
   });
@@ -209,7 +216,7 @@ async function lookupIpLocation(
   }
 }
 
-async function insertLoginEvent(
+async function captureLoginEvent(
   input: QueueLoginEventInput,
   fetchFn: typeof fetch = fetch,
 ) {
@@ -246,7 +253,7 @@ export function queueLoginEvent(
     return;
   }
 
-  void insertLoginEvent(input, options.fetchFn).catch((error) => {
-    console.error("[loginEvents] insert failed:", error);
+  void captureLoginEvent(input, options.fetchFn).catch((error) => {
+    console.error("[loginEvents] failed:", error);
   });
 }

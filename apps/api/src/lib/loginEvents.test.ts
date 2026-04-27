@@ -10,7 +10,17 @@ const {
   tryMarkLoginSessionSeen,
 } = await import("./loginEvents.js");
 
-test("extractClientIp prefers x-forwarded-for over socket remote address", () => {
+test("extractClientIp prefers cf-connecting-ip over x-forwarded-for and socket remote address", () => {
+  const ip = extractClientIp({
+    cloudflareIp: "203.0.113.10",
+    forwardedFor: "203.0.113.7, 10.0.0.1",
+    socketRemoteAddress: "198.51.100.9",
+  });
+
+  assert.equal(ip, "203.0.113.10");
+});
+
+test("extractClientIp prefers x-forwarded-for over socket remote address when Cloudflare header is absent", () => {
   const ip = extractClientIp({
     forwardedFor: "203.0.113.7, 10.0.0.1",
     socketRemoteAddress: "198.51.100.9",
