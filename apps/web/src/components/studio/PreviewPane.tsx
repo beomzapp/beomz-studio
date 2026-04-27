@@ -589,9 +589,14 @@ export function PreviewPane({
       ? { viewportWidth: vpW, viewportHeight: vpH }
       : { viewportWidth: vpW, viewportHeight: vpH, isPortrait: tabletPortrait };
 
+    const isLandscape = isMobile ? mobileLandscape : !tabletPortrait;
+
     return (
-      <div className="flex h-full items-start justify-center overflow-auto">
-        <div style={{ transform: `scale(${zoom * (isMobile ? 1 : 0.9)})`, transformOrigin: "top center", transition: "transform 0.2s ease" }}>
+      <div
+        className="flex h-full justify-center overflow-auto"
+        style={{ alignItems: isLandscape ? "center" : "flex-start" }}
+      >
+        <div style={{ transform: `scale(${zoom * (isMobile ? 1 : 0.9)})`, transformOrigin: isLandscape ? "center center" : "top center", transition: "transform 0.2s ease" }}>
           {/* @ts-expect-error -- Frame union, props are compatible */}
           <Frame {...frameProps}>
             {activeFrame ? (
