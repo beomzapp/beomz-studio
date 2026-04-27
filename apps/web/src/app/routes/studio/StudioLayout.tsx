@@ -7,8 +7,10 @@ import {
   Settings,
   Menu,
   X,
-  Lock,
   Gift,
+  Smartphone,
+  Globe,
+  Video,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
@@ -50,16 +52,20 @@ interface NavItem {
   to: string;
   label: string;
   icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>;
-  locked: boolean;
+  locked?: boolean;
+  comingSoon?: boolean;
   activeFor?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/studio/home", label: "Projects", icon: FolderOpen, locked: false },
-  { to: "/studio/images", label: "Images", icon: Image, locked: true },
-  { to: "/studio/agents", label: "Agents", icon: Bot, locked: true },
-  { to: "/studio/settings/profile", label: "Settings", icon: Settings, locked: false, activeFor: "/studio/settings" },
-  { to: "/studio/settings/referrals", label: "Referrals", icon: Gift, locked: false },
+  { to: "/studio/home", label: "Web Apps", icon: FolderOpen },
+  { to: "", label: "Mobile Apps", icon: Smartphone, comingSoon: true },
+  { to: "/studio/websites", label: "Websites", icon: Globe },
+  { to: "", label: "Images", icon: Image, comingSoon: true },
+  { to: "", label: "Videos", icon: Video, comingSoon: true },
+  { to: "/studio/agents", label: "Agents", icon: Bot },
+  { to: "/studio/settings/profile", label: "Settings", icon: Settings, activeFor: "/studio/settings" },
+  { to: "/studio/settings/referrals", label: "Referrals", icon: Gift },
 ];
 
 export function StudioLayout() {
@@ -158,6 +164,20 @@ export function StudioLayout() {
 
         <nav className="flex-1 space-y-1 p-3">
           {NAV_ITEMS.map((item) => {
+            if (item.comingSoon) {
+              return (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium cursor-not-allowed opacity-50"
+                >
+                  <item.icon size={18} className="text-[#9ca3af]" />
+                  <span className="text-[#9ca3af]">{item.label}</span>
+                  <span className="ml-auto rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-500 leading-none">
+                    Soon
+                  </span>
+                </div>
+              );
+            }
             const active = matchRoute({ to: item.activeFor ?? item.to, fuzzy: true });
             return (
               <Link
@@ -173,9 +193,6 @@ export function StudioLayout() {
               >
                 <item.icon size={18} />
                 {item.label}
-                {item.locked && (
-                  <Lock size={12} className="ml-auto text-[#d1d5db]" />
-                )}
               </Link>
             );
           })}

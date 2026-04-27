@@ -37,6 +37,9 @@ const ImagesPage = lazy(() =>
 const AgentsPage = lazy(() =>
   import("./app/routes/studio/AgentsPage").then(m => ({ default: m.AgentsPage })),
 );
+const WebsitesPage = lazy(() =>
+  import("./app/routes/studio/WebsitesPage").then(m => ({ default: m.WebsitesPage })),
+);
 const ProfilePage = lazy(() =>
   import("./app/routes/studio/ProfilePage").then(m => ({ default: m.ProfilePage })),
 );
@@ -259,6 +262,12 @@ const agentsRoute = createRoute({
   component: withSuspense(AgentsPage),
 });
 
+const websitesRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: "/websites",
+  component: withSuspense(WebsitesPage),
+});
+
 // Settings layout route — renders SettingsLayout (sidebar + outlet).
 // The beforeLoad redirect handles bare /studio/settings → /studio/settings/profile.
 const settingsRoute = createRoute({
@@ -359,6 +368,7 @@ const routeTree = rootRoute.addChildren([
     projectRoute,
     imagesRoute,
     agentsRoute,
+    websitesRoute,
     settingsRoute.addChildren([
       settingsProfileRoute,
       settingsBillingRoute,
