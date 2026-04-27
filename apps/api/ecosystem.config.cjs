@@ -18,6 +18,7 @@ module.exports = {
       listen_timeout: 5000,
       env: {
         NODE_ENV: "production",
+        MOCK_ANTHROPIC: process.env.MOCK_ANTHROPIC,
         TAVILY_API_KEY: process.env.TAVILY_API_KEY,
       },
     },

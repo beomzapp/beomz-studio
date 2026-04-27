@@ -73,6 +73,7 @@ import { upsertEnvFile } from "../../lib/envFile.js";
 import { runBuildPipeline } from "../../lib/build/buildPipeline.js";
 import * as contextBuilder from "../../lib/build/contextBuilder.js";
 import { runIterationPipeline } from "../../lib/build/iterationPipeline.js";
+import { runMockBuildPipeline } from "../../lib/build/mockPipeline.js";
 import {
   buildProjectDatabaseEnvVars,
   getByoSupabaseConfig,
@@ -3264,6 +3265,20 @@ async function _runBuildInBackground(
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
   const dbType = normaliseProjectDbType(currentProject?.db_type);
   const dbContextBlock = contextBuilder.buildDbContextBlock(projectId, dbType);
+
+  if (apiConfig.MOCK_ANTHROPIC) {
+    await runMockBuildPipeline({
+      input,
+      db,
+      operation: op,
+      nextId,
+      ts,
+      abortSignal,
+      appendEventToDb,
+      appendSessionEventToDb,
+    });
+    return;
+  }
 
   // ── BEO-372: clarifying answer detection ────────────────────────────────
   // If the previous completed generation for this project ended with a

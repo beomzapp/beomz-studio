@@ -4,6 +4,21 @@ const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1),
+  MOCK_ANTHROPIC: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((value) => {
+      if (typeof value === "boolean") {
+        return value;
+      }
+
+      if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+      }
+
+      return false;
+    }),
   GEMINI_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   TAVILY_API_KEY: z.string().min(1).optional(),
