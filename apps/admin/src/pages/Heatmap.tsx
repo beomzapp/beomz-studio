@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ComposableMap, Geographies, Geography, Marker, type Geography as GeoType } from "react-simple-maps";
 import { Globe, RefreshCw } from "lucide-react";
-import { supabase } from "../lib/supabase.ts";
 import { fetchAdminHeatmap, type HeatmapEntry, type HeatmapRange } from "../lib/api.ts";
+import { useAuthToken } from "../lib/useAuthToken.ts";
 
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
@@ -18,11 +18,6 @@ const POLL_INTERVAL_MS = 30_000;
 // #F97316 (249,115,22) → #22c55e (34,197,94) based on active/total ratio
 const COLOR_INACTIVE = [249, 115, 22] as const;
 const COLOR_ACTIVE = [34, 197, 94] as const;
-
-async function getToken(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
 
 function calcRadius(total: number): number {
   return Math.max(8, Math.min(40, Math.sqrt(total) * 4));
@@ -43,6 +38,8 @@ interface Tooltip {
 }
 
 export default function HeatmapPage() {
+  const token = useAuthToken();
+
   const [range, setRange] = useState<HeatmapRange>("24h");
   const [data, setData] = useState<HeatmapEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,11 +50,10 @@ export default function HeatmapPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async (showLoading = false) => {
+    if (!token) return;
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      const token = await getToken();
-      if (!token) { setError("Not authenticated"); return; }
       const entries = await fetchAdminHeatmap(token, range);
       setData(entries);
       setLastUpdated(new Date());
@@ -66,19 +62,17 @@ export default function HeatmapPage() {
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [token, range]);
 
   useEffect(() => {
+    if (!token) return;
     void load(true);
-  }, [load]);
-
-  useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => { void load(false); }, POLL_INTERVAL_MS);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [load]);
+  }, [token, load]);
 
   const totalUsers = data.reduce((s, e) => s + e.total, 0);
   const totalActive = data.reduce((s, e) => s + e.active, 0);

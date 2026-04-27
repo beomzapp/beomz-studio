@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, Search, ChevronLeft, ChevronRight } from "lucide-react";
-import { supabase } from "../lib/supabase.ts";
 import {
   fetchAdminUsers,
   fetchUserCreditHistory,
@@ -8,6 +7,7 @@ import {
   type AdminUser,
   type CreditHistoryEntry,
 } from "../lib/api.ts";
+import { useAuthToken } from "../lib/useAuthToken.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -18,11 +18,6 @@ function useDebounce<T>(value: T, delay: number): T {
     return () => clearTimeout(id);
   }, [value, delay]);
   return debounced;
-}
-
-async function getToken(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -74,6 +69,8 @@ const PAGE_LIMIT = 50;
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
+  const token = useAuthToken();
+
   // Table state
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -98,11 +95,10 @@ export default function UsersPage() {
   // ── Fetch users ─────────────────────────────────────────────────────────────
 
   const loadUsers = useCallback(async () => {
+    if (!token) return;
     setLoading(true);
     setTableError(null);
     try {
-      const token = await getToken();
-      if (!token) { setTableError("Not authenticated"); return; }
       const data = await fetchAdminUsers(token, {
         search: debouncedSearch || undefined,
         plan: plan || undefined,
@@ -116,7 +112,7 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, plan, page]);
+  }, [token, debouncedSearch, plan, page]);
 
   useEffect(() => { void loadUsers(); }, [loadUsers]);
 
@@ -133,7 +129,6 @@ export default function UsersPage() {
     setHistory([]);
     setHistoryLoading(true);
     try {
-      const token = await getToken();
       if (!token) return;
       const entries = await fetchUserCreditHistory(token, user.id);
       setHistory(entries);
@@ -165,7 +160,6 @@ export default function UsersPage() {
     applyOptimistic(next);
 
     try {
-      const token = await getToken();
       if (!token) throw new Error("Not authenticated");
       await postCreditAdjustment(token, selected.id, n, reason.trim());
       // Refresh credit history

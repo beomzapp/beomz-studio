@@ -1,19 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { supabase } from "../lib/supabase.ts";
 import {
   fetchAdminBuilds,
   fetchAdminBuildStats,
   type AdminBuild,
   type AdminBuildStats,
 } from "../lib/api.ts";
+import { useAuthToken } from "../lib/useAuthToken.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function getToken(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -192,6 +187,8 @@ function BuildTable({
 const POLL_INTERVAL_MS = 10_000;
 
 export default function BuildsPage() {
+  const token = useAuthToken();
+
   const [stats, setStats] = useState<AdminBuildStats | null>(null);
   const [inFlight, setInFlight] = useState<AdminBuild[]>([]);
   const [recent, setRecent] = useState<AdminBuild[]>([]);
@@ -203,9 +200,8 @@ export default function BuildsPage() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStats = useCallback(async () => {
+    if (!token) return;
     try {
-      const token = await getToken();
-      if (!token) { setError("Not authenticated"); return; }
       const data = await fetchAdminBuildStats(token);
       setStats(data);
     } catch (e) {
@@ -214,14 +210,13 @@ export default function BuildsPage() {
     } finally {
       setStatsLoading(false);
     }
-  }, []);
+  }, [token]);
 
   const loadBuilds = useCallback(async (silent = false) => {
+    if (!token) return;
     if (!silent) setBuildsLoading(true);
     setError(null);
     try {
-      const token = await getToken();
-      if (!token) { setError("Not authenticated"); return; }
       const data = await fetchAdminBuilds(token);
       setInFlight(data.in_flight ?? []);
       setRecent(data.recent ?? []);
@@ -230,9 +225,10 @@ export default function BuildsPage() {
     } finally {
       setBuildsLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
+    if (!token) return;
     void loadStats();
     void loadBuilds(false);
 
@@ -243,7 +239,7 @@ export default function BuildsPage() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [loadStats, loadBuilds]);
+  }, [token, loadStats, loadBuilds]);
 
   const successRate =
     stats && stats.success_rate != null

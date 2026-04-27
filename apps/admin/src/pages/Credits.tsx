@@ -1,17 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { supabase } from "../lib/supabase.ts";
 import {
   fetchAdminCredits,
   type AdminCreditTransaction,
 } from "../lib/api.ts";
+import { useAuthToken } from "../lib/useAuthToken.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function getToken(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -63,6 +58,8 @@ const PAGE_LIMIT = 50;
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CreditsPage() {
+  const token = useAuthToken();
+
   const [source, setSource] = useState("");
   const [page, setPage] = useState(1);
 
@@ -72,11 +69,10 @@ export default function CreditsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const token = await getToken();
-      if (!token) { setError("Not authenticated"); return; }
       const data = await fetchAdminCredits(token, {
         source: source || undefined,
         page,
@@ -89,7 +85,7 @@ export default function CreditsPage() {
     } finally {
       setLoading(false);
     }
-  }, [source, page]);
+  }, [token, source, page]);
 
   useEffect(() => { void load(); }, [load]);
 
