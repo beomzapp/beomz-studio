@@ -701,7 +701,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     classifiedIntent === "ambiguous"
       || (isBuildIshIntent && effectiveConfidence < buildConfidenceThreshold)
   );
-  const shouldOfferPlanSummary = isBuildIshIntent
+  const shouldOfferPlanSummary = !mockAnthropicEnabled
+    && isBuildIshIntent
     && !needsClarification
     && !isImplementConfirmation
     && !isIteration;
