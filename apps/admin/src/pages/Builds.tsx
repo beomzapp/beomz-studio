@@ -25,8 +25,8 @@ function formatDate(iso: string | null | undefined): string {
   });
 }
 
-function formatDuration(ms: number | null): string {
-  if (ms === null) return "—";
+function formatDuration(ms: number | null | undefined): string {
+  if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
@@ -35,8 +35,8 @@ function formatDuration(ms: number | null): string {
   return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
 }
 
-function formatTokens(n: number | null): string {
-  if (n === null) return "—";
+function formatTokens(n: number | null | undefined): string {
+  if (n == null) return "—";
   return n.toLocaleString();
 }
 
@@ -48,11 +48,11 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 };
 
-function StatusPill({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] ?? "bg-slate-100 text-slate-600";
+function StatusPill({ status }: { status: string | undefined }) {
+  const style = STATUS_STYLES[status ?? ""] ?? "bg-slate-100 text-slate-600";
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${style}`}>
-      {status}
+      {status ?? "unknown"}
     </span>
   );
 }
@@ -223,8 +223,8 @@ export default function BuildsPage() {
       const token = await getToken();
       if (!token) { setError("Not authenticated"); return; }
       const data = await fetchAdminBuilds(token);
-      setInFlight(data.in_flight);
-      setRecent(data.recent);
+      setInFlight(data.in_flight ?? []);
+      setRecent(data.recent ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load builds");
     } finally {
