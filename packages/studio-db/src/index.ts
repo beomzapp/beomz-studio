@@ -1332,6 +1332,13 @@ export class StudioDbClient {
       }
     }
 
+    if (response.error && /build_telemetry_user_id_fkey/i.test(response.error.message)) {
+      response = await runUpsert({
+        ...input,
+        user_id: null,
+      });
+    }
+
     return unwrapSingle(response);
   }
 
