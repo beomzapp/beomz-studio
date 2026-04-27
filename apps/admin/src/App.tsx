@@ -8,6 +8,7 @@ import BuildsPage from "./pages/Builds.tsx";
 import CreditsPage from "./pages/Credits.tsx";
 import HeatmapPage from "./pages/Heatmap.tsx";
 import LoginPage from "./pages/Login.tsx";
+import AuthCallback from "./pages/AuthCallback.tsx";
 
 type AuthState = "loading" | "unauthenticated" | "forbidden" | "allowed";
 
@@ -89,6 +90,8 @@ export default function App() {
             )
           }
         />
+
+        <Route path="/auth/callback" element={<AuthCallback />} />
 
         {authState === "unauthenticated" ? (
           <Route path="*" element={<Navigate to="/login" replace />} />
