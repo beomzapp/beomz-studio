@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import type { StudioFile } from "@beomz-studio/contracts";
 import { getAccessToken, getApiBaseUrl } from "../lib/api";
 
@@ -44,6 +45,7 @@ function ts(): string {
 export function useWebsiteBuilder(
   projectId: string | null,
   initialBrief: string | null,
+  wcPatchFileRef?: RefObject<((file: string, content: string) => Promise<void>) | null>,
 ): UseWebsiteBuilderReturn {
   const [files, setFiles] = useState<readonly StudioFile[] | null>(null);
   const [buildId, setBuildId] = useState<string | null>(null);
@@ -143,6 +145,14 @@ export function useWebsiteBuilder(
                 ...prev,
                 { role: "assistant", content: msg, timestamp: ts() },
               ]);
+            }
+
+            if (event.type === "image_update") {
+              const file = typeof event.file === "string" ? event.file : null;
+              const content = typeof event.content === "string" ? event.content : null;
+              if (file && content !== null) {
+                void wcPatchFileRef?.current?.(file, content);
+              }
             }
 
             if (event.type === "error") {

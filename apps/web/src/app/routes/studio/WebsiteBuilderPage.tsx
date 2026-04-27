@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import type { RefObject } from "react";
 import {
   ChevronLeft,
   Clock,
@@ -522,6 +523,9 @@ export function WebsiteBuilderPage() {
 
   const commandBarInputRef = useRef<HTMLInputElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // BEO-676: ref to patchFile from useWebContainerPreview — set below after
+  // useWebContainerPreview is called, read by useWebsiteBuilder SSE handler.
+  const wcPatchFileRef = useRef<((file: string, content: string) => Promise<void>) | null>(null);
 
   // Website builder SSE + files
   const {
@@ -533,7 +537,7 @@ export function WebsiteBuilderPage() {
     history,
     sendIterate,
     isBuildInProgress,
-  } = useWebsiteBuilder(projectId, brief);
+  } = useWebsiteBuilder(projectId, brief, wcPatchFileRef as RefObject<((file: string, content: string) => Promise<void>) | null>);
 
   // Update site name from generated content
   useEffect(() => {
@@ -557,6 +561,7 @@ export function WebsiteBuilderPage() {
     progressMessage,
     firstFilesDelivered,
     isHotPatching,
+    patchFile,
   } = useWebContainerPreview(
     wcFiles,
     wcProject,
@@ -567,6 +572,9 @@ export function WebsiteBuilderPage() {
     undefined,
     isBuildInProgress,
   );
+
+  // BEO-676: keep the ref current so useWebsiteBuilder's SSE handler can call it.
+  wcPatchFileRef.current = patchFile;
 
   const showOverlay =
     !isWebContainerSupported() ||

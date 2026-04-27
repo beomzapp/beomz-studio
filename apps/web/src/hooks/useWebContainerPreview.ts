@@ -149,6 +149,11 @@ export interface WcPreviewState {
    * the MIME-type errors that occur when the iframe reloads before Vite is ready.
    */
   isHotPatching: boolean;
+  /**
+   * BEO-676: write a single file into the running WebContainer FS so Vite HMR
+   * picks it up without a full reload. No-ops if the container isn't ready yet.
+   */
+  patchFile: (file: string, content: string) => Promise<void>;
 }
 
 // BEO-482 Fix 2: known scaffold content signatures.
@@ -897,5 +902,12 @@ export function useWebContainerPreview(
     void deliverFiles(instance, files, project);
   }, [files, project, project?.id, deliverFiles]);
 
-  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered, isHotPatching };
+  // BEO-676: write a single file into the live WC FS so Vite HMR picks it up.
+  const patchFile = useCallback(async (file: string, content: string) => {
+    const instance = instanceRef.current;
+    if (!instance || instance.installedAt === null) return;
+    await writeFileEnsuringDir(instance.wc, file, content);
+  }, []);
+
+  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered, isHotPatching, patchFile };
 }
