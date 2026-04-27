@@ -155,8 +155,7 @@ function ProgressPhases({ filled }: { filled: number }) {
 
 // ─── Surprise helpers ─────────────────────────────────────────────────────────
 
-function buildSurprisePrompt(): string {
-  const randomSiteType = SITE_TYPES[Math.floor(Math.random() * SITE_TYPES.length)].id;
+function buildSurprisePrompt(siteType: SiteType): string {
   const presetVibes = ["Minimal", "Bold", "Playful", "Luxury", "Corporate"] as const;
   const randomVibe = presetVibes[Math.floor(Math.random() * presetVibes.length)];
 
@@ -170,7 +169,7 @@ function buildSurprisePrompt(): string {
 
   const adjectives = ["stunning", "vibrant", "clean", "modern", "bold", "elegant", "creative", "sleek"];
   const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const typeLabel = SITE_TYPE_LABELS[randomSiteType];
+  const typeLabel = SITE_TYPE_LABELS[siteType];
 
   return (
     `Build a ${adj} ${typeLabel} website. Surprise me with the design. ` +
@@ -187,10 +186,11 @@ function buildSurprisePrompt(): string {
 interface Step1Props {
   onSelect: (type: SiteType) => void;
   onDescribeDirect: (text: string) => void;
-  onSurprise: () => void;
+  onSurprise: (type: SiteType) => void;
 }
 
 function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
+  const [selectedType, setSelectedType] = useState<SiteType | null>(null);
   const [showDirectInput, setShowDirectInput] = useState(false);
   const [directText, setDirectText] = useState("");
   const [surprised, setSurprised] = useState(false);
@@ -201,8 +201,9 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
   }, [showDirectInput]);
 
   const handleSurpriseClick = () => {
+    if (!selectedType) return;
     setSurprised(true);
-    setTimeout(() => onSurprise(), 1500);
+    setTimeout(() => onSurprise(selectedType), 1500);
   };
 
   if (surprised) {
@@ -223,6 +224,8 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
     );
   }
 
+  const selectedLabel = SITE_TYPES.find((t) => t.id === selectedType)?.label ?? "";
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#faf9f6] px-6 py-16">
       <h1 className="mb-2 text-center text-3xl font-bold tracking-tight text-[#1a1a1a]">
@@ -232,46 +235,98 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
         Choose the type of site you want to create
       </p>
 
-      {/* 3×2 grid */}
+      {/* 3×2 grid — click selects, does not navigate */}
       <div className="grid w-full max-w-2xl grid-cols-3 gap-4">
-        {SITE_TYPES.map(({ id, label, icon }) => (
-          <button
-            key={id}
-            onClick={() => onSelect(id)}
-            className="group flex flex-col items-center justify-center gap-3 rounded-2xl border border-[#e5e5e5] bg-white px-4 py-8 text-center transition-all duration-150 hover:border-[#F97316]/40 hover:bg-orange-50/40 hover:shadow-sm active:scale-[0.97]"
-          >
-            <span className="text-[#6b7280] transition-colors group-hover:text-[#F97316]">
-              {icon}
-            </span>
-            <span className="text-[14px] font-medium text-[#1a1a1a]">{label}</span>
-          </button>
-        ))}
+        {SITE_TYPES.map(({ id, label, icon }) => {
+          const isSelected = selectedType === id;
+          return (
+            <button
+              key={id}
+              onClick={() => setSelectedType(id)}
+              className={cn(
+                "group flex flex-col items-center justify-center gap-3 rounded-2xl border bg-white px-4 py-8 text-center transition-all duration-150 active:scale-[0.97]",
+                isSelected
+                  ? "border-[#F97316] bg-orange-50/40 shadow-sm"
+                  : "border-[#e5e5e5] hover:border-[#F97316]/40 hover:bg-orange-50/40 hover:shadow-sm",
+              )}
+            >
+              <span
+                className={cn(
+                  "transition-colors",
+                  isSelected ? "text-[#F97316]" : "text-[#6b7280] group-hover:text-[#F97316]",
+                )}
+              >
+                {icon}
+              </span>
+              <span className="text-[14px] font-medium text-[#1a1a1a]">{label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Surprise me — 7th card, full width below grid */}
-      <div className="mt-4 w-full max-w-2xl">
+      {/* Confirmation badge — appears above bottom row when type selected */}
+      <div className="mt-5 flex h-7 w-full max-w-2xl items-center">
+        {selectedType && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1 text-[12px] font-semibold text-[#EA580C]">
+            ✓ {selectedLabel} selected
+          </span>
+        )}
+      </div>
+
+      {/* Bottom row: Surprise me (left) + Continue (right) */}
+      <div className="mt-2 grid w-full max-w-2xl grid-cols-2 gap-4">
         <button
           onClick={handleSurpriseClick}
-          className="group flex w-full items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#F97316]/50 bg-white px-4 py-6 text-center transition-all duration-150 hover:border-[#F97316] hover:bg-orange-50/30 hover:shadow-sm active:scale-[0.99]"
+          disabled={!selectedType}
+          title={
+            selectedType
+              ? "We'll pick vibe, colors and sections — builds instantly, no more questions"
+              : "Select a type above first"
+          }
+          className={cn(
+            "flex items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-6 text-center transition-all duration-150",
+            selectedType
+              ? "cursor-pointer border-[#F97316] hover:bg-orange-50/30 hover:shadow-sm active:scale-[0.99]"
+              : "cursor-not-allowed border-[#d1d5db] opacity-50",
+          )}
         >
-          <span className="text-[20px] text-[#F97316] transition-transform duration-150 group-hover:scale-110">
+          <span
+            className={cn(
+              "text-[20px] transition-transform duration-150",
+              selectedType ? "text-[#F97316]" : "text-[#9ca3af]",
+            )}
+          >
             ✦
           </span>
           <span className="text-[14px] font-medium text-[#1a1a1a]">Surprise me</span>
         </button>
+
+        <button
+          onClick={() => selectedType && onSelect(selectedType)}
+          disabled={!selectedType}
+          className={cn(
+            "flex items-center justify-center gap-2 rounded-2xl px-4 py-6 text-[14px] font-semibold text-white transition-all duration-150",
+            selectedType
+              ? "bg-[#F97316] hover:bg-[#EA580C] active:scale-[0.99]"
+              : "cursor-not-allowed bg-[#F97316] opacity-40",
+          )}
+        >
+          Continue
+          <ChevronRight size={16} />
+        </button>
       </div>
 
-      {/* Escape hatch */}
+      {/* Tertiary escape hatch — does not require type selection */}
       {!showDirectInput ? (
         <button
           onClick={() => setShowDirectInput(true)}
-          className="mt-8 flex items-center gap-1 text-[13px] text-[#9ca3af] transition-colors hover:text-[#F97316]"
+          className="mt-6 flex items-center gap-1 text-[13px] text-[#9ca3af] transition-colors hover:text-[#F97316]"
         >
           or describe your site directly
           <ChevronRight size={14} />
         </button>
       ) : (
-        <div className="mt-8 flex w-full max-w-lg flex-col gap-3">
+        <div className="mt-6 flex w-full max-w-lg flex-col gap-3">
           <input
             ref={directInputRef}
             value={directText}
@@ -979,8 +1034,8 @@ export function WebsiteNewPage() {
       });
   }, [navigate]);
 
-  const handleSurprise = useCallback(() => {
-    const prompt = buildSurprisePrompt();
+  const handleSurprise = useCallback((type: SiteType) => {
+    const prompt = buildSurprisePrompt(type);
     createWebsiteProject("My Website", "marketing-website")
       .then((project) => {
         void navigate({
