@@ -89,7 +89,7 @@ function BuildRow({ build }: { build: AdminBuild }) {
                 {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               </span>
             )}
-            <span className="text-sm text-slate-700 truncate max-w-[240px]">{build.user_email}</span>
+            <span className="text-sm text-slate-700 truncate max-w-[240px]">{build.user_email ?? "—"}</span>
           </div>
         </td>
         <td className="px-4 py-3">
@@ -246,7 +246,7 @@ export default function BuildsPage() {
   }, [loadStats, loadBuilds]);
 
   const successRate =
-    stats
+    stats && stats.success_rate != null
       ? `${stats.success_rate.toFixed(1)}%`
       : "—";
 

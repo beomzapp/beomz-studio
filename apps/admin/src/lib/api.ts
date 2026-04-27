@@ -119,9 +119,9 @@ export type BuildStatus = "building" | "success" | "failed";
 
 export interface AdminBuild {
   id: string;
-  user_email: string;
+  user_email: string | null;
   status: BuildStatus;
-  started_at: string;
+  started_at: string | null;
   completed_at: string | null;
   duration_ms: number | null;
   tokens_used: number | null;
@@ -137,7 +137,7 @@ export interface AdminBuildStats {
   today_total: number;
   today_success: number;
   today_failed: number;
-  success_rate: number;
+  success_rate: number | null;
 }
 
 export async function fetchAdminBuilds(accessToken: string): Promise<AdminBuildsResponse> {
