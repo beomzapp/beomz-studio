@@ -1320,22 +1320,27 @@ export class StudioDbClient {
       .select("*")
       .single();
 
-    let response = await runUpsert(input);
+    let payload = input;
+    let response = await runUpsert(payload);
 
     if (response.error && /input_tokens/i.test(response.error.message)) {
       await attemptPostgrestSchemaReload(this.client).catch(() => undefined);
-      response = await runUpsert(input);
+      response = await runUpsert(payload);
 
       if (response.error && /input_tokens/i.test(response.error.message)) {
-        const { input_tokens: _ignoredInputTokens, ...fallbackInput } = input;
-        response = await runUpsert(fallbackInput);
+        const { input_tokens: _ignoredInputTokens, ...fallbackInput } = payload;
+        payload = fallbackInput;
+        response = await runUpsert(payload);
       }
     }
 
     if (response.error && /build_telemetry_user_id_fkey/i.test(response.error.message)) {
-      response = await runUpsert({
-        ...input,
+      payload = {
+        ...payload,
         user_id: null,
+      };
+      response = await runUpsert({
+        ...payload,
       });
     }
 
