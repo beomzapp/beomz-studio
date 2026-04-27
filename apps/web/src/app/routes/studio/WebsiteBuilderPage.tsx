@@ -357,7 +357,11 @@ function PreviewOverlay({ message }: PreviewOverlayProps) {
           <BeomzLogo className="h-7 w-7 text-white" />
         </span>
       </div>
-      <p className="text-[14px] font-medium text-[#1a1a1a]">{message || "Loading…"}</p>
+      <p className="max-w-[480px] text-center text-[14px] font-medium text-[#1a1a1a]">
+        {((message || "Loading…").length > 80
+          ? (message || "Loading…").slice(0, 80) + "…"
+          : (message || "Loading…"))}
+      </p>
     </div>
   );
 }
