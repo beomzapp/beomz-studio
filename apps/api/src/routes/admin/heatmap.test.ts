@@ -10,7 +10,7 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { createRequireAdmin } = await import("../../middleware/requireAdmin.js");
-const { createAdminHeatmapRoute } = await import("./heatmap.js");
+const { buildHeatmap, createAdminHeatmapRoute } = await import("./heatmap.js");
 
 function createOrgContext(): OrgContext {
   const now = new Date().toISOString();
@@ -79,7 +79,81 @@ test("GET /admin/heatmap rejects non-admin users", async () => {
   assert.deepEqual(await response.json(), { error: "Admin access required." });
 });
 
-test("GET /admin/heatmap defaults to 24h and returns grouped points", async () => {
+test("buildHeatmap groups by country using the most recent event per user and tracks active users", () => {
+  const now = Date.parse("2026-04-27T13:30:00.000Z");
+
+  const points = buildHeatmap([
+    {
+      country_code: "US",
+      country_name: "United States",
+      created_at: "2026-04-27T13:20:00.000Z",
+      lat: 40,
+      lng: -74,
+      user_id: "user-1",
+    },
+    {
+      country_code: "CA",
+      country_name: "Canada",
+      created_at: "2026-04-27T13:10:00.000Z",
+      lat: 56,
+      lng: -106,
+      user_id: "user-1",
+    },
+    {
+      country_code: "US",
+      country_name: "United States",
+      created_at: "2026-04-27T12:40:00.000Z",
+      lat: 34,
+      lng: -118,
+      user_id: "user-2",
+    },
+    {
+      country_code: "AE",
+      country_name: "United Arab Emirates",
+      created_at: "2026-04-27T13:25:00.000Z",
+      lat: 25.2048,
+      lng: 55.2708,
+      user_id: "user-3",
+    },
+    {
+      country_code: "AE",
+      country_name: "United Arab Emirates",
+      created_at: "2026-04-27T13:15:00.000Z",
+      lat: null,
+      lng: null,
+      user_id: "user-4",
+    },
+    {
+      country_code: "US",
+      country_name: "United States",
+      created_at: "2026-04-27T13:05:00.000Z",
+      lat: 37.7749,
+      lng: -122.4194,
+      user_id: null,
+    },
+  ], now);
+
+  assert.deepEqual(points, [
+    {
+      active: 1,
+      country_code: "US",
+      country_name: "United States",
+      lat: 37,
+      lng: -96,
+      total: 2,
+    },
+    {
+      active: 1,
+      country_code: "AE",
+      country_name: "United Arab Emirates",
+      lat: 25.2048,
+      lng: 55.2708,
+      total: 1,
+    },
+  ]);
+});
+
+test("GET /admin/heatmap defaults to 24h and returns grouped country totals", async () => {
   const ranges: string[] = [];
   const app = createApp(createAdminHeatmapRoute({
     authMiddleware: async (_c, next) => {
@@ -88,11 +162,12 @@ test("GET /admin/heatmap defaults to 24h and returns grouped points", async () =
     getHeatmap: async (range) => {
       ranges.push(range);
       return [{
-        count: 3,
+        active: 1,
         country_code: "US",
         country_name: "United States",
         lat: 37.0902,
         lng: -95.7129,
+        total: 3,
       }];
     },
     loadOrgContextMiddleware: async (c, next) => {
@@ -107,11 +182,12 @@ test("GET /admin/heatmap defaults to 24h and returns grouped points", async () =
   const response = await app.request("http://localhost/admin/heatmap");
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), [{
-    count: 3,
+    active: 1,
     country_code: "US",
     country_name: "United States",
     lat: 37.0902,
     lng: -95.7129,
+    total: 3,
   }]);
   assert.deepEqual(ranges, ["24h"]);
 });
