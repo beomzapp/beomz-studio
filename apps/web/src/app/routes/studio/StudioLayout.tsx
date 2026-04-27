@@ -119,11 +119,10 @@ export function StudioLayout() {
   // Hide sidebar on builder pages — they have their own TopBar + layout
   const isProjectPage = !!matchRoute({ to: "/studio/project/$id", fuzzy: true });
   const isVersionPreviewPage = !!matchRoute({ to: "/studio/version-preview", fuzzy: true });
-  const isWebsiteNewPage = !!matchRoute({ to: "/studio/websites/new", fuzzy: true });
   // Onboarding modal must only appear on the home dashboard
   const isHomePage = !!matchRoute({ to: "/studio/home", fuzzy: true });
 
-  if (isProjectPage || isVersionPreviewPage || isWebsiteNewPage) {
+  if (isProjectPage || isVersionPreviewPage) {
     return (
       <div className="flex h-screen flex-col">
         <main className="flex-1 overflow-hidden">
