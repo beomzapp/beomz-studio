@@ -874,7 +874,10 @@ async function callAnthropicWebsiteGeneration(input: {
     "7. SEO is mandatory: exactly one h1 on the page, sensible h2 and h3 hierarchy, and meta tags in index.html.",
     "8. Use Tailwind utility classes with a mobile-first responsive layout.",
     "9. Make the design modern, high quality, and aligned to the requested vibe. Default to a clean minimal aesthetic unless the vibe clearly asks for something stronger.",
-    "10. Use https://picsum.photos/1200/600 for placeholder imagery when an image is needed.",
+    "10. For ALL images use Unsplash Source API:",
+    "    <img src=\"https://source.unsplash.com/{width}x{height}/?{keyword1},{keyword2}\" alt=\"description\" />",
+    "    Keywords by context: hero→restaurant,fine-dining | gallery→food,plating | person→chef,portrait | product→product,lifestyle",
+    "    NEVER use picsum or broken src. Every <img> must use https://source.unsplash.com",
     "11. Keep the output self-contained. Do not add route.ts files, backend files, or package manager files.",
     "12. Prefer a tasteful, production-ready website that could realistically be shown to a customer immediately.",
   ].join("\n");
