@@ -58,6 +58,7 @@ import nextPhaseRoute from "./routes/projects/next-phase.js";
 import projectAuthRoute, { PROJECT_AUTH_CORS_HEADERS } from "./routes/projects/auth.js";
 import supabaseIntegrationsRoute from "./routes/integrations/supabase.js";
 import websitesGenerateRoute from "./routes/websites/generate.js";
+import websitesIterateRoute from "./routes/websites/iterate.js";
 
 const app = new Hono();
 const activeSseConnections = new Set<string>();
@@ -214,6 +215,7 @@ app.route("/payments/storage-addon", createStorageAddonRoute());
 app.route("/payments/storage-addons", createStorageAddonRoute());
 app.route("/integrations/supabase", supabaseIntegrationsRoute);
 app.route("/websites", websitesGenerateRoute);
+app.route("/websites", websitesIterateRoute);
 // BEO-130: Built-in DB + BYO Supabase
 app.route("/projects/:id/db", dbRouter);
 // BEO-262: Publish
