@@ -31,6 +31,10 @@ const WEBSITE_MAX_TOKENS = 64000;
 const WEBSITE_OPERATION: BuilderV3Operation = "initial_build";
 const WEBSITE_PREVIEW_ENTRY_PATH = "/";
 const WEBSITE_PING_INTERVAL_MS = 20_000;
+const WEBSITE_HERO_FILE_PATH = "src/components/Hero.tsx";
+const FAL_FLUX_ENDPOINT = "https://fal.run/fal-ai/flux/dev";
+const FAL_HERO_IMAGE_WIDTH = 1600;
+const FAL_HERO_IMAGE_HEIGHT = 900;
 
 const siteTypeSchema = z.enum(["landing", "portfolio", "restaurant", "ecommerce", "agency", "blog"]);
 const vibeSchema = z.enum(["minimal", "bold", "playful", "luxury", "corporate"]);
@@ -69,6 +73,15 @@ interface WebsiteFilesEvent extends Record<string, unknown> {
   operation: BuilderV3Operation;
   files: Array<{ path: string; content: string }>;
   totalFiles: number;
+}
+
+interface WebsiteImageUpdateEvent extends Record<string, unknown> {
+  type: "image_update";
+  id: string;
+  timestamp: string;
+  operation: BuilderV3Operation;
+  file: string;
+  content: string;
 }
 
 interface WebsiteBuildProfile {
@@ -203,7 +216,7 @@ function readTrace(metadata: Record<string, unknown>): BuilderV3TraceMetadata {
 async function appendEventToDb(
   db: StudioDbClient,
   buildId: string,
-  event: BuilderV3Event,
+  event: BuilderV3Event | WebsiteFilesEvent | WebsiteImageUpdateEvent,
   extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
 ): Promise<void> {
   const row = await db.findGenerationById(buildId);
@@ -215,9 +228,10 @@ async function appendEventToDb(
     ? (row.metadata as Record<string, unknown>)
     : {};
   const currentTrace = readTrace(metadata);
+  const traceEvent = event as unknown as BuilderV3Event;
   const nextTrace: BuilderV3TraceMetadata = {
     ...currentTrace,
-    events: [...currentTrace.events, event],
+    events: [...currentTrace.events, traceEvent],
     lastEventId: event.id,
   };
 
@@ -842,6 +856,139 @@ function parseToolResult(raw: {
   return { files, summary, siteName };
 }
 
+function buildHeroImagePrompt(input: {
+  projectName: string;
+  prompt: string;
+  siteType: SiteType;
+  vibe: Vibe;
+  pages: string[];
+  summary: string;
+}): string {
+  const siteContext: Record<SiteType, string> = {
+    landing: "Show a premium brand moment that instantly communicates the offer without looking like a SaaS dashboard.",
+    portfolio: "Show an editorial, design-forward scene that feels like a premium portfolio hero with strong taste and atmosphere.",
+    restaurant: "Show elevated hospitality, plated food, and a cinematic dining atmosphere that feels reservation-worthy.",
+    ecommerce: "Show a polished product-led lifestyle scene with premium lighting, composition, and commercial photography quality.",
+    agency: "Show a confident brand-forward scene that feels strategic, premium, and modern rather than corporate stock imagery.",
+    blog: "Show an editorial lifestyle scene that feels thoughtful, warm, and credible for a content-led brand.",
+  };
+  const vibeContext: Record<Vibe, string> = {
+    minimal: "Keep the composition clean, refined, airy, and understated.",
+    bold: "Use dramatic contrast, dynamic framing, and high visual confidence.",
+    playful: "Use expressive color, warmth, and an energetic but polished mood.",
+    luxury: "Use rich materials, moody lighting, and high-end editorial styling.",
+    corporate: "Keep it crisp, trustworthy, premium, and contemporary.",
+  };
+
+  const brief = compactWhitespace(input.prompt).slice(0, 1200);
+  const pageContext = input.pages.length > 0 ? `Key navigation themes: ${input.pages.join(", ")}.` : "";
+
+  return compactWhitespace([
+    `Create a cinematic website hero image for ${input.projectName}.`,
+    siteContext[input.siteType],
+    vibeContext[input.vibe],
+    `Website summary: ${input.summary}`,
+    `User brief: ${brief}`,
+    pageContext,
+    "Use a 16:9 composition suitable for a landing-page hero.",
+    "Photorealistic, premium, customer-ready, and visually cohesive.",
+    "Do not include text, letters, logos, UI mockups, watermarks, split screens, or collage layouts.",
+  ].filter(Boolean).join(" "));
+}
+
+async function generateFalHeroImageUrl(input: {
+  heroPrompt: string;
+  abortSignal?: AbortSignal;
+}): Promise<string | null> {
+  const falKey = process.env.FAL_KEY?.trim();
+  if (!falKey) {
+    console.warn("[websites/generate] FAL_KEY missing; skipping hero image generation.");
+    return null;
+  }
+
+  const response = await fetch(FAL_FLUX_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${falKey}`,
+      "Content-Type": "application/json",
+      "X-Fal-Store-IO": "0",
+    },
+    body: JSON.stringify({
+      prompt: input.heroPrompt,
+      image_size: {
+        width: FAL_HERO_IMAGE_WIDTH,
+        height: FAL_HERO_IMAGE_HEIGHT,
+      },
+      num_images: 1,
+      enable_safety_checker: true,
+      output_format: "jpeg",
+    }),
+    signal: input.abortSignal,
+  });
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      `fal.ai hero image request failed: ${response.status} ${response.statusText}${details ? ` - ${details.slice(0, 300)}` : ""}`,
+    );
+  }
+
+  const data = await response.json() as {
+    images?: Array<{ url?: unknown }>;
+  };
+  const imageUrl = data.images?.find((image) => typeof image.url === "string" && image.url.trim().length > 0)?.url;
+
+  if (typeof imageUrl !== "string") {
+    throw new Error("fal.ai hero image response did not include an image URL.");
+  }
+
+  return imageUrl.trim();
+}
+
+function replaceHeroImageSrc(heroContent: string, imageUrl: string): string | null {
+  const quotedSrcUpdated = heroContent.replace(
+    /(<img\b[\s\S]*?\bsrc=)(["'])(.*?)\2/,
+    (_match, prefix: string, quote: string) => `${prefix}${quote}${imageUrl}${quote}`,
+  );
+
+  if (quotedSrcUpdated !== heroContent) {
+    return quotedSrcUpdated;
+  }
+
+  const jsxWrappedSrcUpdated = heroContent.replace(
+    /(<img\b[\s\S]*?\bsrc=\{)(["'])(.*?)\2\}/,
+    (_match, prefix: string, quote: string) => `${prefix}${quote}${imageUrl}${quote}}`,
+  );
+
+  return jsxWrappedSrcUpdated !== heroContent ? jsxWrappedSrcUpdated : null;
+}
+
+function applyHeroImageUpdate(files: StudioFile[], imageUrl: string): {
+  files: StudioFile[];
+  updatedContent: string | null;
+} {
+  let updatedContent: string | null = null;
+
+  const nextFiles = files.map((file) => {
+    if (file.path !== WEBSITE_HERO_FILE_PATH) {
+      return file;
+    }
+
+    const replacedContent = replaceHeroImageSrc(file.content, imageUrl);
+    if (!replacedContent || replacedContent === file.content) {
+      return file;
+    }
+
+    updatedContent = replacedContent;
+    return {
+      ...file,
+      content: replacedContent,
+    };
+  });
+
+  return { files: nextFiles, updatedContent };
+}
+
 async function callAnthropicWebsiteGeneration(input: {
   prompt: string;
   siteType: SiteType;
@@ -1186,7 +1333,7 @@ websitesGenerateRoute.post(
 
       const writeEvent = async (
         eventName: string,
-        payload: BuilderV3Event | WebsiteFilesEvent,
+        payload: BuilderV3Event | WebsiteFilesEvent | WebsiteImageUpdateEvent,
         extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
       ) => {
         await appendEventToDb(
@@ -1272,7 +1419,7 @@ websitesGenerateRoute.post(
           aiFiles: generation?.files ?? [],
           fallbackFiles,
         });
-        const finalFiles = toStudioFiles(normalized.files);
+        let finalFiles = toStudioFiles(normalized.files);
         const fallbackUsed = generation === null || normalized.scaffoldEnforced || apiConfig.MOCK_ANTHROPIC === true;
         const fallbackReason = generation === null
           ? (apiConfig.MOCK_ANTHROPIC ? "mock_anthropic" : "anthropic_error")
@@ -1300,6 +1447,53 @@ websitesGenerateRoute.post(
           output_paths: finalFiles.map((file) => file.path),
           preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
         });
+
+        throwIfAborted(abortController.signal);
+
+        const heroImagePrompt = buildHeroImagePrompt({
+          projectName: project.name,
+          prompt,
+          siteType,
+          vibe,
+          pages,
+          summary,
+        });
+        const heroImageUrl = await generateFalHeroImageUrl({
+          heroPrompt: heroImagePrompt,
+          abortSignal: abortController.signal,
+        }).catch((error) => {
+          if (isAbortError(error) || abortController.signal.aborted || c.req.raw.signal.aborted) {
+            throw error;
+          }
+
+          console.warn(
+            "[websites/generate] fal hero image generation failed; keeping existing hero image:",
+            error instanceof Error ? error.message : String(error),
+          );
+          return null;
+        });
+
+        if (heroImageUrl) {
+          const heroUpdate = applyHeroImageUpdate(finalFiles, heroImageUrl);
+          if (heroUpdate.updatedContent) {
+            finalFiles = heroUpdate.files;
+
+            const imageUpdateEvent: WebsiteImageUpdateEvent = {
+              type: "image_update",
+              id: String(nextEventId++),
+              timestamp: ts(),
+              operation: WEBSITE_OPERATION,
+              file: WEBSITE_HERO_FILE_PATH,
+              content: heroUpdate.updatedContent,
+            };
+
+            await writeEvent("image_update", imageUpdateEvent, {
+              files: finalFiles,
+              output_paths: finalFiles.map((file) => file.path),
+              preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
+            });
+          }
+        }
 
         const completedAt = ts();
         const doneEvent: BuilderV3DoneEvent = {
