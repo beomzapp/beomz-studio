@@ -10,7 +10,7 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { createRequireAdmin } = await import("../../middleware/requireAdmin.js");
-const { createAdminBuildsRoute } = await import("./builds.js");
+const { calculateAdminBuildDurationMs, createAdminBuildsRoute } = await import("./builds.js");
 
 function createOrgContext(): OrgContext {
   const now = new Date().toISOString();
@@ -57,6 +57,14 @@ function createApp(route: ReturnType<typeof createAdminBuildsRoute>) {
   return app;
 }
 
+test("calculateAdminBuildDurationMs returns the completed build duration in milliseconds", () => {
+  assert.equal(
+    calculateAdminBuildDurationMs("2026-04-26T09:55:00.000Z", "2026-04-26T09:59:00.000Z"),
+    240000,
+  );
+  assert.equal(calculateAdminBuildDurationMs("2026-04-26T10:00:00.000Z", null), null);
+});
+
 test("GET /admin/builds rejects non-admin users", async () => {
   const app = createApp(createAdminBuildsRoute({
     authMiddleware: async (_c, next) => {
@@ -89,23 +97,27 @@ test("GET /admin/builds returns in-flight and recent build payloads", async () =
         {
           completed_at: null,
           cost_usd: null,
+          duration_ms: null,
           error_reason: null,
           id: "build-1",
           project_id: "project-1",
           started_at: "2026-04-26T10:00:00.000Z",
           status: "building",
           token_usage: null,
+          tokens_used: null,
           user_email: "omar@example.com",
         },
         {
           completed_at: "2026-04-26T09:59:00.000Z",
           cost_usd: 1.234567,
+          duration_ms: 240000,
           error_reason: null,
           id: "build-2",
           project_id: "project-2",
           started_at: "2026-04-26T09:55:00.000Z",
           status: "success",
           token_usage: 12345,
+          tokens_used: 12345,
           user_email: "team@example.com",
         },
       ],
@@ -113,12 +125,14 @@ test("GET /admin/builds returns in-flight and recent build payloads", async () =
         {
           completed_at: null,
           cost_usd: null,
+          duration_ms: null,
           error_reason: null,
           id: "build-1",
           project_id: "project-1",
           started_at: "2026-04-26T10:00:00.000Z",
           status: "building",
           token_usage: null,
+          tokens_used: null,
           user_email: "omar@example.com",
         },
       ],
@@ -126,12 +140,14 @@ test("GET /admin/builds returns in-flight and recent build payloads", async () =
         {
           completed_at: "2026-04-26T09:59:00.000Z",
           cost_usd: 1.234567,
+          duration_ms: 240000,
           error_reason: null,
           id: "build-2",
           project_id: "project-2",
           started_at: "2026-04-26T09:55:00.000Z",
           status: "success",
           token_usage: 12345,
+          tokens_used: 12345,
           user_email: "team@example.com",
         },
       ],
@@ -152,23 +168,27 @@ test("GET /admin/builds returns in-flight and recent build payloads", async () =
       {
         completed_at: null,
         cost_usd: null,
+        duration_ms: null,
         error_reason: null,
         id: "build-1",
         project_id: "project-1",
         started_at: "2026-04-26T10:00:00.000Z",
         status: "building",
         token_usage: null,
+        tokens_used: null,
         user_email: "omar@example.com",
       },
       {
         completed_at: "2026-04-26T09:59:00.000Z",
         cost_usd: 1.234567,
+        duration_ms: 240000,
         error_reason: null,
         id: "build-2",
         project_id: "project-2",
         started_at: "2026-04-26T09:55:00.000Z",
         status: "success",
         token_usage: 12345,
+        tokens_used: 12345,
         user_email: "team@example.com",
       },
     ],
@@ -176,12 +196,14 @@ test("GET /admin/builds returns in-flight and recent build payloads", async () =
       {
         completed_at: null,
         cost_usd: null,
+        duration_ms: null,
         error_reason: null,
         id: "build-1",
         project_id: "project-1",
         started_at: "2026-04-26T10:00:00.000Z",
         status: "building",
         token_usage: null,
+        tokens_used: null,
         user_email: "omar@example.com",
       },
     ],
@@ -189,12 +211,14 @@ test("GET /admin/builds returns in-flight and recent build payloads", async () =
       {
         completed_at: "2026-04-26T09:59:00.000Z",
         cost_usd: 1.234567,
+        duration_ms: 240000,
         error_reason: null,
         id: "build-2",
         project_id: "project-2",
         started_at: "2026-04-26T09:55:00.000Z",
         status: "success",
         token_usage: 12345,
+        tokens_used: 12345,
         user_email: "team@example.com",
       },
     ],

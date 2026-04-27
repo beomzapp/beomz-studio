@@ -43,12 +43,14 @@ interface UserEmailRow {
 export interface AdminBuild {
   completed_at: string | null;
   cost_usd: number | null;
+  duration_ms: number | null;
   error_reason: string | null;
   id: string;
   project_id: string;
   started_at: string;
   status: AdminBuildStatus;
   token_usage: number | null;
+  tokens_used: number | null;
   user_email: string;
 }
 
@@ -142,6 +144,20 @@ function getTokenUsage(row: BuildTelemetryAdminRow | null | undefined): number |
   }
 
   return (inputTokens ?? 0) + (outputTokens ?? 0);
+}
+
+export function calculateAdminBuildDurationMs(startedAt: string, completedAt: string | null): number | null {
+  if (!completedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(startedAt);
+  const completedAtMs = Date.parse(completedAt);
+  if (Number.isNaN(startedAtMs) || Number.isNaN(completedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, completedAtMs - startedAtMs);
 }
 
 function getCostUsd(row: BuildTelemetryAdminRow | null | undefined): number | null {
@@ -341,12 +357,14 @@ async function hydrateAdminBuilds(rows: GenerationAdminRow[]): Promise<AdminBuil
     return {
       completed_at: row.completed_at,
       cost_usd: getCostUsd(telemetry),
+      duration_ms: calculateAdminBuildDurationMs(row.started_at, row.completed_at),
       error_reason: getBuildErrorReason(row),
       id: row.id,
       project_id: row.project_id,
       started_at: row.started_at,
       status: toAdminBuildStatus(row.status),
       token_usage: getTokenUsage(telemetry),
+      tokens_used: getTokenUsage(telemetry),
       user_email: telemetryUserEmail ?? ownerEmailsByProjectId.get(row.project_id) ?? FALLBACK_USER_EMAIL,
     } satisfies AdminBuild;
   });
