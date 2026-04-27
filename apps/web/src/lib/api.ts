@@ -1299,11 +1299,20 @@ export async function createWebsiteProject(name: string, template = "marketing-w
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ name, template }),
+    body: JSON.stringify({ name, template, project_type: "website" }),
   });
   if (!res.ok) {
     await handleUnauthorizedResponse(res);
     throw new Error(`Failed to create project: ${res.status}`);
   }
   return res.json() as Promise<{ id: string; name: string }>;
+}
+
+/** List all projects with project_type = 'website'. */
+export async function listWebsiteProjects(): Promise<ProjectsListResponse> {
+  const data = await requestJson<ProjectsListResponse>("/projects", { method: "GET" });
+  return {
+    ...data,
+    projects: data.projects.filter((p) => p.projectType === "website"),
+  };
 }
