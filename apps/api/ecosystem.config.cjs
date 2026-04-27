@@ -11,6 +11,8 @@ module.exports = {
       script: "dist/bootstrap.js",
       cwd: "/root/beomz-studio/apps/api",
       interpreter: "node",
+      instances: 2,
+      exec_mode: "cluster",
       kill_timeout: 30000,
       // Use SIGTERM so our server.ts handler fires
       kill_signal: "SIGTERM",
