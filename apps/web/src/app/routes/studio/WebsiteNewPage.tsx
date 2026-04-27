@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { cn } from "../../../lib/cn";
-import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
+import { createWebsiteProject } from "../../../lib/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -868,12 +868,30 @@ interface Step6Props {
 }
 
 function Step6({ siteType, name, description, vibeValue, colors, pages, sections, onDone }: Step6Props) {
+  const navigate = useNavigate();
   useEffect(() => {
     const prompt = buildPrompt(siteType, name, description, vibeValue, colors, pages, sections);
-    saveProjectLaunchIntent({ prompt });
-    const t = setTimeout(() => onDone(), 1600);
-    return () => clearTimeout(t);
-  }, [siteType, name, description, vibeValue, colors, pages, sections, onDone]);
+    let cancelled = false;
+
+    createWebsiteProject(name || "My Website", "marketing-website")
+      .then((project) => {
+        if (cancelled) return;
+        void navigate({
+          to: "/studio/websites/$projectId",
+          params: { projectId: project.id },
+          search: { brief: encodeURIComponent(prompt) },
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        onDone();
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const label = SITE_TYPE_LABELS[siteType];
 
@@ -948,14 +966,32 @@ export function WebsiteNewPage() {
   }, []);
 
   const handleDescribeDirect = useCallback((text: string) => {
-    saveProjectLaunchIntent({ prompt: text });
-    void navigate({ to: "/studio/project/$id", params: { id: "new" } });
+    createWebsiteProject("My Website", "marketing-website")
+      .then((project) => {
+        void navigate({
+          to: "/studio/websites/$projectId",
+          params: { projectId: project.id },
+          search: { brief: encodeURIComponent(text) },
+        });
+      })
+      .catch(() => {
+        void navigate({ to: "/studio/websites" });
+      });
   }, [navigate]);
 
   const handleSurprise = useCallback(() => {
     const prompt = buildSurprisePrompt();
-    saveProjectLaunchIntent({ prompt });
-    void navigate({ to: "/studio/project/$id", params: { id: "new" } });
+    createWebsiteProject("My Website", "marketing-website")
+      .then((project) => {
+        void navigate({
+          to: "/studio/websites/$projectId",
+          params: { projectId: project.id },
+          search: { brief: encodeURIComponent(prompt) },
+        });
+      })
+      .catch(() => {
+        void navigate({ to: "/studio/websites" });
+      });
   }, [navigate]);
 
   const handleQuestionsComplete = useCallback(
@@ -984,7 +1020,7 @@ export function WebsiteNewPage() {
   }, []);
 
   const handleGenerateDone = useCallback(() => {
-    void navigate({ to: "/studio/project/$id", params: { id: "new" } });
+    void navigate({ to: "/studio/websites" });
   }, [navigate]);
 
   if (step === 1) {

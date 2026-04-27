@@ -393,6 +393,33 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     }
   });
 
+  // POST / — create a new project (used by Website builder onboarding)
+  projectsRoute.post("/", authMiddleware, loadOrgContextMiddleware, async (c) => {
+    try {
+      const orgContext = c.get("orgContext") as OrgContext;
+      const body = await c.req.json().catch(() => null);
+      const name = typeof body?.name === "string" && body.name.trim().length > 0
+        ? body.name.trim().slice(0, 120)
+        : "Untitled Website";
+      const template = typeof body?.template === "string" && body.template.trim().length > 0
+        ? body.template.trim()
+        : "marketing-website";
+      const { randomUUID } = await import("node:crypto");
+      const projectId = randomUUID();
+      const projectRow = await orgContext.db.createProject({
+        id: projectId,
+        name,
+        org_id: orgContext.org.id,
+        status: "draft",
+        template: template as import("@beomz-studio/contracts").TemplateId,
+      });
+      return c.json({ id: projectRow.id, name: projectRow.name });
+    } catch (err) {
+      console.error("[POST /projects] error:", err);
+      return c.json({ error: "Failed to create project." }, 500);
+    }
+  });
+
   projectsRoute.delete("/:id", authMiddleware, loadOrgContextMiddleware, async (c) => {
     const orgContext = c.get("orgContext") as OrgContext;
     const projectId = c.req.param("id");

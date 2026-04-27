@@ -1289,3 +1289,21 @@ export async function streamBuildEvents(args: {
     removeReaderAbortListener();
   }
 }
+
+/** Create a new project (used by website builder). Returns { id, name }. */
+export async function createWebsiteProject(name: string, template = "marketing-website"): Promise<{ id: string; name: string }> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/projects`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name, template }),
+  });
+  if (!res.ok) {
+    await handleUnauthorizedResponse(res);
+    throw new Error(`Failed to create project: ${res.status}`);
+  }
+  return res.json() as Promise<{ id: string; name: string }>;
+}
