@@ -1,5 +1,5 @@
 /**
- * VersionPreviewPage — BEO-588
+ * VersionPreviewPage — BEO-588 / BEO-641
  * Full-screen read-only preview of a project version snapshot.
  * Opened in a new tab from VersionHistoryPanel.
  * URL: /studio/version-preview?projectId=X&versionId=Y
@@ -7,8 +7,8 @@
 import { useEffect, useState } from "react";
 import { Clock, X } from "lucide-react";
 import { PreviewPane } from "../../../components/studio/PreviewPane";
-import { getProjectVersion, type ProjectVersionDetail } from "../../../lib/api";
-import type { StudioFile, StudioFileKind } from "@beomz-studio/contracts";
+import { getProjectVersion, getProject, type ProjectVersionDetail } from "../../../lib/api";
+import type { Project, StudioFile, StudioFileKind } from "@beomz-studio/contracts";
 
 function toStudioFiles(filesMap: Record<string, string>): StudioFile[] {
   return Object.entries(filesMap).map(([path, content]) => {
@@ -31,6 +31,7 @@ export function VersionPreviewPage() {
   const versionId = params.get("versionId") ?? "";
 
   const [version, setVersion] = useState<ProjectVersionDetail | null>(null);
+  const [project, setProject] = useState<Pick<Project, "id" | "name" | "templateId"> | null>(null);
   const [files, setFiles] = useState<StudioFile[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,9 +44,13 @@ export function VersionPreviewPage() {
     }
     void (async () => {
       try {
-        const detail = await getProjectVersion(projectId, versionId);
+        const [detail, proj] = await Promise.all([
+          getProjectVersion(projectId, versionId),
+          getProject(projectId),
+        ]);
         setVersion(detail);
         setFiles(toStudioFiles(detail.files));
+        setProject({ id: proj.id, name: proj.name, templateId: proj.templateId });
       } catch {
         setError("Failed to load version. Please close this tab and try again.");
       } finally {
@@ -104,13 +109,13 @@ export function VersionPreviewPage() {
           </div>
         )}
 
-        {!loading && !error && files && (
+        {!loading && !error && files && project && (
           <PreviewPane
             files={files}
             generationId={versionId}
             isAiCustomising={false}
             previewEntryPath={null}
-            project={null}
+            project={project}
             refreshToken={0}
             buildFailed={false}
             isBuildInProgress={false}
