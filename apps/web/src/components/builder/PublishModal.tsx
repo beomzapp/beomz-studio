@@ -61,6 +61,8 @@ interface PublishModalProps {
   /** Same gating as TopBar: Pro Builder+ can export; optional so embedders can omit. */
   onExportZip?: () => void;
   isExporting?: boolean;
+  /** BEO-656: BYO hosting handler for Pro Builder+; omit to show "Coming soon". */
+  onByoHosting?: () => void;
 }
 
 const PAID_PLANS = new Set(["pro_starter", "pro_builder", "business"]);
@@ -82,6 +84,7 @@ export function PublishModal({
   onDomainRemoved,
   onExportZip,
   isExporting = false,
+  onByoHosting,
 }: PublishModalProps) {
   const [view, setView] = useState<ModalView>("choose");
   const [copiedVercel, setCopiedVercel] = useState(false);
@@ -252,6 +255,21 @@ export function PublishModal({
                   </span>
                 )}
               </button>
+
+              {/* BEO-656: Export ZIP card */}
+              <ExportZipCard
+                plan={plan}
+                onExportZip={onExportZip}
+                isExporting={isExporting}
+                onCloseModal={onClose}
+              />
+
+              {/* BEO-656: BYO Hosting card */}
+              <ByoHostingCard
+                plan={plan}
+                onByoHosting={onByoHosting}
+                onCloseModal={onClose}
+              />
             </div>
 
             {hasPublishedSurface && (
@@ -262,15 +280,6 @@ export function PublishModal({
                 domainStatus={domainStatus ?? null}
                 onCloseModal={onClose}
                 onDomainRemoved={onDomainRemoved}
-              />
-            )}
-
-            {onExportZip && (
-              <ModalExportSection
-                plan={plan}
-                onExportZip={onExportZip}
-                isExporting={isExporting}
-                onCloseModal={onClose}
               />
             )}
 
@@ -382,50 +391,153 @@ export function PublishModal({
   );
 }
 
-function ModalExportSection({
+// ─────────────────────────────────────────────────────────────
+// BEO-656 — Export ZIP card (locked for free/starter, full card for Pro Builder+)
+// ─────────────────────────────────────────────────────────────
+function ExportZipCard({
   plan,
   onExportZip,
   isExporting,
   onCloseModal,
 }: {
   plan: string;
-  onExportZip: () => void;
+  onExportZip?: () => void;
   isExporting: boolean;
   onCloseModal: () => void;
 }) {
   const { openPricingModal } = usePricingModal();
-  const isGated = EXPORT_GATED_PLANS.has(plan);
+  const isLocked = EXPORT_GATED_PLANS.has(plan);
+
+  if (isLocked) {
+    return (
+      <div className="flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
+          <Download size={18} className="text-white/50" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white">Export ZIP</span>
+            <span className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/60">
+              <Lock size={8} /> Pro Builder+
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-white/50">
+            Download your project to host anywhere
+          </p>
+          <button
+            onClick={() => { onCloseModal(); openPricingModal(); }}
+            className="mt-3 text-xs font-semibold text-[#F97316] hover:underline"
+          >
+            Upgrade to unlock →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-5 border-t border-[#e5e5e5] pt-4">
-      <h3 className="text-sm font-semibold text-[#1a1a1a]">Export ZIP</h3>
-      <p className="mt-0.5 text-xs text-[#6b7280]">Download your project to host anywhere</p>
-      {isGated ? (
-        <div className="mt-3 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] p-3">
-          <p className="text-xs text-[#6b7280]">
-            Available on Pro Builder and above.{" "}
-            <button
-              onClick={() => {
-                onCloseModal();
-                openPricingModal();
-              }}
-              className="font-semibold text-[#F97316] hover:underline"
-            >
-              Upgrade →
-            </button>
+    <button
+      type="button"
+      onClick={onExportZip}
+      disabled={isExporting || !onExportZip}
+      className="group flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4 text-left transition-all hover:border-[#444] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
+        {isExporting ? (
+          <Loader size={18} className="animate-spin text-white/60" />
+        ) : (
+          <Download size={18} className="text-white/60" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="text-sm font-semibold text-white">Export ZIP</span>
+        <p className="mt-0.5 text-xs text-white/50">
+          {isExporting ? "Preparing your ZIP…" : "Download your project to host anywhere"}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// BEO-656 — BYO Hosting card (locked for free/starter, full card for Pro Builder+)
+// ─────────────────────────────────────────────────────────────
+function ByoHostingCard({
+  plan,
+  onByoHosting,
+  onCloseModal,
+}: {
+  plan: string;
+  onByoHosting?: () => void;
+  onCloseModal: () => void;
+}) {
+  const { openPricingModal } = usePricingModal();
+  const isLocked = EXPORT_GATED_PLANS.has(plan);
+
+  if (isLocked) {
+    return (
+      <div className="flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
+          <Globe size={18} className="text-white/50" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white">BYO Hosting</span>
+            <span className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/60">
+              <Lock size={8} /> Pro Builder+
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-white/50">
+            Deploy to Vercel, Netlify, or any provider
+          </p>
+          <button
+            onClick={() => { onCloseModal(); openPricingModal(); }}
+            className="mt-3 text-xs font-semibold text-[#F97316] hover:underline"
+          >
+            Upgrade to unlock →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!onByoHosting) {
+    return (
+      <div className="flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4 opacity-60">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
+          <Globe size={18} className="text-white/60" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white">BYO Hosting</span>
+            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/60">
+              Coming soon
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-white/50">
+            Deploy to Vercel, Netlify, or any provider
           </p>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={onExportZip}
-          disabled={isExporting}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a1a] transition-colors hover:bg-[#f3f4f6] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isExporting ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
-          {isExporting ? "Exporting…" : "Download ZIP"}
-        </button>
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onByoHosting}
+      className="group flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4 text-left transition-all hover:border-[#444] hover:shadow-md"
+    >
+      <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
+        <Globe size={18} className="text-white/60" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="text-sm font-semibold text-white">BYO Hosting</span>
+        <p className="mt-0.5 text-xs text-white/50">
+          Deploy to Vercel, Netlify, or any provider
+        </p>
+      </div>
+    </button>
   );
 }
 
