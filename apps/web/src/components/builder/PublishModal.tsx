@@ -233,41 +233,41 @@ export function PublishModal({
             <div className="flex flex-col gap-3">
               <button
                 onClick={beomzAppUrl ? () => { setView("vercel-success"); } : handleVercelDeploy}
-                className="group flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4 text-left transition-all hover:border-[#444] hover:shadow-md"
+                className="group flex items-start gap-4 rounded-xl border border-[#e5e5e5] bg-[#f5f5f5] p-4 text-left transition-all hover:border-[#d1d5db] hover:shadow-sm"
               >
-                <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
-                  <span className="text-lg font-bold text-white">▲</span>
+                <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#e5e5e5]">
+                  <span className="text-lg font-bold text-[#1a1a1a]">▲</span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-white">Deploy to beomz.app</span>
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+                    <span className="text-sm font-semibold text-[#1a1a1a]">Deploy to beomz.app</span>
+                    <span className="rounded-full bg-[#e5e5e5] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
                       Fast · CDN · No loading
                     </span>
                   </div>
-                  <p className="mt-0.5 text-xs text-white/50">
+                  <p className="mt-0.5 text-xs text-[#6b7280]">
                     Instant load. No waiting. Powered by Vercel.
                   </p>
                 </div>
                 {beomzAppUrl && (
-                  <span className="flex-none rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                  <span className="flex-none rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
                     Live
                   </span>
                 )}
               </button>
+
+              {/* BEO-656: BYO Hosting card */}
+              <ByoHostingCard
+                plan={plan}
+                onByoHosting={onByoHosting}
+                onCloseModal={onClose}
+              />
 
               {/* BEO-656: Export ZIP card */}
               <ExportZipCard
                 plan={plan}
                 onExportZip={onExportZip}
                 isExporting={isExporting}
-                onCloseModal={onClose}
-              />
-
-              {/* BEO-656: BYO Hosting card */}
-              <ByoHostingCard
-                plan={plan}
-                onByoHosting={onByoHosting}
                 onCloseModal={onClose}
               />
             </div>
