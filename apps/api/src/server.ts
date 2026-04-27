@@ -45,6 +45,7 @@ import webhookRoute from "./routes/payments/webhook.js";
 import {
   createStorageAddonRoute,
 } from "./routes/payments/storage-addon.js";
+import imageProxyRoute from "./routes/proxy/image.js";
 import dbRouter from "./routes/db/index.js";
 import {
   checkSlugRoute,
@@ -214,6 +215,8 @@ app.route("/payments/webhook", webhookRoute);
 app.route("/payments/storage-addon", createStorageAddonRoute());
 app.route("/payments/storage-addons", createStorageAddonRoute());
 app.route("/integrations/supabase", supabaseIntegrationsRoute);
+app.route("/proxy", imageProxyRoute);
+app.route("/api/proxy", imageProxyRoute);
 app.route("/websites", websitesGenerateRoute);
 app.route("/websites", websitesIterateRoute);
 // BEO-130: Built-in DB + BYO Supabase

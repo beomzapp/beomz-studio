@@ -35,6 +35,7 @@ const WEBSITE_HERO_FILE_PATH = "src/components/Hero.tsx";
 const FAL_FLUX_ENDPOINT = "https://fal.run/fal-ai/flux/dev";
 const FAL_HERO_IMAGE_WIDTH = 1600;
 const FAL_HERO_IMAGE_HEIGHT = 900;
+const WEBSITE_IMAGE_PROXY_BASE_URL = "https://beomz.ai/api/proxy/image?url=";
 
 const siteTypeSchema = z.enum(["landing", "portfolio", "restaurant", "ecommerce", "agency", "blog"]);
 const vibeSchema = z.enum(["minimal", "bold", "playful", "luxury", "corporate"]);
@@ -856,6 +857,10 @@ function parseToolResult(raw: {
   return { files, summary, siteName };
 }
 
+function buildImageProxyUrl(imageUrl: string): string {
+  return `${WEBSITE_IMAGE_PROXY_BASE_URL}${encodeURIComponent(imageUrl)}`;
+}
+
 function buildHeroImagePrompt(input: {
   projectName: string;
   prompt: string;
@@ -1021,10 +1026,10 @@ async function callAnthropicWebsiteGeneration(input: {
     "7. SEO is mandatory: exactly one h1 on the page, sensible h2 and h3 hierarchy, and meta tags in index.html.",
     "8. Use Tailwind utility classes with a mobile-first responsive layout.",
     "9. Make the design modern, high quality, and aligned to the requested vibe. Default to a clean minimal aesthetic unless the vibe clearly asks for something stronger.",
-    "10. For ALL images use Unsplash Source API:",
-    "    <img src=\"https://source.unsplash.com/{width}x{height}/?{keyword1},{keyword2}\" alt=\"description\" />",
+    "10. For ALL images use Unsplash Source API through the Beomz proxy:",
+    "    <img src=\"https://beomz.ai/api/proxy/image?url=https://source.unsplash.com/{width}x{height}/?{keyword1},{keyword2}\" alt=\"description\" />",
     "    Keywords by context: hero→restaurant,fine-dining | gallery→food,plating | person→chef,portrait | product→product,lifestyle",
-    "    NEVER use picsum or broken src. Every <img> must use https://source.unsplash.com",
+    "    NEVER use picsum, direct external image URLs, or broken src. Every <img> must use https://beomz.ai/api/proxy/image?url=https://source.unsplash.com",
     "11. Keep the output self-contained. Do not add route.ts files, backend files, or package manager files.",
     "12. Prefer a tasteful, production-ready website that could realistically be shown to a customer immediately.",
   ].join("\n");
@@ -1474,7 +1479,8 @@ websitesGenerateRoute.post(
         });
 
         if (heroImageUrl) {
-          const heroUpdate = applyHeroImageUpdate(finalFiles, heroImageUrl);
+          const proxiedUrl = buildImageProxyUrl(heroImageUrl);
+          const heroUpdate = applyHeroImageUpdate(finalFiles, proxiedUrl);
           if (heroUpdate.updatedContent) {
             finalFiles = heroUpdate.files;
 
