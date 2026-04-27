@@ -12,6 +12,7 @@ import type {
   PlanStep,
   PreviewSessionStatus,
   ProjectStatus,
+  ProjectType,
   StudioFile,
   TemplateId,
 } from "@beomz-studio/contracts";
@@ -82,6 +83,7 @@ export interface ProjectRow extends Record<string, unknown> {
   org_id: string;
   name: string;
   template: TemplateId;
+  project_type?: ProjectType;
   status: ProjectStatus;
   icon: string | null;
   created_at: string;
@@ -325,6 +327,7 @@ export interface ProjectInsert extends Record<string, unknown> {
   org_id: string;
   name: string;
   template: TemplateId;
+  project_type?: ProjectType;
   status: ProjectStatus;
   icon?: string | null;
   created_at?: string;
@@ -335,6 +338,7 @@ export interface ProjectUpdate extends Record<string, unknown> {
   org_id?: string;
   name?: string;
   template?: TemplateId;
+  project_type?: ProjectType;
   status?: ProjectStatus;
   icon?: string | null;
   created_at?: string;

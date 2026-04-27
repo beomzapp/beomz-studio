@@ -5,6 +5,7 @@ import type {
   BuilderV3TraceMetadata,
   InitialBuildOutput,
   Project,
+  ProjectType,
   StudioFile,
 } from "@beomz-studio/contracts";
 import { createEmptyBuilderV3TraceMetadata } from "@beomz-studio/contracts";
@@ -260,6 +261,10 @@ export function readBuildTraceMetadata(row: GenerationRow): BuilderV3TraceMetada
   return synthesizeBuilderTrace(row, metadata);
 }
 
+function normaliseProjectType(value: ProjectRow["project_type"]): ProjectType {
+  return value === "website" ? "website" : "app";
+}
+
 export function mapProjectRowToProject(row: ProjectRow): Project {
   const template = getTemplateDefinitionSafe(row.template);
 
@@ -270,6 +275,7 @@ export function mapProjectRowToProject(row: ProjectRow): Project {
     lastOpenedAt: row.last_opened_at ?? null,
     name: row.name,
     orgId: row.org_id,
+    projectType: normaliseProjectType(row.project_type),
     previewEntryPath: template.previewEntryPath,
     status: row.status,
     templateId: row.template,

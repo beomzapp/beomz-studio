@@ -8,6 +8,8 @@ export type ProjectStatus =
   | "published"
   | "archived";
 
+export type ProjectType = "app" | "website";
+
 export type StudioFileKind =
   | "route"
   | "component"
@@ -44,6 +46,7 @@ export interface Project {
   orgId: string;
   name: string;
   templateId: TemplateId;
+  projectType?: ProjectType;
   status: ProjectStatus;
   description?: string;
   icon?: string | null;

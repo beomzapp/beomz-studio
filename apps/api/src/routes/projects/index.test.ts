@@ -38,6 +38,7 @@ function createProject(overrides: Partial<ProjectRow> = {}): ProjectRow {
     org_id: "org-1",
     name: "Test Project",
     template: "blank",
+    project_type: "app",
     status: "ready",
     icon: null,
     created_at: now,
@@ -69,6 +70,11 @@ function createOrgContext(project: ProjectRow, dbOverrides: Partial<OrgContext["
 
   return {
     db: {
+      createProject: async (input: Record<string, unknown>) => ({
+        ...project,
+        ...input,
+        project_type: typeof input.project_type === "string" ? input.project_type : (project.project_type ?? "app"),
+      }) as ProjectRow,
       findProjectById: async (id: string) => (id === project.id ? project : null),
       findLatestGenerationByProjectId: async () => null,
       createGeneration: async (input: Record<string, unknown>) => {
@@ -143,6 +149,103 @@ function createApp(
   app.route("/projects", route);
   return app;
 }
+
+test("GET /projects includes project_type for each project", async () => {
+  const websiteProject = createProject({
+    id: "website-1",
+    name: "Marketing Site",
+    project_type: "website",
+    template: "marketing-website",
+  });
+  const orgContext = createOrgContext(websiteProject, {
+    findProjectsByOrgId: async () => [websiteProject],
+    countGenerationsByProjectIds: async () => ({ [websiteProject.id]: 3 }),
+  });
+  const app = createApp(orgContext);
+
+  const response = await app.request("http://localhost/projects", {
+    method: "GET",
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    projects: Array<{ id: string; project_type: string; generationCount: number }>;
+  };
+  assert.equal(body.projects.length, 1);
+  assert.equal(body.projects[0]?.id, "website-1");
+  assert.equal(body.projects[0]?.project_type, "website");
+  assert.equal(body.projects[0]?.generationCount, 3);
+});
+
+test("POST /projects defaults project_type to app", async () => {
+  const baseProject = createProject();
+  let createdInput: Record<string, unknown> | null = null;
+  const orgContext = createOrgContext(baseProject, {
+    createProject: async (input: Record<string, unknown>) => {
+      createdInput = input;
+      return createProject({
+        id: String(input.id),
+        name: String(input.name),
+        org_id: String(input.org_id),
+        project_type: input.project_type === "website" ? "website" : "app",
+        status: "draft",
+        template: input.template as ProjectRow["template"],
+      });
+    },
+  });
+  const app = createApp(orgContext);
+
+  const response = await app.request("http://localhost/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: "New App" }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(createdInput?.project_type, "app");
+  assert.deepEqual(await response.json(), {
+    id: String(createdInput?.id),
+    name: "New App",
+    project_type: "app",
+  });
+});
+
+test("POST /projects accepts project_type=website", async () => {
+  const baseProject = createProject();
+  let createdInput: Record<string, unknown> | null = null;
+  const orgContext = createOrgContext(baseProject, {
+    createProject: async (input: Record<string, unknown>) => {
+      createdInput = input;
+      return createProject({
+        id: String(input.id),
+        name: String(input.name),
+        org_id: String(input.org_id),
+        project_type: "website",
+        status: "draft",
+        template: input.template as ProjectRow["template"],
+      });
+    },
+  });
+  const app = createApp(orgContext);
+
+  const response = await app.request("http://localhost/projects", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Marketing Site",
+      template: "marketing-website",
+      project_type: "website",
+    }),
+    headers: { "content-type": "application/json" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(createdInput?.project_type, "website");
+  assert.deepEqual(await response.json(), {
+    id: String(createdInput?.id),
+    name: "Marketing Site",
+    project_type: "website",
+  });
+});
 
 test("project deletion triggers project_db_limits cleanup", async () => {
   const project = createProject();

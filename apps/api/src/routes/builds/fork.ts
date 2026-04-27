@@ -45,6 +45,7 @@ buildsForkRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     id: randomUUID(),
     name: buildForkProjectName(sourceProjectRow.name),
     org_id: orgContext.org.id,
+    project_type: sourceProjectRow.project_type ?? "app",
     status: "ready",
     template: sourceBuildRow.template_id,
   });

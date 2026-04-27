@@ -8,7 +8,7 @@
 import { neon } from "@neondatabase/serverless";
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
-import type { StudioFile } from "@beomz-studio/contracts";
+import type { ProjectType, StudioFile, TemplateId } from "@beomz-studio/contracts";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -70,6 +70,27 @@ interface ProjectsRouteDeps {
   restoreSupabaseDatabase?: typeof restoreSupabaseDatabase;
   ensureByoDbAnonKeyColumn?: () => Promise<void>;
   runBuildInBackground?: typeof runBuildInBackground;
+}
+
+function normaliseProjectType(value: unknown): ProjectType {
+  return value === "website" ? "website" : "app";
+}
+
+function parseProjectType(value: unknown): ProjectType | null {
+  if (value === undefined) {
+    return "app";
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "app" || trimmed === "website") {
+    return trimmed;
+  }
+
+  return null;
 }
 
 function assertSafeSqlIdentifier(identifier: string): string {
@@ -330,6 +351,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
 
       return c.json({
         ...mapProjectRowToProject(project),
+        project_type: normaliseProjectType(project.project_type),
         // Extra fields not on the core Project type
         database_enabled: Boolean(project.database_enabled),
         db_provider: project.db_provider ?? null,
@@ -360,6 +382,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
 
       const projects = rows.map((row) => ({
         ...mapProjectRowToProject(row),
+        project_type: normaliseProjectType(row.project_type),
         generationCount: genCounts[row.id] ?? 0,
         // BEO-130: DB status for the frontend (no credentials, no nonce)
         database_enabled: Boolean(row.database_enabled),
@@ -398,22 +421,31 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     try {
       const orgContext = c.get("orgContext") as OrgContext;
       const body = await c.req.json().catch(() => null);
+      const projectType = parseProjectType(body?.project_type);
+      if (!projectType) {
+        return c.json({ error: "project_type must be 'app' or 'website'" }, 400);
+      }
       const name = typeof body?.name === "string" && body.name.trim().length > 0
         ? body.name.trim().slice(0, 120)
-        : "Untitled Website";
+        : (projectType === "website" ? "Untitled Website" : "Untitled Project");
       const template = typeof body?.template === "string" && body.template.trim().length > 0
         ? body.template.trim()
-        : "marketing-website";
+        : (projectType === "website" ? "marketing-website" : "blank");
       const { randomUUID } = await import("node:crypto");
       const projectId = randomUUID();
       const projectRow = await orgContext.db.createProject({
         id: projectId,
         name,
         org_id: orgContext.org.id,
+        project_type: projectType,
         status: "draft",
-        template: template as import("@beomz-studio/contracts").TemplateId,
+        template: template as TemplateId,
       });
-      return c.json({ id: projectRow.id, name: projectRow.name });
+      return c.json({
+        id: projectRow.id,
+        name: projectRow.name,
+        project_type: normaliseProjectType(projectRow.project_type),
+      });
     } catch (err) {
       console.error("[POST /projects] error:", err);
       return c.json({ error: "Failed to create project." }, 500);

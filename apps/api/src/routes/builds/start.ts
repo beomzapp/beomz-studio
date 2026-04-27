@@ -849,7 +849,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   } else {
     projectRow = await orgContext.db.createProject({
       id: projectId, name: projectName,
-      org_id: orgContext.org.id, status: projectStatus, template: selectedTemplateId as TemplateId,
+      org_id: orgContext.org.id, status: projectStatus, template: selectedTemplateId as TemplateId, project_type: "app",
     });
   }
 
