@@ -410,18 +410,18 @@ function ExportZipCard({
 
   if (isLocked) {
     return (
-      <div className="flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4">
-        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
-          <Download size={18} className="text-white/50" />
+      <div className="flex items-start gap-4 rounded-xl border border-[#e5e5e5] bg-[#f5f5f5] p-4">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#e5e5e5]">
+          <Download size={18} className="text-[#9ca3af]" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white">Export ZIP</span>
-            <span className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/60">
+            <span className="text-sm font-semibold text-[#1a1a1a]">Export ZIP</span>
+            <span className="flex items-center gap-1 rounded-full bg-[#e5e5e5] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
               <Lock size={8} /> Pro Builder+
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-white/50">
+          <p className="mt-0.5 text-xs text-[#6b7280]">
             Download your project to host anywhere
           </p>
           <button
@@ -476,18 +476,18 @@ function ByoHostingCard({
 
   if (isLocked) {
     return (
-      <div className="flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4">
-        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
-          <Globe size={18} className="text-white/50" />
+      <div className="flex items-start gap-4 rounded-xl border border-[#e5e5e5] bg-[#f5f5f5] p-4">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#e5e5e5]">
+          <Globe size={18} className="text-[#9ca3af]" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white">BYO Hosting</span>
-            <span className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/60">
+            <span className="text-sm font-semibold text-[#1a1a1a]">BYO Hosting</span>
+            <span className="flex items-center gap-1 rounded-full bg-[#e5e5e5] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
               <Lock size={8} /> Pro Builder+
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-white/50">
+          <p className="mt-0.5 text-xs text-[#6b7280]">
             Deploy to Vercel, Netlify, or any provider
           </p>
           <button
@@ -503,18 +503,18 @@ function ByoHostingCard({
 
   if (!onByoHosting) {
     return (
-      <div className="flex items-start gap-4 rounded-xl border border-[#222] bg-[#111] p-4 opacity-60">
-        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white/10">
-          <Globe size={18} className="text-white/60" />
+      <div className="flex items-start gap-4 rounded-xl border border-[#e5e5e5] bg-[#f5f5f5] p-4 opacity-60">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-[#e5e5e5]">
+          <Globe size={18} className="text-[#9ca3af]" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white">BYO Hosting</span>
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-white/60">
+            <span className="text-sm font-semibold text-[#1a1a1a]">BYO Hosting</span>
+            <span className="rounded-full bg-[#e5e5e5] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
               Coming soon
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-white/50">
+          <p className="mt-0.5 text-xs text-[#6b7280]">
             Deploy to Vercel, Netlify, or any provider
           </p>
         </div>
