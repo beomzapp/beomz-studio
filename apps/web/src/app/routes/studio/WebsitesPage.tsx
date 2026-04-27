@@ -1,4 +1,5 @@
-import { Globe } from "lucide-react";
+import { Globe, Plus } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 
 export function WebsitesPage() {
   return (
@@ -8,8 +9,15 @@ export function WebsitesPage() {
       </div>
       <h1 className="mt-5 text-2xl font-semibold text-[#1a1a1a]">Websites</h1>
       <p className="mt-2 text-sm text-[#6b7280]">
-        Coming soon — AI-powered website builder
+        AI-powered website builder — create your first site
       </p>
+      <Link
+        to="/studio/websites/new"
+        className="mt-6 flex items-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C]"
+      >
+        <Plus size={16} />
+        New website
+      </Link>
     </div>
   );
 }
