@@ -6,10 +6,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import {
+  ChevronLeft,
   Clock,
   FileText,
+  Globe,
   Search,
   Send,
   X,
@@ -22,6 +24,7 @@ import { useWebContainerPreview } from "../../../hooks/useWebContainerPreview";
 import { useWebsiteBuilder } from "../../../hooks/useWebsiteBuilder";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 import { isWebContainerSupported } from "../../../lib/webcontainer";
+import { GlobalNav } from "../../../components/layout/GlobalNav";
 
 // ─── Section suggestions ─────────────────────────────────────────────────────
 
@@ -387,6 +390,7 @@ function WebsiteTopBar({
   onSEOClick,
   onPublish,
 }: WebsiteTopBarProps) {
+  const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(siteName);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -410,13 +414,23 @@ function WebsiteTopBar({
     .slice(0, 30) || projectId.slice(0, 8);
 
   return (
-    <header className="h-11 flex items-center justify-between border-b border-[#e5e5e5] bg-white px-3 flex-shrink-0 z-20">
+    <header className="relative z-[60] flex h-12 flex-none shrink-0 items-center justify-between border-b border-[#e5e5e5] bg-white px-3">
       {/* Left */}
-      <div className="flex items-center gap-2 min-w-0">
-        <Link to="/studio/websites" className="text-[#F97316] flex-shrink-0">
-          <BeomzLogo className="h-5 w-5" />
-        </Link>
-        <span className="text-[#e5e5e5] text-[14px] select-none">·</span>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        {/* Back button — exact copy from TopBar */}
+        <button
+          onClick={() => navigate({ to: "/studio/websites" })}
+          className="flex flex-none items-center gap-1 rounded-md px-2 py-1.5 text-[#9ca3af] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+          aria-label="Back to dashboard"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+
+        {/* Logo — dark, matching ProjectPage TopBar style */}
+        <BeomzLogo className="h-5 w-5 flex-shrink-0 text-[#1a1a1a]" />
+
+        <span className="select-none text-[14px] text-[#e5e5e5]">·</span>
+
         {editing ? (
           <input
             ref={inputRef}
@@ -431,50 +445,60 @@ function WebsiteTopBar({
               }
             }}
             autoFocus
-            className="text-[13px] font-medium text-[#1a1a1a] outline-none border-b border-[#F97316] bg-transparent min-w-[80px] max-w-[200px]"
+            className="min-w-[80px] max-w-[200px] border-b border-[#1a1a1a] bg-transparent text-sm font-semibold text-[#1a1a1a] outline-none"
           />
         ) : (
           <button
             onClick={() => setEditing(true)}
-            className="text-[13px] font-medium text-[#1a1a1a] hover:text-[#F97316] transition-colors truncate max-w-[200px]"
+            className="max-w-[220px] truncate text-sm font-semibold text-[#1a1a1a] transition-colors hover:text-[#6b7280]"
           >
             {siteName || "Untitled Site"}
           </button>
         )}
-        <span className="rounded-full border border-[#e5e5e5] bg-[#faf9f6] px-2 py-0.5 text-[11px] text-[#9ca3af] font-mono flex-shrink-0">
+        <span className="flex-shrink-0 rounded-full border border-[#e5e5e5] bg-[#faf9f6] px-2 py-0.5 font-mono text-[11px] text-[#9ca3af]">
           {slug}.beomz.app
         </span>
       </div>
 
       {/* Right */}
-      <div className="flex items-center gap-1">
+      <div className="flex flex-1 items-center justify-end gap-1.5">
         <button
           onClick={onHistoryClick}
           title="History"
-          className="p-2 rounded-lg text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a] transition-colors"
+          className="rounded-md p-1.5 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
         >
           <Clock size={16} />
         </button>
         <button
           onClick={onPagesClick}
           title="Pages"
-          className="p-2 rounded-lg text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a] transition-colors"
+          className="rounded-md p-1.5 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
         >
           <FileText size={16} />
         </button>
         <button
           onClick={onSEOClick}
           title="SEO"
-          className="p-2 rounded-lg text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a] transition-colors"
+          className="rounded-md p-1.5 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
         >
           <Search size={16} />
         </button>
+
+        <div className="h-4 w-px bg-[#e5e5e5]" />
+
+        {/* Publish button — exact copy from TopBar (dark style) */}
         <button
           onClick={onPublish}
-          className="ml-1 rounded-lg bg-[#F97316] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#EA580C] transition-colors"
+          className="flex items-center gap-1.5 rounded-lg bg-[#1a1a1a] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#333]"
         >
+          <Globe size={12} />
           Publish
         </button>
+
+        <div className="h-4 w-px bg-[#e5e5e5]" />
+
+        {/* Credits + avatar — same pattern as ProjectPage TopBar via GlobalNav */}
+        <GlobalNav />
       </div>
     </header>
   );
