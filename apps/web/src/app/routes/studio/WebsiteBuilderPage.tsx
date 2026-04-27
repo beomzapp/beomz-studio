@@ -517,6 +517,15 @@ export function WebsiteBuilderPage() {
   }, [generatedSiteName]);
 
   // WebContainer preview
+  // BEO-671: Gate files delivery — only pass files after the build completes.
+  // Files arrive mid-stream while isBuildInProgress=true. deliverFiles() defers
+  // with pendingDeliverRef=true, but server-ready fires exactly once (during boot)
+  // and also defers. When the build finishes, `files` reference hasn't changed so
+  // the files-change effect never re-runs and the overlay is stuck permanently.
+  // Passing null while building ensures `wcFiles` transitions null→files at the
+  // same moment isBuildInProgress flips to false, giving the files-change effect
+  // a new reference and allowing delivery to proceed.
+  const wcFiles = isBuildInProgress ? null : files;
   const wcProject = { id: projectId, name: siteName, templateId: "marketing-website" as const };
   const {
     status: wcStatus,
@@ -525,7 +534,7 @@ export function WebsiteBuilderPage() {
     firstFilesDelivered,
     isHotPatching,
   } = useWebContainerPreview(
-    files,
+    wcFiles,
     wcProject,
     undefined,
     undefined,
