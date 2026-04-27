@@ -591,7 +591,7 @@ export function PreviewPane({
 
     return (
       <div className="flex h-full items-center justify-center overflow-auto">
-        <div style={{ transform: `scale(${zoom})`, transformOrigin: "center center", transition: "transform 0.2s ease" }}>
+        <div style={{ transform: `scale(${zoom * (isMobile ? 1 : 0.9)})`, transformOrigin: "top center", transition: "transform 0.2s ease" }}>
           {/* @ts-expect-error -- Frame union, props are compatible */}
           <Frame {...frameProps}>
             {activeFrame ? (
