@@ -224,6 +224,7 @@ export function PreviewPane({
     progressMessage,
     isFixing,
     firstFilesDelivered,
+    isHotPatching,
   } = useWebContainerPreview(
     files,
     project,
@@ -323,10 +324,17 @@ export function PreviewPane({
   // Gate the timer on firstFilesDelivered so it only runs AFTER deliverFiles()
   // has wc.mount()-ed the real app files. Iterations: firstFilesDelivered
   // stays true across the component lifetime so their behaviour is unchanged.
+  //
+  // BEO-651: `isBuilding` intentionally removed from deps. Iterations do NOT
+  // restart the WC dev server, so wcReadyConfirmed must stay true throughout
+  // the iteration. The loading overlay during iteration file writes is handled
+  // separately by isHotPatching (from useWebContainerPreview). Previously,
+  // isBuilding in deps caused wcReadyConfirmed to reset on every iteration,
+  // which meant the iframe briefly went visible mid-Vite-rebuild and triggered
+  // the MIME-type errors ("Expected JavaScript-or-Wasm but got text/html").
   const [wcReadyConfirmed, setWcReadyConfirmed] = useState(false);
   useEffect(() => {
     if (
-      !isBuilding &&
       wcStatus === "ready" &&
       previewUrl &&
       firstFilesDelivered
@@ -336,17 +344,22 @@ export function PreviewPane({
       return () => clearTimeout(t);
     }
     setWcReadyConfirmed(false);
-  }, [wcStatus, previewUrl, isBuilding, firstFilesDelivered]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wcStatus, previewUrl, firstFilesDelivered]); // isBuilding excluded — see BEO-651
 
   // Unified "should hide iframe behind overlay" — true when:
   //  - WC is still booting (not ready yet), OR
-  //  - WC just became ready but we haven't confirmed it's serving yet.
+  //  - WC just became ready but we haven't confirmed it's serving yet, OR
+  //  - BEO-651: iteration hot-patch is in progress (isHotPatching) — files are
+  //    being written to WC and Vite may trigger a full-page reload while still
+  //    recompiling; keeping the overlay up prevents the iframe from exposing the
+  //    "Expected JavaScript-or-Wasm but got text/html" MIME error.
   // BEO-449: isAiCustomising no longer forces the overlay when WC is already
   // confirmed live. For iterations the iframe stays visible and Vite HMR
   // updates it in place; only the "Updating…" badge in the URL bar changes.
   const showLoadingOverlay =
     !!(files && files.length > 0) &&
-    (wcIsLoading || !wcReadyConfirmed);
+    (wcIsLoading || !wcReadyConfirmed || isHotPatching);
 
   // ── BEO-454/455: Progress bar only (shimmer checklist moved to chat panel) ─
   // Only show the top orange progress bar during a real build turn (not while

@@ -142,6 +142,13 @@ export interface WcPreviewState {
    * Vite is still serving the blank shell.
    */
   firstFilesDelivered: boolean;
+  /**
+   * BEO-651: true from the moment hotPatchFiles() starts writing iteration
+   * files until a 2.5 s settle window expires. PreviewPane uses this to keep
+   * the loading overlay up while Vite recompiles the changed modules, preventing
+   * the MIME-type errors that occur when the iframe reloads before Vite is ready.
+   */
+  isHotPatching: boolean;
 }
 
 // BEO-482 Fix 2: known scaffold content signatures.
@@ -196,11 +203,19 @@ export function useWebContainerPreview(
   // completed wc.mount() with the real app files. Exposed so PreviewPane can
   // gate wcReadyConfirmed on real delivery rather than server-ready timing.
   const [firstFilesDelivered, setFirstFilesDelivered] = useState(false);
+  // BEO-651: true while an iteration's hotPatchFiles() is running and during
+  // the subsequent 2.5 s Vite module-rebuild settle window. PreviewPane gates
+  // the iframe reveal on this so the preview never shows MIME-type errors.
+  const [isHotPatching, setIsHotPatching] = useState(false);
 
   const instanceRef = useRef<WcInstance | null>(null);
   const viteStartedRef = useRef(false);
   const prevFilesRef = useRef<readonly StudioFile[] | null>(null);
   const fixAttemptsRef = useRef<Record<string, number>>({});
+
+  // BEO-651: timer ref for the hot-patch settle window (cleared between iterations
+  // and on unmount so stale timers never flip isHotPatching at the wrong moment).
+  const hotPatchSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // BEO-202: refs for the 15s stale-cache fallback.
   // cacheTimeoutIdRef  — setTimeout handle; cleared when server-ready fires.
@@ -336,6 +351,14 @@ export function useWebContainerPreview(
         // wc.fs.writeFile(). chokidar fires HMR for those modules in place,
         // so the iframe stays mounted, no reload, no flash, no state loss.
 
+        // BEO-651: signal hot-patch start so PreviewPane keeps the loading
+        // overlay up during file writes + Vite module-rebuild settle period.
+        setIsHotPatching(true);
+        if (hotPatchSettleTimerRef.current) {
+          clearTimeout(hotPatchSettleTimerRef.current);
+          hotPatchSettleTimerRef.current = null;
+        }
+
         // BEO-421: delete stale stub files from the previous build first.
         const firstFilePath = currentFiles[0]?.path
           ? normalizeGeneratedPath(currentFiles[0].path)
@@ -356,6 +379,17 @@ export function useWebContainerPreview(
         console.log(
           `[BEO-586] Hot-patched WC: wrote ${stats.written} file(s), removed ${stats.deleted} — Vite HMR will update preview in-place`,
         );
+
+        // BEO-651: start settle window AFTER writes complete.
+        // Vite chokidar detects the changes and may trigger a full-page reload
+        // (especially for runtime.json which has no HMR boundary). The 2.5 s
+        // window gives Vite time to recompile all changed modules before the
+        // PreviewPane overlay is lifted — preventing the MIME-type errors that
+        // occur when the iframe reloads against a still-building dev server.
+        hotPatchSettleTimerRef.current = setTimeout(() => {
+          setIsHotPatching(false);
+          hotPatchSettleTimerRef.current = null;
+        }, 2500);
       }
 
       // BEO-452: Re-inject Neon env vars after every delivery so they
@@ -792,6 +826,11 @@ export function useWebContainerPreview(
         clearTimeout(cacheTimeoutIdRef.current);
         cacheTimeoutIdRef.current = null;
       }
+      // BEO-651: clean up hot-patch settle timer on unmount
+      if (hotPatchSettleTimerRef.current !== null) {
+        clearTimeout(hotPatchSettleTimerRef.current);
+        hotPatchSettleTimerRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run exactly once per component mount
@@ -858,5 +897,5 @@ export function useWebContainerPreview(
     void deliverFiles(instance, files, project);
   }, [files, project, project?.id, deliverFiles]);
 
-  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered };
+  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered, isHotPatching };
 }
