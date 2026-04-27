@@ -1,11 +1,12 @@
-import "dotenv/config";
-
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { config as loadDotenv } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
 import { apiConfig } from "../config.js";
+
+loadDotenv({ path: process.env.LOAD_TEST_ENV_PATH ?? ".env.local" });
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TIERS = [10, 50, 100, 500, 1_000];
