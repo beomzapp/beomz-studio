@@ -33,37 +33,47 @@ function extractSourceUnsplashQuery(url: URL): string {
   return decodeURIComponent(url.search.slice(1)).trim();
 }
 
+function buildLoremFlickrFallbackUrl(url: URL): URL {
+  const size = parseSourceUnsplashSize(url) ?? { width: 1600, height: 900 };
+  const query = extractSourceUnsplashQuery(url) || "photo";
+  return new URL(`https://loremflickr.com/${size.width}/${size.height}/${encodeURIComponent(query)}`);
+}
+
 async function resolveSourceUnsplashUrl(url: URL): Promise<URL> {
   const size = parseSourceUnsplashSize(url);
   const query = extractSourceUnsplashQuery(url) || "photo";
-  const response = await fetch(`https://unsplash.com/napi/photos/random?query=${encodeURIComponent(query)}`, {
-    headers: {
-      accept: "application/json",
-      "user-agent": IMAGE_FETCH_HEADERS["user-agent"],
-    },
-  });
+  try {
+    const response = await fetch(`https://unsplash.com/napi/photos/random?query=${encodeURIComponent(query)}`, {
+      headers: {
+        accept: "application/json",
+        "user-agent": IMAGE_FETCH_HEADERS["user-agent"],
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(`Unsplash resolver failed with ${response.status}.`);
+    if (!response.ok) {
+      throw new Error(`Unsplash resolver failed with ${response.status}.`);
+    }
+
+    const payload = await response.json() as UnsplashRandomPhotoResponse;
+    const candidateUrl = payload.urls?.raw ?? payload.urls?.full ?? payload.urls?.regular;
+    if (!candidateUrl) {
+      throw new Error("Unsplash resolver did not return an image URL.");
+    }
+
+    const resolvedUrl = new URL(candidateUrl);
+    if (size) {
+      resolvedUrl.searchParams.set("w", String(size.width));
+      resolvedUrl.searchParams.set("h", String(size.height));
+      resolvedUrl.searchParams.set("fit", "crop");
+      resolvedUrl.searchParams.set("crop", "entropy");
+      resolvedUrl.searchParams.set("fm", "jpg");
+      resolvedUrl.searchParams.set("q", "80");
+    }
+
+    return resolvedUrl;
+  } catch {
+    return buildLoremFlickrFallbackUrl(url);
   }
-
-  const payload = await response.json() as UnsplashRandomPhotoResponse;
-  const candidateUrl = payload.urls?.raw ?? payload.urls?.full ?? payload.urls?.regular;
-  if (!candidateUrl) {
-    throw new Error("Unsplash resolver did not return an image URL.");
-  }
-
-  const resolvedUrl = new URL(candidateUrl);
-  if (size) {
-    resolvedUrl.searchParams.set("w", String(size.width));
-    resolvedUrl.searchParams.set("h", String(size.height));
-    resolvedUrl.searchParams.set("fit", "crop");
-    resolvedUrl.searchParams.set("crop", "entropy");
-    resolvedUrl.searchParams.set("fm", "jpg");
-    resolvedUrl.searchParams.set("q", "80");
-  }
-
-  return resolvedUrl;
 }
 
 async function fetchUpstreamImage(url: URL): Promise<Response> {
