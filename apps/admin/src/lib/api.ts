@@ -165,7 +165,8 @@ export interface HeatmapEntry {
   country_name: string;
   lat: number;
   lng: number;
-  count: number;
+  total: number;
+  active: number;
 }
 
 export async function fetchAdminHeatmap(

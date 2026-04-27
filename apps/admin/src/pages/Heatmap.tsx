@@ -15,19 +15,25 @@ const RANGES: { label: string; value: HeatmapRange }[] = [
 
 const POLL_INTERVAL_MS = 30_000;
 
+// #F97316 (249,115,22) → #22c55e (34,197,94) based on active/total ratio
+const COLOR_INACTIVE = [249, 115, 22] as const;
+const COLOR_ACTIVE = [34, 197, 94] as const;
+
 async function getToken(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }
 
-function calcRadius(count: number, maxCount: number): number {
-  if (maxCount === 0) return 4;
-  return 4 + ((count / maxCount) ** 0.6) * 26;
+function calcRadius(total: number): number {
+  return Math.max(8, Math.min(40, Math.sqrt(total) * 4));
 }
 
-function calcOpacity(count: number, maxCount: number): number {
-  if (maxCount === 0) return 0.3;
-  return 0.3 + ((count / maxCount) ** 0.5) * 0.6;
+function calcColor(active: number, total: number): string {
+  const ratio = total === 0 ? 0 : Math.min(1, active / total);
+  const r = Math.round(COLOR_INACTIVE[0] + (COLOR_ACTIVE[0] - COLOR_INACTIVE[0]) * ratio);
+  const g = Math.round(COLOR_INACTIVE[1] + (COLOR_ACTIVE[1] - COLOR_INACTIVE[1]) * ratio);
+  const b = Math.round(COLOR_INACTIVE[2] + (COLOR_ACTIVE[2] - COLOR_INACTIVE[2]) * ratio);
+  return `rgb(${r},${g},${b})`;
 }
 
 interface Tooltip {
@@ -62,12 +68,10 @@ export default function HeatmapPage() {
     }
   }, [range]);
 
-  // Initial load + on range change
   useEffect(() => {
     void load(true);
   }, [load]);
 
-  // Live polling
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => { void load(false); }, POLL_INTERVAL_MS);
@@ -76,18 +80,15 @@ export default function HeatmapPage() {
     };
   }, [load]);
 
-  const maxCount = data.reduce((m, e) => Math.max(m, e.count), 0);
-  const totalLogins = data.reduce((s, e) => s + e.count, 0);
+  const totalUsers = data.reduce((s, e) => s + e.total, 0);
+  const totalActive = data.reduce((s, e) => s + e.active, 0);
   const uniqueCountries = data.length;
+  const maxTotal = data.reduce((m, e) => Math.max(m, e.total), 0);
 
   function handleMarkerMouseEnter(e: React.MouseEvent<SVGCircleElement>, entry: HeatmapEntry) {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setTooltip({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-      entry,
-    });
+    setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top, entry });
   }
 
   function handleMarkerMouseMove(e: React.MouseEvent<SVGCircleElement>) {
@@ -103,7 +104,7 @@ export default function HeatmapPage() {
         <div className="flex items-center gap-2.5">
           <Globe size={18} className="text-slate-500" />
           <div>
-            <h2 className="text-xl font-semibold text-slate-800">Login Heatmap</h2>
+            <h2 className="text-xl font-semibold text-slate-800">User Heatmap</h2>
             {lastUpdated && (
               <p className="text-xs text-slate-400 mt-0.5">
                 Last updated {lastUpdated.toLocaleTimeString()}
@@ -113,7 +114,6 @@ export default function HeatmapPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Range toggle */}
           <div className="flex items-center bg-slate-100 rounded-lg p-1 gap-0.5">
             {RANGES.map(r => (
               <button
@@ -130,7 +130,6 @@ export default function HeatmapPage() {
             ))}
           </div>
 
-          {/* Refresh button */}
           <button
             onClick={() => void load(true)}
             disabled={loading}
@@ -149,9 +148,20 @@ export default function HeatmapPage() {
             <span className="text-orange-500 text-sm font-bold">↑</span>
           </div>
           <div>
-            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Total Logins</p>
+            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Total Users</p>
             <p className="text-xl font-semibold text-slate-800">
-              {loading ? "—" : totalLogins.toLocaleString()}
+              {loading ? "—" : totalUsers.toLocaleString()}
+            </p>
+          </div>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-green-50 flex items-center justify-center">
+            <span className="text-green-500 text-sm font-bold">●</span>
+          </div>
+          <div>
+            <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Active</p>
+            <p className="text-xl font-semibold text-slate-800">
+              {loading ? "—" : totalActive.toLocaleString()}
             </p>
           </div>
         </div>
@@ -167,10 +177,20 @@ export default function HeatmapPage() {
           </div>
         </div>
 
-        {/* Poll indicator */}
-        <div className="ml-auto flex items-center gap-1.5 text-xs text-slate-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-          Live · polls every 30s
+        {/* Legend */}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#F97316" }} />
+            Inactive
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <span className="w-3 h-3 rounded-full inline-block" style={{ background: "#22c55e" }} />
+            Active
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 border-l border-slate-200 pl-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            Live · 30s
+          </div>
         </div>
       </div>
 
@@ -221,8 +241,9 @@ export default function HeatmapPage() {
           </Geographies>
 
           {data.map(entry => {
-            const r = calcRadius(entry.count, maxCount);
-            const opacity = calcOpacity(entry.count, maxCount);
+            const r = calcRadius(entry.total);
+            const color = calcColor(entry.active, entry.total);
+            const fontSize = Math.max(8, Math.round(r * 0.48));
             return (
               <Marker
                 key={entry.country_code}
@@ -230,16 +251,28 @@ export default function HeatmapPage() {
               >
                 <circle
                   r={r}
-                  fill="#F97316"
-                  fillOpacity={opacity}
-                  stroke="#F97316"
-                  strokeOpacity={Math.min(opacity + 0.15, 1)}
+                  fill={color}
+                  fillOpacity={0.82}
+                  stroke={color}
+                  strokeOpacity={0.95}
                   strokeWidth={1}
                   style={{ cursor: "pointer" }}
                   onMouseEnter={e => handleMarkerMouseEnter(e, entry)}
                   onMouseMove={e => handleMarkerMouseMove(e)}
                   onMouseLeave={() => setTooltip(null)}
                 />
+                {r > 14 && (
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={fontSize}
+                    fill="white"
+                    fontWeight="700"
+                    style={{ pointerEvents: "none", userSelect: "none" }}
+                  >
+                    {entry.total}
+                  </text>
+                )}
               </Marker>
             );
           })}
@@ -256,8 +289,9 @@ export default function HeatmapPage() {
               whiteSpace: "nowrap",
             }}
           >
-            <p className="font-semibold">{tooltip.entry.country_name}</p>
-            <p className="text-slate-300">{tooltip.entry.count.toLocaleString()} login{tooltip.entry.count !== 1 ? "s" : ""}</p>
+            <p className="font-semibold">
+              {tooltip.entry.country_name} — {tooltip.entry.total.toLocaleString()} user{tooltip.entry.total !== 1 ? "s" : ""} ({tooltip.entry.active.toLocaleString()} active)
+            </p>
           </div>
         )}
       </div>
@@ -272,25 +306,33 @@ export default function HeatmapPage() {
           </div>
           <div className="divide-y divide-slate-50">
             {[...data]
-              .sort((a, b) => b.count - a.count)
+              .sort((a, b) => b.total - a.total)
               .slice(0, 10)
-              .map((entry, i) => (
-                <div key={entry.country_code} className="flex items-center gap-3 px-4 py-2.5">
-                  <span className="text-xs text-slate-400 w-4 text-right shrink-0">{i + 1}</span>
-                  <div className="flex-1 flex items-center gap-2 min-w-0">
-                    <span className="text-sm text-slate-700 truncate">{entry.country_name}</span>
-                    <span className="text-xs text-slate-400 font-mono shrink-0 ml-auto">
-                      {entry.count.toLocaleString()}
-                    </span>
+              .map((entry, i) => {
+                const color = calcColor(entry.active, entry.total);
+                return (
+                  <div key={entry.country_code} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="text-xs text-slate-400 w-4 text-right shrink-0">{i + 1}</span>
+                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                      <span className="text-sm text-slate-700 truncate">{entry.country_name}</span>
+                      <span className="text-xs text-slate-400 font-mono shrink-0 ml-auto">
+                        {entry.total.toLocaleString()}
+                        <span className="text-slate-300 mx-1">·</span>
+                        <span style={{ color }}>{entry.active.toLocaleString()} active</span>
+                      </span>
+                    </div>
+                    <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden shrink-0">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${(entry.total / maxTotal) * 100}%`,
+                          background: color,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden shrink-0">
-                    <div
-                      className="h-full bg-orange-400 rounded-full"
-                      style={{ width: `${(entry.count / maxCount) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </div>
       )}
