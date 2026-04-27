@@ -10,6 +10,7 @@ import type {
 import { getTemplateDefinitionSafe } from "@beomz-studio/templates";
 import { Hono } from "hono";
 
+import { apiConfig } from "../../config.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -557,6 +558,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   let planSummary = parsedBody.data.summary;
   let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
   const requestedProjectId = parsedBody.data.projectId?.trim();
+  const mockAnthropicEnabled = apiConfig.MOCK_ANTHROPIC;
 
   if (planSessionId) {
     const planSession = await orgContext.db.findPlanSessionById(planSessionId);
@@ -622,6 +624,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
         reason: "forceIteration requested.",
         accumulatedContext: effectivePrompt,
       }
+    : mockAnthropicEnabled
+    ? {
+        intent: isIteration ? "iteration" as const : "build_new" as const,
+        confidence: 1,
+        reason: "MOCK_ANTHROPIC enabled.",
+        accumulatedContext: effectivePrompt,
+      }
     : isImplementConfirmation
     ? {
         intent: implementConfirmationIntent,
@@ -653,7 +662,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     || classifiedIntent === "ambiguous";
   const detectedUrl = extractUrlLike(sourcePrompt);
   const hasResearchUrl = Boolean(detectedUrl);
-  const urlResearchResult = !isImplementConfirmation
+  const urlResearchResult = !mockAnthropicEnabled
+    && !isImplementConfirmation
     && isBuildIshIntent
     && detectedUrl
     ? await researchUrlFn(detectedUrl, readDomainFromUrl(detectedUrl))
@@ -736,7 +746,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
 
   // ── Template selection (fast; generate.ts picks the best prebuilt later) ───
   let selectedTemplateId: string;
-  if (isImmediateConversation) {
+  if (mockAnthropicEnabled) {
+    selectedTemplateId = projectRow?.template ?? "interactive-tool";
+  } else if (isImmediateConversation) {
     selectedTemplateId = projectRow?.template ?? "interactive-tool";
   } else if (isIteration && projectRow) {
     selectedTemplateId = projectRow.template;
