@@ -12,6 +12,7 @@ interface GenerationAdminRow {
   completed_at: string | null;
   error: string | null;
   id: string;
+  metadata?: Record<string, unknown> | null;
   project_id: string;
   started_at: string;
   status: string;
@@ -84,6 +85,12 @@ const FALLBACK_USER_EMAIL = "unknown";
 const INPUT_TOKEN_RATE_USD = 0.000003;
 const OUTPUT_TOKEN_RATE_USD = 0.000015;
 
+interface ResolvedBuildTokenUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+}
+
 function createStudioAdminClient() {
   return createClient(apiConfig.STUDIO_SUPABASE_URL, apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
@@ -96,6 +103,10 @@ function createStudioAdminClient() {
 function roundNumber(value: number, decimals: number) {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toAdminBuildStatus(status: string): AdminBuildStatus {
@@ -131,19 +142,60 @@ function getBuildErrorReason(row: GenerationAdminRow): string | null {
   return null;
 }
 
-function getTokenUsage(row: BuildTelemetryAdminRow | null | undefined): number | null {
-  if (!row) {
+export function readGenerationAiUsage(metadata: Record<string, unknown> | null | undefined): ResolvedBuildTokenUsage | null {
+  if (!isRecord(metadata)) {
     return null;
+  }
+
+  const rawUsage = metadata.ai_usage;
+  if (!isRecord(rawUsage)) {
+    return null;
+  }
+
+  const inputTokens = typeof rawUsage.input_tokens === "number" ? rawUsage.input_tokens : null;
+  const outputTokens = typeof rawUsage.output_tokens === "number" ? rawUsage.output_tokens : null;
+  const totalTokens = typeof rawUsage.total_tokens === "number"
+    ? rawUsage.total_tokens
+    : ((inputTokens !== null || outputTokens !== null) ? (inputTokens ?? 0) + (outputTokens ?? 0) : null);
+
+  if (inputTokens === null && outputTokens === null && totalTokens === null) {
+    return null;
+  }
+
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+  };
+}
+
+export function resolveBuildTokenUsage(
+  row: BuildTelemetryAdminRow | null | undefined,
+  metadata?: Record<string, unknown> | null,
+): ResolvedBuildTokenUsage | null {
+  if (!row) {
+    return readGenerationAiUsage(metadata);
   }
 
   const outputTokens = typeof row.output_tokens === "number" ? row.output_tokens : null;
   const inputTokens = typeof row.input_tokens === "number" ? row.input_tokens : null;
 
   if (inputTokens === null && outputTokens === null) {
-    return null;
+    return readGenerationAiUsage(metadata);
   }
 
-  return (inputTokens ?? 0) + (outputTokens ?? 0);
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: (inputTokens ?? 0) + (outputTokens ?? 0),
+  };
+}
+
+function getTokenUsage(
+  row: BuildTelemetryAdminRow | null | undefined,
+  metadata?: Record<string, unknown> | null,
+): number | null {
+  return resolveBuildTokenUsage(row, metadata)?.total_tokens ?? null;
 }
 
 export function calculateAdminBuildDurationMs(startedAt: string, completedAt: string | null): number | null {
@@ -160,13 +212,17 @@ export function calculateAdminBuildDurationMs(startedAt: string, completedAt: st
   return Math.max(0, completedAtMs - startedAtMs);
 }
 
-function getCostUsd(row: BuildTelemetryAdminRow | null | undefined): number | null {
-  if (!row) {
+export function resolveBuildCostUsd(
+  row: BuildTelemetryAdminRow | null | undefined,
+  metadata?: Record<string, unknown> | null,
+): number | null {
+  const usage = resolveBuildTokenUsage(row, metadata);
+  if (!row && !usage) {
     return null;
   }
 
-  const inputTokens = typeof row.input_tokens === "number" ? row.input_tokens : null;
-  const outputTokens = typeof row.output_tokens === "number" ? row.output_tokens : null;
+  const inputTokens = usage?.input_tokens ?? null;
+  const outputTokens = usage?.output_tokens ?? null;
 
   if (inputTokens !== null || outputTokens !== null) {
     return roundNumber(
@@ -175,7 +231,7 @@ function getCostUsd(row: BuildTelemetryAdminRow | null | undefined): number | nu
     );
   }
 
-  return typeof row.cost_usd === "number" ? row.cost_usd : null;
+  return row && typeof row.cost_usd === "number" ? row.cost_usd : null;
 }
 
 async function fetchGenerationRows(
@@ -184,7 +240,7 @@ async function fetchGenerationRows(
 ): Promise<GenerationAdminRow[]> {
   let query = client
     .from("generations")
-    .select("id,project_id,status,started_at,completed_at,error")
+    .select("id,project_id,status,started_at,completed_at,error,metadata")
     .order("started_at", { ascending: false });
 
   if (mode === "in_flight") {
@@ -208,7 +264,7 @@ async function fetchGenerationRowsForUtcDay(
 ): Promise<GenerationAdminRow[]> {
   const response = await client
     .from("generations")
-    .select("id,project_id,status,started_at,completed_at,error")
+    .select("id,project_id,status,started_at,completed_at,error,metadata")
     .gte("started_at", dayStartIso)
     .lt("started_at", nextDayIso)
     .order("started_at", { ascending: false });
@@ -356,15 +412,15 @@ async function hydrateAdminBuilds(rows: GenerationAdminRow[]): Promise<AdminBuil
 
     return {
       completed_at: row.completed_at,
-      cost_usd: getCostUsd(telemetry),
+      cost_usd: resolveBuildCostUsd(telemetry, row.metadata),
       duration_ms: calculateAdminBuildDurationMs(row.started_at, row.completed_at),
       error_reason: getBuildErrorReason(row),
       id: row.id,
       project_id: row.project_id,
       started_at: row.started_at,
       status: toAdminBuildStatus(row.status),
-      token_usage: getTokenUsage(telemetry),
-      tokens_used: getTokenUsage(telemetry),
+      token_usage: getTokenUsage(telemetry, row.metadata),
+      tokens_used: getTokenUsage(telemetry, row.metadata),
       user_email: telemetryUserEmail ?? ownerEmailsByProjectId.get(row.project_id) ?? FALLBACK_USER_EMAIL,
     } satisfies AdminBuild;
   });
@@ -427,7 +483,7 @@ async function getBuildStatsFromDb(): Promise<AdminBuildStats> {
       todayFailed += 1;
     }
 
-    const tokenUsage = getTokenUsage(telemetryByBuildId.get(row.id));
+    const tokenUsage = getTokenUsage(telemetryByBuildId.get(row.id), row.metadata);
     if (tokenUsage !== null) {
       tokenTotal += tokenUsage;
       tokenCount += 1;

@@ -13,6 +13,7 @@ import {
   calcCreditCostHaiku,
   isAdminEmail,
 } from "../credits.js";
+import { buildPersistedAiUsage, persistGenerationAiUsage } from "./tokenUsage.js";
 import { maybeSendCreditsLowEmailForUser } from "../email/service.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../projectVersions.js";
 
@@ -469,6 +470,14 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     summary: customised.summary,
   });
 
+  await persistGenerationAiUsage(
+    db,
+    buildId,
+    buildPersistedAiUsage(inputTokens, outputTokens),
+  ).catch((error) => {
+    console.error("[generate] generation ai_usage persistence failed (non-fatal):", error instanceof Error ? error.message : String(error));
+  });
+
   console.log("[generate] Build complete.", {
     buildId,
     filesCount: finalFiles.length,
@@ -502,13 +511,16 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     error_log: null,
     generation_time_ms: generationMs > 0 ? generationMs : null,
     credits_used: creditsUsed,
+    input_tokens: inputTokens,
     output_tokens: outputTokens,
     cost_usd: costUsd,
     user_iterated: input.isIteration,
     iteration_count: 0,
     model_used: model,
     phase_file_diff: phaseDiff,
-  }).catch(() => undefined);
+  }).catch((error) => {
+    console.error("[generate] build telemetry upsert failed (non-fatal):", error instanceof Error ? error.message : String(error));
+  });
 
   await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
   await maybeSendCreditsLowEmailForUser({

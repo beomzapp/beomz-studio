@@ -175,6 +175,7 @@ export interface BuildTelemetryRow extends Record<string, unknown> {
   error_log: Record<string, unknown> | null;
   generation_time_ms: number | null;
   credits_used: number;
+  input_tokens: number;
   output_tokens: number;
   cost_usd: number | null;
   user_iterated: boolean;
@@ -464,6 +465,7 @@ export interface BuildTelemetryInsert extends Record<string, unknown> {
   error_log?: Record<string, unknown> | null;
   generation_time_ms?: number | null;
   credits_used?: number;
+  input_tokens?: number;
   output_tokens?: number;
   cost_usd?: number | null;
   user_iterated?: boolean;
@@ -485,6 +487,7 @@ export interface BuildTelemetryUpdate extends Record<string, unknown> {
   error_log?: Record<string, unknown> | null;
   generation_time_ms?: number | null;
   credits_used?: number;
+  input_tokens?: number;
   output_tokens?: number;
   cost_usd?: number | null;
   user_iterated?: boolean;
@@ -1309,13 +1312,25 @@ export class StudioDbClient {
   async upsertBuildTelemetry(
     input: BuildTelemetryInsert,
   ): Promise<BuildTelemetryRow> {
-    const response = await this.client
+    const runUpsert = async (payload: BuildTelemetryInsert) => this.client
       .from("build_telemetry")
-      .upsert(input, {
+      .upsert(payload, {
         onConflict: "id",
       })
       .select("*")
       .single();
+
+    let response = await runUpsert(input);
+
+    if (response.error && /input_tokens/i.test(response.error.message)) {
+      await attemptPostgrestSchemaReload(this.client).catch(() => undefined);
+      response = await runUpsert(input);
+
+      if (response.error && /input_tokens/i.test(response.error.message)) {
+        const { input_tokens: _ignoredInputTokens, ...fallbackInput } = input;
+        response = await runUpsert(fallbackInput);
+      }
+    }
 
     return unwrapSingle(response);
   }

@@ -10,7 +10,13 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 
 const { createRequireAdmin } = await import("../../middleware/requireAdmin.js");
-const { calculateAdminBuildDurationMs, createAdminBuildsRoute } = await import("./builds.js");
+const {
+  calculateAdminBuildDurationMs,
+  createAdminBuildsRoute,
+  readGenerationAiUsage,
+  resolveBuildCostUsd,
+  resolveBuildTokenUsage,
+} = await import("./builds.js");
 
 function createOrgContext(): OrgContext {
   const now = new Date().toISOString();
@@ -63,6 +69,53 @@ test("calculateAdminBuildDurationMs returns the completed build duration in mill
     240000,
   );
   assert.equal(calculateAdminBuildDurationMs("2026-04-26T10:00:00.000Z", null), null);
+});
+
+test("readGenerationAiUsage extracts persisted metadata token totals", () => {
+  assert.deepEqual(
+    readGenerationAiUsage({
+      ai_usage: {
+        input_tokens: 1200,
+        output_tokens: 3400,
+        total_tokens: 4600,
+      },
+    }),
+    {
+      input_tokens: 1200,
+      output_tokens: 3400,
+      total_tokens: 4600,
+    },
+  );
+});
+
+test("resolveBuildTokenUsage falls back to generation metadata when telemetry is missing", () => {
+  assert.deepEqual(
+    resolveBuildTokenUsage(null, {
+      ai_usage: {
+        input_tokens: 500,
+        output_tokens: 1500,
+        total_tokens: 2000,
+      },
+    }),
+    {
+      input_tokens: 500,
+      output_tokens: 1500,
+      total_tokens: 2000,
+    },
+  );
+});
+
+test("resolveBuildCostUsd computes cost from generation metadata when telemetry is missing", () => {
+  assert.equal(
+    resolveBuildCostUsd(null, {
+      ai_usage: {
+        input_tokens: 1000,
+        output_tokens: 2000,
+        total_tokens: 3000,
+      },
+    }),
+    0.033,
+  );
 });
 
 test("GET /admin/builds rejects non-admin users", async () => {

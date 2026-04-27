@@ -206,6 +206,17 @@ interface TokenUsage {
   outputTokens: number;
 }
 
+function addCustomiseResultUsage(
+  base: CustomiseResult,
+  extra: Pick<CustomiseResult, "inputTokens" | "outputTokens">,
+): CustomiseResult {
+  return {
+    ...base,
+    inputTokens: (base.inputTokens ?? 0) + (extra.inputTokens ?? 0),
+    outputTokens: base.outputTokens + extra.outputTokens,
+  };
+}
+
 interface IterationMetrics {
   baselineInputTokens: number | null;
   optimizedInputTokens: number | null;
@@ -2148,7 +2159,7 @@ async function callAnthropicWithMessages(
       if (retry.files.length === 0) {
         throw new Error(`Model returned 0 files on retry (outputTokens: ${retry.outputTokens})`);
       }
-      return retry;
+      return addCustomiseResultUsage(retry, result);
     }
     console.log(JSON.stringify({
       event: "generate.outcome",
@@ -2527,7 +2538,7 @@ async function callAnthropicIterateWithTools(
       if (retry.files.length === 0) {
         throw new Error(`Model returned 0 files on retry (outputTokens: ${retry.outputTokens})`);
       }
-      return retry;
+      return addCustomiseResultUsage(retry, result);
     }
     return result;
   };

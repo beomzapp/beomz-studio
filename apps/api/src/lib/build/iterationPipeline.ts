@@ -10,6 +10,7 @@ import {
   calcIterationCreditCost,
   isAdminEmail,
 } from "../credits.js";
+import { buildPersistedAiUsage, persistGenerationAiUsage } from "./tokenUsage.js";
 import { maybeSendCreditsLowEmailForUser } from "../email/service.js";
 import { encryptProjectSecret } from "../projectSecrets.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../projectVersions.js";
@@ -534,6 +535,14 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     }
   }
 
+  await persistGenerationAiUsage(
+    db,
+    buildId,
+    buildPersistedAiUsage(iterInputTokens, iterTokens),
+  ).catch((error) => {
+    console.error("[generate] iteration ai_usage persistence failed (non-fatal):", error instanceof Error ? error.message : String(error));
+  });
+
   await db.upsertBuildTelemetry({
     id: buildId,
     project_id: projectId,
@@ -547,12 +556,15 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     error_log: iterErrorReason ? { message: iterErrorReason } : null,
     generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
     credits_used: iterCreditsUsed,
+    input_tokens: iterInputTokens,
     output_tokens: iterTokens,
     cost_usd: iterCostUsd,
     user_iterated: true,
     iteration_count: 0,
     model_used: model,
-  }).catch(() => undefined);
+  }).catch((error) => {
+    console.error("[generate] iteration build telemetry upsert failed (non-fatal):", error instanceof Error ? error.message : String(error));
+  });
 
   await db.updateProject(projectId, { status: "ready" }).catch(() => undefined);
   await maybeSendCreditsLowEmailForUser({
