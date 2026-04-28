@@ -757,6 +757,16 @@ export function WebsiteBuilderPage() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  // BEO-687: After the first successful generate, strip ?brief= from the URL
+  // so future page refreshes do not re-trigger the generate call.
+  const briefClearedRef = useRef(false);
+  useEffect(() => {
+    if (!briefClearedRef.current && brief && buildStatus === "done") {
+      briefClearedRef.current = true;
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [buildStatus, brief]);
+
   // BEO-682: inject section detection by writing a JS file to the WebContainer FS
   // and prepending its import to main.tsx — avoids cross-origin eval() entirely.
   const injectSectionDetection = useCallback(async () => {

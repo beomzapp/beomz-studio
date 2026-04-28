@@ -669,9 +669,13 @@ export function ProjectPage() {
   const autoStarted = useRef(false);
   useEffect(() => {
     if (autoStarted.current || !launchIntent?.prompt) return;
+    // BEO-687: skip if the project already loaded existing files via the
+    // resume effect — prevents any potential race where launchIntent fires
+    // after build state is already hydrated.
+    if (buildResult && buildResult.files.length > 0) return;
     autoStarted.current = true;
     handleSendMessage(launchIntent.prompt);
-  }, [handleSendMessage, launchIntent?.prompt]);
+  }, [handleSendMessage, launchIntent?.prompt, buildResult]);
 
   useEffect(() => {
     if (build?.status === "completed" || build?.status === "failed") clearState();

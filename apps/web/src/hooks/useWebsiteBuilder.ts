@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { StudioFile } from "@beomz-studio/contracts";
-import { getAccessToken, getApiBaseUrl } from "../lib/api";
+import { getAccessToken, getApiBaseUrl, getLatestBuildForProject } from "../lib/api";
 
 export type WebsiteBuildStatus = "idle" | "generating" | "done" | "error";
 
@@ -208,15 +208,47 @@ export function useWebsiteBuilder(
     [],
   );
 
-  // Fire initial generation once when brief + projectId are available
+  // Fire initial generation once when brief + projectId are available.
+  // BEO-687: Before generating, check whether the project already has files
+  // (e.g. user refreshed the page with ?brief= still in the URL). If files
+  // exist, load them directly and skip the generate call so credits are not
+  // deducted and the design is not rebuilt.
   useEffect(() => {
     if (!projectId || !initialBrief || firedRef.current) return;
     firedRef.current = true;
-    void generate({
-      projectId,
-      sessionId: sessionIdRef.current,
-      prompt: initialBrief,
-    });
+
+    void (async () => {
+      try {
+        const existing = await getLatestBuildForProject(projectId);
+        if (
+          existing?.build?.status === "completed" &&
+          existing.result?.files &&
+          existing.result.files.length > 0
+        ) {
+          // Project already has files — hydrate state and skip generate
+          const loadedFiles = existing.result.files.map(f => ({
+            path: f.path,
+            kind: f.kind ?? inferKind(f.path),
+            language: f.language ?? inferLanguage(f.path),
+            content: f.content as string,
+            source: "ai" as const,
+            locked: false,
+          }));
+          setFiles(loadedFiles);
+          setStatus("done");
+          setStatusMessage("Website ready.");
+          if (existing.build.id) setBuildId(existing.build.id);
+          return;
+        }
+      } catch {
+        // Check failed (network error etc.) — fall through to generate
+      }
+      void generate({
+        projectId,
+        sessionId: sessionIdRef.current,
+        prompt: initialBrief,
+      });
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, initialBrief]);
 
