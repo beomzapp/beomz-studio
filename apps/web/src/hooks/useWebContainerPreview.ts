@@ -257,6 +257,15 @@ export function useWebContainerPreview(
   // cacheFallbackFnRef — the fallback fn; called on [FS] ERROR in output or timeout.
   const cacheTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cacheFallbackFnRef = useRef<(() => void) | null>(null);
+  // BEO-688 follow-up: debounce the [FS] ERROR cache-bust trigger. WebContainer
+  // emits a benign "[FS] [ERROR] invalid mount filesystem-worker" on first mount
+  // that the WC recovers from in <1s; it should NOT bust the IndexedDB cache.
+  // Only treat the error as a real corruption signal when we see ≥2 occurrences
+  // within a 5s window — that's the signature of a genuinely bad node_modules
+  // snapshot. After server-ready fires, cacheFallbackFnRef goes null so the
+  // counter naturally short-circuits and never escalates a one-off error.
+  const fsErrorCountRef = useRef(0);
+  const fsErrorWindowStartRef = useRef(0);
   // BEO-383: armCacheFallbackRef stores the armCacheFallback() function created
   // inside boot() so the post-boot generationId effect can also arm it.
   const armCacheFallbackRef = useRef<(() => void) | null>(null);
@@ -544,9 +553,25 @@ export function useWebContainerPreview(
             }
           }
 
-          // 3) Stale node_modules cache → bust.
+          // 3) Stale node_modules cache → bust (BEO-688: only after ≥2 FS
+          // errors within 5s — a single transient FS error on first mount is
+          // a known WC quirk and the WC recovers within ~1s; busting on the
+          // first one busted the cache on every page load and forced a fresh
+          // npm install every time, defeating the IndexedDB cache entirely).
           if (chunk.includes("[FS]") && chunk.includes("ERROR") && cacheFallbackFnRef.current) {
-            cacheFallbackFnRef.current();
+            const now = Date.now();
+            if (now - fsErrorWindowStartRef.current > 5_000) {
+              fsErrorWindowStartRef.current = now;
+              fsErrorCountRef.current = 1;
+            } else {
+              fsErrorCountRef.current += 1;
+            }
+            if (fsErrorCountRef.current >= 2) {
+              console.warn("[wc-cache] [FS] ERROR repeated within 5s — busting cache");
+              cacheFallbackFnRef.current();
+            } else {
+              console.log("[wc-cache] transient [FS] ERROR ignored — waiting for recovery");
+            }
           }
         },
       })).catch(() => { /* stream closed */ });
@@ -721,7 +746,7 @@ export function useWebContainerPreview(
             if (nmMountOk) {
               instance.installedAt = Date.now();
               usedCachedNm = true;
-              console.log("[wc-cache] node_modules restored from IndexedDB");
+              console.log("[wc-cache] restored from cache");
             } else {
               console.warn("[wc-cache] node_modules mount invalid — clearing cache for fresh install");
               await wcCacheDeleteNodeModules();
@@ -778,6 +803,10 @@ export function useWebContainerPreview(
               clearTimeout(cacheTimeoutIdRef.current);
               cacheTimeoutIdRef.current = null;
             }
+            // BEO-688: reset FS-error debounce window so a future server-ready
+            // → re-arm cycle doesn't carry stale counts across rebuilds.
+            fsErrorCountRef.current = 0;
+            fsErrorWindowStartRef.current = 0;
             console.warn("[wc-cache] Stale node_modules cache — running fresh npm install");
             await wcCacheDeleteNodeModules();
             instance.devProcess?.kill();
