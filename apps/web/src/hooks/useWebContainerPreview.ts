@@ -9,6 +9,7 @@ import {
   buildShellFileTree,
   getOrBootWebContainer,
   isWebContainerSupported,
+  WEBSITE_SCAFFOLD_PACKAGE_JSON,
   WORKSPACE_PACKAGE_JSON,
   type DbEnv,
   type WcInstance,
@@ -225,6 +226,8 @@ export function useWebContainerPreview(
    * filesystem. Iterations ignore this flag (firstBuildDeliveredRef gate).
    */
   isBuildInProgress?: boolean,
+  /** BEO-688: slim website-only scaffold skips app-only packages. */
+  scaffoldType?: "app" | "website",
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -312,6 +315,11 @@ export function useWebContainerPreview(
   const isBuildInProgressRef = useRef(isBuildInProgress);
   isBuildInProgressRef.current = isBuildInProgress;
 
+  // BEO-688: live ref for scaffoldType so stable closures always use the
+  // current value without being re-created.
+  const scaffoldTypeRef = useRef(scaffoldType);
+  scaffoldTypeRef.current = scaffoldType;
+
   // ── BEO-456: Deliver real files to the WC + signal HMR ────────────────────
   // Uses the same path the iteration hot-swap uses: wc.mount(previewFileTree)
   // at root while Vite is running. Vite's file watcher picks up the change and
@@ -374,7 +382,7 @@ export function useWebContainerPreview(
         // the generated files in one pass. The container is still booting
         // its module graph; per-file writes here would fight with Vite's
         // initial dep optimisation.
-        const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current);
+        const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current, scaffoldTypeRef.current);
         await wc.mount(tree);
       } else {
         // BEO-586 hot-patch: iteration — container is already running and
@@ -483,7 +491,7 @@ export function useWebContainerPreview(
       if (viteStartedRef.current) return;
       viteStartedRef.current = true;
 
-      await wc.mount(buildShellFileTree());
+      await wc.mount(buildShellFileTree(scaffoldTypeRef.current));
 
       setStatus("starting");
       setProgressMessage("Starting dev server…");
@@ -727,7 +735,9 @@ export function useWebContainerPreview(
             await instance.wc.mount({
               "package.json": {
                 file: {
-                  contents: WORKSPACE_PACKAGE_JSON,
+                  contents: scaffoldTypeRef.current === "website"
+                    ? WEBSITE_SCAFFOLD_PACKAGE_JSON
+                    : WORKSPACE_PACKAGE_JSON,
                 },
               },
             });

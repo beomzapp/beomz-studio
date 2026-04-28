@@ -44,6 +44,59 @@ export const WORKSPACE_PACKAGE_JSON = JSON.stringify(
   2,
 );
 
+// ─── Website-only slim scaffold (BEO-688) ────────────────────────────────────
+// Strips app-only packages: @neondatabase/serverless, @supabase/supabase-js,
+// framer-motion, react-icons, react-router-dom.
+
+export const WEBSITE_SCAFFOLD_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "beomz-preview",
+    private: true,
+    type: "module",
+    scripts: { dev: "vite" },
+    dependencies: {
+      clsx: "^2.0.0",
+      "lucide-react": "^0.400.0",
+      react: "^19.2.0",
+      "react-dom": "^19.2.0",
+      "tailwind-merge": "^2.0.0",
+    },
+    devDependencies: {
+      "@tailwindcss/vite": "^4.2.2",
+      "@types/react": "^19.2.2",
+      "@types/react-dom": "^19.2.2",
+      "@vitejs/plugin-react": "^6.0.1",
+      tailwindcss: "^4.2.2",
+      typescript: "^5.9.3",
+      vite: "^8.0.1",
+    },
+  },
+  null,
+  2,
+);
+
+const WEBSITE_VITE_CONFIG = `// @ts-nocheck
+import path from "node:path";
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "apps/web/src"),
+    },
+  },
+  server: {
+    allowedHosts: true,
+    host: true,
+    port: 5173,
+    strictPort: false,
+  },
+});
+`;
+
 const WORKSPACE_TSCONFIG = JSON.stringify(
   {
     compilerOptions: {
@@ -398,11 +451,13 @@ export function buildPreviewFileTree(
   files: readonly StudioFile[],
   project: Pick<Project, "id" | "name" | "templateId">,
   dbEnv?: DbEnv | null,
+  scaffoldType?: "app" | "website",
 ): FileSystemTree {
+  const isWebsite = scaffoldType === "website";
   const flatFiles: Array<{ path: string; contents: string }> = [
-    { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
+    { path: "package.json", contents: isWebsite ? WEBSITE_SCAFFOLD_PACKAGE_JSON : WORKSPACE_PACKAGE_JSON },
     { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
-    { path: "vite.config.ts", contents: WORKSPACE_VITE_CONFIG },
+    { path: "vite.config.ts", contents: isWebsite ? WEBSITE_VITE_CONFIG : WORKSPACE_VITE_CONFIG },
     { path: "index.html", contents: WORKSPACE_INDEX_HTML },
     { path: "apps/web/src/main.tsx", contents: WORKSPACE_MAIN_TSX },
     { path: "apps/web/src/preview/App.tsx", contents: WORKSPACE_PREVIEW_APP_TSX },
@@ -441,11 +496,12 @@ export function buildPreviewFileTree(
 // visible. Real app files are delivered via wc.mount(buildPreviewFileTree(...))
 // once Vite's HMR watcher is live — the exact same path the iteration hot-swap
 // uses, which is proven to work reliably with HMR.
-export function buildShellFileTree(): FileSystemTree {
+export function buildShellFileTree(scaffoldType?: "app" | "website"): FileSystemTree {
+  const isWebsite = scaffoldType === "website";
   return pathsToFileTree([
-    { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
+    { path: "package.json", contents: isWebsite ? WEBSITE_SCAFFOLD_PACKAGE_JSON : WORKSPACE_PACKAGE_JSON },
     { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
-    { path: "vite.config.ts", contents: WORKSPACE_VITE_CONFIG },
+    { path: "vite.config.ts", contents: isWebsite ? WEBSITE_VITE_CONFIG : WORKSPACE_VITE_CONFIG },
     { path: "index.html", contents: WORKSPACE_INDEX_HTML },
     { path: "apps/web/src/main.tsx", contents: WORKSPACE_BLANK_MAIN_TSX },
   ]);

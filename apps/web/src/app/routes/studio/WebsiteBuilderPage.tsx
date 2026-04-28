@@ -714,6 +714,7 @@ export function WebsiteBuilderPage() {
     undefined,
     undefined,
     isBuildInProgress,
+    "website",
   );
 
   // BEO-676: keep the ref current so useWebsiteBuilder's SSE handler can call it.
