@@ -16,7 +16,7 @@ export function createFeatureFlagsRoute(deps: FeatureFlagsRouteDeps = {}) {
   route.get("/", async (c) => {
     try {
       const flags = await getModulesFeatureFlags();
-      return c.json(flags);
+      return c.json({ modules: flags });
     } catch (error) {
       console.error("[GET /feature-flags] error:", error);
       return c.json({ error: "Failed to load feature flags." }, 500);
