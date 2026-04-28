@@ -105,6 +105,7 @@ export function StudioLayout() {
   useEffect(() => {
     let cancelled = false;
     void loadModuleFlags().then((flags) => {
+      console.log('[BEO-695] flags loaded:', JSON.stringify(flags));
       if (!cancelled) setModuleFlags(flags);
     });
     return () => {
@@ -182,7 +183,7 @@ export function StudioLayout() {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        <nav key={JSON.stringify(moduleFlags)} className="flex-1 space-y-1 p-3">
           {NAV_ITEMS.map((item) => {
             const flagState = item.moduleKey ? moduleFlags[item.moduleKey] : "live";
 
