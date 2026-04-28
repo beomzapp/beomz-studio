@@ -239,6 +239,8 @@ export function ProjectPage() {
   const [showSetupCard, setShowSetupCard] = useState(false);
   const [setupCardNeeds, setSetupCardNeeds] = useState<BuildNeeds | null>(null);
   const pendingBuildRef = useRef<{ prompt: string; imageUrl?: string } | null>(null);
+  // Tracks the most recent prompt that went through fireBuild so handleRetry can re-run the interceptor.
+  const lastSentBuildPromptRef = useRef<string>("");
 
   // ─── Database state ───────────────────────────────────────────────────────
 
@@ -433,6 +435,7 @@ export function ProjectPage() {
       isSystem?: boolean,
       buildMeta?: { withDatabase?: boolean; withAuth?: boolean },
     ) => {
+      lastSentBuildPromptRef.current = text;
       setBuildFailed(false);
       setBuildErrorMessage(null);
       setCreditsUsed(null);
@@ -466,10 +469,11 @@ export function ProjectPage() {
         return;
       }
 
-      // BEO-704: for the first build on a new/empty project, run signal detection
-      // and show the setup card if DB or auth signals are present.
-      const isFirstBuild = !buildResult || buildResult.files.length === 0;
-      if (isFirstBuild && !isSystem) {
+      // BEO-704: run signal detection on every non-system message when the project
+      // does not yet have a database wired. Once DB is provisioned (dbEnabled=true)
+      // the card is skipped — no point asking again. Iteration-like prompts naturally
+      // miss all DB_SIGNALS and fall through without showing the card.
+      if (!isSystem && !dbEnabled) {
         const needs = detectBuildNeeds(text);
         if (!needs.skip && (needs.needsDb || needs.needsAuth)) {
           pendingBuildRef.current = { prompt: text, imageUrl };
@@ -481,7 +485,7 @@ export function ProjectPage() {
 
       fireBuild(text, imageUrl, isSystem);
     },
-    [credits, fireBuild, buildResult],
+    [credits, fireBuild, dbEnabled],
   );
 
   // BEO-704: Setup card — user confirmed DB/auth choices
@@ -504,6 +508,28 @@ export function ProjectPage() {
     pendingBuildRef.current = null;
     fireBuild(pending.prompt, pending.imageUrl);
   }, [fireBuild]);
+
+  // BEO-704: Retry — must pass through the interceptor so the setup card re-appears
+  // when the project still has no DB (e.g. first build failed before provisioning).
+  // If DB is already wired (dbEnabled=true) the interceptor skips the card and
+  // falls through to the silent retry path.
+  const handleRetry = useCallback(() => {
+    const prompt = lastSentBuildPromptRef.current;
+    if (!prompt) {
+      retryLastBuild();
+      return;
+    }
+    if (!dbEnabled) {
+      const needs = detectBuildNeeds(prompt);
+      if (!needs.skip && (needs.needsDb || needs.needsAuth)) {
+        pendingBuildRef.current = { prompt };
+        setSetupCardNeeds(needs);
+        setShowSetupCard(true);
+        return;
+      }
+    }
+    retryLastBuild();
+  }, [retryLastBuild, dbEnabled]);
 
   // ─── Wire to database (fires after Neon provisioning) ────────────────────
 
@@ -983,7 +1009,7 @@ export function ProjectPage() {
             buildFailed={buildFailed}
             neonDbUrl={neonDbUrl}
             buildErrorMessage={buildErrorMessage}
-            onRetry={retryLastBuild}
+            onRetry={handleRetry}
             creditsUsed={creditsUsed}
             isBuildInProgress={isBuilding}
           />
@@ -1060,7 +1086,7 @@ export function ProjectPage() {
               onStopStreaming={handleStopStreaming}
               onForceStop={handleForceStop}
               isStopPending={isStopPending}
-              onRetry={retryLastBuild}
+              onRetry={handleRetry}
               onReportIssue={reportIssue}
               width={chatPanelWidth}
               suggestionChips={suggestionChips}

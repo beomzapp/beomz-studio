@@ -10,6 +10,12 @@ export const DB_SIGNALS = [
   "staff", "employee", "customer", "client", "product", "order", "booking",
   "appointment", "invoice", "expense", "budget", "project", "task", "ticket",
   "issue", "asset", "property", "schedule", "roster", "member", "subscriber",
+  // Common app archetypes that always need persistent data (BEO-704 regression fix)
+  "todo", "todos",
+  "note", "notes",
+  "blog",
+  "form",
+  "contact",
 ];
 
 export const AUTH_SIGNALS = [
