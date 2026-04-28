@@ -67,6 +67,46 @@ type WebsiteGenerationResult = {
 
 type WebsiteSectionKey = "nav" | "hero" | "features" | "about" | "cta" | "footer";
 
+const GENERIC_SITE_NAME_SEGMENTS = new Set([
+  "agency",
+  "blog",
+  "contact",
+  "ecommerce",
+  "home",
+  "landing page",
+  "official site",
+  "portfolio",
+  "restaurant",
+  "website",
+]);
+
+const PLACEHOLDER_SITE_NAMES = new Set([
+  "my website",
+  "new website",
+  "untitled website",
+  "website",
+]);
+
+const NAV_SITE_NAME_BLACKLIST = new Set([
+  "about",
+  "blog",
+  "book a consultation",
+  "book now",
+  "contact",
+  "explore the story",
+  "features",
+  "get started",
+  "home",
+  "join the newsletter",
+  "menu",
+  "reserve now",
+  "reserve your table",
+  "services",
+  "shop",
+  "shop the collection",
+  "start a project",
+]);
+
 interface WebsiteFilesEvent extends Record<string, unknown> {
   type: "files";
   id: string;
@@ -296,6 +336,39 @@ function compactWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normaliseExtractedSiteName(value: string): string | null {
+  const decoded = compactWhitespace(
+    value
+      .replace(/&amp;/gi, "&")
+      .replace(/&nbsp;/gi, " "),
+  );
+  if (!decoded) {
+    return null;
+  }
+
+  const separators = [" | ", " — ", " – ", " - ", " · ", " / "];
+  const separator = separators.find((candidate) => decoded.includes(candidate));
+  const segments = separator
+    ? decoded.split(separator).map((segment) => compactWhitespace(segment)).filter(Boolean)
+    : [decoded];
+
+  const preferred = segments.find((segment) => !GENERIC_SITE_NAME_SEGMENTS.has(segment.toLowerCase()))
+    ?? segments[0]
+    ?? decoded;
+  const cleaned = compactWhitespace(preferred.replace(/^['"`]+|['"`]+$/g, ""));
+
+  if (!cleaned || cleaned.length > 80) {
+    return null;
+  }
+
+  const normalised = cleaned.toLowerCase();
+  if (GENERIC_SITE_NAME_SEGMENTS.has(normalised) || PLACEHOLDER_SITE_NAMES.has(normalised)) {
+    return null;
+  }
+
+  return cleaned;
+}
+
 function escapeText(value: string): string {
   return value
     .replaceAll("\"", "'")
@@ -495,7 +568,7 @@ function renderNav(profile: WebsiteBuildProfile): string {
   const navLinks = profile.navItems
     .map((label) => {
       const href = label.toLowerCase() === "contact" ? "#cta" : `#${label.toLowerCase().replace(/\s+/g, "-")}`;
-      return `            <a href="${href}" className="text-sm font-medium text-slate-600 transition hover:text-slate-950">${escapeText(label)}</a>`;
+      return `            <a href="${href}" className="text-sm font-medium text-slate-800 transition hover:text-slate-950">${escapeText(label)}</a>`;
     })
     .join("\n");
 
@@ -861,6 +934,113 @@ function buildImageProxyUrl(imageUrl: string): string {
   return `${WEBSITE_IMAGE_PROXY_BASE_URL}${encodeURIComponent(imageUrl)}`;
 }
 
+function extractSiteNameFromIndexHtml(content: string): string | null {
+  const titleMatch = content.match(/<title>\s*([^<]+?)\s*<\/title>/i);
+  if (!titleMatch) {
+    return null;
+  }
+
+  return normaliseExtractedSiteName(titleMatch[1] ?? "");
+}
+
+function extractSiteNameFromNavContent(content: string): string | null {
+  for (const match of content.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const innerContent = match[1] ?? "";
+    const textContent = compactWhitespace(
+      innerContent
+        .replace(/<[^>]+>/g, " ")
+        .replace(/[{}]/g, " ")
+        .replace(/&amp;/gi, "&"),
+    );
+    const candidate = normaliseExtractedSiteName(textContent);
+    if (!candidate || NAV_SITE_NAME_BLACKLIST.has(candidate.toLowerCase())) {
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return null;
+}
+
+function extractSiteNameFromGeneratedFiles(files: StudioFile[]): string | null {
+  const indexHtml = files.find((file) => file.path === "index.html")?.content;
+  const siteNameFromTitle = indexHtml ? extractSiteNameFromIndexHtml(indexHtml) : null;
+  if (siteNameFromTitle) {
+    return siteNameFromTitle;
+  }
+
+  const navContent = files.find((file) => file.path === "src/components/Nav.tsx")?.content;
+  return navContent ? extractSiteNameFromNavContent(navContent) : null;
+}
+
+function buildProjectPatchUrl(requestUrl: string, projectId: string): URL {
+  const patchUrl = new URL(requestUrl);
+  const nextPathname = patchUrl.pathname.replace(/\/websites\/generate\/?$/, `/projects/${projectId}`);
+  patchUrl.pathname = nextPathname === patchUrl.pathname ? `/projects/${projectId}` : nextPathname;
+  patchUrl.search = "";
+  patchUrl.hash = "";
+  return patchUrl;
+}
+
+async function syncGeneratedProjectName(input: {
+  db: StudioDbClient;
+  projectId: string;
+  currentProjectName: string;
+  files: StudioFile[];
+  requestUrl: string;
+  authorizationHeader?: string;
+  abortSignal?: AbortSignal;
+}): Promise<string | null> {
+  const extractedName = extractSiteNameFromGeneratedFiles(input.files);
+  if (!extractedName || extractedName.toLowerCase() === input.currentProjectName.trim().toLowerCase()) {
+    return null;
+  }
+
+  const patchUrl = buildProjectPatchUrl(input.requestUrl, input.projectId);
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (input.authorizationHeader) {
+    headers.Authorization = input.authorizationHeader;
+  }
+
+  try {
+    const response = await fetch(patchUrl, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ name: extractedName }),
+      signal: input.abortSignal,
+    });
+
+    if (!response.ok) {
+      const details = await response.text().catch(() => "");
+      throw new Error(
+        `PATCH ${patchUrl.pathname} failed with ${response.status}${details ? `: ${details.slice(0, 200)}` : ""}`,
+      );
+    }
+
+    return extractedName;
+  } catch (error) {
+    console.warn(
+      "[websites/generate] project name PATCH failed; falling back to direct project update:",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  try {
+    await input.db.updateProject(input.projectId, { name: extractedName });
+    return extractedName;
+  } catch (error) {
+    console.warn(
+      "[websites/generate] direct project name update failed:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+}
+
 function buildHeroImagePrompt(input: {
   projectName: string;
   prompt: string;
@@ -1026,6 +1206,7 @@ async function callAnthropicWebsiteGeneration(input: {
     "7. SEO is mandatory: exactly one h1 on the page, sensible h2 and h3 hierarchy, and meta tags in index.html.",
     "8. Use Tailwind utility classes with a mobile-first responsive layout.",
     "9. Make the design modern, high quality, and aligned to the requested vibe. Default to a clean minimal aesthetic unless the vibe clearly asks for something stronger.",
+    "CRITICAL: Navigation links must have sufficient contrast against the background color. If the nav background is dark, nav links must be white or light grey (#fff or #e5e5e5). If light, use dark (#1a1a1a). NEVER use opacity < 0.8 on nav links. Nav must always be clearly readable.",
     "10. For ALL images use Unsplash Source API through the Beomz proxy:",
     "    <img src=\"https://beomz.ai/api/proxy/image?url=https://source.unsplash.com/{width}x{height}/?{keyword1},{keyword2}\" alt=\"description\" />",
     "    Keywords by context: hero→restaurant,fine-dining | gallery→food,plating | person→chef,portrait | product→product,lifestyle",
@@ -1550,6 +1731,16 @@ websitesGenerateRoute.post(
           template: templateId,
           updated_at: completedAt,
         }).catch(() => undefined);
+
+        await syncGeneratedProjectName({
+          db: orgContext.db,
+          projectId,
+          currentProjectName: project.name,
+          files: finalFiles,
+          requestUrl: c.req.url,
+          authorizationHeader: c.req.header("authorization"),
+          abortSignal: abortController.signal,
+        });
 
         void saveProjectVersion(
           projectId,

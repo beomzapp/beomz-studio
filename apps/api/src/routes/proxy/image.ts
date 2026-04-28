@@ -30,13 +30,42 @@ function parseSourceUnsplashSize(url: URL): { width: number; height: number } | 
 }
 
 function extractSourceUnsplashQuery(url: URL): string {
-  return decodeURIComponent(url.search.slice(1)).trim();
+  const rawSearch = url.search.startsWith("?") ? url.search.slice(1) : "";
+  if (!rawSearch) {
+    return "";
+  }
+
+  if (!rawSearch.includes("=")) {
+    return decodeURIComponent(rawSearch).trim();
+  }
+
+  const params = new URLSearchParams(rawSearch);
+  return params.get("query")?.trim()
+    ?? params.get("q")?.trim()
+    ?? params.get("keywords")?.trim()
+    ?? decodeURIComponent(rawSearch).trim();
+}
+
+function buildLoremFlickrKeywordPath(url: URL): string {
+  const query = extractSourceUnsplashQuery(url);
+  if (!query) {
+    return "photo";
+  }
+
+  const keywords = query
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => segment.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, ""))
+    .filter(Boolean);
+
+  return keywords.length > 0 ? keywords.join(",") : "photo";
 }
 
 function buildLoremFlickrFallbackUrl(url: URL): URL {
   const size = parseSourceUnsplashSize(url) ?? { width: 1600, height: 900 };
-  const query = extractSourceUnsplashQuery(url) || "photo";
-  return new URL(`https://loremflickr.com/${size.width}/${size.height}/${encodeURIComponent(query)}`);
+  const keywordPath = buildLoremFlickrKeywordPath(url);
+  return new URL(`https://loremflickr.com/${size.width}/${size.height}/${keywordPath}`);
 }
 
 async function resolveSourceUnsplashUrl(url: URL): Promise<URL> {
