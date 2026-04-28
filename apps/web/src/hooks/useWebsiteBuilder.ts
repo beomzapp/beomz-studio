@@ -36,6 +36,7 @@ export interface UseWebsiteBuilderReturn {
   sendIterate: (prompt: string, activeSection?: string) => void;
   stopGeneration: () => void;
   isBuildInProgress: boolean;
+  lastIterationAt: number | null;
 }
 
 function ts(): string {
@@ -53,6 +54,7 @@ export function useWebsiteBuilder(
   const [status, setStatus] = useState<WebsiteBuildStatus>("idle");
   const [statusMessage, setStatusMessage] = useState("");
   const [history, setHistory] = useState<WebsiteHistoryEntry[]>([]);
+  const [lastIterationAt, setLastIterationAt] = useState<number | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const firedRef = useRef(false);
@@ -141,6 +143,7 @@ export function useWebsiteBuilder(
               setStatusMessage(msg);
               if (bid) setBuildId(bid);
               if (sn) setSiteName(sn);
+              setLastIterationAt(Date.now());
               setHistory((prev) => [
                 ...prev,
                 { role: "assistant", content: msg, timestamp: ts() },
@@ -254,6 +257,7 @@ export function useWebsiteBuilder(
     sendIterate,
     stopGeneration,
     isBuildInProgress: status === "generating",
+    lastIterationAt,
   };
 }
 

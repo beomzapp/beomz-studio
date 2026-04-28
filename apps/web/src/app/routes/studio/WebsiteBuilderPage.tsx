@@ -543,6 +543,7 @@ export function WebsiteBuilderPage() {
     history,
     sendIterate,
     isBuildInProgress,
+    lastIterationAt,
   } = useWebsiteBuilder(projectId, brief, wcPatchFileRef as RefObject<((file: string, content: string) => Promise<void>) | null>);
 
   // Update site name from generated content
@@ -736,6 +737,21 @@ export function WebsiteBuilderPage() {
     }
   }, []);
 
+  // BEO-682: inject after firstFilesDelivered — iframe onLoad fires too early
+  // (blank Vite dev server), so we wait until the built website is ready.
+  useEffect(() => {
+    if (!firstFilesDelivered) return;
+    const timer = setTimeout(injectSectionDetection, 1000);
+    return () => clearTimeout(timer);
+  }, [firstFilesDelivered, injectSectionDetection]);
+
+  // BEO-682: re-inject after each iteration so new [data-section] elements are wired up.
+  useEffect(() => {
+    if (!lastIterationAt) return;
+    const timer = setTimeout(injectSectionDetection, 2000);
+    return () => clearTimeout(timer);
+  }, [lastIterationAt, injectSectionDetection]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -817,7 +833,6 @@ export function WebsiteBuilderPage() {
             src={previewUrl}
             className="absolute inset-0 h-full w-full border-0"
             allow="cross-origin-isolated"
-            onLoad={injectSectionDetection}
             title="Website preview"
           />
         )}
