@@ -27,6 +27,7 @@ import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 import { isWebContainerSupported } from "../../../lib/webcontainer";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { PublishModal } from "../../../components/builder";
+import { StylePanel, type StylePanelElement } from "../../../components/builder/StylePanel";
 import { useCredits } from "../../../lib/CreditsContext";
 
 // ─── Section detection script ─────────────────────────────────────────────────
@@ -65,15 +66,33 @@ const DETECT_SCRIPT = `(function() {
   // Click detection — skip clicks that originate inside the action bar
   document.addEventListener('click', function(e) {
     if (e.target.closest && e.target.closest('[data-beomz-bar]')) return;
-    var el = e.target;
-    while (el && el !== document.body) {
-      if (el.dataset && el.dataset.section) {
-        window.parent.postMessage({ type: 'section-click', section: el.dataset.section }, '*');
-        return;
+
+    // Walk up to find an enclosing [data-section]
+    var sectionName = null;
+    var walk = e.target;
+    while (walk && walk !== document.body) {
+      if (walk.dataset && walk.dataset.section) {
+        sectionName = walk.dataset.section;
+        break;
       }
-      el = el.parentElement;
+      walk = walk.parentElement;
     }
-    window.parent.postMessage({ type: 'no-section-click' }, '*');
+    if (sectionName) {
+      window.parent.postMessage({ type: 'section-click', section: sectionName }, '*');
+    } else {
+      window.parent.postMessage({ type: 'no-section-click' }, '*');
+    }
+
+    // BEO-689: element-level click (fires after section-click)
+    if (e.target && e.target !== document.body && e.target !== document.documentElement) {
+      window.parent.postMessage({
+        type: 'element-click',
+        tagName: e.target.tagName.toLowerCase(),
+        className: typeof e.target.className === 'string' ? e.target.className : '',
+        textContent: (e.target.textContent || '').slice(0, 100),
+        sectionName: sectionName,
+      }, '*');
+    }
   });
 
   // BEO-681: build (or retrieve) the floating action bar for a section element
@@ -155,6 +174,7 @@ function getSuggestions(section: string | null): string[] {
 
 interface FloatingCommandBarProps {
   activeSection: string | null;
+  activeElementTag: string | null;
   pickMode: boolean;
   onDeselect: () => void;
   onPickMode: () => void;
@@ -165,6 +185,7 @@ interface FloatingCommandBarProps {
 
 function FloatingCommandBar({
   activeSection,
+  activeElementTag,
   pickMode,
   onDeselect,
   onPickMode,
@@ -292,6 +313,8 @@ function FloatingCommandBar({
           placeholder={
             isGenerating
               ? "Generating…"
+              : activeElementTag
+              ? `Editing ${activeElementTag} — describe changes or use panel →`
               : hasSectionSelected
               ? "Describe what to change…"
               : pickMode
@@ -650,6 +673,7 @@ export function WebsiteBuilderPage() {
   const { credits } = useCredits();
 
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [activeElement, setActiveElement] = useState<StylePanelElement | null>(null);
   const [siteName, setSiteName] = useState("My Website");
   const [pickMode, setPickMode] = useState(false);
 
@@ -748,6 +772,15 @@ export function WebsiteBuilderPage() {
         setPickMode(false);
         setActiveSection(null);
       }
+      // BEO-689: element-level click → open style panel
+      if (e.data?.type === "element-click" && typeof e.data.tagName === "string") {
+        setActiveElement({
+          tagName: e.data.tagName,
+          className: typeof e.data.className === "string" ? e.data.className : "",
+          textContent: typeof e.data.textContent === "string" ? e.data.textContent : "",
+          sectionName: typeof e.data.sectionName === "string" ? e.data.sectionName : null,
+        });
+      }
       // BEO-681: reorder button in hover bar — pre-fill command bar so user can type "up" / "down"
       if (e.data?.type === "section-reorder" && typeof e.data.section === "string") {
         const inputEl = commandBarInputRef.current;
@@ -816,6 +849,7 @@ export function WebsiteBuilderPage() {
       }
       if (e.key === "Escape") {
         setActiveSection(null);
+        setActiveElement(null);
         setPickMode(false);
       }
     };
@@ -825,9 +859,43 @@ export function WebsiteBuilderPage() {
 
   const handleSend = useCallback(
     (text: string) => {
+      // BEO-689: when an element is selected, scope the free-form prompt to it.
+      if (activeElement) {
+        const sectionPart = activeElement.sectionName
+          ? `In ${activeElement.sectionName}.tsx, `
+          : "";
+        const trimmedText = activeElement.textContent.trim();
+        const textPart = trimmedText ? ` with text "${trimmedText}"` : "";
+        const prompt =
+          `${sectionPart}find the ${activeElement.tagName}${textPart} and ${text}. ` +
+          `Change ONLY this specific element, nothing else.`;
+        sendIterate(prompt, activeElement.sectionName ?? undefined);
+        return;
+      }
       sendIterate(text, activeSection ?? undefined);
     },
-    [sendIterate, activeSection],
+    [sendIterate, activeSection, activeElement],
+  );
+
+  // BEO-689: Apply changes from the style panel.
+  const handleApplyElementStyle = useCallback(
+    (newClassName: string, newContent?: string) => {
+      if (!activeElement) return;
+      const sectionPart = activeElement.sectionName
+        ? `In ${activeElement.sectionName}.tsx, `
+        : "";
+      const trimmedText = activeElement.textContent.trim();
+      const textPart = trimmedText ? ` with text "${trimmedText}"` : "";
+      const contentPart = newContent
+        ? ` and update its text content to "${newContent}"`
+        : "";
+      const prompt =
+        `${sectionPart}find the ${activeElement.tagName}${textPart} and ` +
+        `change its className to "${newClassName}"${contentPart}. ` +
+        `Change ONLY this specific element, nothing else.`;
+      sendIterate(prompt, activeElement.sectionName ?? undefined);
+    },
+    [sendIterate, activeElement],
   );
 
   const handleAddPage = useCallback(
@@ -882,47 +950,70 @@ export function WebsiteBuilderPage() {
 
       {/* Preview area */}
       <div className={cn("relative flex-1 overflow-hidden", pickMode && "cursor-crosshair")}>
-        {/* WebContainer iframe */}
-        {!isWcFallback && previewUrl && (
-          <iframe
-            ref={iframeRef}
-            src={previewUrl}
-            className="absolute inset-0 h-full w-full border-0"
-            allow="cross-origin-isolated"
-            title="Website preview"
+        {/*
+          BEO-689: When the StylePanel is open, the preview content shrinks left
+          (260px reserved on the right). Side panels (Pages/SEO/History) sit
+          outside this wrapper so they keep overlaying the full preview area.
+        */}
+        <div
+          className={cn(
+            "absolute top-0 left-0 bottom-0 transition-[right] duration-200 ease-out",
+            activeElement ? "right-[260px]" : "right-0",
+          )}
+        >
+          {/* WebContainer iframe */}
+          {!isWcFallback && previewUrl && (
+            <iframe
+              ref={iframeRef}
+              src={previewUrl}
+              className="absolute inset-0 h-full w-full border-0"
+              allow="cross-origin-isolated"
+              title="Website preview"
+            />
+          )}
+
+          {/* Fallback: WebContainer not supported */}
+          {isWcFallback && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#faf9f6]">
+              <p className="text-[14px] text-[#9ca3af] text-center px-8">
+                Live preview requires a browser that supports SharedArrayBuffer
+                (Chrome / Edge 92+).
+              </p>
+            </div>
+          )}
+
+          {/* Loading overlay */}
+          {!isWcFallback && showOverlay && (
+            <PreviewOverlay message={overlayMessage} />
+          )}
+
+          {/* Floating command bar */}
+          <FloatingCommandBar
+            activeSection={activeSection}
+            activeElementTag={activeElement?.tagName ?? null}
+            pickMode={pickMode}
+            onDeselect={() => {
+              setActiveSection(null);
+              setActiveElement(null);
+              setPickMode(false);
+            }}
+            onPickMode={() => setPickMode((v) => !v)}
+            onSend={handleSend}
+            isGenerating={isBuildInProgress}
+            onFocusRef={(el) => {
+              commandBarInputRef.current = el;
+            }}
+          />
+        </div>
+
+        {/* BEO-689: Style panel — slides in from the right when an element is selected */}
+        {activeElement && (
+          <StylePanel
+            element={activeElement}
+            onApply={handleApplyElementStyle}
+            onClose={() => setActiveElement(null)}
           />
         )}
-
-        {/* Fallback: WebContainer not supported */}
-        {isWcFallback && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#faf9f6]">
-            <p className="text-[14px] text-[#9ca3af] text-center px-8">
-              Live preview requires a browser that supports SharedArrayBuffer
-              (Chrome / Edge 92+).
-            </p>
-          </div>
-        )}
-
-        {/* Loading overlay */}
-        {!isWcFallback && showOverlay && (
-          <PreviewOverlay message={overlayMessage} />
-        )}
-
-        {/* Floating command bar */}
-        <FloatingCommandBar
-          activeSection={activeSection}
-          pickMode={pickMode}
-          onDeselect={() => {
-            setActiveSection(null);
-            setPickMode(false);
-          }}
-          onPickMode={() => setPickMode((v) => !v)}
-          onSend={handleSend}
-          isGenerating={isBuildInProgress}
-          onFocusRef={(el) => {
-            commandBarInputRef.current = el;
-          }}
-        />
 
         {/* Side panels */}
         <PagesPanel
