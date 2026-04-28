@@ -1,34 +1,43 @@
 /**
- * BEO-704: Build needs detection — keyword-based signal matching.
- * Used to determine whether to show the DB/Auth setup card before a first build.
+ * BEO-704: Build needs detection — used to decide whether to show the DB/Auth
+ * setup card before a build starts.
+ *
+ * Design principle: most real apps need persistent data. Instead of trying to
+ * enumerate every possible data-heavy keyword, we default to needsDb=true and
+ * only suppress the card for prompts that are clearly static or utility apps.
+ * Auth is still opt-in — only shown when explicit login/account signals appear.
  */
 
-export const DB_SIGNALS = [
-  "save", "store", "track", "manage", "record", "log", "history",
-  "dashboard", "report", "list", "create", "edit", "delete", "update",
-  "submit", "upload", "inventory", "catalog", "crm", "erp", "admin",
-  "staff", "employee", "customer", "client", "product", "order", "booking",
-  "appointment", "invoice", "expense", "budget", "project", "task", "ticket",
-  "issue", "asset", "property", "schedule", "roster", "member", "subscriber",
-  // Common app archetypes that always need persistent data (BEO-704 regression fix)
-  "todo", "todos",
-  "note", "notes",
-  "blog",
-  "form",
-  "contact",
-];
-
-export const AUTH_SIGNALS = [
-  "login", "sign in", "sign up", "register", "account", "user",
-  "users", "profile", "password", "authentication", "admin", "role",
-  "permission", "access", "protected", "private", "personal", "multi-user",
-  "team", "staff", "portal", "member area",
-];
-
+/**
+ * Prompts that clearly describe a static page or a stateless utility tool.
+ * If any of these match, skip the setup card entirely.
+ */
 export const SKIP_SIGNALS = [
-  "landing page", "portfolio", "calculator", "converter", "timer",
-  "clock", "countdown", "simple game", "colour picker", "text tool",
-  "static", "just a page",
+  // Static / presentational pages
+  "landing page", "portfolio", "coming soon", "under construction",
+  // Stateless calculators and converters
+  "calculator", "converter", "currency converter", "unit converter",
+  // Clocks and timers (no server-side state)
+  "timer", "countdown", "clock", "stopwatch", "alarm clock",
+  // Visual / canvas demos
+  "animation", "particle", "canvas demo", "visualizer",
+  // Colour / design tools
+  "colour picker", "color picker", "palette generator",
+  // Simple mini-games with no leaderboard
+  "simple game", "clicker game",
+  // Explicit one-shot tools
+  "text tool", "static", "just a page", "html only",
+];
+
+/**
+ * Signals that mean the app needs user login / accounts.
+ * Auth is opt-in — only pre-selected when these appear in the prompt.
+ */
+export const AUTH_SIGNALS = [
+  "login", "sign in", "sign up", "register", "account",
+  "user", "users", "profile", "password", "authentication",
+  "role", "permission", "access", "protected", "private",
+  "personal", "multi-user", "team", "portal", "member area",
 ];
 
 export interface BuildNeeds {
@@ -37,16 +46,25 @@ export interface BuildNeeds {
   skip: boolean;
 }
 
+/**
+ * Returns whether a prompt implies the app needs a database and/or auth.
+ *
+ * Most real apps benefit from persistent data, so needsDb defaults to true.
+ * The card is skipped only when the prompt is clearly a static/utility build
+ * (matched by SKIP_SIGNALS). Auth is shown only when explicit account/login
+ * signals are present.
+ */
 export function detectBuildNeeds(prompt: string): BuildNeeds {
   const lower = prompt.toLowerCase();
 
-  // Skip signals take precedence — these are presentational/utility apps
+  // Static / utility prompts — no setup needed
   if (SKIP_SIGNALS.some(signal => lower.includes(signal))) {
     return { needsDb: false, needsAuth: false, skip: true };
   }
 
-  const needsDb = DB_SIGNALS.some(signal => lower.includes(signal));
+  // Auth is selective — only pre-select "Yes" when the prompt explicitly implies accounts
   const needsAuth = AUTH_SIGNALS.some(signal => lower.includes(signal));
 
-  return { needsDb, needsAuth, skip: false };
+  // Any real app prompt that isn't obviously static needs persistent data
+  return { needsDb: true, needsAuth, skip: false };
 }
