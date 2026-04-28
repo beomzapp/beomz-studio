@@ -58,6 +58,35 @@ function isAbortError(error: unknown): boolean {
     && (error.name === "AbortError" || error.message === "The operation was aborted.");
 }
 
+function buildRequestedDataContext(
+  withDatabase?: boolean,
+  withAuth?: boolean,
+): string {
+  const blocks: string[] = [];
+
+  if (withDatabase) {
+    blocks.push([
+      "REQUESTED DATABASE CONTEXT:",
+      "A Neon Postgres database is connected. VITE_DATABASE_URL is available.",
+      "Use @neondatabase/serverless for ALL data operations.",
+      "Design an appropriate schema with CREATE TABLE IF NOT EXISTS in App.tsx on startup.",
+      "Never use mock or in-memory data.",
+    ].join("\n"));
+  }
+
+  if (withAuth) {
+    blocks.push([
+      "REQUESTED AUTH CONTEXT:",
+      "Include full user authentication: login page, signup page, JWT tokens stored in localStorage, and protected routes.",
+      "Create a users table with id, email, password_hash, and created_at.",
+      "Assume password hashing is handled server-side by the Beomz auth proxy; do not import bcrypt or jsonwebtoken in frontend code.",
+      "Use the connected database for real auth data — never fall back to mock auth when auth is requested.",
+    ].join("\n"));
+  }
+
+  return blocks.join("\n\n");
+}
+
 type BuildPipelineArgs = {
   input: {
     buildId: string;
@@ -75,6 +104,8 @@ type BuildPipelineArgs = {
     phaseOverride?: unknown;
     forcedSimple?: boolean;
     imageUrl?: string;
+    withDatabase?: boolean;
+    withAuth?: boolean;
   };
   db: StudioDbClient;
   op: "initial_build";
@@ -261,6 +292,13 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     : undefined;
 
   const activePhaseData = activePhasesData?.find((phase) => phase.index === activeCurrentPhase);
+  const requestedDataContextBlock = buildRequestedDataContext(
+    input.withDatabase,
+    input.withAuth,
+  );
+  const modelDbContextBlock = [dbContextBlock, requestedDataContextBlock]
+    .filter((block) => typeof block === "string" && block.trim().length > 0)
+    .join("\n\n");
   const phaseScope = activePhaseData
     ? {
         index: activeCurrentPhase,
@@ -287,7 +325,7 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
       phaseScope,
       input.forcedSimple ? 32000 : undefined,
       hasByoSupabaseConfig,
-      dbContextBlock,
+      modelDbContextBlock,
       abortSignal,
     );
     throwIfBuildAborted();

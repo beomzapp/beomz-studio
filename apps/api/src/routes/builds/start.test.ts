@@ -20,10 +20,116 @@ test("/builds/start defaults generation to claude-sonnet-4-6", async () => {
   assert.match(source, /clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS/);
   assert.match(source, /const shouldOfferPlanSummary = isBuildIshIntent[\s\S]*&& !isIteration;/);
   assert.match(source, /const forceIteration = parsedBody\.data\.forceIteration === true;/);
+  assert.match(source, /const withDatabase = parsedBody\.data\.withDatabase === true;/);
+  assert.match(source, /const withAuth = parsedBody\.data\.withAuth === true;/);
   assert.match(source, /const isIteration = forceIteration \|\| hasExistingIterationContext;/);
   assert.match(source, /const intentDecision = forceIteration[\s\S]*reason: "forceIteration requested\."/);
   assert.match(sharedSource, /forceIteration\?: boolean;/);
+  assert.match(sharedSource, /withAuth\?: boolean;/);
+  assert.match(sharedSource, /withDatabase\?: boolean;/);
   assert.match(sharedSource, /forceIteration: z\.boolean\(\)\.optional\(\),/);
+  assert.match(sharedSource, /withAuth: z\.boolean\(\)\.optional\(\),/);
+  assert.match(sharedSource, /withDatabase: z\.boolean\(\)\.optional\(\),/);
+});
+
+test("/builds/start forwards withDatabase and withAuth flags into the background build", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let capturedFlags: { withAuth?: boolean; withDatabase?: boolean } | null = null;
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: (input.output_paths as string[] | undefined) ?? [],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: (input.session_events as Record<string, unknown>[] | undefined) ?? [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: (input.warnings as string[] | undefined) ?? [],
+          }),
+          findLatestGenerationByProjectId: async () => null,
+          findProjectById: async () => null,
+          getOrgWithBalance: async () => org,
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => ({
+      intent: "build_new",
+      confidence: 0.95,
+      reason: "Clear build request.",
+      accumulatedContext: "Build a dashboard with auth and a database.",
+    }),
+    generatePlanSummary: async () => {
+      throw new Error("plan summary should not run for a clear build");
+    },
+    runBuildInBackground: async (input) => {
+      capturedFlags = {
+        withAuth: input.withAuth,
+        withDatabase: input.withDatabase,
+      };
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: "Build me a project dashboard",
+      withAuth: true,
+      withDatabase: true,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(capturedFlags, {
+    withAuth: true,
+    withDatabase: true,
+  });
 });
 
 test("/builds/start returns a conversational generation for greeting intent and does not queue a build", async () => {

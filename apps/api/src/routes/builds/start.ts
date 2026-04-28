@@ -554,6 +554,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
   const confirmedIntent = parsedBody.data.confirmedIntent;
   const forceIteration = parsedBody.data.forceIteration === true;
+  const withDatabase = parsedBody.data.withDatabase === true;
+  const withAuth = parsedBody.data.withAuth === true;
   let planSessionId = parsedBody.data.planSessionId;
   let planSummary = parsedBody.data.summary;
   let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
@@ -1176,6 +1178,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       imageUrl,
       confirmedIntent,
       projectName,
+      withDatabase,
+      withAuth,
     },
     orgContext.db,
   ).catch((err: unknown) => {

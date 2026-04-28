@@ -61,6 +61,8 @@ export interface StartBuildRequest extends BuildPlanContext {
   projectName?: string;
   existingFiles?: readonly StudioFile[];
   model?: string;
+  withAuth?: boolean;
+  withDatabase?: boolean;
 }
 
 const imageIntentSchema = z.enum(["logo", "reference", "error", "theme", "general"]);
@@ -76,6 +78,8 @@ export const startBuildRequestSchema = z.object({
   prompt: z.string().max(50000),
   projectId: z.string().trim().uuid().optional(),
   projectName: z.string().trim().min(1).max(120).optional(),
+  withAuth: z.boolean().optional(),
+  withDatabase: z.boolean().optional(),
 }).merge(buildPlanContextSchema)
   .superRefine((value, ctx) => {
     if (value.prompt.trim().length === 0 && !value.imageUrl) {

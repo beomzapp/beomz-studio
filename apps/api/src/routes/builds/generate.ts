@@ -105,6 +105,7 @@ import {
 import { uploadProjectAsset } from "../../lib/images/index.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
+import { provisionProjectDatabase } from "../db/enable.js";
 
 export {
   buildIterationSystemPrompt,
@@ -147,6 +148,8 @@ export interface BuildGenerateInput {
   // BEO-335: set by force-simple endpoint — skips planPhases and caps max_tokens
   // to keep the build within ~6 credits for low-credit orgs.
   forcedSimple?: boolean;
+  withAuth?: boolean;
+  withDatabase?: boolean;
 }
 
 interface CustomiseResult {
@@ -3248,6 +3251,7 @@ async function _runBuildInBackground(
   let projectChatHistory: ProjectChatHistoryEntry[] = [];
   let projectChatSummary: string | null = null;
   let currentProject: Awaited<ReturnType<typeof db.findProjectById>> | null = null;
+  const shouldProvisionDatabase = input.withDatabase === true || input.withAuth === true;
 
   try {
     if (typeof db.findProjectById === "function") {
@@ -3262,8 +3266,44 @@ async function _runBuildInBackground(
   }
 
   throwIfBuildAborted();
+  if (shouldProvisionDatabase && (!currentProject?.database_enabled || !currentProject?.db_wired)) {
+    await appendEventToDb(db, buildId, {
+      type: "status",
+      id: nextId(),
+      timestamp: ts(),
+      operation: op,
+      code: "db_provisioning",
+      phase: "loading",
+      message: "Provisioning database…",
+    } as unknown as BuilderV3StatusEvent);
+
+    const provisionResult = await provisionProjectDatabase({ db, orgId, projectId });
+    if (provisionResult.status >= 400) {
+      const message = typeof provisionResult.body.message === "string"
+        ? provisionResult.body.message
+        : (typeof provisionResult.body.error === "string"
+            ? provisionResult.body.error
+            : "Failed to provision database");
+      throw new Error(message);
+    }
+
+    currentProject = await db.findProjectById(projectId);
+  }
+
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
-  const dbType = normaliseProjectDbType(currentProject?.db_type);
+  const projectLimits = await db.getProjectDbLimits(projectId).catch(() => null);
+  const resolvedDbProvider = currentProject
+    ? resolveProjectDbProvider(currentProject, projectLimits)
+    : null;
+  const dbType = resolvedDbProvider === "supabase"
+    ? "supabase"
+    : (
+        resolvedDbProvider === "neon"
+        || resolvedDbProvider === "postgres"
+        || shouldProvisionDatabase
+          ? "neon"
+          : normaliseProjectDbType(currentProject?.db_type)
+      );
   const dbContextBlock = contextBuilder.buildDbContextBlock(projectId, dbType);
 
   if (apiConfig.MOCK_ANTHROPIC) {
@@ -3706,6 +3746,8 @@ async function _runBuildInBackground(
         templateId,
         model,
         requestedAt,
+        withDatabase: input.withDatabase,
+        withAuth: input.withAuth,
       },
       db,
       op: "initial_build",
