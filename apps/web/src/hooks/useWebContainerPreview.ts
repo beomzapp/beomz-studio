@@ -156,6 +156,27 @@ export interface WcPreviewState {
   patchFile: (file: string, content: string) => Promise<void>;
 }
 
+// BEO-683: Fix single-quoted JSX attribute values or JS/TS string literals that
+// contain an unescaped apostrophe (e.g. title='it's great' → title="it's great").
+// This is the #1 cause of Vite oxc parse errors in AI-generated websites.
+//
+// Detection: a single-quoted "string" where an apostrophe sits mid-word creates
+// the pattern  'prefix'suffix'  — the parser closes the string at the apostrophe
+// and emits a PARSE_ERROR for the leftover "suffix'" fragment.
+//
+// Strategy: match  'prefix'suffix'  where prefix ends in \w and suffix starts
+// with \w (the mid-word apostrophe signature), then collapse the whole span into
+// a properly double-quoted string, escaping any pre-existing double quotes.
+// Returns null when the content is clean (no apostrophe strings found) so callers
+// can detect a no-op without comparing two potentially large strings.
+function fixApostropheErrors(content: string): string | null {
+  const fixed = content.replace(
+    /'([^'\n]*\w)'(\w[^'\n]*)'/g,
+    (_match, before, after) => `"${(before + "'" + after).replace(/"/g, '\\"')}"`,
+  );
+  return fixed !== content ? fixed : null;
+}
+
 // BEO-482 Fix 2: known scaffold content signatures.
 // Any IndexedDB cache entry containing these strings was written during a
 // pre-BEO-474 build (before the scaffold guard existed). Discard immediately
@@ -599,6 +620,17 @@ export function useWebContainerPreview(
       }
       if (!fileContent || !resolvedPath) {
         console.warn(`[self-heal] Could not read ${filePath} from WebContainer`);
+        return;
+      }
+
+      // BEO-683: try a cheap local fix for unescaped apostrophes before
+      // making an AI round-trip. Handles the pattern  'it's great'  in JSX
+      // attribute values and JS object property strings — the most common
+      // cause of oxc PARSE_ERROR in AI-generated websites.
+      const localFixed = fixApostropheErrors(fileContent);
+      if (localFixed !== null) {
+        console.log(`[self-heal] Local apostrophe fix applied to ${filePath}`);
+        await wc.fs.writeFile(resolvedPath, localFixed);
         return;
       }
 
