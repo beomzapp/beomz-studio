@@ -599,18 +599,33 @@ export function WebsiteBuilderPage() {
     ? "Starting preview…"
     : progressMessage;
 
-  // Section click detection via postMessage
+  // Section click detection + BEO-681 reorder via postMessage
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data?.type === "section-click" && typeof e.data.section === "string") {
         setActiveSection(e.data.section);
+      }
+      // BEO-681: reorder button in hover bar — pre-fill command bar so user can type "up" / "down"
+      if (e.data?.type === "section-reorder" && typeof e.data.section === "string") {
+        const inputEl = commandBarInputRef.current;
+        if (inputEl) {
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          )?.set;
+          if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(inputEl, `Move the ${e.data.section} section `);
+            inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          inputEl.focus();
+        }
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
   }, []);
 
-  // Inject section detection script into iframe after preview loads
+  // Inject section detection + hover micro-actions script into iframe after preview loads
   const injectSectionDetection = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe?.contentWindow) return;
@@ -619,11 +634,95 @@ export function WebsiteBuilderPage() {
 (function() {
   if (window.__beomzSectionDetection) return;
   window.__beomzSectionDetection = true;
+
+  // BEO-681: inject styles — sections become relative, action bar floats top-right
+  var style = document.createElement('style');
+  style.textContent = [
+    '[data-section]{position:relative!important;}',
+    '[data-beomz-bar]{',
+      'position:absolute;top:8px;right:8px;z-index:9999;',
+      'display:flex;align-items:center;gap:2px;',
+      'background:white;border-radius:9999px;padding:3px 6px;',
+      'box-shadow:0 2px 10px rgba(0,0,0,0.14);',
+      'opacity:0;pointer-events:none;',
+      'transition:opacity 120ms ease;',
+      'font-family:system-ui,sans-serif;',
+    '}',
+    '[data-beomz-bar].bz-show{opacity:1;pointer-events:auto;}',
+    '[data-beomz-bar] button{',
+      'border:none;background:transparent;cursor:pointer;',
+      'font-size:11px;color:#374151;',
+      'display:flex;align-items:center;gap:3px;',
+      'padding:3px 7px;border-radius:6px;white-space:nowrap;',
+    '}',
+    '[data-beomz-bar] button:hover{background:#f3f4f6;}',
+  ].join('');
+  document.head.appendChild(style);
+
+  // Click detection — skip clicks that originate inside the action bar
   document.addEventListener('click', function(e) {
+    if (e.target.closest && e.target.closest('[data-beomz-bar]')) return;
     var el = e.target;
     while (el && el !== document.body) {
       if (el.dataset && el.dataset.section) {
         window.parent.postMessage({ type: 'section-click', section: el.dataset.section }, '*');
+        return;
+      }
+      el = el.parentElement;
+    }
+  });
+
+  // BEO-681: build (or retrieve) the floating action bar for a section element
+  function getOrCreateBar(sectionEl) {
+    var bar = sectionEl.querySelector('[data-beomz-bar]');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.setAttribute('data-beomz-bar', '1');
+
+    var editBtn = document.createElement('button');
+    editBtn.innerHTML = '\u270f\ufe0f&nbsp;Edit';
+    editBtn.onclick = function(e) {
+      e.stopPropagation();
+      window.parent.postMessage({ type: 'section-click', section: sectionEl.dataset.section }, '*');
+    };
+
+    var reorderBtn = document.createElement('button');
+    reorderBtn.textContent = '\u2195';
+    reorderBtn.title = 'Reorder section';
+    reorderBtn.onclick = function(e) {
+      e.stopPropagation();
+      window.parent.postMessage({ type: 'section-reorder', section: sectionEl.dataset.section }, '*');
+    };
+
+    bar.appendChild(editBtn);
+    bar.appendChild(reorderBtn);
+    sectionEl.appendChild(bar);
+    return bar;
+  }
+
+  // Show action bar on mouseenter (mouseover + entering-from-outside check)
+  document.addEventListener('mouseover', function(e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.section) {
+        if (!el.contains(e.relatedTarget)) {
+          getOrCreateBar(el).classList.add('bz-show');
+        }
+        return;
+      }
+      el = el.parentElement;
+    }
+  });
+
+  // Hide action bar on mouseleave (mouseout + leaving-to-outside check)
+  document.addEventListener('mouseout', function(e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.section) {
+        if (!el.contains(e.relatedTarget)) {
+          var bar = el.querySelector('[data-beomz-bar]');
+          if (bar) bar.classList.remove('bz-show');
+        }
         return;
       }
       el = el.parentElement;
