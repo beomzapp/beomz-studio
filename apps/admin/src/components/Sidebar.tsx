@@ -1,11 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { Users, Hammer, Coins, Map } from "lucide-react";
+import { Users, Hammer, Coins, Map, LayoutGrid } from "lucide-react";
 
 const navItems = [
   { to: "/users", label: "Users", icon: Users },
   { to: "/builds", label: "Builds", icon: Hammer },
   { to: "/credits", label: "Credits", icon: Coins },
   { to: "/heatmap", label: "Heatmap", icon: Map },
+  { to: "/modules", label: "Modules", icon: LayoutGrid },
 ];
 
 export default function Sidebar() {

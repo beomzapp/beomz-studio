@@ -17,6 +17,13 @@ import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { OnboardingModal } from "../../../components/OnboardingModal";
 import { getApiBaseUrl, getAccessToken, type UserProfile } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
+import {
+  DEFAULT_MODULES_FLAGS,
+  getCachedModuleFlags,
+  loadModuleFlags,
+  type ModuleKey,
+  type ModulesFlags,
+} from "../../../lib/featureFlags";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 
 /**
@@ -53,17 +60,19 @@ interface NavItem {
   label: string;
   icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>;
   locked?: boolean;
-  comingSoon?: boolean;
   activeFor?: string;
+  // Module key drives feature-flag lookup. Items without a moduleKey
+  // (Settings, Referrals) always render.
+  moduleKey?: ModuleKey;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/studio/home", label: "Web Apps", icon: FolderOpen },
-  { to: "", label: "Mobile Apps", icon: Smartphone, comingSoon: true },
-  { to: "/studio/websites", label: "Websites", icon: Globe },
-  { to: "", label: "Images", icon: Image, comingSoon: true },
-  { to: "", label: "Videos", icon: Video, comingSoon: true },
-  { to: "/studio/agents", label: "Agents", icon: Bot },
+  { to: "/studio/home", label: "Web Apps", icon: FolderOpen, moduleKey: "web_apps" },
+  { to: "", label: "Mobile Apps", icon: Smartphone, moduleKey: "mobile_apps" },
+  { to: "/studio/websites", label: "Websites", icon: Globe, moduleKey: "websites" },
+  { to: "", label: "Images", icon: Image, moduleKey: "images" },
+  { to: "", label: "Videos", icon: Video, moduleKey: "videos" },
+  { to: "/studio/agents", label: "Agents", icon: Bot, moduleKey: "agents" },
   { to: "/studio/settings/profile", label: "Settings", icon: Settings, activeFor: "/studio/settings" },
   { to: "/studio/settings/referrals", label: "Referrals", icon: Gift },
 ];
@@ -72,6 +81,11 @@ export function StudioLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingUser, setOnboardingUser] = useState<UserProfile | null>(null);
+  // Seed from the session-cached flags when present so navigations within
+  // the SPA never re-fetch or briefly flash hardcoded defaults.
+  const [moduleFlags, setModuleFlags] = useState<ModulesFlags>(
+    () => getCachedModuleFlags() ?? DEFAULT_MODULES_FLAGS,
+  );
   const matchRoute = useMatchRoute();
   const { session } = useAuth();
 
@@ -92,6 +106,17 @@ export function StudioLayout() {
         : null;
     return { name, avatar };
   }, [session]);
+
+  useEffect(() => {
+    if (getCachedModuleFlags()) return;
+    let cancelled = false;
+    void loadModuleFlags().then((flags) => {
+      if (!cancelled) setModuleFlags(flags);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     // studioRoute.beforeLoad in router.ts already guards this component behind
@@ -165,7 +190,11 @@ export function StudioLayout() {
 
         <nav className="flex-1 space-y-1 p-3">
           {NAV_ITEMS.map((item) => {
-            if (item.comingSoon) {
+            const flagState = item.moduleKey ? moduleFlags[item.moduleKey] : "live";
+
+            if (flagState === "disabled") return null;
+
+            if (flagState === "coming_soon") {
               return (
                 <div
                   key={item.label}
@@ -179,10 +208,11 @@ export function StudioLayout() {
                 </div>
               );
             }
+
             const active = matchRoute({ to: item.activeFor ?? item.to, fuzzy: true });
             return (
               <Link
-                key={item.to}
+                key={item.to || item.label}
                 to={item.to}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(

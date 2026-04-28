@@ -221,3 +221,62 @@ export async function fetchAdminCredits(
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json() as Promise<AdminCreditsResponse>;
 }
+
+// ── Admin: Feature flags ──────────────────────────────────────────────────────
+
+export type ModuleFlagState = "live" | "coming_soon" | "disabled";
+
+export type ModuleKey =
+  | "web_apps"
+  | "websites"
+  | "mobile_apps"
+  | "images"
+  | "videos"
+  | "agents";
+
+export type ModulesFlags = Record<ModuleKey, ModuleFlagState>;
+
+export interface FeatureFlagsResponse {
+  modules: ModulesFlags;
+}
+
+export const DEFAULT_MODULES_FLAGS: ModulesFlags = {
+  web_apps: "live",
+  websites: "live",
+  mobile_apps: "coming_soon",
+  images: "coming_soon",
+  videos: "coming_soon",
+  agents: "live",
+};
+
+export async function fetchAdminFeatureFlags(
+  accessToken: string,
+): Promise<FeatureFlagsResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/feature-flags`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<FeatureFlagsResponse>;
+}
+
+export async function patchAdminFeatureFlags(
+  accessToken: string,
+  modules: ModulesFlags,
+): Promise<FeatureFlagsResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/feature-flags`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ modules }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<FeatureFlagsResponse>;
+}
