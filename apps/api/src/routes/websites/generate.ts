@@ -42,6 +42,33 @@ const FAL_HERO_IMAGE_WIDTH = 1600;
 const FAL_HERO_IMAGE_HEIGHT = 900;
 const WEBSITE_IMAGE_PROXY_BASE_URL = "https://beomz.ai/api/proxy/image?url=";
 
+export const WEBSITE_SCAFFOLD_PACKAGE_JSON = JSON.stringify(
+  {
+    name: "beomz-website",
+    private: true,
+    type: "module",
+    scripts: { build: "vite build" },
+    dependencies: {
+      clsx: "^2.0.0",
+      "lucide-react": "^0.400.0",
+      react: "^19.2.0",
+      "react-dom": "^19.2.0",
+      "tailwind-merge": "^2.0.0",
+    },
+    devDependencies: {
+      "@tailwindcss/vite": "^4.2.2",
+      "@types/react": "^19.2.2",
+      "@types/react-dom": "^19.2.2",
+      "@vitejs/plugin-react": "^6.0.1",
+      tailwindcss: "^4.2.2",
+      typescript: "^5.9.3",
+      vite: "^8.0.1",
+    },
+  },
+  null,
+  2,
+);
+
 const siteTypeSchema = z.enum(["landing", "portfolio", "restaurant", "ecommerce", "agency", "blog"]);
 const vibeSchema = z.enum(["minimal", "bold", "playful", "luxury", "corporate"]);
 

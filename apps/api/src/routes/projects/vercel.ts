@@ -26,6 +26,7 @@ import { createVercelDomainsRoute } from "../../lib/vercel/domainManager.js";
 import { createStudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
 import { getByoSupabaseConfig, getProjectPostgresUrl, resolveProjectDbProvider } from "../../lib/projectDb.js";
+import { WEBSITE_SCAFFOLD_PACKAGE_JSON } from "../websites/generate.js";
 
 export { injectFreePlanBeomzBadge } from "../../lib/vercel/badgeInjector.js";
 export { createVercelDomainsRoute } from "../../lib/vercel/domainManager.js";
@@ -33,7 +34,7 @@ export { createVercelDomainsRoute } from "../../lib/vercel/domainManager.js";
 // ── Scaffold files required for Vercel to build a Vite + React project ────────
 // Mirrors the WebContainer scaffold in apps/web/src/lib/webcontainer.ts
 
-const SCAFFOLD_PACKAGE_JSON = JSON.stringify(
+const APP_SCAFFOLD_PACKAGE_JSON = JSON.stringify(
   {
     name: "beomz-app",
     private: true,
@@ -136,9 +137,13 @@ body {
 }
 `;
 
-function buildScaffold(): Array<{ filename: string; content: string }> {
+function buildScaffold(projectType: ProjectRow["project_type"]): Array<{ filename: string; content: string }> {
+  const packageJson = projectType === "website"
+    ? WEBSITE_SCAFFOLD_PACKAGE_JSON
+    : APP_SCAFFOLD_PACKAGE_JSON;
+
   return [
-    { filename: "package.json",    content: SCAFFOLD_PACKAGE_JSON },
+    { filename: "package.json",    content: packageJson },
     { filename: "vite.config.ts",  content: SCAFFOLD_VITE_CONFIG },
     { filename: "tsconfig.json",   content: SCAFFOLD_TSCONFIG },
     { filename: "index.html",      content: SCAFFOLD_INDEX_HTML },
@@ -442,7 +447,7 @@ export function createVercelDeployRoute(deps: VercelDeployRouteDeps = {}) {
 
   // Scaffold + generated files (scaffold first so generated files can override if needed)
   const deployFiles = injectFreePlanBeomzBadge(
-    [...buildScaffold(), ...deployGeneratedFiles],
+    [...buildScaffold(project.project_type), ...deployGeneratedFiles],
     orgContext.org.plan,
   );
 

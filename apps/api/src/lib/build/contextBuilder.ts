@@ -45,6 +45,8 @@ const BYO_SUPABASE_SYSTEM_PROMPT_BLOCK = [
   "const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)",
 ].join("\n");
 
+const ITERATION_STRICT_REBUILD_RULE = "CRITICAL: NEVER regenerate or redesign the entire site. You are making surgical changes only. Only rebuild from scratch if the user explicitly says 'rebuild', 'redesign', 'start over', 'make it completely different', or 'try a new design'. ALL other requests — even vague ones — are precise iterations on the existing design.";
+
 const BYO_SUPABASE_MIGRATIONS_CRITICAL_BLOCK = [
   "CRITICAL — Supabase schema migrations:",
   "You MUST include ALL database schema changes in the migrations array.",
@@ -1177,6 +1179,7 @@ function buildIterationSystemPrompt(
       ];
   return [
     "You are making a surgical edit to an existing React app.",
+    ITERATION_STRICT_REBUILD_RULE,
     imageBlock,
     imageEmbeddingBlock,
     byoSupabaseBlock,

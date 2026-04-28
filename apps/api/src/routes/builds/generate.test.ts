@@ -117,6 +117,14 @@ test("iteration system prompt forces surgical changed-file responses", () => {
   assert.match(prompt, /What is the minimal change to each file\?/);
 });
 
+test("iteration system prompt forbids whole-site rebuilds unless the user explicitly asks", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, false);
+
+  assert.match(prompt, /CRITICAL: NEVER regenerate or redesign the entire site\./);
+  assert.match(prompt, /Only rebuild from scratch if the user explicitly says 'rebuild', 'redesign', 'start over', 'make it completely different', or 'try a new design'\./);
+  assert.match(prompt, /ALL other requests — even vague ones — are precise iterations on the existing design\./);
+});
+
 test("iteration system prompt appends explicit public URL embedding instructions for attached images", () => {
   const prompt = buildIterationSystemPrompt(
     undefined,

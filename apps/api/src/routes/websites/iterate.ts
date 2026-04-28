@@ -32,6 +32,7 @@ const WEBSITE_ITERATION_MAX_TOKENS = 32000;
 const WEBSITE_OPERATION: BuilderV3Operation = "iteration";
 const WEBSITE_PREVIEW_ENTRY_PATH = "/";
 const WEBSITE_PING_INTERVAL_MS = 20_000;
+const WEBSITE_STRICT_ITERATION_RULE = "CRITICAL: NEVER regenerate or redesign the entire site. You are making surgical changes only. Only rebuild from scratch if the user explicitly says 'rebuild', 'redesign', 'start over', 'make it completely different', or 'try a new design'. ALL other requests — even vague ones — are precise iterations on the existing design.";
 
 const websiteSectionSchema = z.enum(["hero", "features", "about", "cta", "footer", "nav"]);
 
@@ -398,12 +399,14 @@ async function callAnthropicWebsiteIteration(input: {
   const systemPrompt = activeSection
     ? [
         "You are editing a single section component of a marketing website.",
+        WEBSITE_STRICT_ITERATION_RULE,
         "Rewrite ONLY this component based on the instruction.",
         "Keep the data-section attribute.",
         "Return only the updated file.",
       ].join(" ")
     : [
         "You are editing an existing React + TypeScript marketing website.",
+        WEBSITE_STRICT_ITERATION_RULE,
         "Return only the changed files through the deliver_updated_website_files tool.",
         "Preserve every existing data-section attribute on section components.",
         "Do not add backend files, package manager files, or unrelated rewrites.",
