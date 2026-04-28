@@ -154,6 +154,12 @@ export interface WcPreviewState {
    * picks it up without a full reload. No-ops if the container isn't ready yet.
    */
   patchFile: (file: string, content: string) => Promise<void>;
+  /**
+   * BEO-682: ref to the live WcInstance so callers can perform FS operations
+   * (readFile / writeFile) without going through eval or cross-origin barriers.
+   * Will be null until the WebContainer has booted.
+   */
+  wcInstanceRef: { current: WcInstance | null };
 }
 
 // BEO-683: Fix single-quoted JSX attribute values or JS/TS string literals that
@@ -941,5 +947,5 @@ export function useWebContainerPreview(
     await writeFileEnsuringDir(instance.wc, file, content);
   }, []);
 
-  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered, isHotPatching, patchFile };
+  return { status, previewUrl, progressMessage, isFixing, firstFilesDelivered, isHotPatching, patchFile, wcInstanceRef: instanceRef };
 }

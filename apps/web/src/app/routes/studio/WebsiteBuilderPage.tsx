@@ -13,6 +13,7 @@ import {
   Clock,
   FileText,
   Globe,
+  MousePointer2,
   Search,
   Send,
   X,
@@ -27,6 +28,110 @@ import { isWebContainerSupported } from "../../../lib/webcontainer";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { PublishModal } from "../../../components/builder";
 import { useCredits } from "../../../lib/CreditsContext";
+
+// ─── Section detection script ─────────────────────────────────────────────────
+// BEO-682: Written to apps/web/src/beomz-detect.js in the WebContainer FS and
+// imported from main.tsx so it runs inside the iframe's own JS bundle — no
+// cross-origin eval() needed.
+
+const DETECT_SCRIPT = `(function() {
+  if (window.__beomzSectionDetection) return;
+  window.__beomzSectionDetection = true;
+
+  // BEO-681: inject styles — sections become relative, action bar floats top-right
+  var style = document.createElement('style');
+  style.textContent = [
+    '[data-section]{position:relative!important;}',
+    '[data-beomz-bar]{',
+      'position:absolute;top:8px;right:8px;z-index:9999;',
+      'display:flex;align-items:center;gap:2px;',
+      'background:white;border-radius:9999px;padding:3px 6px;',
+      'box-shadow:0 2px 10px rgba(0,0,0,0.14);',
+      'opacity:0;pointer-events:none;',
+      'transition:opacity 120ms ease;',
+      'font-family:system-ui,sans-serif;',
+    '}',
+    '[data-beomz-bar].bz-show{opacity:1;pointer-events:auto;}',
+    '[data-beomz-bar] button{',
+      'border:none;background:transparent;cursor:pointer;',
+      'font-size:11px;color:#374151;',
+      'display:flex;align-items:center;gap:3px;',
+      'padding:3px 7px;border-radius:6px;white-space:nowrap;',
+    '}',
+    '[data-beomz-bar] button:hover{background:#f3f4f6;}',
+  ].join('');
+  document.head.appendChild(style);
+
+  // Click detection — skip clicks that originate inside the action bar
+  document.addEventListener('click', function(e) {
+    if (e.target.closest && e.target.closest('[data-beomz-bar]')) return;
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.section) {
+        window.parent.postMessage({ type: 'section-click', section: el.dataset.section }, '*');
+        return;
+      }
+      el = el.parentElement;
+    }
+  });
+
+  // BEO-681: build (or retrieve) the floating action bar for a section element
+  function getOrCreateBar(sectionEl) {
+    var bar = sectionEl.querySelector('[data-beomz-bar]');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.setAttribute('data-beomz-bar', '1');
+
+    var editBtn = document.createElement('button');
+    editBtn.innerHTML = '\u270f\ufe0f\u00a0Edit';
+    editBtn.onclick = function(e) {
+      e.stopPropagation();
+      window.parent.postMessage({ type: 'section-click', section: sectionEl.dataset.section }, '*');
+    };
+
+    var reorderBtn = document.createElement('button');
+    reorderBtn.textContent = '\u2195';
+    reorderBtn.title = 'Reorder section';
+    reorderBtn.onclick = function(e) {
+      e.stopPropagation();
+      window.parent.postMessage({ type: 'section-reorder', section: sectionEl.dataset.section }, '*');
+    };
+
+    bar.appendChild(editBtn);
+    bar.appendChild(reorderBtn);
+    sectionEl.appendChild(bar);
+    return bar;
+  }
+
+  // Show action bar on mouseenter (mouseover + entering-from-outside check)
+  document.addEventListener('mouseover', function(e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.section) {
+        if (!el.contains(e.relatedTarget)) {
+          getOrCreateBar(el).classList.add('bz-show');
+        }
+        return;
+      }
+      el = el.parentElement;
+    }
+  });
+
+  // Hide action bar on mouseleave (mouseout + leaving-to-outside check)
+  document.addEventListener('mouseout', function(e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.section) {
+        if (!el.contains(e.relatedTarget)) {
+          var bar = el.querySelector('[data-beomz-bar]');
+          if (bar) bar.classList.remove('bz-show');
+        }
+        return;
+      }
+      el = el.parentElement;
+    }
+  });
+})();`;
 
 // ─── Section suggestions ─────────────────────────────────────────────────────
 
@@ -49,7 +154,9 @@ function getSuggestions(section: string | null): string[] {
 
 interface FloatingCommandBarProps {
   activeSection: string | null;
+  pickMode: boolean;
   onDeselect: () => void;
+  onPickMode: () => void;
   onSend: (text: string) => void;
   isGenerating: boolean;
   onFocusRef: (el: HTMLInputElement | null) => void;
@@ -57,7 +164,9 @@ interface FloatingCommandBarProps {
 
 function FloatingCommandBar({
   activeSection,
+  pickMode,
   onDeselect,
+  onPickMode,
   onSend,
   isGenerating,
   onFocusRef,
@@ -131,6 +240,25 @@ function FloatingCommandBar({
           "transition-all duration-150",
         )}
       >
+        {/* MousePointer2 — leftmost; orange when section active or in pick mode */}
+        <button
+          onClick={hasSectionSelected ? onDeselect : onPickMode}
+          title={
+            hasSectionSelected
+              ? `Editing: ${activeSection}`
+              : "Click any section to edit it"
+          }
+          className="flex-shrink-0 rounded-md p-0.5 transition-colors hover:bg-[#f3f4f6]"
+        >
+          <MousePointer2
+            size={14}
+            style={{ color: hasSectionSelected || pickMode ? "#F97316" : "#9ca3af" }}
+          />
+        </button>
+
+        {/* Divider */}
+        <div className="h-4 w-px flex-shrink-0 bg-[#e5e5e5]" />
+
         {/* Spark icon */}
         <span className="text-[#F97316] flex-shrink-0 text-[18px] select-none">✦</span>
 
@@ -517,6 +645,7 @@ export function WebsiteBuilderPage() {
 
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [siteName, setSiteName] = useState("My Website");
+  const [pickMode, setPickMode] = useState(false);
 
   // Panels
   const [showHistory, setShowHistory] = useState(false);
@@ -569,6 +698,7 @@ export function WebsiteBuilderPage() {
     firstFilesDelivered,
     isHotPatching,
     patchFile,
+    wcInstanceRef,
   } = useWebContainerPreview(
     wcFiles,
     wcProject,
@@ -605,6 +735,7 @@ export function WebsiteBuilderPage() {
     const handler = (e: MessageEvent) => {
       if (e.data?.type === "section-click" && typeof e.data.section === "string") {
         setActiveSection(e.data.section);
+        setPickMode(false);
       }
       // BEO-681: reorder button in hover bar — pre-fill command bar so user can type "up" / "down"
       if (e.data?.type === "section-reorder" && typeof e.data.section === "string") {
@@ -626,115 +757,18 @@ export function WebsiteBuilderPage() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
-  // Inject section detection + hover micro-actions script into iframe after preview loads
-  const injectSectionDetection = useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe?.contentWindow) return;
+  // BEO-682: inject section detection by writing a JS file to the WebContainer FS
+  // and prepending its import to main.tsx — avoids cross-origin eval() entirely.
+  const injectSectionDetection = useCallback(async () => {
+    const wc = wcInstanceRef.current?.wc;
+    if (!wc) return;
+    await wc.fs.writeFile('apps/web/src/beomz-detect.js', DETECT_SCRIPT);
     try {
-      const script = `
-(function() {
-  if (window.__beomzSectionDetection) return;
-  window.__beomzSectionDetection = true;
-
-  // BEO-681: inject styles — sections become relative, action bar floats top-right
-  var style = document.createElement('style');
-  style.textContent = [
-    '[data-section]{position:relative!important;}',
-    '[data-beomz-bar]{',
-      'position:absolute;top:8px;right:8px;z-index:9999;',
-      'display:flex;align-items:center;gap:2px;',
-      'background:white;border-radius:9999px;padding:3px 6px;',
-      'box-shadow:0 2px 10px rgba(0,0,0,0.14);',
-      'opacity:0;pointer-events:none;',
-      'transition:opacity 120ms ease;',
-      'font-family:system-ui,sans-serif;',
-    '}',
-    '[data-beomz-bar].bz-show{opacity:1;pointer-events:auto;}',
-    '[data-beomz-bar] button{',
-      'border:none;background:transparent;cursor:pointer;',
-      'font-size:11px;color:#374151;',
-      'display:flex;align-items:center;gap:3px;',
-      'padding:3px 7px;border-radius:6px;white-space:nowrap;',
-    '}',
-    '[data-beomz-bar] button:hover{background:#f3f4f6;}',
-  ].join('');
-  document.head.appendChild(style);
-
-  // Click detection — skip clicks that originate inside the action bar
-  document.addEventListener('click', function(e) {
-    if (e.target.closest && e.target.closest('[data-beomz-bar]')) return;
-    var el = e.target;
-    while (el && el !== document.body) {
-      if (el.dataset && el.dataset.section) {
-        window.parent.postMessage({ type: 'section-click', section: el.dataset.section }, '*');
-        return;
+      const main = await wc.fs.readFile('apps/web/src/main.tsx', 'utf-8');
+      if (!main.includes('beomz-detect')) {
+        await wc.fs.writeFile('apps/web/src/main.tsx', `import './beomz-detect.js'\n${main}`);
       }
-      el = el.parentElement;
-    }
-  });
-
-  // BEO-681: build (or retrieve) the floating action bar for a section element
-  function getOrCreateBar(sectionEl) {
-    var bar = sectionEl.querySelector('[data-beomz-bar]');
-    if (bar) return bar;
-    bar = document.createElement('div');
-    bar.setAttribute('data-beomz-bar', '1');
-
-    var editBtn = document.createElement('button');
-    editBtn.innerHTML = '\u270f\ufe0f&nbsp;Edit';
-    editBtn.onclick = function(e) {
-      e.stopPropagation();
-      window.parent.postMessage({ type: 'section-click', section: sectionEl.dataset.section }, '*');
-    };
-
-    var reorderBtn = document.createElement('button');
-    reorderBtn.textContent = '\u2195';
-    reorderBtn.title = 'Reorder section';
-    reorderBtn.onclick = function(e) {
-      e.stopPropagation();
-      window.parent.postMessage({ type: 'section-reorder', section: sectionEl.dataset.section }, '*');
-    };
-
-    bar.appendChild(editBtn);
-    bar.appendChild(reorderBtn);
-    sectionEl.appendChild(bar);
-    return bar;
-  }
-
-  // Show action bar on mouseenter (mouseover + entering-from-outside check)
-  document.addEventListener('mouseover', function(e) {
-    var el = e.target;
-    while (el && el !== document.body) {
-      if (el.dataset && el.dataset.section) {
-        if (!el.contains(e.relatedTarget)) {
-          getOrCreateBar(el).classList.add('bz-show');
-        }
-        return;
-      }
-      el = el.parentElement;
-    }
-  });
-
-  // Hide action bar on mouseleave (mouseout + leaving-to-outside check)
-  document.addEventListener('mouseout', function(e) {
-    var el = e.target;
-    while (el && el !== document.body) {
-      if (el.dataset && el.dataset.section) {
-        if (!el.contains(e.relatedTarget)) {
-          var bar = el.querySelector('[data-beomz-bar]');
-          if (bar) bar.classList.remove('bz-show');
-        }
-        return;
-      }
-      el = el.parentElement;
-    }
-  });
-})();`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (iframe.contentWindow as any).eval(script);
-    } catch {
-      // cross-origin safety — ignore
-    }
+    } catch { /* ignore */ }
   }, []);
 
   // BEO-682: inject after firstFilesDelivered — iframe onLoad fires too early
@@ -761,6 +795,7 @@ export function WebsiteBuilderPage() {
       }
       if (e.key === "Escape") {
         setActiveSection(null);
+        setPickMode(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -825,7 +860,7 @@ export function WebsiteBuilderPage() {
       />
 
       {/* Preview area */}
-      <div className="relative flex-1 overflow-hidden">
+      <div className={cn("relative flex-1 overflow-hidden", pickMode && "cursor-crosshair")}>
         {/* WebContainer iframe */}
         {!isWcFallback && previewUrl && (
           <iframe
@@ -855,7 +890,12 @@ export function WebsiteBuilderPage() {
         {/* Floating command bar */}
         <FloatingCommandBar
           activeSection={activeSection}
-          onDeselect={() => setActiveSection(null)}
+          pickMode={pickMode}
+          onDeselect={() => {
+            setActiveSection(null);
+            setPickMode(false);
+          }}
+          onPickMode={() => setPickMode(true)}
           onSend={handleSend}
           isGenerating={isBuildInProgress}
           onFocusRef={(el) => {
