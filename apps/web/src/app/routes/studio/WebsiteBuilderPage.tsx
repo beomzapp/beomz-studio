@@ -20,12 +20,13 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
-import { getAccessToken, getApiBaseUrl } from "../../../lib/api";
 import { useWebContainerPreview } from "../../../hooks/useWebContainerPreview";
 import { useWebsiteBuilder } from "../../../hooks/useWebsiteBuilder";
 import BeomzLogo from "../../../assets/beomz-logo.svg?react";
 import { isWebContainerSupported } from "../../../lib/webcontainer";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
+import { PublishModal } from "../../../components/builder";
+import { useCredits } from "../../../lib/CreditsContext";
 
 // ─── Section suggestions ─────────────────────────────────────────────────────
 
@@ -510,8 +511,9 @@ function WebsiteTopBar({
 export function WebsiteBuilderPage() {
   const { projectId } = useParams({ from: "/studio/websites/$projectId" });
   const search = useSearch({ from: "/studio/websites/$projectId" }) as { brief?: string };
-  const navigate = useNavigate();
   const brief = typeof search.brief === "string" ? decodeURIComponent(search.brief) : null;
+
+  const { credits } = useCredits();
 
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [siteName, setSiteName] = useState("My Website");
@@ -520,6 +522,10 @@ export function WebsiteBuilderPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [showSEO, setShowSEO] = useState(false);
+
+  // Publish modal
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [beomzAppUrl, setBeomzAppUrl] = useState<string | null>(null);
 
   const commandBarInputRef = useRef<HTMLInputElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -672,19 +678,9 @@ export function WebsiteBuilderPage() {
     [sendIterate],
   );
 
-  const handlePublish = useCallback(async () => {
-    try {
-      const token = await getAccessToken();
-      await fetch(`${getApiBaseUrl()}/projects/${projectId}/publish`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ projectId }),
-      });
-    } catch {
-      // Non-blocking
-    }
-    void navigate({ to: "/studio/websites" });
-  }, [projectId, navigate]);
+  const handlePublish = useCallback(() => {
+    setShowPublishModal(true);
+  }, []);
 
   const isWcFallback = !isWebContainerSupported();
 
@@ -773,6 +769,17 @@ export function WebsiteBuilderPage() {
           history={history}
         />
       </div>
+
+      {showPublishModal && (
+        <PublishModal
+          projectId={projectId}
+          beomzAppUrl={beomzAppUrl}
+          plan={credits?.plan ?? "free"}
+          onClose={() => setShowPublishModal(false)}
+          onVercelDeployed={(url) => setBeomzAppUrl(url)}
+          onVercelUnpublished={() => setBeomzAppUrl(null)}
+        />
+      )}
     </div>
   );
 }
