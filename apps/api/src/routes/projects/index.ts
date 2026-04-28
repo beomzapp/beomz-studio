@@ -344,7 +344,11 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       const orgContext = c.get("orgContext") as OrgContext;
       const projectId = c.req.param("id");
 
-      const project = await orgContext.db.findProjectById(projectId);
+      const [project, latestCompletedGeneration] = await Promise.all([
+        orgContext.db.findProjectById(projectId),
+        orgContext.db.findLatestCompletedGenerationByProjectId(projectId),
+      ]);
+
       if (!project || project.org_id !== orgContext.org.id) {
         return c.json({ error: "Project not found" }, 404);
       }
@@ -360,6 +364,8 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
         published: Boolean(project.published),
         published_slug: project.published_slug ?? null,
         beomz_app_url: project.beomz_app_url ?? null,
+        has_files: Boolean(latestCompletedGeneration),
+        last_generation_at: latestCompletedGeneration?.completed_at ?? latestCompletedGeneration?.started_at ?? null,
         // BEO-576: custom domain active status (DB-persisted)
         custom_domain: project.custom_domain ?? null,
         domain_status: project.domain_status ?? null,

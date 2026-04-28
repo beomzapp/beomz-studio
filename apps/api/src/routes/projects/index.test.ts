@@ -77,6 +77,7 @@ function createOrgContext(project: ProjectRow, dbOverrides: Partial<OrgContext["
       }) as ProjectRow,
       findProjectById: async (id: string) => (id === project.id ? project : null),
       findLatestGenerationByProjectId: async () => null,
+      findLatestCompletedGenerationByProjectId: async () => null,
       createGeneration: async (input: Record<string, unknown>) => {
         generationStore.set(String(input.id), input);
         return input;
@@ -149,6 +150,70 @@ function createApp(
   app.route("/projects", route);
   return app;
 }
+
+test("GET /projects/:id includes completed build metadata for mount-time reuse", async () => {
+  const completedAt = "2026-04-28T08:15:00.000Z";
+  const project = createProject();
+  const orgContext = createOrgContext(project, {
+    findLatestCompletedGenerationByProjectId: async (projectId: string) => (
+      projectId === project.id
+        ? {
+            id: "gen-1",
+            project_id: project.id,
+            template_id: "blank",
+            operation_id: "initial_build",
+            status: "completed",
+            prompt: "Build me a landing page",
+            started_at: "2026-04-28T08:10:00.000Z",
+            completed_at: completedAt,
+            output_paths: [],
+            summary: "Build completed.",
+            error: null,
+            preview_entry_path: "src/main.tsx",
+            warnings: [],
+            files: [],
+            metadata: {},
+            session_events: [],
+          }
+        : null
+    ),
+  });
+  const app = createApp(orgContext);
+
+  const response = await app.request(`http://localhost/projects/${project.id}`, {
+    method: "GET",
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    id: string;
+    has_files: boolean;
+    last_generation_at: string | null;
+  };
+  assert.equal(body.id, project.id);
+  assert.equal(body.has_files, true);
+  assert.equal(body.last_generation_at, completedAt);
+});
+
+test("GET /projects/:id keeps has_files false when only failed generations exist", async () => {
+  const project = createProject();
+  const orgContext = createOrgContext(project, {
+    findLatestCompletedGenerationByProjectId: async () => null,
+  });
+  const app = createApp(orgContext);
+
+  const response = await app.request(`http://localhost/projects/${project.id}`, {
+    method: "GET",
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as {
+    has_files: boolean;
+    last_generation_at: string | null;
+  };
+  assert.equal(body.has_files, false);
+  assert.equal(body.last_generation_at, null);
+});
 
 test("GET /projects includes project_type for each project", async () => {
   const websiteProject = createProject({

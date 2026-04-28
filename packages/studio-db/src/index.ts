@@ -1104,6 +1104,23 @@ export class StudioDbClient {
     return response.data;
   }
 
+  async findLatestCompletedGenerationByProjectId(projectId: string): Promise<GenerationRow | null> {
+    const response = await this.client
+      .from("generations")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("status", "completed")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.data;
+  }
+
   /**
    * Given a build ID that can no longer be resolved, tries to find the most
    * recent *completed* generation for the same project. Used by the SSE events
