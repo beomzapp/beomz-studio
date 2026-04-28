@@ -73,6 +73,7 @@ const DETECT_SCRIPT = `(function() {
       }
       el = el.parentElement;
     }
+    window.parent.postMessage({ type: 'no-section-click' }, '*');
   });
 
   // BEO-681: build (or retrieve) the floating action bar for a section element
@@ -246,12 +247,15 @@ function FloatingCommandBar({
           title={
             hasSectionSelected
               ? `Editing: ${activeSection}`
+              : pickMode
+              ? "Exit pick mode"
               : "Click any section to edit it"
           }
           className="flex-shrink-0 rounded-md p-0.5 transition-colors hover:bg-[#f3f4f6]"
         >
           <MousePointer2
             size={14}
+            className={pickMode && !hasSectionSelected ? "animate-pulse" : undefined}
             style={{ color: hasSectionSelected || pickMode ? "#F97316" : "#9ca3af" }}
           />
         </button>
@@ -290,6 +294,8 @@ function FloatingCommandBar({
               ? "Generating…"
               : hasSectionSelected
               ? "Describe what to change…"
+              : pickMode
+              ? "Click any section to select it..."
               : "Ask Beomz to change anything… or click a section"
           }
           disabled={isGenerating}
@@ -737,6 +743,10 @@ export function WebsiteBuilderPage() {
         setActiveSection(e.data.section);
         setPickMode(false);
       }
+      if (e.data?.type === "no-section-click") {
+        setPickMode(false);
+        setActiveSection(null);
+      }
       // BEO-681: reorder button in hover bar — pre-fill command bar so user can type "up" / "down"
       if (e.data?.type === "section-reorder" && typeof e.data.section === "string") {
         const inputEl = commandBarInputRef.current;
@@ -905,7 +915,7 @@ export function WebsiteBuilderPage() {
             setActiveSection(null);
             setPickMode(false);
           }}
-          onPickMode={() => setPickMode(true)}
+          onPickMode={() => setPickMode((v) => !v)}
           onSend={handleSend}
           isGenerating={isBuildInProgress}
           onFocusRef={(el) => {
