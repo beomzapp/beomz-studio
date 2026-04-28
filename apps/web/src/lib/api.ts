@@ -252,6 +252,9 @@ export function startBuild(body: {
   projectId?: string;
   projectName?: string;
   imageUrl?: string;
+  /** BEO-704: DB/Auth setup card flags — passed by user choice before first build */
+  withDatabase?: boolean;
+  withAuth?: boolean;
 } & BuildPlanContext): Promise<StartBuildResponse> {
   return requestJson<StartBuildResponse>("/builds/start", {
     body: JSON.stringify(body),

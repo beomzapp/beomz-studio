@@ -1603,7 +1603,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const sendMessageInternalRef = useRef<((text: string, imageUrl?: string, implementPlan?: string) => void) | null>(null);
 
   const sendMessage = useCallback(
-    (text: string, imageUrl?: string, isSystem?: boolean) => {
+    (text: string, imageUrl?: string, isSystem?: boolean, buildMeta?: { withDatabase?: boolean; withAuth?: boolean }) => {
       if (!isSystem && isBuildConfirmation(text)) {
         const plan = pendingImplementPlanRef.current;
         if (plan && implementWithPlanRef.current) {
@@ -1674,6 +1674,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               ? existingFilesRef.current
               : undefined,
           ...(imageUrl ? { imageUrl } : {}),
+          // BEO-704: DB/Auth setup flags from pre-build setup card
+          ...(buildMeta?.withDatabase !== undefined ? { withDatabase: buildMeta.withDatabase } : {}),
+          ...(buildMeta?.withAuth !== undefined ? { withAuth: buildMeta.withAuth } : {}),
         },
         signal: controller.signal,
         onBuildStarted: response => {

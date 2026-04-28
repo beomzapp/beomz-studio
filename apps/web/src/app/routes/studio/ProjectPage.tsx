@@ -40,6 +40,8 @@ import { cn } from "../../../lib/cn";
 import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
 import { getApiBaseUrl } from "../../../lib/api";
+import { detectBuildNeeds, type BuildNeeds } from "../../../lib/buildDetection";
+import { BuildSetupCard } from "../../../components/builder/BuildSetupCard";
 
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
@@ -232,6 +234,12 @@ export function ProjectPage() {
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
   const [domainStatus, setDomainStatus] = useState<string | null>(null);
 
+  // ─── BEO-704: Setup card state ────────────────────────────────────────────
+
+  const [showSetupCard, setShowSetupCard] = useState(false);
+  const [setupCardNeeds, setSetupCardNeeds] = useState<BuildNeeds | null>(null);
+  const pendingBuildRef = useRef<{ prompt: string; imageUrl?: string } | null>(null);
+
   // ─── Database state ───────────────────────────────────────────────────────
 
   const [dbEnabled, setDbEnabled] = useState(false);
@@ -417,13 +425,14 @@ export function ProjectPage() {
 
   // ─── Send message ─────────────────────────────────────────────────────────
 
-  const handleSendMessage = useCallback(
-    (text: string, imageUrl?: string, isSystem?: boolean) => {
-      if (credits && credits.balance <= 0) {
-        setIsHardBlockCredits(false);
-        setShowOutOfCreditsModal(true);
-        return;
-      }
+  // BEO-704: internal — preps state then fires build. Shared by handleSendMessage and setup card.
+  const fireBuild = useCallback(
+    (
+      text: string,
+      imageUrl?: string,
+      isSystem?: boolean,
+      buildMeta?: { withDatabase?: boolean; withAuth?: boolean },
+    ) => {
       setBuildFailed(false);
       setBuildErrorMessage(null);
       setCreditsUsed(null);
@@ -444,10 +453,57 @@ export function ProjectPage() {
         clearTimeout(aiCustomisingTimeoutRef.current);
         aiCustomisingTimeoutRef.current = null;
       }
-      sendMessage(text, imageUrl, isSystem);
+      sendMessage(text, imageUrl, isSystem, buildMeta);
     },
-    [credits, sendMessage, buildDoneRef, buildResult],
+    [sendMessage, buildDoneRef, buildResult],
   );
+
+  const handleSendMessage = useCallback(
+    (text: string, imageUrl?: string, isSystem?: boolean) => {
+      if (credits && credits.balance <= 0) {
+        setIsHardBlockCredits(false);
+        setShowOutOfCreditsModal(true);
+        return;
+      }
+
+      // BEO-704: for the first build on a new/empty project, run signal detection
+      // and show the setup card if DB or auth signals are present.
+      const isFirstBuild = !buildResult || buildResult.files.length === 0;
+      if (isFirstBuild && !isSystem) {
+        const needs = detectBuildNeeds(text);
+        if (!needs.skip && (needs.needsDb || needs.needsAuth)) {
+          pendingBuildRef.current = { prompt: text, imageUrl };
+          setSetupCardNeeds(needs);
+          setShowSetupCard(true);
+          return;
+        }
+      }
+
+      fireBuild(text, imageUrl, isSystem);
+    },
+    [credits, fireBuild, buildResult],
+  );
+
+  // BEO-704: Setup card — user confirmed DB/auth choices
+  const handleSetupCardConfirm = useCallback(
+    (withDatabase: boolean, withAuth: boolean) => {
+      setShowSetupCard(false);
+      const pending = pendingBuildRef.current;
+      if (!pending) return;
+      pendingBuildRef.current = null;
+      fireBuild(pending.prompt, pending.imageUrl, undefined, { withDatabase, withAuth });
+    },
+    [fireBuild],
+  );
+
+  // BEO-704: Setup card — user skipped setup, build with no flags
+  const handleSetupCardSkip = useCallback(() => {
+    setShowSetupCard(false);
+    const pending = pendingBuildRef.current;
+    if (!pending) return;
+    pendingBuildRef.current = null;
+    fireBuild(pending.prompt, pending.imageUrl);
+  }, [fireBuild]);
 
   // ─── Wire to database (fires after Neon provisioning) ────────────────────
 
@@ -1080,6 +1136,16 @@ export function ProjectPage() {
         onCloseOutOfCreditsModal={() => setShowOutOfCreditsModal(false)}
         isHardBlock={isHardBlockCredits}
       />
+
+      {/* BEO-704: DB/Auth setup card — shown before the first build for data-heavy apps */}
+      {showSetupCard && setupCardNeeds && (
+        <BuildSetupCard
+          needsDb={setupCardNeeds.needsDb}
+          needsAuth={setupCardNeeds.needsAuth}
+          onConfirm={handleSetupCardConfirm}
+          onSkip={handleSetupCardSkip}
+        />
+      )}
 
       {showPublishModal && projectId && (
         <PublishModal
