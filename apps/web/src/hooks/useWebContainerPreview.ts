@@ -22,6 +22,7 @@ import {
   wcCacheGetNodeModules,
   wcCacheSetNodeModules,
   wcCacheDeleteNodeModules,
+  wcCacheHasAnyFilesForProject,
 } from "../lib/wcCache";
 import { fixFile } from "../lib/api";
 
@@ -257,6 +258,13 @@ export function useWebContainerPreview(
   // cacheFallbackFnRef — the fallback fn; called on [FS] ERROR in output or timeout.
   const cacheTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cacheFallbackFnRef = useRef<(() => void) | null>(null);
+  // BEO-690: 30s stuck-dev-server detection timer. Armed in startViteShell()
+  // right after `npm run dev` is spawned and the status flips to "starting".
+  // Cleared by the server-ready listener. On expiry it forces a recovery
+  // (cacheFallbackFnRef → bust node_modules + fresh npm install + restart Vite)
+  // — covers the navigate-away-and-back case where Vite never binds its port
+  // because the previous dev process is still holding it.
+  const stuckDevServerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // BEO-688 follow-up: debounce the [FS] ERROR cache-bust trigger. WebContainer
   // emits a benign "[FS] [ERROR] invalid mount filesystem-worker" on first mount
   // that the WC recovers from in <1s; it should NOT bust the IndexedDB cache.
@@ -505,6 +513,21 @@ export function useWebContainerPreview(
       setStatus("starting");
       setProgressMessage("Starting dev server…");
 
+      // BEO-690: arm the 30s stuck-dev-server safety net. If server-ready
+      // doesn't fire within 30s of spawning `npm run dev`, force a recovery
+      // (bust node_modules cache + fresh install + restart Vite). This is the
+      // backstop for navigate-away-and-back scenarios where Vite never binds
+      // its dev port because of a lingering dev process or a stale FS state.
+      if (stuckDevServerTimerRef.current !== null) {
+        clearTimeout(stuckDevServerTimerRef.current);
+      }
+      stuckDevServerTimerRef.current = setTimeout(() => {
+        stuckDevServerTimerRef.current = null;
+        if (serverReadyFiredRef.current) return;
+        console.warn("[wc] stuck on dev server start > 30s — forcing recovery");
+        cacheFallbackFnRef.current?.();
+      }, 30_000);
+
       const devProcess = await wc.spawn("npm", ["run", "dev"]);
       instance.devProcess = devProcess;
 
@@ -581,6 +604,11 @@ export function useWebContainerPreview(
         if (cacheTimeoutIdRef.current !== null) {
           clearTimeout(cacheTimeoutIdRef.current);
           cacheTimeoutIdRef.current = null;
+        }
+        // BEO-690: cancel the 30s stuck-dev-server safety net.
+        if (stuckDevServerTimerRef.current !== null) {
+          clearTimeout(stuckDevServerTimerRef.current);
+          stuckDevServerTimerRef.current = null;
         }
         cacheFallbackFnRef.current = null;
 
@@ -714,8 +742,43 @@ export function useWebContainerPreview(
         let usedCachedNm = false;
 
         if (instance.installedAt === null) {
+          // ── BEO-690: remount detection ─────────────────────────────────
+          // Skip the IndexedDB node_modules restore when this hook mount is
+          // a navigate-back into an existing project (vs. a fresh generate).
+          // The cache mount + re-deliver of files conflicts with the WC's
+          // mount sequence and silently wedges Vite on "Starting dev server…".
+          // For initial builds the cache is still very valuable (saves the
+          // ~20-30s npm install), so we only skip it on confirmed remounts.
+          //
+          // Detection signals (any one is enough):
+          //   1. files prop is already populated synchronously at boot —
+          //      the parent loaded them from DB before this hook even
+          //      requested them, so this can't be a fresh generate.
+          //   2. wcCache has at least one cached files entry for this
+          //      project — we've successfully built it before, so a return
+          //      visit is by definition a remount.
+          // Both signals are gated on !isBuildInProgress so an in-flight
+          // build (where wcCache might already exist from a prior attempt)
+          // still uses the node_modules cache to keep cold-start fast.
+          const projectId = projectRef.current?.id ?? null;
+          const hasFilesAtBoot = !!(
+            filesRef.current && filesRef.current.length > 0
+          );
+          const hasCachedFilesForProject = projectId
+            ? await wcCacheHasAnyFilesForProject(projectId)
+            : false;
+          if (cancelled) return;
+          const isRemount =
+            !isBuildInProgressRef.current &&
+            (hasFilesAtBoot || hasCachedFilesForProject);
+          if (isRemount) {
+            console.log(
+              "[BEO-690] Remount detected — skipping node_modules cache restore, running fresh npm install",
+            );
+          }
+
           // ── BEO-375: try restoring node_modules from IndexedDB cache ──
-          const cachedNm = await wcCacheGetNodeModules();
+          const cachedNm = isRemount ? null : await wcCacheGetNodeModules();
           if (cancelled) return;
 
           if (cachedNm) {
@@ -790,10 +853,17 @@ export function useWebContainerPreview(
         }
 
         // BEO-202: Helper to arm the 15s stale-cache fallback after a cached
-        // mount. Called once per boot if usedCachedNm is true. If server-ready
-        // fires first the timeout is cancelled cleanly.
+        // mount. Called once per boot. If server-ready fires first the timeout
+        // is cancelled cleanly.
+        //
+        // BEO-690: the recovery function (runCacheFallback) is now ALWAYS
+        // registered on cacheFallbackFnRef regardless of whether the cache
+        // was used — the 30s stuck-dev-server safety net in startViteShell
+        // calls into it, and on remount paths where we deliberately skipped
+        // the cache there's still a (lingering) dev process / wedged FS that
+        // needs the same heavy-hammer recovery. The 15s auto-arm timer stays
+        // gated on usedCachedNm so we don't blow up healthy fresh installs.
         function armCacheFallback() {
-          if (!usedCachedNm) return;
           let fired = false;
           const runCacheFallback = async () => {
             if (fired || cancelled) return;
@@ -845,7 +915,13 @@ export function useWebContainerPreview(
             }
           };
           cacheFallbackFnRef.current = runCacheFallback;
-          cacheTimeoutIdRef.current = setTimeout(() => void runCacheFallback(), 15_000);
+          // BEO-690: only auto-arm the 15s stale-cache timer when the cache
+          // was actually used. For fresh installs and remount-skip paths the
+          // function stays available for manual invocation (30s safety net,
+          // [FS] ERROR debounce) but doesn't fire automatically.
+          if (usedCachedNm) {
+            cacheTimeoutIdRef.current = setTimeout(() => void runCacheFallback(), 15_000);
+          }
         }
         // BEO-383: expose this to the post-boot generationId effect which
         // can't call armCacheFallback() directly (defined inside boot()).
@@ -912,6 +988,11 @@ export function useWebContainerPreview(
       if (hotPatchSettleTimerRef.current !== null) {
         clearTimeout(hotPatchSettleTimerRef.current);
         hotPatchSettleTimerRef.current = null;
+      }
+      // BEO-690: clean up stuck-dev-server safety net on unmount
+      if (stuckDevServerTimerRef.current !== null) {
+        clearTimeout(stuckDevServerTimerRef.current);
+        stuckDevServerTimerRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

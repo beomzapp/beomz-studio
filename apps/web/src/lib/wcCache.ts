@@ -102,6 +102,29 @@ export async function wcCacheSetFiles(
   }
 }
 
+// BEO-690: returns true if the cache has at least one files entry for this
+// project (any generationId). Used by useWebContainerPreview to detect a
+// remount of an existing project — in that case the IndexedDB node_modules
+// snapshot is skipped and a fresh npm install runs instead, because the
+// cache mount + re-deliver creates a conflict that wedges Vite silently.
+export async function wcCacheHasAnyFilesForProject(
+  projectId: string,
+): Promise<boolean> {
+  try {
+    const db = await openDb();
+    return await new Promise<boolean>((resolve) => {
+      const tx = db.transaction(STORE_FILES, "readonly");
+      const store = tx.objectStore(STORE_FILES);
+      const range = IDBKeyRange.bound(`wc-${projectId}-`, `wc-${projectId}-\uffff`);
+      const req = store.openKeyCursor(range);
+      req.onsuccess = () => resolve(req.result !== null);
+      req.onerror = () => resolve(false);
+    });
+  } catch {
+    return false;
+  }
+}
+
 // ── node_modules binary cache ────────────────────────────────────────────────
 
 export async function wcCacheGetNodeModules(): Promise<Uint8Array | null> {
