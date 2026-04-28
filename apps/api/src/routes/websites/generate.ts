@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type {
   BuilderV3DoneEvent,
   BuilderV3Event,
+  BuilderV3InsufficientCreditsEvent,
   BuilderV3Operation,
   BuilderV3PreambleEvent,
   BuilderV3PreBuildAckEvent,
@@ -18,6 +19,10 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
 import { apiConfig } from "../../config.js";
+import {
+  calcCreditCost,
+  isAdminEmail,
+} from "../../lib/credits.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -1469,6 +1474,7 @@ websitesGenerateRoute.post(
       sessionId,
       siteType,
       vibe,
+      creditsUsed: 0,
     };
 
     await orgContext.db.createGeneration({
@@ -1552,6 +1558,40 @@ websitesGenerateRoute.post(
 
       try {
         throwIfAborted(abortController.signal);
+
+        if (!isAdminEmail(orgContext.user.email)) {
+          let totalAvailable = 0;
+          try {
+            const freshOrg = await orgContext.db.getOrgWithBalance(orgContext.org.id);
+            totalAvailable = Number(freshOrg?.credits ?? 0) + Number(freshOrg?.topup_credits ?? 0);
+          } catch (error) {
+            console.warn(
+              "[websites/generate] credit check failed (non-fatal):",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+
+          if (totalAvailable <= 0) {
+            const insufficientEvent: BuilderV3InsufficientCreditsEvent = {
+              type: "insufficient_credits",
+              id: String(nextEventId++),
+              timestamp: ts(),
+              operation: WEBSITE_OPERATION,
+              available: totalAvailable,
+              required: 0,
+              features: [],
+            };
+
+            await writeEvent("insufficient_credits", insufficientEvent, {
+              status: "insufficient_credits",
+            });
+            await orgContext.db.updateProject(projectId, {
+              status: "draft",
+              updated_at: ts(),
+            }).catch(() => undefined);
+            return;
+          }
+        }
 
         const preBuildAckEvent: BuilderV3PreBuildAckEvent = {
           type: "pre_build_ack",
@@ -1687,6 +1727,33 @@ websitesGenerateRoute.post(
           }
         }
 
+        const inputTokens = generation?.inputTokens ?? 0;
+        const outputTokens = generation?.outputTokens ?? 0;
+        let creditsUsed = 0;
+        if (!fallbackUsed && outputTokens > 0 && !isAdminEmail(orgContext.user.email)) {
+          const totalCost = calcCreditCost(inputTokens, outputTokens);
+          try {
+            const deduction = await orgContext.db.applyOrgUsageDeduction(
+              orgContext.org.id,
+              totalCost,
+              buildId,
+              "App generation",
+            );
+            creditsUsed = deduction.deducted;
+            console.log("[websites/generate] credits deducted:", {
+              deducted: creditsUsed,
+              inputTokens,
+              outputTokens,
+              buildId,
+            });
+          } catch (error) {
+            console.error(
+              "[websites/generate] credit deduction failed (non-fatal):",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+
         const completedAt = ts();
         const doneEvent: BuilderV3DoneEvent = {
           type: "done",
@@ -1724,8 +1791,9 @@ websitesGenerateRoute.post(
         await orgContext.db.updateGeneration(buildId, {
           metadata: {
             ...completedMetadata,
-            inputTokens: generation?.inputTokens ?? 0,
-            outputTokens: generation?.outputTokens ?? 0,
+            creditsUsed,
+            inputTokens,
+            outputTokens,
             resultSource: fallbackUsed ? "fallback" : "ai",
             fallbackReason,
           },

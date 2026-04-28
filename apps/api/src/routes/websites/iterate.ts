@@ -15,6 +15,10 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
 import { apiConfig } from "../../config.js";
+import {
+  calcIterationCreditCost,
+  isAdminEmail,
+} from "../../lib/credits.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -609,6 +613,7 @@ websitesIterateRoute.post(
       activeSection: activeSection ?? null,
       iterationSourceGenerationId: sourceGeneration.id,
       resultSource: "ai",
+      creditsUsed: 0,
     };
 
     await orgContext.db.createGeneration({
@@ -743,6 +748,33 @@ websitesIterateRoute.post(
           preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
         });
 
+        const inputTokens = iteration.inputTokens;
+        const outputTokens = iteration.outputTokens;
+        let creditsUsed = 0;
+        if (outputTokens > 0 && !isAdminEmail(orgContext.user.email)) {
+          const totalCost = calcIterationCreditCost(inputTokens, outputTokens);
+          try {
+            const deduction = await orgContext.db.applyOrgUsageDeduction(
+              orgContext.org.id,
+              totalCost,
+              buildId,
+              "App iteration",
+            );
+            creditsUsed = deduction.deducted;
+            console.log("[websites/iterate] credits deducted:", {
+              deducted: creditsUsed,
+              inputTokens,
+              outputTokens,
+              buildId,
+            });
+          } catch (error) {
+            console.error(
+              "[websites/iterate] credit deduction failed (non-fatal):",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+
         const completedAt = ts();
         const doneMessage = buildDoneMessage(changedStudioFiles.length, activeSection);
         const doneEvent: BuilderV3DoneEvent = {
@@ -780,8 +812,9 @@ websitesIterateRoute.post(
         await orgContext.db.updateGeneration(buildId, {
           metadata: {
             ...completedMetadata,
-            inputTokens: iteration.inputTokens,
-            outputTokens: iteration.outputTokens,
+            creditsUsed,
+            inputTokens,
+            outputTokens,
             resultSource: "ai",
           },
         }).catch(() => undefined);
