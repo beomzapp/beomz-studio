@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { Hono } from "hono";
 
-import { createStudioDbClient } from "@beomz-studio/studio-db";
+import { createStudioDbClient, type OrgRow, type StudioDbClient } from "@beomz-studio/studio-db";
 import { apiConfig } from "../../config.js";
 import { CREDIT_PACKS, PLAN_LIMITS } from "../../lib/credits.js";
 import { getFeatureLimits } from "../../lib/features.js";
@@ -31,7 +31,102 @@ function buildPriceToPlan(): Record<string, string> {
   return map;
 }
 
-const webhookRoute = new Hono();
+interface CreateWebhookRouteDeps {
+  createStudioDbClient?: () => StudioDbClient;
+  createStripe?: (secretKey: string) => Stripe;
+}
+
+type CreditTransactionsClient = {
+  from: (table: "credit_transactions") => {
+    insert: (row: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+  };
+};
+
+async function recordSubscriptionAllocation(
+  db: StudioDbClient,
+  orgId: string,
+  amount: number,
+  description: string,
+): Promise<void> {
+  const client = (db as unknown as { client: CreditTransactionsClient }).client;
+  const response = await client
+    .from("credit_transactions")
+    .insert({
+      org_id: orgId,
+      amount,
+      type: "subscription_reset",
+      description,
+      created_at: new Date().toISOString(),
+    });
+
+  if (response.error) {
+    throw new Error(response.error.message);
+  }
+}
+
+function hasSubscriptionAllocationAlreadyApplied(
+  org: OrgRow | null,
+  plan: string,
+  subId: string | null,
+  planLimit: { credits: number; rolloverCap: number },
+): boolean {
+  if (!org) return false;
+  if (org.plan !== plan) return false;
+  if ((org.monthly_credits ?? 0) !== planLimit.credits) return false;
+  if ((org.rollover_cap ?? 0) !== planLimit.rolloverCap) return false;
+  if (org.downgrade_at_period_end) return false;
+  if (org.pending_plan !== null) return false;
+  if (subId && org.stripe_subscription_id !== subId) return false;
+  return true;
+}
+
+async function applyImmediateSubscriptionAllocation(
+  db: StudioDbClient,
+  {
+    orgId,
+    plan,
+    subId,
+    planLimit,
+    creditsPeriodStart,
+    creditsPeriodEnd,
+    resetRolloverCredits,
+    allocationDescription,
+  }: {
+    orgId: string;
+    plan: string;
+    subId: string | null;
+    planLimit: { credits: number; rolloverCap: number };
+    creditsPeriodStart?: string;
+    creditsPeriodEnd?: string;
+    resetRolloverCredits?: boolean;
+    allocationDescription: string;
+  },
+): Promise<{ creditsGranted: boolean }> {
+  const org = await db.getOrgWithBalance(orgId);
+  const creditsAlreadyGranted = hasSubscriptionAllocationAlreadyApplied(org, plan, subId, planLimit);
+  const currentCredits = Number(org?.credits ?? 0);
+  const nextCredits = currentCredits + planLimit.credits;
+
+  await db.updateOrg(orgId, {
+    plan,
+    stripe_subscription_id: subId ?? undefined,
+    monthly_credits: planLimit.credits,
+    rollover_cap: planLimit.rolloverCap,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    ...(!creditsAlreadyGranted ? { credits: nextCredits } : {}),
+    ...(resetRolloverCredits ? { rollover_credits: 0 } : {}),
+    ...(creditsPeriodStart ? { credits_period_start: creditsPeriodStart } : {}),
+    ...(creditsPeriodEnd ? { credits_period_end: creditsPeriodEnd } : {}),
+  });
+
+  if (creditsAlreadyGranted) {
+    return { creditsGranted: false };
+  }
+
+  await recordSubscriptionAllocation(db, orgId, planLimit.credits, allocationDescription);
+  return { creditsGranted: true };
+}
 
 /**
  * POST /payments/webhook
@@ -39,38 +134,41 @@ const webhookRoute = new Hono();
  *
  * Handled events:
  *  - checkout.session.completed      → one-time pack purchase → apply_org_topup_purchase
- *  - customer.subscription.created   → update org.plan + reset credits + set rollover_cap
- *  - customer.subscription.updated   → update plan; schedule downgrade if downgrading
+ *  - customer.subscription.created   → initial paid activation; preserve balance + add allocation once
+ *  - customer.subscription.updated   → upgrade preserves balance; downgrade schedules period-end change
  *  - customer.subscription.deleted   → schedule downgrade to Free at period end
  *  - invoice.payment_succeeded       → billing cycle reset with rollover calculation
  *  - invoice.payment_failed          → log warning (future: flag account)
  */
-webhookRoute.post("/", async (c) => {
-  if (!apiConfig.STRIPE_SECRET_KEY || !apiConfig.STRIPE_WEBHOOK_SECRET) {
-    return c.json({ error: "Payments not configured." }, 503);
-  }
+export function createWebhookRoute(deps: CreateWebhookRouteDeps = {}): Hono {
+  const webhookRoute = new Hono();
 
-  const rawBody = await c.req.text();
-  const sig = c.req.header("stripe-signature") ?? "";
+  webhookRoute.post("/", async (c) => {
+    if (!apiConfig.STRIPE_SECRET_KEY || !apiConfig.STRIPE_WEBHOOK_SECRET) {
+      return c.json({ error: "Payments not configured." }, 503);
+    }
 
-  const stripe = new Stripe(apiConfig.STRIPE_SECRET_KEY);
-  let event: Stripe.Event;
+    const rawBody = await c.req.text();
+    const sig = c.req.header("stripe-signature") ?? "";
 
-  try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, apiConfig.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[webhook] Signature verification failed:", msg);
-    return c.json({ error: `Webhook signature invalid: ${msg}` }, 400);
-  }
+    const stripe = deps.createStripe?.(apiConfig.STRIPE_SECRET_KEY) ?? new Stripe(apiConfig.STRIPE_SECRET_KEY);
+    let event: Stripe.Event;
 
-  const db = createStudioDbClient();
-  const PRICE_TO_PLAN = buildPriceToPlan();
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, sig, apiConfig.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[webhook] Signature verification failed:", msg);
+      return c.json({ error: `Webhook signature invalid: ${msg}` }, 400);
+    }
 
-  console.log("[webhook] Received event:", event.type, event.id);
+    const db = deps.createStudioDbClient?.() ?? createStudioDbClient();
+    const PRICE_TO_PLAN = buildPriceToPlan();
 
-  try {
-    switch (event.type) {
+    console.log("[webhook] Received event:", event.type, event.id);
+
+    try {
+      switch (event.type) {
       // ── One-time credit pack purchase ───────────────────────────────────────
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -135,9 +233,9 @@ webhookRoute.post("/", async (c) => {
         }
 
         // ── New subscription checkout ──────────────────────────────────────────
-        // BEO-354: grant plan credits immediately on checkout completion.
-        // customer.subscription.created also fires and writes the same values
-        // (idempotent), but this ensures credits are available right away.
+        // BEO-354/BEO-693: grant plan credits immediately on checkout completion
+        // without wiping any existing balance. customer.subscription.created also
+        // fires, so this path must stay idempotent across both events.
         if (session.mode === "subscription") {
           const orgId = session.metadata?.org_id;
           if (!orgId) {
@@ -166,21 +264,21 @@ webhookRoute.post("/", async (c) => {
             now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate(),
           )).toISOString();
 
-          await db.updateOrg(orgId, {
+          const result = await applyImmediateSubscriptionAllocation(db, {
+            orgId,
             plan,
-            stripe_subscription_id: subId ?? undefined,
-            monthly_credits: planLimit.credits,
-            rollover_credits: 0,
-            rollover_cap: planLimit.rolloverCap,
-            credits_period_start: now.toISOString(),
-            credits_period_end: periodEnd,
-            downgrade_at_period_end: false,
-            pending_plan: null,
+            subId,
+            planLimit,
+            creditsPeriodStart: now.toISOString(),
+            creditsPeriodEnd: periodEnd,
+            resetRolloverCredits: true,
+            allocationDescription: `Subscription activation allocation (${plan})`,
           });
-          // resetOrgMonthlyCredits also writes the legacy `credits` column
-          await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
           console.log("[webhook] checkout.session.completed(sub): org upgraded to", plan, {
-            orgId, monthly: planLimit.credits, rolloverCap: planLimit.rolloverCap,
+            orgId,
+            monthly: planLimit.credits,
+            rolloverCap: planLimit.rolloverCap,
+            creditsGranted: result.creditsGranted,
           });
 
           // BEO-329: Sync DB limits for all DB-enabled projects in this org
@@ -207,19 +305,20 @@ webhookRoute.post("/", async (c) => {
         // Estimate period end as 1 month from anchor for subscription.created
         const periodEnd   = new Date(((sub.billing_cycle_anchor ?? 0) + 30 * 24 * 3600) * 1000).toISOString();
 
-        await db.updateOrg(orgId, {
+        const result = await applyImmediateSubscriptionAllocation(db, {
+          orgId,
           plan,
-          stripe_subscription_id: sub.id,
-          monthly_credits: planLimit.credits,
-          rollover_credits: 0,
-          rollover_cap: planLimit.rolloverCap,
-          credits_period_start: periodStart,
-          credits_period_end: periodEnd,
-          downgrade_at_period_end: false,
-          pending_plan: null,
+          subId: sub.id,
+          planLimit,
+          creditsPeriodStart: periodStart,
+          creditsPeriodEnd: periodEnd,
+          resetRolloverCredits: true,
+          allocationDescription: `Subscription activation allocation (${plan})`,
         });
-        await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
-        console.log("[webhook] subscription.created: org upgraded to", plan, { orgId });
+        console.log("[webhook] subscription.created: org upgraded to", plan, {
+          orgId,
+          creditsGranted: result.creditsGranted,
+        });
 
         // BEO-329: Sync DB limits for all DB-enabled projects in this org
         await syncOrgProjectDbLimits(db, orgId, plan);
@@ -251,8 +350,12 @@ webhookRoute.post("/", async (c) => {
         const planOrder: Record<string, number> = {
           free: 0, pro_starter: 1, starter: 1, pro_builder: 2, pro: 2, business: 3,
         };
+        const currentRank = planOrder[currentPlan] ?? 0;
+        const newRank = planOrder[newPlan] ?? 0;
         const isDowngrade =
-          (planOrder[newPlan] ?? 0) < (planOrder[currentPlan] ?? 0);
+          newRank < currentRank;
+        const isUpgrade =
+          newRank > currentRank && newPlan !== "free";
 
         const planLimit = PLAN_LIMITS[newPlan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.pro_starter;
 
@@ -264,12 +367,27 @@ webhookRoute.post("/", async (c) => {
             pending_plan: newPlan,
           });
           console.log("[webhook] subscription.updated: downgrade scheduled to", newPlan, { orgId });
-        } else {
-          // Immediate upgrade — apply new plan + rollover cap now
-          const wasUpgrade =
-            (planOrder[newPlan] ?? 0) > (planOrder[currentPlan] ?? 0)
-            && newPlan !== "free";
+        } else if (isUpgrade) {
+          // Immediate upgrade — preserve the remaining balance and add the new
+          // plan allocation on top instead of overwriting the current credits.
+          const result = await applyImmediateSubscriptionAllocation(db, {
+            orgId,
+            plan: newPlan,
+            subId: sub.id,
+            planLimit,
+            allocationDescription: `Plan upgrade allocation (${newPlan})`,
+          });
+          console.log("[webhook] subscription.updated: org plan upgraded to", newPlan, {
+            orgId,
+            creditsGranted: result.creditsGranted,
+          });
 
+          // BEO-329: Sync DB limits for all DB-enabled projects in this org
+          await syncOrgProjectDbLimits(db, orgId, newPlan);
+          await maybeRewardReferralUpgradeForOrg(db, orgId);
+        } else {
+          // Same plan / non-upgrade update — sync Stripe linkage and plan
+          // metadata only. Do not reset or add credits on routine updates.
           await db.updateOrg(orgId, {
             plan: newPlan,
             stripe_subscription_id: sub.id,
@@ -278,14 +396,10 @@ webhookRoute.post("/", async (c) => {
             downgrade_at_period_end: false,
             pending_plan: null,
           });
-          await db.resetOrgMonthlyCredits(orgId, planLimit.credits);
-          console.log("[webhook] subscription.updated: org plan upgraded to", newPlan, { orgId });
-
-          // BEO-329: Sync DB limits for all DB-enabled projects in this org
-          await syncOrgProjectDbLimits(db, orgId, newPlan);
-          if (wasUpgrade) {
-            await maybeRewardReferralUpgradeForOrg(db, orgId);
-          }
+          console.log("[webhook] subscription.updated: plan metadata synced without credit change", {
+            orgId,
+            plan: newPlan,
+          });
         }
 
         void prevSub; // suppress unused var warning
@@ -398,15 +512,18 @@ webhookRoute.post("/", async (c) => {
       default:
         console.log("[webhook] Unhandled event type:", event.type);
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[webhook] Handler error:", msg, { eventType: event.type, eventId: event.id });
-    // Return 200 so Stripe doesn't retry indefinitely for application-level errors
-    return c.json({ received: true, warning: msg });
-  }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[webhook] Handler error:", msg, { eventType: event.type, eventId: event.id });
+      // Return 200 so Stripe doesn't retry indefinitely for application-level errors
+      return c.json({ received: true, warning: msg });
+    }
 
-  return c.json({ received: true });
-});
+    return c.json({ received: true });
+  });
+
+  return webhookRoute;
+}
 
 async function resolveOrgByCustomer(
   db: ReturnType<typeof createStudioDbClient>,
@@ -459,5 +576,7 @@ async function syncOrgProjectDbLimits(
     console.warn("[webhook] syncOrgProjectDbLimits failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
 }
+
+const webhookRoute = createWebhookRoute();
 
 export default webhookRoute;
