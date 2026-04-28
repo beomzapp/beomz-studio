@@ -39,6 +39,16 @@ const DETECT_SCRIPT = `(function() {
   if (window.__beomzSectionDetection) return;
   window.__beomzSectionDetection = true;
 
+  // BEO-689: current mode synced from the parent via postMessage.
+  //   'section' → click anywhere fires a section-click (default behavior)
+  //   'pick'    → click anywhere fires an element-click (style-panel mode)
+  var currentMode = 'section';
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'beomz-set-mode') {
+      currentMode = e.data.mode;
+    }
+  });
+
   // BEO-681: inject styles — sections become relative, action bar floats top-right
   var style = document.createElement('style');
   style.textContent = [
@@ -77,21 +87,26 @@ const DETECT_SCRIPT = `(function() {
       }
       walk = walk.parentElement;
     }
-    if (sectionName) {
-      window.parent.postMessage({ type: 'section-click', section: sectionName }, '*');
-    } else {
-      window.parent.postMessage({ type: 'no-section-click' }, '*');
-    }
 
-    // BEO-689: element-level click (fires after section-click)
-    if (e.target && e.target !== document.body && e.target !== document.documentElement) {
-      window.parent.postMessage({
-        type: 'element-click',
-        tagName: e.target.tagName.toLowerCase(),
-        className: typeof e.target.className === 'string' ? e.target.className : '',
-        textContent: (e.target.textContent || '').slice(0, 100),
-        sectionName: sectionName,
-      }, '*');
+    // BEO-689: route the click based on the mode the parent told us we're in.
+    if (currentMode === 'pick') {
+      // Pick mode → element-level click (opens StylePanel in the parent)
+      if (e.target && e.target !== document.body && e.target !== document.documentElement) {
+        window.parent.postMessage({
+          type: 'element-click',
+          tagName: e.target.tagName.toLowerCase(),
+          className: typeof e.target.className === 'string' ? e.target.className : '',
+          textContent: (e.target.textContent || '').slice(0, 100),
+          sectionName: sectionName,
+        }, '*');
+      }
+    } else {
+      // Default 'section' mode → section-click / no-section-click
+      if (sectionName) {
+        window.parent.postMessage({ type: 'section-click', section: sectionName }, '*');
+      } else {
+        window.parent.postMessage({ type: 'no-section-click' }, '*');
+      }
     }
   });
 
@@ -840,6 +855,17 @@ export function WebsiteBuilderPage() {
     return () => clearTimeout(timer);
   }, [lastIterationAt, injectSectionDetection]);
 
+  // BEO-689: sync pick-mode state into the iframe via postMessage. The
+  // DETECT_SCRIPT runs inside the WebContainer iframe and can't read React
+  // state directly — so we tell it which mode we're in whenever pickMode flips.
+  useEffect(() => {
+    if (!iframeRef.current?.contentWindow) return;
+    iframeRef.current.contentWindow.postMessage(
+      { type: "beomz-set-mode", mode: pickMode ? "pick" : "section" },
+      "*",
+    );
+  }, [pickMode]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -949,16 +975,19 @@ export function WebsiteBuilderPage() {
       />
 
       {/* Preview area */}
-      <div className={cn("relative flex-1 overflow-hidden", pickMode && "cursor-crosshair")}>
+      <div className="relative flex-1 overflow-hidden">
         {/*
           BEO-689: When the StylePanel is open, the preview content shrinks left
           (260px reserved on the right). Side panels (Pages/SEO/History) sit
           outside this wrapper so they keep overlaying the full preview area.
+          BEO-689: cursor-crosshair lives on the iframe wrapper (not the outer
+          area) so it doesn't leak onto the floating command bar.
         */}
         <div
           className={cn(
             "absolute top-0 left-0 bottom-0 transition-[right] duration-200 ease-out",
             activeElement ? "right-[260px]" : "right-0",
+            pickMode && "cursor-crosshair",
           )}
         >
           {/* WebContainer iframe */}
