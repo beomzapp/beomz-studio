@@ -828,14 +828,15 @@ export function WebsiteBuilderPage() {
 
   // BEO-682: inject section detection by writing a JS file to the WebContainer FS
   // and prepending its import to main.tsx — avoids cross-origin eval() entirely.
+  // BEO-692: website files live at src/… (not apps/web/src/…) so use src/ paths.
   const injectSectionDetection = useCallback(async () => {
     const wc = wcInstanceRef.current?.wc;
     if (!wc) return;
-    await wc.fs.writeFile('apps/web/src/beomz-detect.js', DETECT_SCRIPT);
+    await wc.fs.writeFile('src/beomz-detect.js', DETECT_SCRIPT);
     try {
-      const main = await wc.fs.readFile('apps/web/src/main.tsx', 'utf-8');
+      const main = await wc.fs.readFile('src/main.tsx', 'utf-8');
       if (!main.includes('beomz-detect')) {
-        await wc.fs.writeFile('apps/web/src/main.tsx', `import './beomz-detect.js'\n${main}`);
+        await wc.fs.writeFile('src/main.tsx', `import './beomz-detect.js'\n${main}`);
       }
     } catch { /* ignore */ }
   }, []);

@@ -186,6 +186,34 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 `;
 
+// BEO-692: Website-specific shell files.
+// Website files use a flat src/ structure with their own index.html (entry:
+// /src/main.tsx). The app-style scaffold (apps/web/src/main.tsx + PreviewApp +
+// runtime.json) must never be mounted for websites — it points Vite at the
+// wrong entry and the import.meta.glob("../app/generated/…") pattern misses
+// all website files that live under src/.
+
+const WEBSITE_SHELL_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Beomz Preview</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
+
+const WEBSITE_SHELL_BLANK_MAIN_TSX = `import React from "react";
+import ReactDOM from "react-dom/client";
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode><div /></React.StrictMode>,
+);
+`;
+
 const WORKSPACE_PREVIEW_APP_TSX = `import { useMemo, type ComponentType } from "react";
 
 import runtime from "../.beomz/runtime.json";
@@ -454,10 +482,29 @@ export function buildPreviewFileTree(
   scaffoldType?: "app" | "website",
 ): FileSystemTree {
   const isWebsite = scaffoldType === "website";
+
+  if (isWebsite) {
+    // BEO-692: Website scaffold — files have their own flat src/ structure with
+    // index.html (entry: /src/main.tsx) and src/main.tsx. Mount them as-is.
+    // Do NOT inject apps/web/src/main.tsx (PreviewApp), runtime.json, or
+    // preview/App.tsx — the PreviewApp import.meta.glob targets app/generated/**
+    // and would miss all src/… website files, causing a blank preview.
+    const flatFiles: Array<{ path: string; contents: string }> = [
+      { path: "package.json", contents: WEBSITE_SCAFFOLD_PACKAGE_JSON },
+      { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
+      { path: "vite.config.ts", contents: WEBSITE_VITE_CONFIG },
+      ...files.map((file) => ({
+        path: normalizeGeneratedPath(file.path),
+        contents: file.content,
+      })),
+    ];
+    return pathsToFileTree(flatFiles);
+  }
+
   const flatFiles: Array<{ path: string; contents: string }> = [
-    { path: "package.json", contents: isWebsite ? WEBSITE_SCAFFOLD_PACKAGE_JSON : WORKSPACE_PACKAGE_JSON },
+    { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
     { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
-    { path: "vite.config.ts", contents: isWebsite ? WEBSITE_VITE_CONFIG : WORKSPACE_VITE_CONFIG },
+    { path: "vite.config.ts", contents: WORKSPACE_VITE_CONFIG },
     { path: "index.html", contents: WORKSPACE_INDEX_HTML },
     { path: "apps/web/src/main.tsx", contents: WORKSPACE_MAIN_TSX },
     { path: "apps/web/src/preview/App.tsx", contents: WORKSPACE_PREVIEW_APP_TSX },
@@ -497,11 +544,22 @@ export function buildPreviewFileTree(
 // once Vite's HMR watcher is live — the exact same path the iteration hot-swap
 // uses, which is proven to work reliably with HMR.
 export function buildShellFileTree(scaffoldType?: "app" | "website"): FileSystemTree {
-  const isWebsite = scaffoldType === "website";
+  if (scaffoldType === "website") {
+    // BEO-692: Website shell — entry at /src/main.tsx (blank), matching the
+    // entry point that website-generated index.html uses. The real index.html
+    // and src/main.tsx are replaced via wc.mount() once files arrive.
+    return pathsToFileTree([
+      { path: "package.json", contents: WEBSITE_SCAFFOLD_PACKAGE_JSON },
+      { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
+      { path: "vite.config.ts", contents: WEBSITE_VITE_CONFIG },
+      { path: "index.html", contents: WEBSITE_SHELL_INDEX_HTML },
+      { path: "src/main.tsx", contents: WEBSITE_SHELL_BLANK_MAIN_TSX },
+    ]);
+  }
   return pathsToFileTree([
-    { path: "package.json", contents: isWebsite ? WEBSITE_SCAFFOLD_PACKAGE_JSON : WORKSPACE_PACKAGE_JSON },
+    { path: "package.json", contents: WORKSPACE_PACKAGE_JSON },
     { path: "tsconfig.json", contents: WORKSPACE_TSCONFIG },
-    { path: "vite.config.ts", contents: isWebsite ? WEBSITE_VITE_CONFIG : WORKSPACE_VITE_CONFIG },
+    { path: "vite.config.ts", contents: WORKSPACE_VITE_CONFIG },
     { path: "index.html", contents: WORKSPACE_INDEX_HTML },
     { path: "apps/web/src/main.tsx", contents: WORKSPACE_BLANK_MAIN_TSX },
   ]);
