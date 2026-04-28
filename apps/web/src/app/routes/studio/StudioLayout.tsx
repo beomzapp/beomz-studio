@@ -19,7 +19,6 @@ import { getApiBaseUrl, getAccessToken, type UserProfile } from "../../../lib/ap
 import { useAuth } from "../../../lib/useAuth";
 import {
   DEFAULT_MODULES_FLAGS,
-  getCachedModuleFlags,
   loadModuleFlags,
   type ModuleKey,
   type ModulesFlags,
@@ -81,11 +80,7 @@ export function StudioLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingUser, setOnboardingUser] = useState<UserProfile | null>(null);
-  // Seed from the session-cached flags when present so navigations within
-  // the SPA never re-fetch or briefly flash hardcoded defaults.
-  const [moduleFlags, setModuleFlags] = useState<ModulesFlags>(
-    () => getCachedModuleFlags() ?? DEFAULT_MODULES_FLAGS,
-  );
+  const [moduleFlags, setModuleFlags] = useState<ModulesFlags>(DEFAULT_MODULES_FLAGS);
   const matchRoute = useMatchRoute();
   const { session } = useAuth();
 
@@ -108,7 +103,6 @@ export function StudioLayout() {
   }, [session]);
 
   useEffect(() => {
-    if (getCachedModuleFlags()) return;
     let cancelled = false;
     void loadModuleFlags().then((flags) => {
       if (!cancelled) setModuleFlags(flags);
