@@ -218,7 +218,9 @@ export default function ModulesPage() {
 
         <div className="flex items-center gap-2">
           {savedAt && !isDirty && !saveError && (
-            <span className="text-xs text-green-600 font-medium">Saved</span>
+            <span className="text-xs text-green-600 font-medium">
+              ✓ Saved — changes will reflect in studio within 60 seconds
+            </span>
           )}
           <button
             type="button"

@@ -51,9 +51,10 @@ function normaliseFlags(raw: unknown): ModulesFlags {
   return merged;
 }
 
-// Cache the resolved flags for the lifetime of the SPA session so the
-// fetch only runs once across mounts/navigations.
+const CACHE_TTL_MS = 60_000;
+
 let cached: ModulesFlags | null = null;
+let cachedAt = 0;
 let inFlight: Promise<ModulesFlags> | null = null;
 
 export function getCachedModuleFlags(): ModulesFlags | null {
@@ -61,7 +62,7 @@ export function getCachedModuleFlags(): ModulesFlags | null {
 }
 
 export async function loadModuleFlags(): Promise<ModulesFlags> {
-  if (cached) return cached;
+  if (cached && Date.now() - cachedAt < CACHE_TTL_MS) return cached;
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
@@ -73,11 +74,13 @@ export async function loadModuleFlags(): Promise<ModulesFlags> {
       const data = (await res.json()) as Partial<FeatureFlagsResponse> | null;
       const modules = normaliseFlags(data?.modules);
       cached = modules;
+      cachedAt = Date.now();
       return modules;
     } catch {
-      // Fallback to hardcoded defaults on any failure so the studio nav
-      // never breaks for end users.
+      // On failure return stale cache if available, else fall back to defaults.
+      if (cached) return cached;
       cached = { ...DEFAULT_MODULES_FLAGS };
+      cachedAt = Date.now();
       return cached;
     } finally {
       inFlight = null;
