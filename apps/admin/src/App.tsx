@@ -8,6 +8,7 @@ import BuildsPage from "./pages/Builds.tsx";
 import CreditsPage from "./pages/Credits.tsx";
 import HeatmapPage from "./pages/Heatmap.tsx";
 import ModulesPage from "./pages/Modules.tsx";
+import ModelsPage from "./pages/Models.tsx";
 import LoginPage from "./pages/Login.tsx";
 import AuthCallback from "./pages/AuthCallback.tsx";
 
@@ -104,6 +105,7 @@ export default function App() {
             <Route path="credits" element={<CreditsPage />} />
             <Route path="heatmap" element={<HeatmapPage />} />
             <Route path="modules" element={<ModulesPage />} />
+            <Route path="models" element={<ModelsPage />} />
             <Route path="*" element={<Navigate to="/users" replace />} />
           </Route>
         )}

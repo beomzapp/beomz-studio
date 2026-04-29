@@ -280,3 +280,50 @@ export async function patchAdminFeatureFlags(
   }
   return res.json() as Promise<FeatureFlagsResponse>;
 }
+
+// ── Admin: AI Models ──────────────────────────────────────────────────────────
+
+export type AiModelKey = "web_apps" | "websites" | "agents" | "chat_plan";
+
+export type AiModelSelections = Record<AiModelKey, string>;
+
+export interface AiModelsResponse extends AiModelSelections {
+  openai_available?: boolean;
+}
+
+export const DEFAULT_AI_MODELS: AiModelSelections = {
+  web_apps: "claude-sonnet-4-5-20251001",
+  websites: "claude-sonnet-4-5-20251001",
+  agents: "claude-sonnet-4-5-20251001",
+  chat_plan: "claude-haiku-4-5-20251001",
+};
+
+export async function fetchAdminAiModels(accessToken: string): Promise<AiModelsResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/ai-models`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<AiModelsResponse>;
+}
+
+export async function postAdminAiModels(
+  accessToken: string,
+  models: AiModelSelections,
+): Promise<AiModelsResponse> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/ai-models`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(models),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<AiModelsResponse>;
+}
