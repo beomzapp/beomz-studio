@@ -77,6 +77,7 @@ import { runMockBuildPipeline } from "../../lib/build/mockPipeline.js";
 import {
   buildProjectDatabaseEnvVars,
   getByoSupabaseConfig,
+  getProjectPostgresUrl,
   parsePostgresConnectionString,
   parseSupabaseProjectUrl,
   resolveProjectDbProvider,
@@ -3297,17 +3298,34 @@ async function _runBuildInBackground(
       message: "Provisioning database…",
     } as unknown as BuilderV3StatusEvent);
 
-    const provisionResult = await provisionProjectDatabase({ db, orgId, projectId });
+    console.log("[build/provision] starting Neon provision for project:", projectId);
+    let provisionResult: Awaited<ReturnType<typeof provisionProjectDatabase>>;
+    try {
+      provisionResult = await provisionProjectDatabase({ db, orgId, projectId });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log("[build/provision] ERROR:", errorMessage);
+      throw error;
+    }
     if (provisionResult.status >= 400) {
       const message = typeof provisionResult.body.message === "string"
         ? provisionResult.body.message
         : (typeof provisionResult.body.error === "string"
             ? provisionResult.body.error
             : "Failed to provision database");
+      console.log("[build/provision] ERROR:", message);
       throw new Error(message);
     }
 
     currentProject = await db.findProjectById(projectId);
+    const currentProjectLimits = await db.getProjectDbLimits(projectId).catch(() => null);
+    const provisionedUrl = currentProject
+      ? getProjectPostgresUrl(currentProject, currentProjectLimits)
+      : null;
+    console.log("[build/provision] Neon provisioned successfully:", {
+      projectId,
+      hasUrl: !!provisionedUrl,
+    });
   }
 
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));

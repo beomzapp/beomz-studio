@@ -18,10 +18,10 @@ test("/builds/start defaults generation to claude-sonnet-4-6", async () => {
   assert.match(source, /const NEW_BUILD_PLAN_SUMMARY_CONFIDENCE = 0\.8;/);
   assert.match(source, /const ITERATION_BUILD_CONFIDENCE = 0\.7;/);
   assert.match(source, /clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS/);
-  assert.match(source, /const shouldOfferPlanSummary = isBuildIshIntent[\s\S]*&& !isIteration;/);
+  assert.match(source, /const shouldOfferPlanSummary = !mockAnthropicEnabled[\s\S]*&& !isIteration;/);
   assert.match(source, /const forceIteration = parsedBody\.data\.forceIteration === true;/);
-  assert.match(source, /const withDatabase = parsedBody\.data\.withDatabase === true;/);
-  assert.match(source, /const withAuth = parsedBody\.data\.withAuth === true;/);
+  assert.match(source, /let withDatabase = parsedBody\.data\.withDatabase === true;/);
+  assert.match(source, /let withAuth = parsedBody\.data\.withAuth === true;/);
   assert.match(source, /const isIteration = forceIteration \|\| hasExistingIterationContext;/);
   assert.match(source, /const intentDecision = forceIteration[\s\S]*reason: "forceIteration requested\."/);
   assert.match(sharedSource, /forceIteration\?: boolean;/);
@@ -36,6 +36,18 @@ test("/builds/start forwards withDatabase and withAuth flags into the background
   const { createBuildsStartRoute } = await import("./start.js");
 
   let capturedFlags: { withAuth?: boolean; withDatabase?: boolean } | null = null;
+  const project = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Dashboard",
+    org_id: "org-1",
+    status: "ready",
+    template: "workspace-task",
+    icon: "CheckSquare",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [],
+    chat_summary: null,
+  };
   const org = {
     id: "org-1",
     owner_id: "user-1",
@@ -81,8 +93,12 @@ test("/builds/start forwards withDatabase and withAuth flags into the background
             warnings: (input.warnings as string[] | undefined) ?? [],
           }),
           findLatestGenerationByProjectId: async () => null,
-          findProjectById: async () => null,
+          findProjectById: async () => project,
           getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            ...project,
+            ...patch,
+          }),
         } as OrgContext["db"],
         jwt: { sub: "platform-user" },
         membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
@@ -120,6 +136,8 @@ test("/builds/start forwards withDatabase and withAuth flags into the background
     },
     body: JSON.stringify({
       prompt: "Build me a project dashboard",
+      projectId: project.id,
+      forceIteration: true,
       withAuth: true,
       withDatabase: true,
     }),
@@ -397,6 +415,7 @@ test("/builds/start returns a plan summary with implementPlan when confidence re
     body: JSON.stringify({
       prompt: "playful colorful kid centric",
       projectId: project.id,
+      withDatabase: true,
     }),
   });
 
@@ -426,6 +445,10 @@ test("/builds/start returns a plan summary with implementPlan when confidence re
   );
   assert.match(summaryEvent?.message ?? "", /Here's what I'll do:/);
   assert.equal(createdGenerationMetadata?.readyToImplement, true);
+  assert.deepEqual(createdGenerationMetadata?.requestedBuildSetup, {
+    withDatabase: true,
+    withAuth: false,
+  });
   assert.equal(runBuildCalls, 0);
 });
 
@@ -826,6 +849,127 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
   assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
   assert.equal(runBuildCalls, 1);
   assert.equal(capturedBuildPrompt, implementPlan);
+});
+
+test("/builds/start restores stored DB/auth setup when implementPlan confirmation omits flags", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+
+  let capturedFlags: { withAuth?: boolean; withDatabase?: boolean } | null = null;
+  const implementPlan = "Build a cheerful task app with shared projects, due dates, and real persistence.";
+  const project = {
+    id: "44444444-4444-4444-4444-444444444444",
+    name: "Tasks",
+    org_id: "org-1",
+    status: "ready",
+    template: "workspace-task",
+    icon: "CheckSquare",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [],
+    chat_summary: "Plan summary already shared.",
+  };
+
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  const route = createBuildsStartRoute({
+    authMiddleware: async (_c, next) => {
+      await next();
+    },
+    loadOrgContextMiddleware: async (c, next) => {
+      c.set("orgContext", {
+        db: {
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
+          findLatestGenerationByProjectId: async () => ({
+            files: [],
+            metadata: {
+              implementPlan,
+              readyToImplement: true,
+              requestedBuildSetup: {
+                withDatabase: true,
+                withAuth: true,
+              },
+            },
+          }),
+          findProjectById: async () => project,
+          getOrgWithBalance: async () => org,
+          updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+            ...project,
+            ...patch,
+          }),
+        } as OrgContext["db"],
+        jwt: { sub: "platform-user" },
+        membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+        org,
+        user: {
+          id: "user-1",
+          email: "omar@example.com",
+          platform_user_id: "platform-user",
+          created_at: new Date().toISOString(),
+        },
+      });
+      await next();
+    },
+    classifyIntent: async () => {
+      throw new Error("implement confirmation should bypass intent detection");
+    },
+    runBuildInBackground: async (input) => {
+      capturedFlags = {
+        withAuth: input.withAuth,
+        withDatabase: input.withDatabase,
+      };
+    },
+  });
+
+  const response = await route.request("http://localhost/", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: implementPlan,
+      projectId: project.id,
+    }),
+  });
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(capturedFlags, {
+    withAuth: true,
+    withDatabase: true,
+  });
 });
 
 test("/builds/start accepts implementPlan as the build prompt alias", async () => {

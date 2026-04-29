@@ -265,6 +265,49 @@ function readPendingImplementPlan(metadata: unknown): string | null {
     : null;
 }
 
+type RequestedBuildSetup = {
+  withDatabase: boolean;
+  withAuth: boolean;
+};
+
+function buildRequestedBuildSetup(
+  withDatabase: boolean,
+  withAuth: boolean,
+): RequestedBuildSetup | undefined {
+  if (!withDatabase && !withAuth) {
+    return undefined;
+  }
+
+  return {
+    withDatabase: withDatabase || withAuth,
+    withAuth,
+  };
+}
+
+function readRequestedBuildSetup(metadata: unknown): RequestedBuildSetup | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const requestedBuildSetup = (metadata as Record<string, unknown>).requestedBuildSetup;
+  if (!requestedBuildSetup || typeof requestedBuildSetup !== "object" || Array.isArray(requestedBuildSetup)) {
+    return null;
+  }
+
+  const record = requestedBuildSetup as Record<string, unknown>;
+  const withAuth = record.withAuth === true;
+  const withDatabase = record.withDatabase === true || withAuth;
+
+  if (!withDatabase && !withAuth) {
+    return null;
+  }
+
+  return {
+    withDatabase,
+    withAuth,
+  };
+}
+
 function buildAccumulatedContextFallback(
   currentMessage: string,
   history: readonly ReturnType<typeof readProjectChatHistory>[number][],
@@ -554,8 +597,10 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
   const confirmedIntent = parsedBody.data.confirmedIntent;
   const forceIteration = parsedBody.data.forceIteration === true;
-  const withDatabase = parsedBody.data.withDatabase === true;
-  const withAuth = parsedBody.data.withAuth === true;
+  const hasWithDatabaseFlag = typeof parsedBody.data.withDatabase === "boolean";
+  const hasWithAuthFlag = typeof parsedBody.data.withAuth === "boolean";
+  let withDatabase = parsedBody.data.withDatabase === true;
+  let withAuth = parsedBody.data.withAuth === true;
   let planSessionId = parsedBody.data.planSessionId;
   let planSummary = parsedBody.data.summary;
   let planSteps: readonly PlanStep[] | undefined = parsedBody.data.steps;
@@ -619,6 +664,18 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     ?? (matchingStoredImplementPlan ? storedImplementPlan : null)
     ?? (explicitImplementSignal ? sourcePromptForComparison : null);
   const implementConfirmationIntent: Intent = isIteration ? "iteration" : "build_new";
+  const storedRequestedBuildSetup = readRequestedBuildSetup(latestGeneration?.metadata);
+  if (isImplementConfirmation) {
+    if (!hasWithAuthFlag && storedRequestedBuildSetup?.withAuth) {
+      withAuth = true;
+    }
+    if (!hasWithDatabaseFlag && storedRequestedBuildSetup?.withDatabase) {
+      withDatabase = true;
+    }
+  }
+  if (withAuth) {
+    withDatabase = true;
+  }
   const intentDecision = forceIteration
     ? {
         intent: "iteration" as const,
@@ -819,6 +876,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();
   const requestedAt = new Date().toISOString();
+  const requestedBuildSetup = buildRequestedBuildSetup(withDatabase, withAuth);
   const operation = isIteration ? "iteration" : "initial_build";
   const operationId = isIteration ? projectIterationOperation.id : initialBuildOperation.id;
   const initialBuilderTrace = createInitialBuilderTrace(requestedAt, operation);
@@ -834,6 +892,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     planSteps: planSteps ? [...planSteps] : undefined,
     planSummary,
     resultSource: undefined,
+    requestedBuildSetup,
     selectedTemplateId,
     sourcePrompt,
     templateUsed: selectedTemplateId,
@@ -1164,6 +1223,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   }
 
   // ── Fire-and-forget background build (BEO-210 — no Temporal) ──────────────
+  console.log("[build/start] withDatabase:", withDatabase, "projectId:", projectId);
   runBuildInBackgroundFn(
     {
       buildId, projectId,
