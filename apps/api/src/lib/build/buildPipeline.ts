@@ -87,6 +87,324 @@ function buildRequestedDataContext(
   return blocks.join("\n\n");
 }
 
+function generatedFilesUseNeonDatabase(files: readonly StudioFile[]): boolean {
+  return files.some((file) =>
+    /\.(tsx?|jsx?)$/i.test(file.path)
+    && file.content.includes("@neondatabase/serverless")
+    && file.content.includes("VITE_DATABASE_URL")
+    && /sql`|CREATE TABLE IF NOT EXISTS/i.test(file.content),
+  );
+}
+
+function isTodoTaskPrompt(prompt: string): boolean {
+  return /\b(todo|task)(?:s| list| management)?\b/i.test(prompt);
+}
+
+function buildDatabaseTaskAppSource(): string {
+  return [
+    'import { type FormEvent, useEffect, useMemo, useState } from "react";',
+    'import { neon } from "@neondatabase/serverless";',
+    'import { Check, Circle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";',
+    "",
+    "type TodoRow = {",
+    "  id: number;",
+    "  title: string;",
+    "  done: boolean;",
+    "  created_at: string;",
+    "};",
+    "",
+    'const databaseUrl = import.meta.env.VITE_DATABASE_URL;',
+    "",
+    "if (!databaseUrl) {",
+    '  throw new Error("Missing VITE_DATABASE_URL.");',
+    "}",
+    "",
+    "const sql = neon(databaseUrl);",
+    "",
+    "async function ensureTasksTable(): Promise<void> {",
+    "  await sql`",
+    "    CREATE TABLE IF NOT EXISTS tasks (",
+    "      id SERIAL PRIMARY KEY,",
+    "      title TEXT NOT NULL,",
+    "      done BOOLEAN DEFAULT false,",
+    "      created_at TIMESTAMPTZ DEFAULT NOW()",
+    "    )",
+    "  `;",
+    "}",
+    "",
+    "async function loadTasks(): Promise<TodoRow[]> {",
+    "  await ensureTasksTable();",
+    "  return await sql`",
+    "    SELECT id, title, done, created_at",
+    "    FROM tasks",
+    "    ORDER BY created_at DESC, id DESC",
+    "  ` as TodoRow[];",
+    "}",
+    "",
+    "function formatError(error: unknown): string {",
+    "  return error instanceof Error ? error.message : \"Something went wrong.\";",
+    "}",
+    "",
+    "function filterButtonClass(isActive: boolean): string {",
+    '  return "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-all "',
+    '    + (isActive ? "bg-indigo-600 text-white" : "text-zinc-500 hover:text-zinc-300");',
+    "}",
+    "",
+    "function todoTextClass(done: boolean): string {",
+    '  return "flex-1 text-sm " + (done ? "text-zinc-600 line-through" : "text-white");',
+    "}",
+    "",
+    "export function App() {",
+    "  const [todos, setTodos] = useState<TodoRow[]>([]);",
+    '  const [text, setText] = useState("");',
+    '  const [filter, setFilter] = useState<"all" | "active" | "completed">("all");',
+    "  const [isLoading, setIsLoading] = useState(true);",
+    "  const [isMutating, setIsMutating] = useState(false);",
+    "  const [error, setError] = useState<string | null>(null);",
+    "",
+    "  const refreshTodos = async (showSpinner = true): Promise<void> => {",
+    "    try {",
+    "      if (showSpinner) {",
+    "        setIsLoading(true);",
+    "      }",
+    "      setError(null);",
+    "      const rows = await loadTasks();",
+    "      setTodos(rows);",
+    "    } catch (loadError) {",
+    "      setError(formatError(loadError));",
+    "    } finally {",
+    "      if (showSpinner) {",
+    "        setIsLoading(false);",
+    "      }",
+    "    }",
+    "  };",
+    "",
+    "  useEffect(() => {",
+    "    void refreshTodos();",
+    "  }, []);",
+    "",
+    "  const filteredTodos = useMemo(() => {",
+    '    if (filter === "active") {',
+    "      return todos.filter((todo) => !todo.done);",
+    "    }",
+    '    if (filter === "completed") {',
+    "      return todos.filter((todo) => todo.done);",
+    "    }",
+    "    return todos;",
+    "  }, [filter, todos]);",
+    "",
+    "  const remainingCount = useMemo(",
+    "    () => todos.filter((todo) => !todo.done).length,",
+    "    [todos],",
+    "  );",
+    "",
+    "  const createTodo = async (event: FormEvent<HTMLFormElement>): Promise<void> => {",
+    "    event.preventDefault();",
+    "    const title = text.trim();",
+    "    if (!title) {",
+    "      return;",
+    "    }",
+    "",
+    "    try {",
+    "      setIsMutating(true);",
+    "      setError(null);",
+    "      await ensureTasksTable();",
+    "      await sql`INSERT INTO tasks (title, done) VALUES (${title}, false)`;",
+    '      setText("");',
+    "      await refreshTodos(false);",
+    "    } catch (createError) {",
+    "      setError(formatError(createError));",
+    "    } finally {",
+    "      setIsMutating(false);",
+    "    }",
+    "  };",
+    "",
+    "  const toggleTodo = async (todo: TodoRow): Promise<void> => {",
+    "    try {",
+    "      setIsMutating(true);",
+    "      setError(null);",
+    "      await sql`UPDATE tasks SET done = ${!todo.done} WHERE id = ${todo.id}`;",
+    "      await refreshTodos(false);",
+    "    } catch (toggleError) {",
+    "      setError(formatError(toggleError));",
+    "    } finally {",
+    "      setIsMutating(false);",
+    "    }",
+    "  };",
+    "",
+    "  const deleteTodo = async (id: number): Promise<void> => {",
+    "    try {",
+    "      setIsMutating(true);",
+    "      setError(null);",
+    "      await sql`DELETE FROM tasks WHERE id = ${id}`;",
+    "      await refreshTodos(false);",
+    "    } catch (deleteError) {",
+    "      setError(formatError(deleteError));",
+    "    } finally {",
+    "      setIsMutating(false);",
+    "    }",
+    "  };",
+    "",
+    "  return (",
+    '    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">',
+    '      <div className="w-full max-w-md">',
+    '        <div className="rounded-3xl bg-zinc-900 p-6 shadow-2xl border border-white/5">',
+    '          <div className="mb-5 flex items-center justify-between gap-3">',
+    '            <div>',
+    '              <h1 className="text-xl font-semibold text-white">Todo List</h1>',
+    '              <p className="mt-1 text-sm text-zinc-500">Persisted with Neon Postgres.</p>',
+    '            </div>',
+    '            <button',
+    '              type="button"',
+    '              onClick={() => { void refreshTodos(); }}',
+    '              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-zinc-300 transition-all hover:border-white/20 hover:text-white"',
+    '              aria-label="Refresh tasks"',
+    "            >",
+    '              <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} />',
+    "            </button>",
+    "          </div>",
+    "",
+    '          <form onSubmit={(event) => { void createTodo(event); }} className="mb-5 flex gap-2">',
+    '            <input',
+    '              type="text"',
+    "              value={text}",
+    '              onChange={(event) => setText(event.target.value)}',
+    '              placeholder="What needs to be done?"',
+    "              disabled={isMutating}",
+    '              className="flex-1 rounded-xl bg-zinc-800 border border-white/5 px-4 py-2.5 text-white placeholder-zinc-600 outline-none focus:border-indigo-500/40 text-sm disabled:opacity-60"',
+    "            />",
+    '            <button',
+    '              type="submit"',
+    "              disabled={isMutating || text.trim().length === 0}",
+    '              className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white transition-all hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"',
+    "            >",
+    "              {isMutating ? <Loader2 size={18} className=\"animate-spin\" /> : <Plus size={18} />}",
+    "            </button>",
+    "          </form>",
+    "",
+    "          {error ? (",
+    '            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">',
+    "              {error}",
+    "            </div>",
+    "          ) : null}",
+    "",
+    '          <div className="mb-4 flex gap-1">',
+    '            {(["all", "active", "completed"] as const).map((value) => (',
+    '              <button',
+    "                key={value}",
+    '                type="button"',
+    "                onClick={() => setFilter(value)}",
+    "                className={filterButtonClass(filter === value)}",
+    "              >",
+    "                {value}",
+    "              </button>",
+    "            ))}",
+    "          </div>",
+    "",
+    '          <div className="mb-4 max-h-80 space-y-1.5 overflow-y-auto">',
+    "            {isLoading ? (",
+    '              <div className="flex items-center justify-center py-8 text-sm text-zinc-500">',
+    '                <Loader2 size={16} className="mr-2 animate-spin" />',
+    "                Loading tasks...",
+    "              </div>",
+    "            ) : null}",
+    "",
+    "            {!isLoading && filteredTodos.length === 0 ? (",
+    '              <p className="py-6 text-center text-sm text-zinc-600">',
+    '                {filter === "all" ? "Add your first task above" : "No matching tasks yet"}',
+    "              </p>",
+    "            ) : null}",
+    "",
+    "            {filteredTodos.map((todo) => (",
+    '              <div',
+    "                key={todo.id}",
+    '                className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-zinc-800/60"',
+    "              >",
+    '                <button type="button" onClick={() => { void toggleTodo(todo); }} className="flex-shrink-0">',
+    "                  {todo.done",
+    '                    ? <Check size={18} className="text-indigo-400" />',
+    '                    : <Circle size={18} className="text-zinc-600" />}',
+    "                </button>",
+    '                <span className={todoTextClass(todo.done)}>{todo.title}</span>',
+    '                <button',
+    '                  type="button"',
+    "                  onClick={() => { void deleteTodo(todo.id); }}",
+    '                  className="flex-shrink-0 text-zinc-700 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"',
+    "                >",
+    "                  <Trash2 size={15} />",
+    "                </button>",
+    "              </div>",
+    "            ))}",
+    "          </div>",
+    "",
+    '          <div className="flex items-center justify-between text-xs text-zinc-600">',
+    '            <span>{remainingCount} remaining</span>',
+    '            <span>{todos.length} total</span>',
+    "          </div>",
+    "        </div>",
+    "      </div>",
+    "    </div>",
+    "  );",
+    "}",
+    "",
+  ].join("\n");
+}
+
+export function ensureRequestedDatabaseApp(args: {
+  files: StudioFile[];
+  prompt: string;
+  sourcePrompt: string;
+  templateId: string;
+  withDatabase?: boolean;
+  withAuth?: boolean;
+}): { files: StudioFile[]; appliedFallback: boolean } {
+  const requiresDatabaseApp = args.withDatabase === true || args.withAuth === true;
+  if (!requiresDatabaseApp || generatedFilesUseNeonDatabase(args.files)) {
+    return { files: args.files, appliedFallback: false };
+  }
+
+  const appPath = remapPrebuiltPath("App.tsx", args.templateId);
+  const promptText = `${args.prompt}\n${args.sourcePrompt}`;
+  const shouldApplyTaskFallback = args.templateId === "workspace-task" || isTodoTaskPrompt(promptText);
+  if (!shouldApplyTaskFallback) {
+    return { files: args.files, appliedFallback: false };
+  }
+
+  const replacementContent = buildDatabaseTaskAppSource();
+  let didReplace = false;
+  const nextFiles = args.files.map((file) => {
+    if (file.path !== appPath) {
+      return file;
+    }
+
+    didReplace = true;
+    return {
+      ...file,
+      content: replacementContent,
+      source: "platform" as const,
+    };
+  });
+
+  if (didReplace) {
+    return { files: nextFiles, appliedFallback: true };
+  }
+
+  return {
+    files: [
+      ...args.files,
+      {
+        path: appPath,
+        kind: "route",
+        language: "tsx",
+        content: replacementContent,
+        source: "platform",
+        locked: false,
+      },
+    ],
+    appliedFallback: true,
+  };
+}
+
 type BuildPipelineArgs = {
   input: {
     buildId: string;
@@ -378,7 +696,28 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     mergedFiles,
     templateId,
   );
-  const finalFiles = await injectProjectDatabaseEnv(db, projectId, postProcessedFiles);
+  const databaseEnforced = ensureRequestedDatabaseApp({
+    files: postProcessedFiles,
+    prompt,
+    sourcePrompt,
+    templateId,
+    withDatabase: input.withDatabase,
+    withAuth: input.withAuth,
+  });
+  if (databaseEnforced.appliedFallback) {
+    console.warn("[generate] requested database build returned no Neon usage; applied task database scaffold fallback.", {
+      buildId,
+      projectId,
+      templateId,
+    });
+  } else if ((input.withDatabase === true || input.withAuth === true) && !generatedFilesUseNeonDatabase(postProcessedFiles)) {
+    console.warn("[generate] requested database build still has no detectable Neon usage after model output.", {
+      buildId,
+      projectId,
+      templateId,
+    });
+  }
+  const finalFiles = await injectProjectDatabaseEnv(db, projectId, databaseEnforced.files);
   if (missingImports.length > 0) {
     console.warn("[generate] WARNING: missing imports detected:", missingImports);
     console.log("[generate] generating stub files for missing components...", { count: missingImports.length });
