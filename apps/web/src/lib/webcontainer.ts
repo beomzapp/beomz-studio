@@ -214,17 +214,23 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 `;
 
-const WORKSPACE_PREVIEW_APP_TSX = `import { useMemo, type ComponentType } from "react";
+// BEO-708: Non-eager glob — loads each generated module on demand rather than
+// as a static top-level import. Eager mode caused "Route not found" for DB
+// builds: App.tsx threw "Missing VITE_DATABASE_URL" at module level before
+// .env.local was written, Vite swallowed the error per-entry and left
+// generatedModules[key].default undefined, so EmptyRoute rendered permanently.
+// Lazy loading wraps each import in a promise so module-level throws are caught
+// without crashing the shell, and the component loads once the env is ready.
+const WORKSPACE_PREVIEW_APP_TSX = `import { useState, useEffect, useMemo, type ComponentType } from "react";
 
 import runtime from "../.beomz/runtime.json";
 
 type AnyGeneratedModule = { default?: ComponentType; [key: string]: unknown };
 
-// Include .ts so theme.ts (and other utility modules) are in Vite's module graph
-// and can be resolved via relative imports from .tsx components.
-const generatedModules = import.meta.glob("../app/generated/**/*.{ts,tsx}", {
-  eager: true,
-}) as Record<string, AnyGeneratedModule>;
+// Non-eager: Vite still tracks these files for HMR but loads them on demand.
+const generatedModuleLoaders = import.meta.glob(
+  "../app/generated/**/*.{ts,tsx}",
+) as Record<string, () => Promise<AnyGeneratedModule>>;
 
 function resolveModuleKey(filePath: string): string {
   return \`../\${filePath.replace(/^apps\\/web\\/src\\//, "")}\`;
@@ -240,18 +246,28 @@ function resolveActiveRoute() {
   );
 }
 
-// BEO-440: If the primary route module key is missing from generatedModules
-// (stale scaffold path baked into runtime.json on a cold boot), scan all loaded
-// modules for a likely entry component as a fallback so the preview never blanks.
-function findFallbackComponent(
-  modules: Record<string, AnyGeneratedModule>,
-): ComponentType | undefined {
-  const ENTRY_NAMES = new Set(["App", "app", "main", "Main", "index", "Index"]);
-  for (const [key, mod] of Object.entries(modules)) {
+const ENTRY_NAMES = new Set(["App", "app", "main", "Main", "index", "Index"]);
+
+// BEO-440 / BEO-708: Try the primary route key first; if that fails (module
+// missing or throws), scan all loaders for a well-known entry-point name.
+async function loadActiveComponent(
+  moduleKey: string,
+): Promise<ComponentType | undefined> {
+  const loader = generatedModuleLoaders[moduleKey];
+  if (loader) {
+    try {
+      const mod = await loader();
+      if (typeof mod?.default === "function") return mod.default as ComponentType;
+    } catch { /* fall through to name-based scan */ }
+  }
+
+  for (const [key, load] of Object.entries(generatedModuleLoaders)) {
     const baseName = key.replace(/^.*\\//, "").replace(/\\.(tsx?|jsx?)$/, "");
-    if (ENTRY_NAMES.has(baseName) && typeof mod?.default === "function") {
-      return mod.default as ComponentType;
-    }
+    if (!ENTRY_NAMES.has(baseName)) continue;
+    try {
+      const mod = await load();
+      if (typeof mod?.default === "function") return mod.default as ComponentType;
+    } catch { /* skip */ }
   }
   return undefined;
 }
@@ -267,19 +283,30 @@ function EmptyRoute() {
   );
 }
 
+type RouteState =
+  | { status: "loading" }
+  | { status: "ready"; Component: ComponentType }
+  | { status: "empty" };
+
 export function PreviewApp() {
   const activeRoute = useMemo(resolveActiveRoute, []);
   const moduleKey = resolveModuleKey(activeRoute.filePath);
-  const resolvedDefault = generatedModules[moduleKey]?.default;
+  const [routeState, setRouteState] = useState<RouteState>({ status: "loading" });
 
-  // BEO-440: Fall back to scanning generatedModules if the route's module key
-  // is not present (e.g. stale scaffold path baked into the runtime.json).
-  const ActiveRoute: ComponentType =
-    (typeof resolvedDefault === "function" ? resolvedDefault : undefined)
-    ?? findFallbackComponent(generatedModules)
-    ?? EmptyRoute;
+  useEffect(() => {
+    let cancelled = false;
+    setRouteState({ status: "loading" });
+    loadActiveComponent(moduleKey).then((Component) => {
+      if (cancelled) return;
+      setRouteState(Component ? { status: "ready", Component } : { status: "empty" });
+    });
+    return () => { cancelled = true; };
+  }, [moduleKey]);
 
-  return <ActiveRoute />;
+  if (routeState.status === "loading") return <div />;
+  if (routeState.status === "empty") return <EmptyRoute />;
+  const { Component } = routeState;
+  return <Component />;
 }
 `;
 
