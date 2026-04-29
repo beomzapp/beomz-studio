@@ -69,6 +69,7 @@ export interface OrgRow extends Record<string, unknown> {
   stripe_subscription_id: string | null;
   daily_reset_at: string | null;
   created_at: string;
+  neon_project_id?: string | null;
 }
 
 export interface OrgMembershipRow extends Record<string, unknown> {
@@ -118,6 +119,9 @@ export interface ProjectRow extends Record<string, unknown> {
   current_phase: number;
   phases_total: number;
   phase_mode: boolean;
+  // BEO-710: branch-per-app
+  neon_project_id?: string | null;
+  neon_branch_id?: string | null;
 }
 
 export interface GenerationRow extends Record<string, unknown> {
@@ -307,6 +311,7 @@ export interface OrgUpdate extends Record<string, unknown> {
   stripe_customer_id?: string | null;
   stripe_subscription_id?: string | null;
   daily_reset_at?: string | null;
+  neon_project_id?: string | null;
 }
 
 export interface OrgMembershipInsert extends Record<string, unknown> {
@@ -373,6 +378,9 @@ export interface ProjectUpdate extends Record<string, unknown> {
   current_phase?: number;
   phases_total?: number;
   phase_mode?: boolean;
+  // BEO-710: branch-per-app
+  neon_project_id?: string | null;
+  neon_branch_id?: string | null;
 }
 
 export interface GenerationInsert extends Record<string, unknown> {

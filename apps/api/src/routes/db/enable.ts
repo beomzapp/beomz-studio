@@ -33,6 +33,8 @@ import {
 } from "../../lib/userDataClient.js";
 import { getFeatureLimits } from "../../lib/features.js";
 import {
+  createBranch as createNeonBranch,
+  createProject as createNeonProject,
   enableNeonAuth,
   enableNeonDataApi,
   getNeonProjectBranches,
@@ -63,7 +65,8 @@ interface EnableDbRouteDeps {
   createBeomzDbFunction?: typeof createBeomzDbFunction;
   insertSchemaRegistry?: typeof insertSchemaRegistry;
   exposeSchemaInPostgREST?: typeof exposeSchemaInPostgREST;
-  provisionNeonProject?: typeof provisionNeonProject;
+  createNeonProject?: typeof createNeonProject;
+  createNeonBranch?: typeof createNeonBranch;
   getNeonProjectBranches?: typeof getNeonProjectBranches;
   enableNeonAuth?: typeof enableNeonAuth;
   enableNeonDataApi?: typeof enableNeonDataApi;
@@ -80,7 +83,8 @@ type EnableDbDepsResolved = {
   createBeomzDbFunctionFn: typeof createBeomzDbFunction;
   insertSchemaRegistryFn: typeof insertSchemaRegistry;
   exposeSchemaInPostgRESTFn: typeof exposeSchemaInPostgREST;
-  provisionNeonProjectFn: typeof provisionNeonProject;
+  createNeonProjectFn: typeof createNeonProject;
+  createNeonBranchFn: typeof createNeonBranch;
   getNeonProjectBranchesFn: typeof getNeonProjectBranches;
   enableNeonAuthFn: typeof enableNeonAuth;
   enableNeonDataApiFn: typeof enableNeonDataApi;
@@ -96,7 +100,8 @@ function resolveEnableDbDeps(deps: EnableDbRouteDeps = {}): EnableDbDepsResolved
     createBeomzDbFunctionFn: deps.createBeomzDbFunction ?? createBeomzDbFunction,
     insertSchemaRegistryFn: deps.insertSchemaRegistry ?? insertSchemaRegistry,
     exposeSchemaInPostgRESTFn: deps.exposeSchemaInPostgREST ?? exposeSchemaInPostgREST,
-    provisionNeonProjectFn: deps.provisionNeonProject ?? provisionNeonProject,
+    createNeonProjectFn: deps.createNeonProject ?? createNeonProject,
+    createNeonBranchFn: deps.createNeonBranch ?? createNeonBranch,
     getNeonProjectBranchesFn: deps.getNeonProjectBranches ?? getNeonProjectBranches,
     enableNeonAuthFn: deps.enableNeonAuth ?? enableNeonAuth,
     enableNeonDataApiFn: deps.enableNeonDataApi ?? enableNeonDataApi,
@@ -118,8 +123,8 @@ export async function provisionProjectDatabase(
     createBeomzDbFunctionFn,
     insertSchemaRegistryFn,
     exposeSchemaInPostgRESTFn,
-    provisionNeonProjectFn,
-    getNeonProjectBranchesFn,
+    createNeonProjectFn,
+    createNeonBranchFn,
     enableNeonAuthFn,
     enableNeonDataApiFn,
     rewireNeonDbFn,
@@ -187,28 +192,38 @@ export async function provisionProjectDatabase(
 
   if (neonEnabled) {
     try {
-      const projectName = `beomz-${project.id.slice(0, 12)}`;
-      const { neonProjectId, connectionUri } = await provisionNeonProjectFn(projectName);
-      const emptyNeonAuth = { baseUrl: "", pubClientKey: "", secretServerKey: "" };
-      let branchId = "";
-      let neonAuth = emptyNeonAuth;
+      // 1. Get or create org's single Neon project
+      let neonProjectId = typeof org.neon_project_id === "string" && org.neon_project_id.length > 0
+        ? org.neon_project_id
+        : null;
+      if (!neonProjectId) {
+        console.log(`[db/enable] creating org Neon project for org: ${orgId}`);
+        const p = await createNeonProjectFn(`beomz-org-${orgId}`);
+        neonProjectId = p.id;
+        await db.updateOrg(orgId, { neon_project_id: neonProjectId });
+        console.log(`[db/enable] org Neon project created: ${neonProjectId}`);
+      }
 
+      // 2. Create branch for this app
+      console.log(`[db/enable] creating Neon branch for project: ${projectId}`);
+      const branch = await createNeonBranchFn(neonProjectId, `project-${projectId}`);
+      const branchId = branch.id;
+      const connectionUri = branch.connectionString;
+      console.log(`[db/enable] Neon branch created: ${branchId}`);
+
+      // 3. Auth + Data API (non-fatal)
+      const emptyNeonAuth = { baseUrl: "", pubClientKey: "", secretServerKey: "" };
+      let neonAuth = emptyNeonAuth;
       try {
-        const branches = await getNeonProjectBranchesFn(neonProjectId);
-        const mainBranch = branches.find((branch) => branch.default) ?? branches[0];
-        branchId = mainBranch?.id ?? "";
-        neonAuth = branchId
-          ? await enableNeonAuthFn(neonProjectId, branchId)
-          : emptyNeonAuth;
-        if (branchId && neonAuth.baseUrl) {
+        neonAuth = await enableNeonAuthFn(neonProjectId, branchId);
+        if (neonAuth.baseUrl) {
           await enableNeonDataApiFn(neonProjectId, branchId);
         }
       } catch (authErr) {
         console.error("[db/enable] neon auth setup failed (non-fatal):", authErr);
-        // Non-fatal — DB provisioning should still succeed
       }
 
-      // Mark connected immediately; rewire helper finalizes db_wired + env context.
+      // 4. Mark connected immediately; rewire helper finalizes db_wired + env context.
       await db.updateProject(projectId, {
         byo_db_url: null,
         byo_db_anon_key: null,
@@ -221,6 +236,8 @@ export async function provisionProjectDatabase(
         db_schema: null,
         db_nonce: null,
         db_config: null,
+        neon_project_id: neonProjectId,
+        neon_branch_id: branchId,
       });
 
       try {
@@ -231,11 +248,10 @@ export async function provisionProjectDatabase(
           limits.tables ?? 0,
         );
       } catch (limitsErr) {
-        // Non-fatal: row may already exist.
         console.warn("[db/enable] insertProjectDbLimits failed (non-fatal):", limitsErr);
       }
 
-      // Best-effort metadata write for Neon linkage columns.
+      // Best-effort: write connection string + auth keys to project_db_limits
       const dbWithConnectionUpdate = db as typeof db & {
         updateProjectDbConnection?: (
           projectId: string,
@@ -251,7 +267,7 @@ export async function provisionProjectDatabase(
       };
       await dbWithConnectionUpdate.updateProjectDbConnection?.(projectId, {
         neon_project_id: neonProjectId,
-        neon_branch_id: branchId || null,
+        neon_branch_id: branchId,
         db_url: connectionUri,
         neon_auth_base_url: neonAuth.baseUrl || null,
         neon_auth_pub_key: neonAuth.pubClientKey || null,

@@ -44,6 +44,73 @@ export async function provisionNeonProject(name: string): Promise<{
   };
 }
 
+export async function createProject(name: string): Promise<{ id: string }> {
+  const res = await fetch(`${NEON_API}/projects`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getNeonKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      project: {
+        name,
+        region_id: process.env.NEON_DEFAULT_REGION ?? "aws-us-west-2",
+        pg_version: 17,
+      },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Neon createProject failed: ${res.status} ${JSON.stringify(err)}`);
+  }
+  const data = await res.json() as { project?: { id?: string } };
+  const id = data.project?.id;
+  if (!id) throw new Error("Neon createProject: no project id in response");
+  return { id };
+}
+
+export async function createBranch(
+  projectId: string,
+  name: string,
+): Promise<{ id: string; connectionString: string }> {
+  const res = await fetch(`${NEON_API}/projects/${projectId}/branches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getNeonKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      branch: { name },
+      endpoints: [{ type: "read_write" }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Neon createBranch failed: ${res.status} ${JSON.stringify(err)}`);
+  }
+  const data = await res.json() as {
+    branch?: { id?: string };
+    connection_uris?: Array<{ connection_uri?: string }>;
+  };
+  const id = data.branch?.id;
+  if (!id) throw new Error("Neon createBranch: no branch id in response");
+  return { id, connectionString: data.connection_uris?.[0]?.connection_uri ?? "" };
+}
+
+export async function deleteBranch(
+  projectId: string,
+  branchId: string,
+): Promise<void> {
+  const res = await fetch(`${NEON_API}/projects/${projectId}/branches/${branchId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getNeonKey()}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Neon deleteBranch failed (${res.status})${body ? `: ${body}` : ""}`);
+  }
+}
+
 export async function deleteNeonProject(neonProjectId: string): Promise<void> {
   const res = await fetch(`${NEON_API}/projects/${neonProjectId}`, {
     method: "DELETE",

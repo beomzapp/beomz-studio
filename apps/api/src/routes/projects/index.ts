@@ -26,7 +26,7 @@ import {
   isUserDataConfigured,
   runSql,
 } from "../../lib/userDataClient.js";
-import { deleteNeonProject } from "../../lib/neonClient.js";
+import { deleteBranch as deleteNeonBranch, deleteNeonProject } from "../../lib/neonClient.js";
 import {
   parsePostgresConnectionString,
   parseSupabaseProjectUrl,
@@ -63,6 +63,7 @@ interface ProjectsRouteDeps {
   runSql?: typeof runSql;
   deleteSchemaRegistry?: typeof deleteSchemaRegistry;
   deleteNeonProject?: typeof deleteNeonProject;
+  deleteNeonBranch?: typeof deleteNeonBranch;
   deleteVercelDeployment?: typeof deleteVercelDeployment;
   removeAllProjectDomains?: typeof removeAllProjectDomains;
   deleteProjectDomain?: typeof deleteProjectDomain;
@@ -331,6 +332,7 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
   const runSqlFn = deps.runSql ?? runSql;
   const deleteSchemaRegistryFn = deps.deleteSchemaRegistry ?? deleteSchemaRegistry;
   const deleteNeonProjectFn = deps.deleteNeonProject ?? deleteNeonProject;
+  const deleteNeonBranchFn = deps.deleteNeonBranch ?? deleteNeonBranch;
   const deleteVercelDeploymentFn = deps.deleteVercelDeployment ?? deleteVercelDeployment;
   const removeAllProjectDomainsFn = deps.removeAllProjectDomains ?? removeAllProjectDomains;
   const deleteProjectDomainFn = deps.deleteProjectDomain ?? deleteProjectDomain;
@@ -467,15 +469,26 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       return c.json({ error: "Project not found" }, 404);
     }
 
-    let neonProjectId: string | null = null;
-    try {
-      const dbWithLimits = orgContext.db as OrgContext["db"] & {
-        getProjectDbLimits?: (projectId: string) => Promise<{ neon_project_id?: string | null } | null>;
-      };
-      const limits = await dbWithLimits.getProjectDbLimits?.(projectId);
-      neonProjectId = typeof limits?.neon_project_id === "string" ? limits.neon_project_id : null;
-    } catch (err) {
-      console.error("[projects/delete] failed reading project_db_limits (non-fatal):", err);
+    // Branch-per-app: read neon IDs from project row first (new strategy)
+    const projectNeonProjectId = typeof project.neon_project_id === "string" && project.neon_project_id.length > 0
+      ? project.neon_project_id
+      : null;
+    const projectNeonBranchId = typeof project.neon_branch_id === "string" && project.neon_branch_id.length > 0
+      ? project.neon_branch_id
+      : null;
+
+    // Fallback: old per-app project strategy — read from project_db_limits
+    let legacyNeonProjectId: string | null = null;
+    if (!projectNeonBranchId) {
+      try {
+        const dbWithLimits = orgContext.db as OrgContext["db"] & {
+          getProjectDbLimits?: (projectId: string) => Promise<{ neon_project_id?: string | null } | null>;
+        };
+        const limits = await dbWithLimits.getProjectDbLimits?.(projectId);
+        legacyNeonProjectId = typeof limits?.neon_project_id === "string" ? limits.neon_project_id : null;
+      } catch (err) {
+        console.error("[projects/delete] failed reading project_db_limits (non-fatal):", err);
+      }
     }
 
     await orgContext.db.deleteProject(projectId);
@@ -526,10 +539,15 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
         }
       }
 
-      if (neonProjectId) {
-        await deleteNeonProjectFn(neonProjectId).catch((err) => {
-          console.error("[delete] Neon cleanup failed:", err);
-          // Non-fatal
+      if (projectNeonProjectId && projectNeonBranchId) {
+        // New branch-per-app strategy: delete the branch, leave the org project intact
+        await deleteNeonBranchFn(projectNeonProjectId, projectNeonBranchId).catch((err) => {
+          console.error("[delete] Neon branch cleanup failed:", err);
+        });
+      } else if (legacyNeonProjectId) {
+        // Legacy per-app project strategy: delete the whole project
+        await deleteNeonProjectFn(legacyNeonProjectId).catch((err) => {
+          console.error("[delete] Neon project cleanup failed:", err);
         });
       }
     } catch (err) {
@@ -707,12 +725,21 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
       return c.json({ error: "Failed to restore Supabase database" }, 500);
     }
 
+    const upgradeBranchId = typeof project.neon_branch_id === "string" && project.neon_branch_id.length > 0
+      ? project.neon_branch_id
+      : null;
     try {
-      await deleteNeonProjectFn(neonProjectId);
+      if (upgradeBranchId) {
+        // Branch-per-app: delete only the branch, not the shared org project
+        await deleteNeonBranchFn(neonProjectId, upgradeBranchId);
+      } else {
+        // Legacy per-app project: delete the whole project
+        await deleteNeonProjectFn(neonProjectId);
+      }
     } catch (error) {
       console.error(
-        "[projects/upgrade-to-byo] orphaned Neon project after successful migration:",
-        { projectId, neonProjectId, error },
+        "[projects/upgrade-to-byo] orphaned Neon resource after successful migration:",
+        { projectId, neonProjectId, upgradeBranchId, error },
       );
     }
 
