@@ -533,6 +533,7 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     message,
   });
 
+  console.log("[build/state]", { buildId, from: "queued", to: "running" });
   await appendEventToDb(
     db, buildId,
     statusEvent("template_loading", "Loading template…", "loading"),
@@ -582,14 +583,14 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     stageEvents.markPreBuildAck();
     await appendSessionEventToDb(db, buildId, { type: "user", content: sourcePrompt });
     await appendSessionEventToDb(db, buildId, { type: "pre_build_ack", content: ack.message });
-  } catch {
-    // non-fatal
+  } catch (ackErr) {
+    console.warn("[build/warn] pre_build_ack failed (non-fatal):", ackErr instanceof Error ? ackErr.message : String(ackErr));
   }
 
   try {
     await emitStagePreamble(sourcePrompt, false, imageConfirmed);
-  } catch {
-    // non-fatal
+  } catch (preambleErr) {
+    console.warn("[build/warn] stage preamble failed (non-fatal):", preambleErr instanceof Error ? preambleErr.message : String(preambleErr));
   }
 
   await stageEvents.emit("classifying");
@@ -823,11 +824,12 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
         };
         await appendEventToDb(db, buildId, nextStepsEvent);
       }
-    } catch {
-      // non-fatal
+    } catch (summaryErr) {
+      console.warn("[build/warn] build summary/next-steps failed (non-fatal):", summaryErr instanceof Error ? summaryErr.message : String(summaryErr));
     }
   }
 
+  console.log("[build/state]", { buildId, from: "running", to: "completed" });
   const doneEvent: BuilderV3DoneEvent = {
     type: "done",
     id: nextId(),

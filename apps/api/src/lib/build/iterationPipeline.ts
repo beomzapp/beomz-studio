@@ -195,6 +195,7 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     console.warn("[generate] iteration: failed to load DB schema (non-fatal):", schemaErr instanceof Error ? schemaErr.message : String(schemaErr));
   }
 
+  console.log("[build/state]", { buildId, from: "queued", to: "running" });
   await appendEventToDb(
     db, buildId,
     statusEvent("ai_iterating", "Applying changes…", "customising"),
@@ -445,6 +446,7 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     fallbackUsed: iterResult.files.length === 0,
     fallbackReason: iterErrorReason ?? null,
   };
+  console.log("[build/state]", { buildId, from: "running", to: "completed" });
   await appendEventToDb(db, buildId, iterDoneEvent, {
     completed_at: iterCompletedAt,
     files: iterFinalFiles,
