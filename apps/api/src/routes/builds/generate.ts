@@ -3322,6 +3322,26 @@ async function _runBuildInBackground(
     const provisionedUrl = currentProject
       ? getProjectPostgresUrl(currentProject, currentProjectLimits)
       : null;
+    await db.updateProject(projectId, {
+      database_enabled: true,
+      db_provider: "neon",
+    });
+    const dbWithConnectionUpdate = db as typeof db & {
+      updateProjectDbConnection?: (
+        targetProjectId: string,
+        patch: { db_url?: string | null },
+      ) => Promise<void>;
+    };
+    if (provisionedUrl) {
+      await dbWithConnectionUpdate.updateProjectDbConnection?.(projectId, {
+        db_url: provisionedUrl,
+      });
+    }
+    console.log("[build/provision] project record updated with db_enabled=true", {
+      projectId,
+      hasUrl: !!provisionedUrl,
+    });
+    currentProject = await db.findProjectById(projectId);
     console.log("[build/provision] Neon provisioned successfully:", {
       projectId,
       hasUrl: !!provisionedUrl,
