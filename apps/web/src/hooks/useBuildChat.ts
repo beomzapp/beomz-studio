@@ -1664,20 +1664,26 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         ];
       });
 
+      const buildBody = {
+        prompt: text,
+        projectId: resolvedProjectIdRef.current || undefined,
+        model: "claude-sonnet-4-6",
+        existingFiles:
+          existingFilesRef.current.length > 0
+            ? existingFilesRef.current
+            : undefined,
+        ...(imageUrl ? { imageUrl } : {}),
+        // BEO-705: DB/Auth setup flags from pre-build setup card
+        ...(buildMeta?.withDatabase !== undefined ? { withDatabase: buildMeta.withDatabase } : {}),
+        ...(buildMeta?.withAuth !== undefined ? { withAuth: buildMeta.withAuth } : {}),
+      };
+      console.log("[BEO-705] /builds/start payload:", {
+        withDatabase: buildBody.withDatabase,
+        withAuth: buildBody.withAuth,
+        prompt: buildBody.prompt?.slice(0, 60),
+      });
       void startAndStreamBuild({
-        body: {
-          prompt: text,
-          projectId: resolvedProjectIdRef.current || undefined,
-          model: "claude-sonnet-4-6",
-          existingFiles:
-            existingFilesRef.current.length > 0
-              ? existingFilesRef.current
-              : undefined,
-          ...(imageUrl ? { imageUrl } : {}),
-          // BEO-704: DB/Auth setup flags from pre-build setup card
-          ...(buildMeta?.withDatabase !== undefined ? { withDatabase: buildMeta.withDatabase } : {}),
-          ...(buildMeta?.withAuth !== undefined ? { withAuth: buildMeta.withAuth } : {}),
-        },
+        body: buildBody,
         signal: controller.signal,
         onBuildStarted: response => {
           resolvedProjectIdRef.current = response.project.id;
