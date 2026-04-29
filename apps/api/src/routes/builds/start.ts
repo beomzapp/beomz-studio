@@ -21,6 +21,7 @@ import {
   startBuildRequestSchema,
 } from "./shared.js";
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
+import { getModelForBuilder } from "../../lib/modelConfig.js";
 import {
   filterBlockedGeneratedFiles,
   generateClarifyingQuestion,
@@ -64,7 +65,7 @@ import {
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
-export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6"; // kept for legacy test compatibility — runtime uses getModelForBuilder
 const NEW_BUILD_PLAN_SUMMARY_CONFIDENCE = 0.8;
 const ITERATION_BUILD_CONFIDENCE = 0.7;
 
@@ -871,7 +872,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     }, 402);
   }
 
-  const effectiveModel = parsedBody.data.model ?? DEFAULT_BUILD_MODEL;
+  const effectiveModel = parsedBody.data.model ?? await getModelForBuilder("web_apps");
 
   const buildId = randomUUID();
   const projectId = projectRow?.id ?? randomUUID();

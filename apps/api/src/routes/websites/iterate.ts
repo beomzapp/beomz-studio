@@ -19,6 +19,7 @@ import {
   calcIterationCreditCost,
   isAdminEmail,
 } from "../../lib/credits.js";
+import { getModelForBuilder } from "../../lib/modelConfig.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -26,7 +27,6 @@ import type { OrgContext } from "../../types.js";
 
 const websitesIterateRoute = new Hono();
 
-const WEBSITE_ITERATION_MODEL = "claude-sonnet-4-6";
 const WEBSITE_ITERATION_MODEL_FALLBACK = "claude-haiku-4-5-20251001";
 const WEBSITE_ITERATION_MAX_TOKENS = 32000;
 const WEBSITE_OPERATION: BuilderV3Operation = "iteration";
@@ -504,7 +504,7 @@ async function callAnthropicWebsiteIteration(input: {
   };
 
   try {
-    return await runWithRetry(WEBSITE_ITERATION_MODEL);
+    return await runWithRetry(await getModelForBuilder("websites"));
   } catch (error) {
     if (error instanceof Anthropic.APIError && error.status === 404) {
       return runWithRetry(WEBSITE_ITERATION_MODEL_FALLBACK);
@@ -625,7 +625,7 @@ websitesIterateRoute.post(
     const initialMetadata = {
       builderTrace: createEmptyBuilderV3TraceMetadata(),
       generationMode: "website",
-      model: WEBSITE_ITERATION_MODEL,
+      model: await getModelForBuilder("websites"),
       sessionId,
       activeSection: activeSection ?? null,
       iterationSourceGenerationId: sourceGeneration.id,

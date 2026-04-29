@@ -43,6 +43,7 @@ import {
   loadUrlContext,
 } from "../../lib/webFetch.js";
 import { anthropic } from "../plan/shared.js";
+import { getModelForBuilder } from "../../lib/modelConfig.js";
 
 type ChatAnthropicMessage = Anthropic.MessageParam;
 interface BuildsChatRouteDeps {
@@ -131,7 +132,7 @@ export function createBuildsChatRoute(deps: BuildsChatRouteDeps = {}) {
       }
 
       const { imageUrl, messages: rawMessages, projectId } = parsed.data;
-      const chatModel = "claude-sonnet-4-6";
+      const chatModel = await getModelForBuilder("chat");
 
       let project: ProjectRow | null = null;
       let projectFiles: readonly StudioFile[] = [];

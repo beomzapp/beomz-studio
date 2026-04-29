@@ -9,12 +9,12 @@ process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
 process.env.TAVILY_API_KEY ??= "test-tavily-key";
 
-test("/builds/start defaults generation to claude-sonnet-4-6", async () => {
+test("/builds/start reads generation model from feature flags", async () => {
   const source = await readFile(new URL("./start.ts", import.meta.url), "utf8");
   const sharedSource = await readFile(new URL("./shared.ts", import.meta.url), "utf8");
 
-  assert.match(source, /export const DEFAULT_BUILD_MODEL = "claude-sonnet-4-6";/);
-  assert.match(source, /const effectiveModel = parsedBody\.data\.model \?\? DEFAULT_BUILD_MODEL;/);
+  assert.match(source, /import { getModelForBuilder } from "\.\.\/\.\.\/lib\/modelConfig\.js"/);
+  assert.match(source, /const effectiveModel = parsedBody\.data\.model \?\? await getModelForBuilder\("web_apps"\);/);
   assert.match(source, /const NEW_BUILD_PLAN_SUMMARY_CONFIDENCE = 0\.8;/);
   assert.match(source, /const ITERATION_BUILD_CONFIDENCE = 0\.7;/);
   assert.match(source, /clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS/);

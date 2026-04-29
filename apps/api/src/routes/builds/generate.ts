@@ -107,6 +107,7 @@ import { uploadProjectAsset } from "../../lib/images/index.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 import { provisionProjectDatabase } from "../db/enable.js";
+import { getModelForBuilder } from "../../lib/modelConfig.js";
 
 export {
   buildIterationSystemPrompt,
@@ -2717,11 +2718,11 @@ async function callModelCustomise(
     );
   }
 
-  // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
-  console.warn("[generate] Unknown model, falling back to claude-sonnet-4-6:", model);
+  // Unknown model — fall back to the configured web_apps model (BEO-720).
+  console.warn("[generate] Unknown model, falling back to configured web_apps model:", model);
   return callAnthropicCustomise(
     prompt,
-    "claude-sonnet-4-6",
+    await getModelForBuilder("web_apps"),
     paletteId,
     instrumentation,
     designSystemSpec,
@@ -2835,11 +2836,11 @@ async function callModelIterate(
     );
   }
 
-  // Unknown model — fall back to Sonnet to preserve the BEO-197/BEO-271 generation contract.
-  console.warn("[generate] Unknown model for iteration, falling back to claude-sonnet-4-6:", model);
+  // Unknown model — fall back to the configured web_apps model (BEO-720).
+  console.warn("[generate] Unknown model for iteration, falling back to configured web_apps model:", model);
   console.log("[generate] iteration seed files:", selection.seedFiles.map((file) => file.basename));
   return callAnthropicIterateWithTools(
-    "claude-sonnet-4-6",
+    await getModelForBuilder("web_apps"),
     systemPrompt,
     prompt,
     existingFiles,
@@ -3090,7 +3091,7 @@ export async function generateConversationalAnswer(
     const websiteContext = input.websiteContext ?? await loadWebsiteContext(input.currentMessage);
     const response = await client.messages.create(
       {
-        model: "claude-sonnet-4-6",
+        model: await getModelForBuilder("chat"),
         max_tokens: 600,
         system: buildConversationalSystemPrompt(
           input.projectName,
@@ -3137,7 +3138,7 @@ export async function generateClarifyingQuestion(input: {
     const websiteContext = input.websiteContext ?? await loadWebsiteContext(input.currentMessage);
     const response = await client.messages.create(
       {
-        model: "claude-sonnet-4-6",
+        model: await getModelForBuilder("chat"),
         max_tokens: 500,
         system: buildClarifyingSystemPrompt(
           input.projectName,

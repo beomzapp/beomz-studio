@@ -23,6 +23,7 @@ import {
   calcCreditCost,
   isAdminEmail,
 } from "../../lib/credits.js";
+import { getModelForBuilder } from "../../lib/modelConfig.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -30,7 +31,6 @@ import type { OrgContext } from "../../types.js";
 
 const websitesGenerateRoute = new Hono();
 
-const WEBSITE_MODEL = "claude-sonnet-4-6";
 const WEBSITE_MODEL_FALLBACK = "claude-haiku-4-5-20251001";
 const WEBSITE_MAX_TOKENS = 64000;
 const WEBSITE_OPERATION: BuilderV3Operation = "initial_build";
@@ -1327,7 +1327,7 @@ async function callAnthropicWebsiteGeneration(input: {
   };
 
   try {
-    return await runWithRetry(WEBSITE_MODEL);
+    return await runWithRetry(await getModelForBuilder("websites"));
   } catch (error) {
     if (error instanceof Anthropic.APIError && error.status === 404) {
       return runWithRetry(WEBSITE_MODEL_FALLBACK);
@@ -1509,7 +1509,7 @@ websitesGenerateRoute.post(
     const initialMetadata = {
       builderTrace: createEmptyBuilderV3TraceMetadata(),
       generationMode: "website",
-      model: WEBSITE_MODEL,
+      model: await getModelForBuilder("websites"),
       pages,
       resultSource: "ai",
       sessionId,
