@@ -10,4 +10,3 @@ export { DatabasePanel } from "./DatabasePanel";
 export { IntegrationsPanel } from "./IntegrationsPanel";
 export { ServerRestartedCard } from "./ServerRestartedCard";
 export { PublishModal } from "./PublishModal";
-export { PostBuildDbPrompt } from "./PostBuildDbPrompt";

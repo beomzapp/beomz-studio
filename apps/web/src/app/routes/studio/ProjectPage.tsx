@@ -246,10 +246,6 @@ export function ProjectPage() {
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
   const [domainStatus, setDomainStatus] = useState<string | null>(null);
 
-  // BEO-715 2d: BuildSetupCard fully removed — the only remaining DB UX is
-  // the post-build PostBuildDbPrompt banner below. The pre-build setup card
-  // was reverted intentionally; do not reintroduce it.
-
   // ─── Database state ───────────────────────────────────────────────────────
 
   const [dbEnabled, setDbEnabled] = useState(false);
@@ -484,9 +480,6 @@ export function ProjectPage() {
         setShowOutOfCreditsModal(true);
         return;
       }
-      // BEO-715 2d: no setup-card interception. Builds always fire immediately;
-      // DB-related UX has moved to the post-build PostBuildDbPrompt banner and
-      // the database-keyword chip handler below.
       fireBuild(text, imageUrl, isSystem);
     },
     [credits, fireBuild],
@@ -497,20 +490,6 @@ export function ProjectPage() {
   const handleRetry = useCallback(() => {
     retryLastBuild();
   }, [retryLastBuild]);
-
-  // BEO-717: PostBuildDbPrompt + DB suggestion-chip handlers. Both navigate
-  // to the Database tab so the user can configure their DB rather than firing
-  // an immediate build with `{ withDatabase: true }`.
-  const handleAddDatabase = useCallback(() => {
-    setActiveView("database");
-  }, []);
-
-  const handleAddDatabaseChip = useCallback(
-    (_chip: string) => {
-      setActiveView("database");
-    },
-    [],
-  );
 
   // ─── Wire to database (fires after Neon provisioning) ────────────────────
 
@@ -1191,9 +1170,6 @@ export function ProjectPage() {
               userFirstName={chatUserData.userFirstName}
               userAvatarUrl={chatUserData.userAvatarUrl}
               userInitials={chatUserData.userInitials}
-              databaseEnabled={dbEnabled}
-              onAddDatabaseChip={handleAddDatabaseChip}
-              onAddDatabase={handleAddDatabase}
             />
           </div>
         </div>
@@ -1254,9 +1230,6 @@ export function ProjectPage() {
         onCloseOutOfCreditsModal={() => setShowOutOfCreditsModal(false)}
         isHardBlock={isHardBlockCredits}
       />
-
-      {/* BEO-715 2d: BuildSetupCard removed — DB UX now lives inside ChatPanel
-          via the inline PostBuildDbPrompt banner shown after the first build. */}
 
       {showPublishModal && projectId && (
         <PublishModal
