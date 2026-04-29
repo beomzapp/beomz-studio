@@ -81,11 +81,9 @@ export async function fetchTableRows(
   tableName: string,
 ): Promise<NeonTableRowsResult> {
   const safeTableName = assertSafeIdentifier(tableName);
-  const sql = createSqlClient(connectionString) as ReturnType<typeof neon> & {
-    query: <T extends Record<string, unknown>>(query: string, params?: unknown[]) => Promise<T[]>;
-  };
+  const sql = createSqlClient(connectionString);
 
-  const columnsResult = await sql.query<{ column_name: string }>(
+  const columnsResult = await sql(
     `
       SELECT column_name
       FROM information_schema.columns
@@ -94,16 +92,16 @@ export async function fetchTableRows(
       ORDER BY ordinal_position;
     `,
     [safeTableName],
-  );
+  ) as Array<{ column_name: string }>;
   const columns = columnsResult.map((column) => column.column_name);
 
   if (columns.length === 0) {
     throw new Error("Table not found");
   }
 
-  const rows = await sql.query<Record<string, unknown>>(
+  const rows = await sql(
     `SELECT * FROM "${safeTableName}" LIMIT 100;`,
-  );
+  ) as Array<Record<string, unknown>>;
 
   return { rows, columns };
 }
