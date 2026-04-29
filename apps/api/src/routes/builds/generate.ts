@@ -3199,10 +3199,9 @@ async function generateBuildSummary(prompt: string, changedFiles: string[]): Pro
       {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 150,
-        system: `Generate a 2-3 sentence natural language summary of what was just built or changed.
-Cover: what changed and why, what the user should notice, and optionally a follow-up suggestion.
-Be conversational and specific. Start with "Done —". Reference the specific changes, not just file names.
-Example: "Done — I've darkened the sidebar to a deeper grey and improved the icon contrast across 3 files. The navigation should feel much more defined now. Want me to adjust the hover states too?"`,
+        system: `Write a 1-2 sentence past-tense summary of what was just built or changed.
+Be specific about what changed. Start with "Done —". Do not use bullet points. Do not say "Here's what I'll do".
+Example: "Done — I've built a todo app with task creation, completion tracking, and local storage persistence."`,
         messages: [{ role: "user", content: `User request: "${prompt}"\nFiles changed: ${fileList}` }],
       },
       { signal: controller.signal },
@@ -3230,18 +3229,46 @@ Example: "Done — I've darkened the sidebar to a deeper grey and improved the i
  * Writes events directly to the generation row's builderTrace so the
  * existing events.ts SSE polling loop delivers them to the frontend.
  */
+const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+
 export async function runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
 ): Promise<void> {
-  const { buildId } = input;
+  const { buildId, projectId } = input;
   const abortController = new AbortController();
+  const timedOutRef = { value: false };
 
   registerActiveBuild(buildId, abortController);
 
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<"timed_out">((resolve) => {
+    timeoutHandle = setTimeout(() => resolve("timed_out"), BUILD_TIMEOUT_MS);
+  });
+
   try {
-    await _runBuildInBackground(input, db, abortController.signal);
+    const outcome = await Promise.race([
+      _runBuildInBackground(input, db, abortController.signal, timedOutRef).then(() => "completed" as const),
+      timeoutPromise,
+    ]);
+
+    if (outcome === "timed_out") {
+      timedOutRef.value = true;
+      console.error("[build/timeout] build exceeded 5min:", buildId);
+      console.log("[build/state]", { buildId, from: "running", to: "timed_out" });
+      abortController.abort();
+      await db.updateGeneration(buildId, {
+        completed_at: new Date().toISOString(),
+        error: "Build timed out after 5 minutes.",
+        status: "timed_out",
+        summary: "Build timed out.",
+      }).catch((err) => {
+        console.error("[build/timeout] failed to update timed_out status:", err instanceof Error ? err.message : String(err));
+      });
+      await db.updateProject(projectId, { status: "draft" }).catch(() => undefined);
+    }
   } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
     unregisterActiveBuild(buildId);
   }
 }
@@ -3250,6 +3277,7 @@ async function _runBuildInBackground(
   input: BuildGenerateInput,
   db: StudioDbClient,
   abortSignal?: AbortSignal,
+  timedOutRef?: { value: boolean },
 ): Promise<void> {
   const { buildId, projectId, orgId, userEmail, templateId, model, requestedAt, userId } = input;
   const throwIfBuildAborted = () => throwIfAborted(abortSignal);
@@ -3287,66 +3315,27 @@ async function _runBuildInBackground(
   }
 
   throwIfBuildAborted();
-  if (shouldProvisionDatabase && (!currentProject?.database_enabled || !currentProject?.db_wired)) {
-    await appendEventToDb(db, buildId, {
-      type: "status",
-      id: nextId(),
-      timestamp: ts(),
-      operation: op,
-      code: "db_provisioning",
-      phase: "loading",
-      message: "Provisioning database…",
-    } as unknown as BuilderV3StatusEvent);
 
-    console.log("[build/provision] starting Neon provision for project:", projectId);
-    let provisionResult: Awaited<ReturnType<typeof provisionProjectDatabase>>;
-    try {
-      provisionResult = await provisionProjectDatabase({ db, orgId, projectId });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.log("[build/provision] ERROR:", errorMessage);
-      throw error;
-    }
-    if (provisionResult.status >= 400) {
-      const message = typeof provisionResult.body.message === "string"
-        ? provisionResult.body.message
-        : (typeof provisionResult.body.error === "string"
-            ? provisionResult.body.error
-            : "Failed to provision database");
-      console.log("[build/provision] ERROR:", message);
-      throw new Error(message);
-    }
-
-    currentProject = await db.findProjectById(projectId);
-    const currentProjectLimits = await db.getProjectDbLimits(projectId).catch(() => null);
-    const provisionedUrl = currentProject
-      ? getProjectPostgresUrl(currentProject, currentProjectLimits)
-      : null;
-    await db.updateProject(projectId, {
-      database_enabled: true,
-      db_provider: "neon",
-    });
-    const dbWithConnectionUpdate = db as typeof db & {
-      updateProjectDbConnection?: (
-        targetProjectId: string,
-        patch: { db_url?: string | null },
-      ) => Promise<void>;
-    };
-    if (provisionedUrl) {
-      await dbWithConnectionUpdate.updateProjectDbConnection?.(projectId, {
-        db_url: provisionedUrl,
-      });
-    }
-    console.log("[build/provision] project record updated with db_enabled=true", {
-      projectId,
-      hasUrl: !!provisionedUrl,
-    });
-    currentProject = await db.findProjectById(projectId);
-    console.log("[build/provision] Neon provisioned successfully:", {
-      projectId,
-      hasUrl: !!provisionedUrl,
-    });
-  }
+  // ── DB provisioning — non-blocking, graceful fallback (BEO-706/710) ───────
+  // Start Neon provision in parallel with intent detection + prompt enrichment.
+  // Awaited later (just before pipeline) so injectProjectDatabaseEnv finds the
+  // URL in the DB. If Neon fails, build continues without a database.
+  const neonProvisionPromise: Promise<Awaited<ReturnType<typeof provisionProjectDatabase>> | null> =
+    (shouldProvisionDatabase && (!currentProject?.database_enabled || !currentProject?.db_wired))
+      ? (() => {
+          console.log("[build/provision] starting for project:", projectId);
+          void appendEventToDb(db, buildId, {
+            type: "status",
+            id: nextId(),
+            timestamp: ts(),
+            operation: op,
+            code: "db_provisioning",
+            phase: "loading",
+            message: "Provisioning database…",
+          } as unknown as BuilderV3StatusEvent);
+          return provisionProjectDatabase({ db, orgId, projectId });
+        })()
+      : Promise.resolve(null);
 
   const hasByoSupabaseConfig = Boolean(getByoSupabaseConfig(currentProject));
   const projectLimits = await db.getProjectDbLimits(projectId).catch(() => null);
@@ -3731,6 +3720,41 @@ async function _runBuildInBackground(
     await appendEventToDb(db, buildId, event);
   };
 
+  // ── Await Neon provision (started non-blocking above) ────────────────────
+  // By this point, intent detection + enrichment have run (~3-10s), giving
+  // Neon provision time to complete. Await with catch so build always starts.
+  {
+    const neonResult = await neonProvisionPromise.catch((err) => {
+      console.error("[build/provision] failed, building without DB:", err instanceof Error ? err.message : String(err));
+      return null;
+    });
+    if (neonResult !== null && neonResult.status < 400) {
+      currentProject = await db.findProjectById(projectId);
+      const provisionLimits = await db.getProjectDbLimits(projectId).catch(() => null);
+      const provisionedUrl = currentProject
+        ? getProjectPostgresUrl(currentProject, provisionLimits)
+        : null;
+      await db.updateProject(projectId, { database_enabled: true, db_provider: "neon" });
+      const dbWithConnectionUpdate = db as typeof db & {
+        updateProjectDbConnection?: (id: string, patch: { db_url?: string | null }) => Promise<void>;
+      };
+      if (provisionedUrl) {
+        await dbWithConnectionUpdate.updateProjectDbConnection?.(projectId, { db_url: provisionedUrl });
+      }
+      currentProject = await db.findProjectById(projectId);
+      console.log("[build/provision] project record updated with db_enabled=true", {
+        projectId,
+        hasUrl: Boolean(provisionedUrl),
+      });
+    } else if (neonResult !== null) {
+      const errMsg = typeof neonResult.body?.message === "string"
+        ? neonResult.body.message
+        : (typeof neonResult.body?.error === "string" ? neonResult.body.error : "Neon provision failed");
+      console.error("[build/provision] provision returned error status, building without DB:", errMsg);
+    }
+  }
+  throwIfBuildAborted();
+
   // ── Best-matching prebuilt template ──────────────────────────────────────
   const prebuilt = pickBestPrebuilt(templateId, workingPrompt);
 
@@ -3847,6 +3871,12 @@ async function _runBuildInBackground(
     });
   } catch (fatalError) {
     if (isAbortError(fatalError)) {
+      if (timedOutRef?.value) {
+        // Timeout handler already updated status to timed_out — skip cancelled update.
+        await db.updateProject(projectId, { status: "draft" }).catch(() => undefined);
+        return;
+      }
+      console.log("[build/state]", { buildId, from: "running", to: "cancelled" });
       console.log("[generate] client disconnected — stream aborted");
       const cancelledAt = ts();
       await db.updateGeneration(buildId, {
@@ -3863,7 +3893,8 @@ async function _runBuildInBackground(
 
     // ── Error path ───────────────────────────────────────────────────────────
     const errorMessage = fatalError instanceof Error ? fatalError.message : "Build failed.";
-    console.error("[generate] Fatal build error.", { buildId, error: errorMessage });
+    console.error("[build/error] Fatal build error.", { buildId, error: errorMessage });
+    console.log("[build/state]", { buildId, from: "running", to: "failed" });
 
     const errorEventId = nextId();
     const errorEvent: BuilderV3ErrorEvent = {

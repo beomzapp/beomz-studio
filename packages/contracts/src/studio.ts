@@ -28,6 +28,7 @@ export type GenerationStatus =
   | "completed"
   | "failed"
   | "cancelled"
+  | "timed_out"
   | "awaiting_scope_confirmation"
   | "insufficient_credits";
 

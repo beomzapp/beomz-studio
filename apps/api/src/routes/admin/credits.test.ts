@@ -157,8 +157,8 @@ test("GET /admin/credits validates pagination query params", async () => {
   assert.deepEqual(await response.json(), {
     details: {
       fieldErrors: {
-        limit: ["Too big: expected number to be <=200"],
-        page: ["Too small: expected number to be >=1"],
+        limit: ["Number must be less than or equal to 200"],
+        page: ["Number must be greater than or equal to 1"],
       },
       formErrors: [],
     },

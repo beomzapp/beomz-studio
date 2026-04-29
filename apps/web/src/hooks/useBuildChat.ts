@@ -599,8 +599,13 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           const pendingBuildId = makeId();
           activeBuildingMsgIdRef.current = pendingBuildId;
 
-          // Drop the thinking indicator — BuildingShimmer takes over
-          setMessages(prev => prev.filter(m => m.type !== "thinking"));
+          // Drop the thinking indicator and any stale pre-build plan card —
+          // BuildingShimmer takes over. The plan message (chat_response with
+          // implementPlan) is past-tense once the build starts; build_summary
+          // will replace it with the real "Done —" completion message (BEO-702).
+          setMessages(prev => prev.filter(
+            m => m.type !== "thinking" && !(m.type === "chat_response" && m.implementPlan),
+          ));
 
           // Safety net: if stage_preamble never fires in 5s, create the card ourselves
           preambleFallbackTimerRef.current = setTimeout(() => {
