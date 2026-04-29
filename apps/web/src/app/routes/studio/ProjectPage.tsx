@@ -682,10 +682,25 @@ export function ProjectPage() {
   }, [build?.id, lastEventId, previewGenerationId, projectId, saveState]);
 
   // Resume existing build on mount
+  //
+  // BEO-691: SSE signal must NOT be aborted as a side-effect of dependency
+  // re-renders. Previously this effect listed `build` in its dep array, so
+  // when `setBuild(status.build)` fired inside the async body the effect's
+  // cleanup ran (controller.abort()) before fetch even reached the network —
+  // streamBuildEvents then saw `signal.aborted: true` at fetch time and
+  // failed with `AbortError: signal is aborted without reason`, killing the
+  // stream and leaving the preview stuck on "Launching preview" forever.
+  //
+  // Fix: drop `build` from deps (the early-return guard already prevents a
+  // re-resume once build is hydrated), reset the resume ref in cleanup so a
+  // real unmount/project-change properly re-arms, and use an `isMounted`
+  // closure flag to suppress post-cleanup state updates from any in-flight
+  // async (e.g. React StrictMode synthetic dismount in dev).
   useEffect(() => {
     if (resumingBuildRef.current || id === "new" || !projectId || build) return;
     resumingBuildRef.current = true;
     const controller = new AbortController();
+    let isMounted = true;
 
     void (async () => {
       const restoredState = restoreState();
@@ -693,7 +708,7 @@ export function ProjectPage() {
         ? await getBuildStatus(restoredState.buildId)
         : await getLatestBuildForProject(projectId);
 
-      if (!status || controller.signal.aborted) return;
+      if (!status || !isMounted || controller.signal.aborted) return;
 
       activeBuildIdRef.current = status.build.id;
       setBuild(status.build);
@@ -737,15 +752,26 @@ export function ProjectPage() {
       }
     })()
       .catch((error: unknown) => {
+        // BEO-691: swallow abort noise — intentional teardown is not a user-facing error.
+        if (!isMounted || controller.signal.aborted) return;
+        const name = error instanceof Error ? error.name : "";
+        if (name === "AbortError") return;
         setLastError(error instanceof Error ? error.message : "Failed to restore build session.");
       })
       .finally(() => {
         resumingBuildRef.current = false;
       });
 
-    return () => { controller.abort(); };
+    return () => {
+      isMounted = false;
+      controller.abort();
+      // Allow a true remount (e.g. navigating away and back) to re-resume.
+      resumingBuildRef.current = false;
+    };
+  // BEO-691: `build` intentionally excluded — including it caused setBuild()
+  // inside the async body to abort the controller mid-flight (see comment above).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [build, id, projectId]);
+  }, [id, projectId]);
 
   // Auto-start from launch intent
   const autoStarted = useRef(false);
