@@ -281,6 +281,81 @@ export async function patchAdminFeatureFlags(
   return res.json() as Promise<FeatureFlagsResponse>;
 }
 
+// ── Admin: AI Providers ───────────────────────────────────────────────────────
+
+export type AiProvider = "anthropic" | "openai" | "google" | "moonshot" | "mistral" | "groq";
+
+export interface AiProviderStatus {
+  provider: AiProvider;
+  connected: boolean;
+  masked_key?: string;
+}
+
+export async function fetchAdminProviders(accessToken: string): Promise<AiProviderStatus[]> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/ai-providers`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<AiProviderStatus[]>;
+}
+
+export async function saveProviderKey(
+  accessToken: string,
+  provider: AiProvider,
+  apiKey: string,
+): Promise<AiProviderStatus> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/ai-providers/${provider}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<AiProviderStatus>;
+}
+
+export async function testProviderKey(
+  accessToken: string,
+  provider: AiProvider,
+  apiKey: string,
+): Promise<{ success: boolean; message?: string }> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/ai-providers/${provider}/test`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<{ success: boolean; message?: string }>;
+}
+
+export async function deleteProvider(
+  accessToken: string,
+  provider: AiProvider,
+): Promise<void> {
+  const res = await fetch(`${getApiBaseUrl()}/admin/ai-providers/${provider}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { message?: string };
+    throw new Error(err.message ?? `HTTP ${res.status}`);
+  }
+}
+
 // ── Admin: AI Models ──────────────────────────────────────────────────────────
 
 export type AiModelKey = "web_apps" | "websites" | "agents" | "chat_plan";

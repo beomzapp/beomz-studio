@@ -1,15 +1,78 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, FolderOpen, Globe, MessageSquare } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bot, FolderOpen, Globe, MessageSquare, X } from "lucide-react";
 import {
   DEFAULT_AI_MODELS,
   fetchAdminAiModels,
+  fetchAdminProviders,
   postAdminAiModels,
+  saveProviderKey,
+  testProviderKey,
+  deleteProvider,
   type AiModelKey,
   type AiModelSelections,
+  type AiProvider,
+  type AiProviderStatus,
 } from "../lib/api.ts";
 import { useAuthToken } from "../lib/useAuthToken.ts";
 
-// ── Model definitions ─────────────────────────────────────────────────────────
+// ── Provider definitions ───────────────────────────────────────────────────────
+
+interface ProviderDef {
+  id: AiProvider;
+  name: string;
+  color: string;
+  bgColor: string;
+  textColor: string;
+  alwaysConnected?: boolean;
+}
+
+const PROVIDERS: ProviderDef[] = [
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    color: "#d97706",
+    bgColor: "bg-amber-50",
+    textColor: "text-amber-700",
+    alwaysConnected: true,
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    color: "#16a34a",
+    bgColor: "bg-green-50",
+    textColor: "text-green-700",
+  },
+  {
+    id: "google",
+    name: "Google Gemini",
+    color: "#2563eb",
+    bgColor: "bg-blue-50",
+    textColor: "text-blue-700",
+  },
+  {
+    id: "moonshot",
+    name: "Moonshot AI",
+    color: "#7c3aed",
+    bgColor: "bg-violet-50",
+    textColor: "text-violet-700",
+  },
+  {
+    id: "mistral",
+    name: "Mistral",
+    color: "#4338ca",
+    bgColor: "bg-indigo-50",
+    textColor: "text-indigo-700",
+  },
+  {
+    id: "groq",
+    name: "Groq",
+    color: "#db2777",
+    bgColor: "bg-pink-50",
+    textColor: "text-pink-700",
+  },
+];
+
+// ── Model definitions ──────────────────────────────────────────────────────────
 
 interface ModelOption {
   id: string;
@@ -54,8 +117,6 @@ const OPENAI_MODELS: ModelOption[] = [
   },
 ];
 
-// ── Builder row definitions ───────────────────────────────────────────────────
-
 interface BuilderDef {
   key: AiModelKey;
   name: string;
@@ -90,7 +151,7 @@ const BUILDERS: BuilderDef[] = [
   },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function getProvider(modelId: string): "anthropic" | "openai" | null {
   if (modelId.startsWith("claude")) return "anthropic";
@@ -114,7 +175,7 @@ function ProviderBadge({ provider }: { provider: "anthropic" | "openai" | null }
   );
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
+// ── Toast ──────────────────────────────────────────────────────────────────────
 
 function Toast({ message, type }: { message: string; type: "success" | "error" }) {
   return (
@@ -139,7 +200,7 @@ function Toast({ message, type }: { message: string; type: "success" | "error" }
   );
 }
 
-// ── Model row ─────────────────────────────────────────────────────────────────
+// ── Model row ──────────────────────────────────────────────────────────────────
 
 interface ModelRowProps {
   builder: BuilderDef;
@@ -154,13 +215,11 @@ function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) 
     ? [...ANTHROPIC_MODELS, ...OPENAI_MODELS]
     : ANTHROPIC_MODELS;
 
-  const activeModel =
-    allModels.find((m) => m.id === value) ?? null;
+  const activeModel = allModels.find((m) => m.id === value) ?? null;
   const provider = activeModel ? activeModel.provider : getProvider(value);
 
   return (
     <div className="flex items-center gap-4 px-5 py-4 bg-white border-b border-slate-100 last:border-0">
-      {/* Builder info */}
       <div className="flex items-center gap-3 w-56 shrink-0">
         <div className="w-9 h-9 rounded-md bg-slate-100 flex items-center justify-center shrink-0">
           <Icon size={16} className="text-slate-600" />
@@ -171,7 +230,6 @@ function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) 
         </div>
       </div>
 
-      {/* Current model */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
         <span className="text-sm text-slate-700 font-mono truncate">
@@ -180,7 +238,6 @@ function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) 
         <ProviderBadge provider={provider} />
       </div>
 
-      {/* Dropdown */}
       <div className="shrink-0">
         <select
           value={value}
@@ -209,26 +266,371 @@ function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) 
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Configure modal ────────────────────────────────────────────────────────────
 
-export default function ModelsPage() {
-  const token = useAuthToken();
+type TestState = "idle" | "testing" | "success" | "error";
 
+interface ConfigureModalProps {
+  providerDef: ProviderDef;
+  status: AiProviderStatus | undefined;
+  token: string;
+  onClose: () => void;
+  onSaved: (updated: AiProviderStatus) => void;
+  onDeleted: (provider: AiProvider) => void;
+}
+
+function ConfigureModal({
+  providerDef,
+  status,
+  token,
+  onClose,
+  onSaved,
+  onDeleted,
+}: ConfigureModalProps) {
+  const [apiKey, setApiKey] = useState("");
+  const [testState, setTestState] = useState<TestState>("idle");
+  const [testMessage, setTestMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const isConnected = status?.connected ?? providerDef.alwaysConnected ?? false;
+  const canSave = testState === "success" && apiKey.trim().length > 0;
+
+  const handleTest = async () => {
+    if (!apiKey.trim()) return;
+    setTestState("testing");
+    setTestMessage("");
+    try {
+      const result = await testProviderKey(token, providerDef.id, apiKey.trim());
+      if (result.success) {
+        setTestState("success");
+        setTestMessage("Connection successful");
+      } else {
+        setTestState("error");
+        setTestMessage(result.message ?? "Invalid key");
+      }
+    } catch (e) {
+      setTestState("error");
+      setTestMessage(e instanceof Error ? e.message : "Connection failed");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const updated = await saveProviderKey(token, providerDef.id, apiKey.trim());
+      onSaved(updated);
+      onClose();
+    } catch (e) {
+      setTestState("error");
+      setTestMessage(e instanceof Error ? e.message : "Failed to save key");
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteProvider(token, providerDef.id);
+      onDeleted(providerDef.id);
+      onClose();
+    } catch {
+      setDeleting(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onKeyDown={handleKeyDown}
+    >
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: providerDef.color }}
+            />
+            <h2 className="text-base font-semibold text-slate-800">
+              Connect {providerDef.name}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-5 flex flex-col gap-4">
+          {/* API Key input */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-slate-700">API Key</label>
+            <input
+              ref={inputRef}
+              type="password"
+              value={apiKey}
+              onChange={(e) => {
+                setApiKey(e.target.value);
+                setTestState("idle");
+                setTestMessage("");
+              }}
+              placeholder="sk-..."
+              className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent font-mono"
+            />
+          </div>
+
+          {/* Test result banner */}
+          {testMessage && (
+            <div
+              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium ${
+                testState === "success"
+                  ? "bg-green-50 text-green-700 border border-green-200"
+                  : "bg-red-50 text-red-700 border border-red-200"
+              }`}
+            >
+              {testState === "success" ? (
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+              {testMessage}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 pt-1">
+            {/* Test button */}
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={!apiKey.trim() || testState === "testing" || saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {testState === "testing" ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                  Testing…
+                </>
+              ) : (
+                "Test connection"
+              )}
+            </button>
+
+            {/* Save button */}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!canSave || saving}
+              className="px-3 py-1.5 text-sm bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+
+            {/* Remove button */}
+            {isConnected && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting || saving}
+                className="ml-auto px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-md hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deleting ? "Removing…" : "Remove"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Provider card ──────────────────────────────────────────────────────────────
+
+interface ProviderCardProps {
+  def: ProviderDef;
+  status: AiProviderStatus | undefined;
+  onConfigure: () => void;
+}
+
+function ProviderCard({ def, status, onConfigure }: ProviderCardProps) {
+  const connected = status?.connected ?? def.alwaysConnected ?? false;
+  const maskedKey = status?.masked_key;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg px-5 py-4 flex items-center gap-4">
+      {/* Color dot + name + badge */}
+      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+        <span
+          className="w-3 h-3 rounded-full shrink-0"
+          style={{ backgroundColor: def.color }}
+        />
+        <span className="text-sm font-semibold text-slate-800 truncate">{def.name}</span>
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide shrink-0 ${def.bgColor} ${def.textColor}`}
+        >
+          {def.id}
+        </span>
+      </div>
+
+      {/* Status */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${connected ? "bg-green-500" : "bg-slate-300"}`}
+        />
+        <span className={`text-sm ${connected ? "text-green-700 font-medium" : "text-slate-400"}`}>
+          {connected ? "Connected" : "Not connected"}
+        </span>
+      </div>
+
+      {/* Masked key */}
+      {maskedKey && (
+        <span className="text-xs text-slate-400 font-mono shrink-0">{maskedKey}</span>
+      )}
+
+      {/* Configure button */}
+      {!def.alwaysConnected && (
+        <button
+          type="button"
+          onClick={onConfigure}
+          className="shrink-0 px-3 py-1.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 transition-colors"
+        >
+          Configure
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Providers tab ──────────────────────────────────────────────────────────────
+
+interface ProvidersTabProps {
+  token: string;
+  showToast: (message: string, type: "success" | "error") => void;
+}
+
+function ProvidersTab({ token, showToast }: ProvidersTabProps) {
+  const [statuses, setStatuses] = useState<AiProviderStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [configuring, setConfiguring] = useState<AiProvider | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminProviders(token);
+      setStatuses(data);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load providers");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const getStatus = (id: AiProvider) => statuses.find((s) => s.provider === id);
+
+  const handleSaved = (updated: AiProviderStatus) => {
+    setStatuses((prev) => {
+      const existing = prev.find((s) => s.provider === updated.provider);
+      if (existing) return prev.map((s) => (s.provider === updated.provider ? updated : s));
+      return [...prev, updated];
+    });
+    showToast(`${PROVIDERS.find((p) => p.id === updated.provider)?.name ?? updated.provider} connected`, "success");
+  };
+
+  const handleDeleted = (provider: AiProvider) => {
+    setStatuses((prev) =>
+      prev.map((s) => (s.provider === provider ? { ...s, connected: false, masked_key: undefined } : s)),
+    );
+    showToast(`${PROVIDERS.find((p) => p.id === provider)?.name ?? provider} removed`, "success");
+  };
+
+  const configuringDef = PROVIDERS.find((p) => p.id === configuring);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-slate-400 text-sm">
+        <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        Loading providers…
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="px-4 py-3 rounded-md border border-red-200 bg-red-50 text-sm text-red-700">
+        {loadError}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex flex-col gap-3">
+        {PROVIDERS.map((def) => (
+          <ProviderCard
+            key={def.id}
+            def={def}
+            status={getStatus(def.id)}
+            onConfigure={() => setConfiguring(def.id)}
+          />
+        ))}
+      </div>
+
+      {configuringDef && (
+        <ConfigureModal
+          providerDef={configuringDef}
+          status={getStatus(configuringDef.id)}
+          token={token}
+          onClose={() => setConfiguring(null)}
+          onSaved={handleSaved}
+          onDeleted={handleDeleted}
+        />
+      )}
+    </>
+  );
+}
+
+// ── Models tab ─────────────────────────────────────────────────────────────────
+
+interface ModelsTabProps {
+  token: string;
+  showToast: (message: string, type: "success" | "error") => void;
+}
+
+function ModelsTab({ token, showToast }: ModelsTabProps) {
   const [serverModels, setServerModels] = useState<AiModelSelections>(DEFAULT_AI_MODELS);
   const [draft, setDraft] = useState<AiModelSelections>(DEFAULT_AI_MODELS);
   const [openaiAvailable, setOpenaiAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-
-  const showToast = (message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const load = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
     setLoadError(null);
     try {
@@ -268,7 +670,7 @@ export default function ModelsPage() {
   };
 
   const handleSave = async () => {
-    if (!token || !isDirty) return;
+    if (!isDirty) return;
     const previousServer = serverModels;
     setSaving(true);
     setServerModels(draft);
@@ -295,34 +697,25 @@ export default function ModelsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-800">AI Models</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Select which AI model powers each builder type.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleReset}
-            disabled={!isDirty || saving}
-            className="px-3 py-1.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!isDirty || saving || loading}
-            className="px-3 py-1.5 text-sm bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-        </div>
+    <>
+      {/* Action bar */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={!isDirty || saving}
+          className="px-3 py-1.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!isDirty || saving || loading}
+          className="px-3 py-1.5 text-sm bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
       </div>
 
       {/* Warning banner */}
@@ -360,7 +753,6 @@ export default function ModelsPage() {
         </div>
       ) : (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          {/* Table header */}
           <div className="flex items-center gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200">
             <div className="w-56 shrink-0 text-xs font-semibold text-slate-500 uppercase tracking-wide">
               Builder
@@ -403,6 +795,65 @@ export default function ModelsPage() {
             </span>
           )}
         </div>
+      )}
+    </>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
+
+type TabId = "providers" | "models";
+
+export default function ModelsPage() {
+  const token = useAuthToken();
+  const [activeTab, setActiveTab] = useState<TabId>("providers");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  if (!token) return null;
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "providers", label: "Providers" },
+    { id: "models", label: "Models" },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Header */}
+      <div>
+        <h2 className="text-xl font-semibold text-slate-800">AI Models</h2>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Manage AI provider keys and model assignments.
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-slate-200">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === tab.id
+                ? "border-orange-500 text-orange-600"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {activeTab === "providers" ? (
+        <ProvidersTab token={token} showToast={showToast} />
+      ) : (
+        <ModelsTab token={token} showToast={showToast} />
       )}
 
       {/* Toast */}
