@@ -469,11 +469,11 @@ export function ProjectPage() {
         return;
       }
 
-      // BEO-704: run signal detection on every non-system message when the project
-      // does not yet have a database wired. Once DB is provisioned (dbEnabled=true)
-      // the card is skipped — no point asking again. Iteration-like prompts naturally
-      // miss all DB_SIGNALS and fall through without showing the card.
-      if (!isSystem && !dbEnabled) {
+      // BEO-704: show the DB/Auth setup card only for the very first message of a
+      // brand-new project (messages is empty). Replies to clarifying questions,
+      // iterations, and returning sessions all have messages.length > 0 and must
+      // bypass the card entirely (BEO-712).
+      if (!isSystem && !dbEnabled && messages.length === 0) {
         const needs = detectBuildNeeds(text);
         if (!needs.skip && (needs.needsDb || needs.needsAuth)) {
           pendingBuildRef.current = { prompt: text, imageUrl };
@@ -485,7 +485,7 @@ export function ProjectPage() {
 
       fireBuild(text, imageUrl, isSystem);
     },
-    [credits, fireBuild, dbEnabled],
+    [credits, fireBuild, dbEnabled, messages],
   );
 
   // BEO-704: Setup card — user confirmed DB/auth choices
