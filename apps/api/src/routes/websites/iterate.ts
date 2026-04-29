@@ -384,6 +384,13 @@ function buildGeneralUserPrompt(input: {
   ].join("\n");
 }
 
+function isSocketDropError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.message === "terminated") return true;
+  const cause = (err as Error & { cause?: { code?: string } }).cause;
+  return cause?.code === "UND_ERR_SOCKET";
+}
+
 async function callAnthropicWebsiteIteration(input: {
   projectName: string;
   prompt: string;
@@ -445,8 +452,15 @@ async function callAnthropicWebsiteIteration(input: {
       },
       input.abortSignal ? { signal: input.abortSignal } : undefined,
     );
-
-    const message = await stream.finalMessage();
+    // Prevent Node from throwing on EventEmitter 'error' before finalMessage() can catch it
+    stream.on("error", () => {});
+    const message = await stream.finalMessage().catch((err: unknown) => {
+      if (isSocketDropError(err)) {
+        console.error("[websites/iterate] Anthropic socket dropped:", err instanceof Error ? err.message : String(err));
+        throw new Error("Connection dropped, please retry");
+      }
+      throw err;
+    });
     const toolBlock = message.content.find(
       (block): block is Anthropic.Messages.ToolUseBlock =>
         block.type === "tool_use" && block.name === WEBSITE_ITERATION_TOOL.name,

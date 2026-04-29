@@ -2081,6 +2081,13 @@ const ANTHROPIC_HAIKU_FALLBACK = "claude-haiku-4-5-20251001";
 const DEFAULT_BUILD_MAX_TOKENS = 64000;
 const ITERATION_MAX_TOKENS = 32000;
 
+function isSocketDropError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.message === "terminated") return true;
+  const cause = (err as Error & { cause?: { code?: string } }).cause;
+  return cause?.code === "UND_ERR_SOCKET";
+}
+
 async function callAnthropicWithMessages(
   model: string,
   systemPrompt: string,
@@ -2112,7 +2119,14 @@ async function callAnthropicWithMessages(
       tool_choice: { type: "tool", name: "deliver_customised_files" },
       messages: [{ role: "user", content: userMessage }],
     }, abortSignal ? { signal: abortSignal } : undefined);
-    const message = await stream.finalMessage();
+    // Prevent Node from throwing on EventEmitter 'error' before finalMessage() can catch it
+    stream.on("error", () => {});
+    const message = await stream.finalMessage().catch((err: unknown) => {
+      if (isSocketDropError(err)) {
+        console.error("[build/generate] Anthropic socket dropped:", err instanceof Error ? err.message : String(err));
+      }
+      throw err;
+    });
     const usage = message.usage as typeof message.usage & {
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
@@ -2411,8 +2425,14 @@ async function callAnthropicIterateWithTools(
           ttftMs = Date.now() - startedAt;
         }
       });
-
-      const message = await stream.finalMessage();
+      // Prevent Node from throwing on EventEmitter 'error' before finalMessage() can catch it
+      stream.on("error", () => {});
+      const message = await stream.finalMessage().catch((err: unknown) => {
+        if (isSocketDropError(err)) {
+          console.error("[build/generate] Anthropic socket dropped:", err instanceof Error ? err.message : String(err));
+        }
+        throw err;
+      });
       const usage = message.usage as typeof message.usage & {
         cache_creation_input_tokens?: number;
         cache_read_input_tokens?: number;

@@ -66,7 +66,7 @@ import websitesIterateRoute from "./routes/websites/iterate.js";
 const app = new Hono();
 const activeSseConnections = new Set<string>();
 const REQUEST_BODY_LIMIT_BYTES = 20 * 1024 * 1024;
-const SSE_DRAIN_TIMEOUT_MS = 25_000;
+const SSE_DRAIN_TIMEOUT_MS = 30_000;
 const SSE_DRAIN_POLL_INTERVAL_MS = 500;
 
 let isShuttingDown = false;
@@ -286,3 +286,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
 process.on("SIGTERM", () => { void gracefulShutdown("SIGTERM"); });
 process.on("SIGINT", () => { void gracefulShutdown("SIGINT"); });
+
+process.on("unhandledRejection", (reason) => {
+  const err = reason as Error & { cause?: { code?: string } };
+  if (err?.cause?.code === "UND_ERR_SOCKET") return;
+  console.error("[unhandledRejection]", reason);
+});

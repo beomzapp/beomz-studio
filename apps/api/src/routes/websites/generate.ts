@@ -1206,6 +1206,13 @@ function applyHeroImageUpdate(files: StudioFile[], imageUrl: string): {
   return { files: nextFiles, updatedContent };
 }
 
+function isSocketDropError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.message === "terminated") return true;
+  const cause = (err as Error & { cause?: { code?: string } }).cause;
+  return cause?.code === "UND_ERR_SOCKET";
+}
+
 async function callAnthropicWebsiteGeneration(input: {
   prompt: string;
   siteType: SiteType;
@@ -1271,8 +1278,15 @@ async function callAnthropicWebsiteGeneration(input: {
       },
       input.abortSignal ? { signal: input.abortSignal } : undefined,
     );
-
-    const message = await stream.finalMessage();
+    // Prevent Node from throwing on EventEmitter 'error' before finalMessage() can catch it
+    stream.on("error", () => {});
+    const message = await stream.finalMessage().catch((err: unknown) => {
+      if (isSocketDropError(err)) {
+        console.error("[websites/generate] Anthropic socket dropped:", err instanceof Error ? err.message : String(err));
+        throw new Error("Connection dropped, please retry");
+      }
+      throw err;
+    });
     const toolBlock = message.content.find(
       (block): block is Anthropic.Messages.ToolUseBlock => block.type === "tool_use" && block.name === WEBSITE_FILES_TOOL.name,
     );
