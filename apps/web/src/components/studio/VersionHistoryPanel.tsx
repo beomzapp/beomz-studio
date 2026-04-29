@@ -111,9 +111,17 @@ export interface VersionHistoryPanelProps {
     restoredVersionNumber: number,
     savedVersionNumber: number,
   ) => void;
+  /**
+   * BEO-715 2c (BEO-714 fix): bump from the parent on every build-complete
+   * event so the panel re-fetches snapshots without forcing the user to
+   * close + reopen it. The bug previously was that `fetchVersions` only
+   * re-ran on `projectId` change, so a build completing while the panel
+   * was open (or before it opened) left it cached at "[]".
+   */
+  refreshKey?: number;
 }
 
-export function VersionHistoryPanel({ projectId, onRestoreSuccess }: VersionHistoryPanelProps) {
+export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 0 }: VersionHistoryPanelProps) {
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [confirmVersion, setConfirmVersion] = useState<ProjectVersion | null>(null);
@@ -134,7 +142,10 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess }: VersionHist
 
   useEffect(() => {
     void fetchVersions();
-  }, [fetchVersions]);
+    // BEO-715 2c: refreshKey is part of the dep set so a parent-driven bump
+    // (after every build_summary / done SSE) re-runs fetchVersions without
+    // needing to remount the panel.
+  }, [fetchVersions, refreshKey]);
 
   const handlePreview = useCallback((version: ProjectVersion) => {
     if (!projectId) return;

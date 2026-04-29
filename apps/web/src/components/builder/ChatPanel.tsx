@@ -10,7 +10,20 @@ import { ArrowDown, MessageSquare, Paperclip, Send, Square, X } from "lucide-rea
 import { cn } from "../../lib/cn";
 import { BuildingShimmer, BAvatar, ChatMessageView } from "./ChatMessage";
 import { ImplementBar } from "./ImplementBar";
+import { PostBuildDbPrompt } from "./PostBuildDbPrompt";
 import { uploadImage } from "../../lib/api";
+
+// BEO-715 2d: keyword detector for the dynamic suggestion chips.
+// `getSuggestionChips` is LLM-generated and "Add a database" is not canon,
+// so we match on common database/persistence keywords. When a chip matches,
+// the click is routed via `onAddDatabaseChip` so the parent can fire a build
+// with `{ withDatabase: true }` instead of a plain chat message.
+const DB_CHIP_KEYWORDS = /\b(database|supabase|neon|postgres|persist|backend|storage)\b/i;
+function isDatabaseChip(text: string): boolean {
+  return DB_CHIP_KEYWORDS.test(text);
+}
+
+const DB_PROMPT_DISMISS_KEY = (projectId: string) => `db_prompt_dismissed_${projectId}`;
 
 // ─── Analysing image indicator (BEO-462) ──────────────────────────────────────
 
@@ -85,6 +98,26 @@ interface ChatPanelProps {
   userAvatarUrl?: string;
   /** BEO-484: user initials fallback for avatar */
   userInitials?: string;
+  /**
+   * BEO-715 2d: project's current managed-DB state. When false AND there is
+   * exactly one build_summary in the thread, the post-build DB prompt is shown
+   * inline below the messages. Hidden permanently once true.
+   */
+  databaseEnabled?: boolean;
+  /**
+   * BEO-715 2d: fires when the user clicks a chip whose text matches the
+   * database keyword set (e.g. "Add a database", "Connect Supabase"). Parent
+   * is expected to call sendMessage with `{ withDatabase: true }` so Neon
+   * provisioning runs before the iteration. Falls back to onSendMessage for
+   * non-DB chips.
+   */
+  onAddDatabaseChip?: (chip: string) => void;
+  /**
+   * BEO-715 2d: fires when the user clicks "Add database" inside the
+   * PostBuildDbPrompt banner. Same contract as onAddDatabaseChip — parent
+   * fires sendMessage with `{ withDatabase: true }` and a canonical prompt.
+   */
+  onAddDatabase?: () => void;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
@@ -114,6 +147,9 @@ export function ChatPanel({
   userFirstName,
   userAvatarUrl,
   userInitials,
+  databaseEnabled = false,
+  onAddDatabaseChip,
+  onAddDatabase,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
@@ -227,10 +263,60 @@ export function ChatPanel({
   const handleChipClick = useCallback(
     (chip: string) => {
       dismissChips();
+      // BEO-715 2d: route database-related chips through onAddDatabaseChip so
+      // the parent can fire the build with `{ withDatabase: true }`. Falls
+      // back to a plain chat message for the typical "Add dark mode" chips.
+      if (onAddDatabaseChip && isDatabaseChip(chip)) {
+        onAddDatabaseChip(chip);
+        return;
+      }
       onSendMessage(chip);
     },
-    [dismissChips, onSendMessage],
+    [dismissChips, onSendMessage, onAddDatabaseChip],
   );
+
+  // BEO-715 2d: PostBuildDbPrompt visibility — survives across renders via
+  // localStorage so a × dismissal sticks for the project's lifetime.
+  const dbPromptDismissKey = projectId ? DB_PROMPT_DISMISS_KEY(projectId) : null;
+  const [dbPromptDismissed, setDbPromptDismissed] = useState<boolean>(() => {
+    if (!dbPromptDismissKey) return false;
+    try {
+      return localStorage.getItem(dbPromptDismissKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  // Re-read the flag when projectId changes (navigating between projects).
+  useEffect(() => {
+    if (!dbPromptDismissKey) {
+      setDbPromptDismissed(false);
+      return;
+    }
+    try {
+      setDbPromptDismissed(localStorage.getItem(dbPromptDismissKey) === "1");
+    } catch {
+      setDbPromptDismissed(false);
+    }
+  }, [dbPromptDismissKey]);
+
+  const dismissDbPrompt = useCallback(() => {
+    if (dbPromptDismissKey) {
+      try {
+        localStorage.setItem(dbPromptDismissKey, "1");
+      } catch {
+        // localStorage quota / disabled — fall back to in-memory dismissal only.
+      }
+    }
+    setDbPromptDismissed(true);
+  }, [dbPromptDismissKey]);
+
+  const buildSummaryCount = messages.filter(m => m.type === "build_summary").length;
+  const showDbPrompt =
+    !databaseEnabled
+    && !dbPromptDismissed
+    && !!onAddDatabase
+    && buildSummaryCount === 1
+    && !isBuilding;
 
   const showChips =
     !chipsDismissed && !isBuilding && suggestionChips && suggestionChips.length > 0;
@@ -390,6 +476,15 @@ export function ChatPanel({
               : showBuildingShimmer
                 ? <BuildingShimmer isIteration={isIterationBuild} />
                 : null}
+
+            {/* BEO-715 2d (BEO-713): subtle DB-prompt banner shown inline
+                below the FIRST completed build of a brand-new project. */}
+            {showDbPrompt && onAddDatabase && (
+              <PostBuildDbPrompt
+                onAddDatabase={onAddDatabase}
+                onDismiss={dismissDbPrompt}
+              />
+            )}
           </div>
         )}
 

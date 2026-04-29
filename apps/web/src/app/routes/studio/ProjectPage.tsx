@@ -35,19 +35,22 @@ import { consumeProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
 import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
 import { useBuildChat } from "../../../hooks/useBuildChat";
+import { useSSEBuildStream } from "../../../hooks/useSSEBuildStream";
 import { useAuth } from "../../../lib/useAuth";
 import { cn } from "../../../lib/cn";
 import { useCredits } from "../../../lib/CreditsContext";
 import { getSuggestionChips } from "../../../lib/getSuggestionChips";
 import { getApiBaseUrl } from "../../../lib/api";
-import { detectBuildNeeds, type BuildNeeds } from "../../../lib/buildDetection";
-import { BuildSetupCard } from "../../../components/builder/BuildSetupCard";
 
 // ─────────────────────────────────────────────
 // File grouping helper for Code panel
 // ─────────────────────────────────────────────
 
 type FileSection = "ROUTES" | "COMPONENTS" | "CONFIG" | "OTHER";
+
+/** BEO-715 2e: client-side build timeout. Last-line defence above the WC's
+ *  own 30s stuck-dev-server safety net and Track B's server-side 5-min cap. */
+const BUILD_CLIENT_TIMEOUT_MS = 5 * 60 * 1000;
 
 function classifyFile(path: string, kind?: string): FileSection {
   if (kind === "route" || /\/(screens|pages|routes)\//.test(path) || /(^|\/)app\.tsx$/i.test(path)) return "ROUTES";
@@ -190,6 +193,12 @@ export function ProjectPage() {
   const savedPreviewGenerationIdRef = useRef<string | null>(null);
   // Keep the ref in sync with state on every render (before any callbacks run).
   previewGenerationIdRef.current = previewGenerationId;
+  // BEO-715 2b: stable mirror of buildResult so callbacks/effects that need
+  // to read its current value don't have to list it as a dep (avoiding the
+  // re-render churn that previously bled into the auto-start and fireBuild
+  // memos). Reads only — never written from outside this render hook.
+  const buildResultRef = useRef<BuildStatusResponse["result"] | null>(null);
+  buildResultRef.current = buildResult;
   const activeBuildIdRef = useRef<string | null>(null);
   const resumingBuildRef = useRef(false);
 
@@ -227,6 +236,9 @@ export function ProjectPage() {
   const [isPublished, setIsPublished] = useState(false);
   const [beomzAppUrl, setBeomzAppUrl] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  // BEO-715 2c (BEO-714 fix): bump on every build_summary / done event so the
+  // open VersionHistoryPanel re-fetches without needing to be reopened.
+  const [versionRefreshKey, setVersionRefreshKey] = useState(0);
   /** BEO-570: preview ahead of last live Vercel deploy; cleared on successful redeploy (local only). */
   const [hasUnsyncedChanges, setHasUnsyncedChanges] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -234,13 +246,9 @@ export function ProjectPage() {
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
   const [domainStatus, setDomainStatus] = useState<string | null>(null);
 
-  // ─── BEO-704: Setup card state ────────────────────────────────────────────
-
-  const [showSetupCard, setShowSetupCard] = useState(false);
-  const [setupCardNeeds, setSetupCardNeeds] = useState<BuildNeeds | null>(null);
-  const pendingBuildRef = useRef<{ prompt: string; imageUrl?: string } | null>(null);
-  // Tracks the most recent prompt that went through fireBuild so handleRetry can re-run the interceptor.
-  const lastSentBuildPromptRef = useRef<string>("");
+  // BEO-715 2d: BuildSetupCard fully removed — the only remaining DB UX is
+  // the post-build PostBuildDbPrompt banner below. The pre-build setup card
+  // was reverted intentionally; do not reintroduce it.
 
   // ─── Database state ───────────────────────────────────────────────────────
 
@@ -395,6 +403,10 @@ export function ProjectPage() {
       if (typeof event.creditsUsed === "number") {
         setCreditsUsed(event.creditsUsed);
       }
+      // BEO-715 2c (BEO-714 fix): API has just persisted a version snapshot —
+      // poke the version panel to re-fetch so it shows the new entry without
+      // the user having to close + reopen it.
+      setVersionRefreshKey(k => k + 1);
     }
   }
 
@@ -435,14 +447,16 @@ export function ProjectPage() {
       isSystem?: boolean,
       buildMeta?: { withDatabase?: boolean; withAuth?: boolean },
     ) => {
-      lastSentBuildPromptRef.current = text;
       setBuildFailed(false);
       setBuildErrorMessage(null);
       setCreditsUsed(null);
       buildDoneRef.current = false;
-      // BEO-587: snapshot current state before each new iteration so stop can revert if needed
+      // BEO-587: snapshot current state before each new iteration so stop can revert if needed.
+      // BEO-715 2b: read buildResult via ref so this callback stays stable across renders —
+      // previously every buildResult change recreated fireBuild, which trickled into
+      // handleSendMessage and the auto-start effect.
       lastGoodSnapshotRef.current = {
-        buildResult,
+        buildResult: buildResultRef.current,
         previewGenerationId: previewGenerationIdRef.current,
       };
       filesWrittenThisBuildRef.current = false;
@@ -458,7 +472,9 @@ export function ProjectPage() {
       }
       sendMessage(text, imageUrl, isSystem, buildMeta);
     },
-    [sendMessage, buildDoneRef, buildResult],
+    // BEO-715: intentionally omitted: [buildResult] — read via buildResultRef
+    // so fireBuild stays stable and doesn't churn handleSendMessage / auto-start.
+    [sendMessage, buildDoneRef],
   );
 
   const handleSendMessage = useCallback(
@@ -468,68 +484,34 @@ export function ProjectPage() {
         setShowOutOfCreditsModal(true);
         return;
       }
-
-      // BEO-704: show the DB/Auth setup card only for the very first message of a
-      // brand-new project (messages is empty). Replies to clarifying questions,
-      // iterations, and returning sessions all have messages.length > 0 and must
-      // bypass the card entirely (BEO-712).
-      if (!isSystem && !dbEnabled && messages.length === 0) {
-        const needs = detectBuildNeeds(text);
-        if (!needs.skip && (needs.needsDb || needs.needsAuth)) {
-          pendingBuildRef.current = { prompt: text, imageUrl };
-          setSetupCardNeeds(needs);
-          setShowSetupCard(true);
-          return;
-        }
-      }
-
+      // BEO-715 2d: no setup-card interception. Builds always fire immediately;
+      // DB-related UX has moved to the post-build PostBuildDbPrompt banner and
+      // the database-keyword chip handler below.
       fireBuild(text, imageUrl, isSystem);
     },
-    [credits, fireBuild, dbEnabled, messages],
+    [credits, fireBuild],
   );
 
-  // BEO-704: Setup card — user confirmed DB/auth choices
-  const handleSetupCardConfirm = useCallback(
-    (withDatabase: boolean, withAuth: boolean) => {
-      setShowSetupCard(false);
-      const pending = pendingBuildRef.current;
-      if (!pending) return;
-      pendingBuildRef.current = null;
-      fireBuild(pending.prompt, pending.imageUrl, undefined, { withDatabase, withAuth });
+  // BEO-715 2e (handler — body filled in by retryLastBuild from useBuildChat).
+  // Must NOT bring back the setup-card path; we always silent-retry the last prompt.
+  const handleRetry = useCallback(() => {
+    retryLastBuild();
+  }, [retryLastBuild]);
+
+  // BEO-715 2d: PostBuildDbPrompt + DB suggestion-chip handlers. Both fire a
+  // build with `{ withDatabase: true }` so Neon provisioning runs in parallel
+  // with the iteration. `isSystem=true` keeps the chip text out of the chat
+  // history user-message slot.
+  const handleAddDatabase = useCallback(() => {
+    fireBuild("Add a database", undefined, true, { withDatabase: true });
+  }, [fireBuild]);
+
+  const handleAddDatabaseChip = useCallback(
+    (chip: string) => {
+      fireBuild(chip, undefined, true, { withDatabase: true });
     },
     [fireBuild],
   );
-
-  // BEO-704: Setup card — user skipped setup, build with no flags
-  const handleSetupCardSkip = useCallback(() => {
-    setShowSetupCard(false);
-    const pending = pendingBuildRef.current;
-    if (!pending) return;
-    pendingBuildRef.current = null;
-    fireBuild(pending.prompt, pending.imageUrl);
-  }, [fireBuild]);
-
-  // BEO-704: Retry — must pass through the interceptor so the setup card re-appears
-  // when the project still has no DB (e.g. first build failed before provisioning).
-  // If DB is already wired (dbEnabled=true) the interceptor skips the card and
-  // falls through to the silent retry path.
-  const handleRetry = useCallback(() => {
-    const prompt = lastSentBuildPromptRef.current;
-    if (!prompt) {
-      retryLastBuild();
-      return;
-    }
-    if (!dbEnabled) {
-      const needs = detectBuildNeeds(prompt);
-      if (!needs.skip && (needs.needsDb || needs.needsAuth)) {
-        pendingBuildRef.current = { prompt };
-        setSetupCardNeeds(needs);
-        setShowSetupCard(true);
-        return;
-      }
-    }
-    retryLastBuild();
-  }, [retryLastBuild, dbEnabled]);
 
   // ─── Wire to database (fires after Neon provisioning) ────────────────────
 
@@ -681,26 +663,30 @@ export function ProjectPage() {
     });
   }, [build?.id, lastEventId, previewGenerationId, projectId, saveState]);
 
-  // Resume existing build on mount
+  // ─── BEO-715 2a: resume an in-flight build via useSSEBuildStream ─────────
   //
-  // BEO-691: SSE signal must NOT be aborted as a side-effect of dependency
-  // re-renders. Previously this effect listed `build` in its dep array, so
-  // when `setBuild(status.build)` fired inside the async body the effect's
-  // cleanup ran (controller.abort()) before fetch even reached the network —
-  // streamBuildEvents then saw `signal.aborted: true` at fetch time and
-  // failed with `AbortError: signal is aborted without reason`, killing the
-  // stream and leaving the preview stuck on "Launching preview" forever.
+  // Architecture:
+  //   1. Hydration effect (below) fetches the latest build for the project,
+  //      hydrates ProjectPage state (build, projectName, buildResult,
+  //      previewGenerationId, lastEventId), and — only if the build is
+  //      queued/running — sets `resumeBuildId` to trigger the hook.
+  //   2. `useSSEBuildStream` (further below) owns the AbortController and
+  //      drives `subscribeToExistingBuild` exactly once per buildId change.
   //
-  // Fix: drop `build` from deps (the early-return guard already prevents a
-  // re-resume once build is hydrated), reset the resume ref in cleanup so a
-  // real unmount/project-change properly re-arms, and use an `isMounted`
-  // closure flag to suppress post-cleanup state updates from any in-flight
-  // async (e.g. React StrictMode synthetic dismount in dev).
+  // History:
+  //   BEO-691 (already shipped) excluded `build` from this effect's deps
+  //   because including it caused `setBuild()` inside the async body to
+  //   abort the controller mid-flight ("Launching preview" hang). The split
+  //   here makes that bug structurally impossible: the hydration effect no
+  //   longer owns a controller, and the hook's controller is keyed on
+  //   buildId so state updates from inside the SSE stream cannot abort it.
+  const [resumeBuildId, setResumeBuildId] = useState<string | null>(null);
+  const [resumeLastEventId, setResumeLastEventId] = useState<string | null>(null);
+
   useEffect(() => {
     if (resumingBuildRef.current || id === "new" || !projectId || build) return;
     resumingBuildRef.current = true;
-    const controller = new AbortController();
-    let isMounted = true;
+    let cancelled = false;
 
     void (async () => {
       const restoredState = restoreState();
@@ -708,7 +694,7 @@ export function ProjectPage() {
         ? await getBuildStatus(restoredState.buildId)
         : await getLatestBuildForProject(projectId);
 
-      if (!status || !isMounted || controller.signal.aborted) return;
+      if (!status || cancelled) return;
 
       activeBuildIdRef.current = status.build.id;
       setBuild(status.build);
@@ -726,20 +712,6 @@ export function ProjectPage() {
         buildDoneRef.current = true;
       }
 
-      // BEO-456 final: when the page rehydrates mid-build, `status.result` may
-      // contain the API's prebuilt scaffold (e.g. Kanban Board). Kick off the
-      // stream FIRST (its synchronous head sets isBuilding=true) so React
-      // batches isBuilding=true with setBuildResult(scaffold) — the
-      // useWebContainerPreview scaffold guard then blocks the wc.mount until
-      // real files land via the completed-build status fetch.
-      const streamPromise = isActive
-        ? subscribeToExistingBuild(
-            status.build.id,
-            restoredState?.lastEventId ?? status.trace.lastEventId,
-            controller.signal,
-          )
-        : null;
-
       if (status.result) setBuildResult(status.result);
       setPreviewGenerationId(
         restoredState?.previewGenerationId
@@ -747,13 +719,18 @@ export function ProjectPage() {
       );
       setLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
 
-      if (streamPromise) {
-        await streamPromise;
+      // Trigger the SSE subscription LAST so React batches the prior state
+      // updates (build / buildResult / previewGenerationId) before the hook
+      // creates its controller and starts streaming. The
+      // useWebContainerPreview scaffold guard still blocks wc.mount until
+      // isBuildInProgress flips, so no stale scaffold can sneak through.
+      if (isActive) {
+        setResumeLastEventId(restoredState?.lastEventId ?? status.trace.lastEventId);
+        setResumeBuildId(status.build.id);
       }
     })()
       .catch((error: unknown) => {
-        // BEO-691: swallow abort noise — intentional teardown is not a user-facing error.
-        if (!isMounted || controller.signal.aborted) return;
+        if (cancelled) return;
         const name = error instanceof Error ? error.name : "";
         if (name === "AbortError") return;
         setLastError(error instanceof Error ? error.message : "Failed to restore build session.");
@@ -763,15 +740,96 @@ export function ProjectPage() {
       });
 
     return () => {
-      isMounted = false;
-      controller.abort();
-      // Allow a true remount (e.g. navigating away and back) to re-resume.
+      cancelled = true;
+      // Allow a true remount (navigate away + back) to re-arm the resume.
       resumingBuildRef.current = false;
     };
-  // BEO-691: `build` intentionally excluded — including it caused setBuild()
-  // inside the async body to abort the controller mid-flight (see comment above).
+  // BEO-715: intentionally omitted: [build, restoreState, setLastError,
+  // subscribeToExistingBuild]. `build` is the historical bug from BEO-691;
+  // the others are stable refs/callbacks read via closure. Only [id, projectId]
+  // should re-arm the hydration.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, projectId]);
+
+  // BEO-715 2a: drives SSE for any active resumed build. The hook owns the
+  // AbortController, so `setResumeBuildId(null)` from anywhere (Stop button,
+  // 5-min timeout in 2e, build completing) cleanly tears down the stream.
+  useSSEBuildStream({
+    buildId: resumeBuildId,
+    lastEventId: resumeLastEventId,
+    subscribe: subscribeToExistingBuild,
+  });
+
+  // Clear the resume hook's buildId once the build settles so we don't keep
+  // the hook armed against a finished stream. Status flips to terminal when
+  // `done` / `error` lands; that's our cue to retire the resume.
+  useEffect(() => {
+    if (!resumeBuildId) return;
+    if (build && build.id === resumeBuildId) {
+      const isTerminal =
+        build.status === "completed"
+        || build.status === "failed"
+        || build.status === "cancelled"
+        || build.status === "timed_out";
+      if (isTerminal) {
+        setResumeBuildId(null);
+        setResumeLastEventId(null);
+      }
+    }
+  }, [build, resumeBuildId]);
+
+  // ─── BEO-715 2e: 5-minute client-side build timeout ──────────────────────
+  //
+  // Server-side has its own 5-min timeout (Track B), but its `timed_out`
+  // status only reaches the client via SSE / poll. If the upstream stream is
+  // stalled (no events, polling hasn't yet escalated, etc.) the user could
+  // be parked on "Launching preview" indefinitely. This effect is the
+  // last-line defence: arm a timer on isBuilding false→true, cancel it on
+  // isBuilding true→false (done / error / stop), and on expiry abort every
+  // active controller and surface a Retry-able error.
+  //
+  // preview_ready short-circuit: if the build has already produced a preview
+  // (previewGenerationId === active build id), the WC owns the rest of the
+  // lifecycle and has its own 30s stuck-dev-server safety net. Skip the
+  // timeout in that case so a slow first paint doesn't error out a build
+  // that effectively succeeded. Build id and preview-generation id are read
+  // via refs so the 5-min window is anchored to isBuilding and not restarted
+  // on every SSE-driven state update.
+  useEffect(() => {
+    if (!isBuilding) return;
+    const handle = setTimeout(() => {
+      const activeBuildId = activeBuildIdRef.current;
+      if (activeBuildId && previewGenerationIdRef.current === activeBuildId) {
+        console.log(
+          "[BEO-715] 5-min client timeout skipped — preview_ready already fired",
+          { activeBuildId },
+        );
+        return;
+      }
+      console.warn("[BEO-715] 5-min client build timeout — aborting build", {
+        activeBuildId,
+      });
+      // Abort fresh-send controller + chat controller; flips isBuilding=false,
+      // which propagates to isBuildInProgressRef in useWebContainerPreview so
+      // the WC scaffold guard releases.
+      stopBuild();
+      // Abort the resume hook's controller (no-op if no resume is active).
+      setResumeBuildId(null);
+      setResumeLastEventId(null);
+      // Drop any lingering AI-customising overlay so PreviewPane shows the error.
+      if (aiCustomisingTimeoutRef.current) {
+        clearTimeout(aiCustomisingTimeoutRef.current);
+        aiCustomisingTimeoutRef.current = null;
+      }
+      setIsAiCustomising(false);
+      setTransport("idle");
+      // Surface the failure via PreviewPane's existing error overlay; the
+      // Retry button is already wired to handleRetry → retryLastBuild.
+      setBuildFailed(true);
+      setBuildErrorMessage("Build timed out after 5 minutes — try again");
+    }, BUILD_CLIENT_TIMEOUT_MS);
+    return () => clearTimeout(handle);
+  }, [isBuilding, stopBuild, setTransport]);
 
   // Auto-start from launch intent
   const autoStarted = useRef(false);
@@ -780,10 +838,15 @@ export function ProjectPage() {
     // BEO-687: skip if the project already loaded existing files via the
     // resume effect — prevents any potential race where launchIntent fires
     // after build state is already hydrated.
-    if (buildResult && buildResult.files.length > 0) return;
+    // BEO-715 2b: read via ref so this effect re-runs only when launchIntent
+    // changes, not on every buildResult update (the autoStarted ref guard
+    // already prevents double-firing within a single mount).
+    if (buildResultRef.current && buildResultRef.current.files.length > 0) return;
     autoStarted.current = true;
     handleSendMessage(launchIntent.prompt);
-  }, [handleSendMessage, launchIntent?.prompt, buildResult]);
+  // BEO-715: intentionally omitted: [buildResult] — see comment above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSendMessage, launchIntent?.prompt]);
 
   useEffect(() => {
     if (build?.status === "completed" || build?.status === "failed") clearState();
@@ -1129,6 +1192,9 @@ export function ProjectPage() {
               userFirstName={chatUserData.userFirstName}
               userAvatarUrl={chatUserData.userAvatarUrl}
               userInitials={chatUserData.userInitials}
+              databaseEnabled={dbEnabled}
+              onAddDatabaseChip={handleAddDatabaseChip}
+              onAddDatabase={handleAddDatabase}
             />
           </div>
         </div>
@@ -1176,6 +1242,7 @@ export function ProjectPage() {
             <VersionHistoryPanel
               projectId={projectId}
               onRestoreSuccess={handleVersionRestored}
+              refreshKey={versionRefreshKey}
             />
           </div>
         </div>
@@ -1189,15 +1256,8 @@ export function ProjectPage() {
         isHardBlock={isHardBlockCredits}
       />
 
-      {/* BEO-704: DB/Auth setup card — shown before the first build for data-heavy apps */}
-      {showSetupCard && setupCardNeeds && (
-        <BuildSetupCard
-          needsDb={setupCardNeeds.needsDb}
-          needsAuth={setupCardNeeds.needsAuth}
-          onConfirm={handleSetupCardConfirm}
-          onSkip={handleSetupCardSkip}
-        />
-      )}
+      {/* BEO-715 2d: BuildSetupCard removed — DB UX now lives inside ChatPanel
+          via the inline PostBuildDbPrompt banner shown after the first build. */}
 
       {showPublishModal && projectId && (
         <PublishModal
