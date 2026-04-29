@@ -107,7 +107,7 @@ import { uploadProjectAsset } from "../../lib/images/index.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 import { provisionProjectDatabase } from "../db/enable.js";
-import { getModelForBuilder } from "../../lib/modelConfig.js";
+import { getModelForBuilder, getProviderApiKey } from "../../lib/modelConfig.js";
 
 export {
   buildIterationSystemPrompt,
@@ -2098,6 +2098,7 @@ async function callAnthropicWithMessages(
   maxTokens = DEFAULT_BUILD_MAX_TOKENS,
   instrumentation?: { buildId: string; isIteration: boolean },
   abortSignal?: AbortSignal,
+  apiKey?: string,
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
     throwIfAborted(abortSignal);
@@ -2106,7 +2107,7 @@ async function callAnthropicWithMessages(
     console.log("[generate] isIteration:", isIteration);
     console.log("[generate] maxTokens:", maxTokens);
     console.log("[generate] system prompt length:", systemPrompt.length, "chars (~" + Math.round(systemPrompt.length / 4) + " tokens)");
-    const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+    const client = new Anthropic({ apiKey: apiKey ?? apiConfig.ANTHROPIC_API_KEY });
     const stream = client.messages.stream({
       model: modelId,
       max_tokens: maxTokens, // BEO-319: raised from 32000; BEO-335: overridable for forcedSimple
@@ -2222,6 +2223,7 @@ async function callAnthropicCustomise(
   hasByoSupabaseConfig = false,
   dbContextBlock?: string,
   abortSignal?: AbortSignal,
+  apiKey?: string,
 ): Promise<CustomiseResult> {
   return callAnthropicWithMessages(
     model,
@@ -2238,6 +2240,7 @@ async function callAnthropicCustomise(
     maxTokens,
     instrumentation,
     abortSignal,
+    apiKey,
   );
 }
 
@@ -2320,10 +2323,11 @@ async function callAnthropicIterateWithTools(
   instrumentation?: { buildId: string; isIteration: boolean },
   imageBlock?: IterationImageBlock,
   abortSignal?: AbortSignal,
+  apiKey?: string,
 ): Promise<CustomiseResult> {
   const executeCall = async (modelId: string): Promise<CustomiseResult> => {
     throwIfAborted(abortSignal);
-    const client = new Anthropic({ apiKey: apiConfig.ANTHROPIC_API_KEY });
+    const client = new Anthropic({ apiKey: apiKey ?? apiConfig.ANTHROPIC_API_KEY });
     const system = [
       {
         type: "text",
@@ -2394,6 +2398,7 @@ async function callAnthropicIterateWithTools(
         maxTokens,
         instrumentation,
         abortSignal,
+        apiKey,
       );
       const metrics = await buildIterationMetrics(
         fallbackResult.files.map((file) => file.path),
@@ -2673,6 +2678,7 @@ async function callModelCustomise(
   }
 
   if (model.startsWith("claude-")) {
+    const anthropicKey = await getProviderApiKey("anthropic");
     return callAnthropicCustomise(
       prompt,
       model,
@@ -2687,12 +2693,13 @@ async function callModelCustomise(
       hasByoSupabaseConfig,
       dbContextBlock,
       abortSignal,
+      anthropicKey ?? undefined,
     );
   }
 
   if (model.startsWith("gpt-")) {
-    const apiKey = apiConfig.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
+    const apiKey = await getProviderApiKey("openai") ?? apiConfig.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OpenAI API key not configured.");
     return callOpenAICompatibleCustomise(
       prompt,
       model,
@@ -2709,8 +2716,8 @@ async function callModelCustomise(
   }
 
   if (model.startsWith("gemini-")) {
-    const apiKey = apiConfig.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY not configured on server.");
+    const apiKey = await getProviderApiKey("google") ?? apiConfig.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("Google AI API key not configured.");
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -2720,6 +2727,7 @@ async function callModelCustomise(
 
   // Unknown model — fall back to the configured web_apps model (BEO-720).
   console.warn("[generate] Unknown model, falling back to configured web_apps model:", model);
+  const anthropicKey = await getProviderApiKey("anthropic");
   return callAnthropicCustomise(
     prompt,
     await getModelForBuilder("web_apps"),
@@ -2734,6 +2742,7 @@ async function callModelCustomise(
     hasByoSupabaseConfig,
     dbContextBlock,
     abortSignal,
+    anthropicKey ?? undefined,
   );
 }
 
@@ -2804,6 +2813,7 @@ async function callModelIterate(
   if (model.startsWith("claude-")) {
     console.log("[generate] iteration seed files:", selection.seedFiles.map((file) => file.basename));
     console.log("[generate] iteration manifest files:", existingFiles?.length ?? 0);
+    const anthropicKey = await getProviderApiKey("anthropic");
     const result = await callAnthropicIterateWithTools(
       model,
       systemPrompt,
@@ -2814,6 +2824,7 @@ async function callModelIterate(
       instrumentation,
       resolvedImageBlock,
       abortSignal,
+      anthropicKey ?? undefined,
     );
     return {
       ...result,
@@ -2822,14 +2833,14 @@ async function callModelIterate(
   }
 
   if (model.startsWith("gpt-")) {
-    const apiKey = apiConfig.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY not configured on server.");
+    const apiKey = await getProviderApiKey("openai") ?? apiConfig.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OpenAI API key not configured.");
     return callOpenAICompatibleWithMessages(model, apiKey, systemPrompt, userMessage, prompt);
   }
 
   if (model.startsWith("gemini-")) {
-    const apiKey = apiConfig.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("GEMINI_API_KEY not configured on server.");
+    const apiKey = await getProviderApiKey("google") ?? apiConfig.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("Google AI API key not configured.");
     return callOpenAICompatibleWithMessages(
       model, apiKey, systemPrompt, userMessage, prompt,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -2839,6 +2850,7 @@ async function callModelIterate(
   // Unknown model — fall back to the configured web_apps model (BEO-720).
   console.warn("[generate] Unknown model for iteration, falling back to configured web_apps model:", model);
   console.log("[generate] iteration seed files:", selection.seedFiles.map((file) => file.basename));
+  const anthropicKey = await getProviderApiKey("anthropic");
   return callAnthropicIterateWithTools(
     await getModelForBuilder("web_apps"),
     systemPrompt,
@@ -2849,6 +2861,7 @@ async function callModelIterate(
     instrumentation,
     resolvedImageBlock,
     abortSignal,
+    anthropicKey ?? undefined,
   );
 }
 
