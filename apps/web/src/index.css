@@ -110,6 +110,15 @@ body {
   animation: build-shimmer 2.5s linear infinite;
 }
 
+/* BEO-719: Typewriter blinking cursor */
+@keyframes typewriter-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.typewriter-cursor {
+  animation: typewriter-blink 500ms step-end infinite;
+}
+
 /* BEO-454: Preview iframe fade-in on first reveal */
 @keyframes fadeInPreview {
   from { opacity: 0; }
@@ -125,7 +134,8 @@ body {
   .plan-step-icon-spin,
   .plan-step-icon-pop,
   .checklist-orb-active,
-  .build-shimmer-text {
+  .build-shimmer-text,
+  .typewriter-cursor {
     animation: none !important;
   }
 

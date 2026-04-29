@@ -12,6 +12,8 @@ import { BuildingShimmer, BAvatar, ChatMessageView } from "./ChatMessage";
 import { ImplementBar } from "./ImplementBar";
 import { uploadImage } from "../../lib/api";
 
+const DB_CHIP_FILTER = /database|add a database|persist data|supabase|neon|postgres/i;
+
 // ─── Analysing image indicator (BEO-462) ──────────────────────────────────────
 
 function AnalysingImageCard() {
@@ -118,6 +120,12 @@ export function ChatPanel({
   const [input, setInput] = useState("");
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
   const [chipsDismissed, setChipsDismissed] = useState(false);
+
+  // BEO-719: track message IDs present on mount so typewriter only fires on NEW messages
+  const initialMsgIdsRef = useRef<Set<string> | null>(null);
+  if (initialMsgIdsRef.current === null) {
+    initialMsgIdsRef.current = new Set(messages.map(m => m.id));
+  }
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -380,6 +388,7 @@ export function ChatPanel({
                   onImplementPlan={onImplementPlan}
                   userAvatarUrl={userAvatarUrl}
                   userInitials={userInitials}
+                  isNewMessage={!initialMsgIdsRef.current!.has(msg.id)}
                 />
               </div>
             ))}
@@ -409,12 +418,15 @@ export function ChatPanel({
 
       {/* Suggestion chips above input */}
       {showChips && (
-        <div className="flex flex-shrink-0 flex-wrap gap-2 px-3 pb-2">
-          {suggestionChips!.map(chip => (
+        <div className="flex flex-shrink-0 flex-wrap gap-1.5 px-3 pb-2">
+          {suggestionChips!
+            .filter(chip => !DB_CHIP_FILTER.test(chip))
+            .map(chip => (
             <button
               key={chip}
               onClick={() => handleChipClick(chip)}
-              className="rounded-full border border-[#e5e5e5] bg-white px-3 py-1.5 text-xs text-[#6b7280] transition-all hover:border-[#d1d5db] hover:text-[#374151]"
+              className="rounded-[20px] px-2.5 py-[3px] text-[11px] text-[#9ca3af] transition-all hover:text-[#6b7280]"
+              style={{ border: "0.5px solid #e5e5e5" }}
             >
               {chip}
             </button>

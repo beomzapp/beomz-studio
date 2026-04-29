@@ -3,7 +3,7 @@
  * Building state: single evolving card — preamble, checklist + timer, summary + next-steps.
  * BEO-484: user bubble orange tint, user/AI avatars, first-name personalisation.
  */
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ChatChecklistStatus, ChatMessage } from "@beomz-studio/contracts";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Copy, FileCode, Send } from "lucide-react";
 import { ServerRestartedCard } from "./ServerRestartedCard";
@@ -625,28 +625,76 @@ function AIMessage({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── BEO-719: Typewriter effect for build_summary messages ─────────────────
+
+function TypewriterText({ text, speed = 20, onDone }: { text: string; speed?: number; onDone?: () => void }) {
+  const [displayed, setDisplayed] = useState("");
+  const [done, setDone] = useState(false);
+  const indexRef = useRef(0);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    indexRef.current = 0;
+    setDisplayed("");
+    setDone(false);
+    const id = setInterval(() => {
+      indexRef.current += 1;
+      if (indexRef.current >= text.length) {
+        setDisplayed(text);
+        setDone(true);
+        clearInterval(id);
+        onDoneRef.current?.();
+      } else {
+        setDisplayed(text.slice(0, indexRef.current));
+      }
+    }, speed);
+    return () => clearInterval(id);
+  }, [text, speed]);
+
+  return (
+    <>
+      <MarkdownText text={displayed} />
+      {!done && <span className="typewriter-cursor ml-0.5 inline-block align-middle text-[#F97316]">|</span>}
+    </>
+  );
+}
+
 function BuildSummaryMessage({
   message,
   onPopulateInput,
+  isNew,
 }: {
   message: Extract<ChatMessage, { type: "build_summary" }>;
   onPopulateInput?: (text: string) => void;
+  isNew?: boolean;
 }) {
   const [summaryAnchoredAt] = useState(() => Date.now());
+  const [typewriterDone, setTypewriterDone] = useState(!isNew);
+  const handleTypewriterDone = useCallback(() => setTypewriterDone(true), []);
+
   return (
     <AIMessage>
-      <MarkdownText text={message.content} />
-      <SummaryFooterRow
-        filesChanged={message.filesChanged}
-        durationMs={message.durationMs}
-        creditsUsed={message.creditsUsed}
-        copyContent={message.content}
-      />
-      <NextStepsCard
-        chips={message.nextSteps}
-        summaryAnchoredAt={summaryAnchoredAt}
-        onSelectPrompt={prompt => onPopulateInput?.(prompt)}
-      />
+      {isNew && !typewriterDone ? (
+        <TypewriterText text={message.content} onDone={handleTypewriterDone} />
+      ) : (
+        <MarkdownText text={message.content} />
+      )}
+      {typewriterDone && (
+        <>
+          <SummaryFooterRow
+            filesChanged={message.filesChanged}
+            durationMs={message.durationMs}
+            creditsUsed={message.creditsUsed}
+            copyContent={message.content}
+          />
+          <NextStepsCard
+            chips={message.nextSteps}
+            summaryAnchoredAt={summaryAnchoredAt}
+            onSelectPrompt={prompt => onPopulateInput?.(prompt)}
+          />
+        </>
+      )}
     </AIMessage>
   );
 }
@@ -905,6 +953,7 @@ export function ChatMessageView({
   onImplementPlan,
   userAvatarUrl,
   userInitials,
+  isNewMessage,
 }: {
   message: ChatMessage;
   onRetry?: () => void;
@@ -916,6 +965,8 @@ export function ChatMessageView({
   userAvatarUrl?: string;
   /** BEO-484: user initials fallback */
   userInitials?: string;
+  /** BEO-719: true when this message arrived after mount — enables typewriter animation */
+  isNewMessage?: boolean;
 }) {
   switch (message.type) {
     case "thinking":
@@ -985,7 +1036,7 @@ export function ChatMessageView({
 
     case "build_summary":
       return (
-        <BuildSummaryMessage message={message} onPopulateInput={onPopulateInput} />
+        <BuildSummaryMessage message={message} onPopulateInput={onPopulateInput} isNew={isNewMessage} />
       );
 
     case "clarifying_question":
