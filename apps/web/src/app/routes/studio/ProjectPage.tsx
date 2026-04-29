@@ -498,19 +498,18 @@ export function ProjectPage() {
     retryLastBuild();
   }, [retryLastBuild]);
 
-  // BEO-715 2d: PostBuildDbPrompt + DB suggestion-chip handlers. Both fire a
-  // build with `{ withDatabase: true }` so Neon provisioning runs in parallel
-  // with the iteration. `isSystem=true` keeps the chip text out of the chat
-  // history user-message slot.
+  // BEO-717: PostBuildDbPrompt + DB suggestion-chip handlers. Both navigate
+  // to the Database tab so the user can configure their DB rather than firing
+  // an immediate build with `{ withDatabase: true }`.
   const handleAddDatabase = useCallback(() => {
-    fireBuild("Add a database", undefined, true, { withDatabase: true });
-  }, [fireBuild]);
+    setActiveView("database");
+  }, []);
 
   const handleAddDatabaseChip = useCallback(
-    (chip: string) => {
-      fireBuild(chip, undefined, true, { withDatabase: true });
+    (_chip: string) => {
+      setActiveView("database");
     },
-    [fireBuild],
+    [],
   );
 
   // ─── Wire to database (fires after Neon provisioning) ────────────────────

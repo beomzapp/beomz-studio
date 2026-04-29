@@ -105,17 +105,14 @@ interface ChatPanelProps {
    */
   databaseEnabled?: boolean;
   /**
-   * BEO-715 2d: fires when the user clicks a chip whose text matches the
+   * BEO-717: fires when the user clicks a chip whose text matches the
    * database keyword set (e.g. "Add a database", "Connect Supabase"). Parent
-   * is expected to call sendMessage with `{ withDatabase: true }` so Neon
-   * provisioning runs before the iteration. Falls back to onSendMessage for
-   * non-DB chips.
+   * navigates to the Database tab. Falls back to onSendMessage for non-DB chips.
    */
   onAddDatabaseChip?: (chip: string) => void;
   /**
-   * BEO-715 2d: fires when the user clicks "Add database" inside the
-   * PostBuildDbPrompt banner. Same contract as onAddDatabaseChip — parent
-   * fires sendMessage with `{ withDatabase: true }` and a canonical prompt.
+   * BEO-717: fires when the user clicks "Add database" inside the
+   * PostBuildDbPrompt banner. Parent navigates to the Database tab.
    */
   onAddDatabase?: () => void;
 }

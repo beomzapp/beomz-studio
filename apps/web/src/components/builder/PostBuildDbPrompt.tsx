@@ -1,9 +1,9 @@
 /**
- * PostBuildDbPrompt — BEO-715 Track A · 2d (BEO-713 simplified)
+ * PostBuildDbPrompt — BEO-715 Track A · 2d (BEO-713 simplified), BEO-717 nav fix
  *
  * A subtle inline banner that appears below the FIRST completed build of a
  * brand-new project. Encourages adding a managed database without blocking
- * the build flow (replaces the previous BuildSetupCard interception).
+ * the build flow.
  *
  * Visual contract:
  *   "💾 Data resets on refresh — [Add database] [×]"
@@ -14,16 +14,14 @@
  *   - localStorage.getItem(`db_prompt_dismissed_${projectId}`) is null
  *
  * Behaviour:
- *   - Add database  → calls onAddDatabase(); parent fires sendMessage("Add a
- *                     database", { withDatabase: true }) which provisions Neon
- *                     before the next iteration runs.
+ *   - Add database  → calls onAddDatabase(); parent navigates to Database tab.
  *   - ✕            → writes localStorage flag and calls onDismiss so parent
  *                     hides the banner immediately.
  */
 import { Database, X } from "lucide-react";
 
 export interface PostBuildDbPromptProps {
-  /** Fires the "Add a database" build with the withDatabase flag. */
+  /** BEO-717: navigates to the Database tab in the topbar. */
   onAddDatabase: () => void;
   /** Fires after the dismissal flag is written to localStorage. */
   onDismiss: () => void;
