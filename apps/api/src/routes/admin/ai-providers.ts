@@ -189,30 +189,39 @@ export function createAdminAiProvidersRoute(deps: AdminAiProvidersRouteDeps = {}
   });
 
   // POST /admin/ai-providers/:provider/test — test connection
+  // Accepts { apiKey } in body to test before saving; falls back to saved DB key.
   route.post("/:provider/test", ...adminMiddlewares, async (c) => {
     const { provider } = c.req.param();
     try {
-      const db = createStudioClient();
-      const { data, error } = await db
-        .from("ai_providers")
-        .select("api_key_encrypted, enabled")
-        .eq("provider", provider)
-        .single();
+      const body = await c.req.json().catch(() => null) as { apiKey?: string } | null;
+      const bodyKey = body?.apiKey?.trim();
 
-      if (error || !data) {
-        return c.json({ success: false, error: "Provider not found." }, 404);
+      let keyToTest = bodyKey;
+
+      if (!keyToTest) {
+        const db = createStudioClient();
+        const { data, error } = await db
+          .from("ai_providers")
+          .select("api_key_encrypted")
+          .eq("provider", provider)
+          .single();
+
+        if (error || !data) {
+          return c.json({ success: false, error: "Provider not found." }, 404);
+        }
+
+        if (!data.api_key_encrypted) {
+          return c.json({ success: false, error: "No API key provided or saved for this provider." });
+        }
+
+        const decrypted = safeDecrypt(data.api_key_encrypted);
+        if (!decrypted) {
+          return c.json({ success: false, error: "Failed to decrypt saved API key." });
+        }
+        keyToTest = decrypted;
       }
 
-      if (!data.enabled || !data.api_key_encrypted) {
-        return c.json({ success: false, error: "Provider not enabled or has no API key." });
-      }
-
-      const decrypted = safeDecrypt(data.api_key_encrypted);
-      if (!decrypted) {
-        return c.json({ success: false, error: "Failed to decrypt API key." });
-      }
-
-      const result = await testProviderConnection(provider, decrypted);
+      const result = await testProviderConnection(provider, keyToTest);
       return c.json(result);
     } catch (err) {
       console.error(`[POST /admin/ai-providers/${provider}/test] error:`, err);
