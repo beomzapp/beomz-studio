@@ -108,11 +108,13 @@ export function BuildSummary({ message, isNewMessage, onPopulateInput }: BuildSu
     <div className="flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 break-words">
-        {isNewMessage && !typewriterDone ? (
-          <TypewriterText text={message.content} onDone={handleDone} />
-        ) : (
-          <MarkdownText text={message.content} />
-        )}
+        <div className="text-sm leading-relaxed text-[#374151] break-words">
+          {isNewMessage && !typewriterDone ? (
+            <TypewriterText text={message.content} onDone={handleDone} />
+          ) : (
+            <MarkdownText text={message.content} />
+          )}
+        </div>
         {typewriterDone && (
           <>
             <SummaryFooter
