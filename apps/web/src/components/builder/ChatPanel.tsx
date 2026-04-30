@@ -1,27 +1,41 @@
 /**
- * ChatPanel — BEO-364 clean rewrite.
- * BEO-398: ImplementBar sticky zone (replaces implement_card message).
- * BEO-182: Image upload — paperclip, paste, thumbnail strip, upload-image API.
- * BEO-511: Prompt enhance (sparkle) removed from builder input — home prompt unchanged.
+ * ChatPanel — orchestrator for the builder chat column.
+ *
+ * BEO-725 (clean rewrite, replaces the patched ChatPanel.tsx):
+ *
+ *   Responsibilities:
+ *     - Layout: scroll region, suggestion-chip strip, ImplementBar zone,
+ *       input bar, image attach.
+ *     - Map each message in `messages` to the right component via
+ *       ChatMessageView. Filters out in-flight `building` messages while
+ *       isBuilding so BuildProgressCard.Shimmer takes over cleanly.
+ *     - Capture the message-id snapshot on mount in `initialMsgIdsRef` so
+ *       only messages added AFTER mount get TypewriterText animation. Hard
+ *       refresh shows everything instantly.
+ *     - Render the floating ImplementBar (sticky, between messages and
+ *       input). The Implement button on it is the ONLY Implement button on
+ *       the page — no chat message component is allowed to render one.
+ *
+ *   Data-layer: untouched; useBuildChat.ts owns all state and SSE handling.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { ArrowDown, MessageSquare, Paperclip, Send, Square, X } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { BuildingShimmer, BAvatar, ChatMessageView } from "./ChatMessage";
-import { ImplementBar } from "./ImplementBar";
 import { uploadImage } from "../../lib/api";
+import { BAvatar } from "./Avatars";
+import { ChatMessageView } from "./ChatMessage";
+import { BuildProgressCard } from "./BuildProgressCard";
+import { ImplementBar } from "./ImplementBar";
 
-const DB_CHIP_FILTER = /database|add a database|persist data|supabase|neon|postgres/i;
+const DB_CHIP_FILTER = /database|supabase|neon|postgres|persist/i;
 
-// ─── Analysing image indicator (BEO-462) ──────────────────────────────────────
+// ─── Analysing image card ─────────────────────────────────────────────────────
 
 function AnalysingImageCard() {
   return (
     <div className="flex items-start gap-2 py-1">
-      <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900">
-        <span className="text-[9px] font-bold leading-none text-[#F97316]">B</span>
-      </div>
+      <BAvatar />
       <div className="min-w-0 flex-1">
         <div className="inline-flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
@@ -51,45 +65,35 @@ interface ChatPanelProps {
   isBuilding: boolean;
   onSendMessage: (text: string, imageUrl?: string) => void;
   onStopStreaming?: () => void;
-  /** BEO-587: hard kill WebContainer + reset all state */
+  /** Hard kill WebContainer + reset all state. */
   onForceStop?: () => void;
-  /** BEO-587: true from stop click until isBuilding settles to false */
+  /** True from stop click until isBuilding settles to false. */
   isStopPending?: boolean;
   onRetry?: () => void;
-  /** BEO-589: opens mailto report with project + prompt context */
   onReportIssue?: () => void;
   width?: number;
   suggestionChips?: string[];
   onDismissChips?: () => void;
-  /** Current credits balance — 0 disables send */
   creditsBalance?: number;
-  /** BEO-396: Chat mode active state */
   chatModeActive?: boolean;
-  /** BEO-396: Toggle chat mode on/off */
   onToggleChatMode?: () => void;
-  /** BEO-398: Sticky implement zone state */
+  /** Drives the floating ImplementBar above the input. */
   implementSuggestion?: { summary: string } | null;
-  /** BEO-398: Fires when user clicks "Implement this" */
   onImplement?: () => void;
-  /** BEO-398: Fires when user clicks ✕ on the implement zone */
   onDismissImplement?: () => void;
-  /** BEO-460: When set, uploads go to POST /builds/upload-image; otherwise image is sent on submit (data URL). */
   projectId?: string | null;
-  /** BEO-461/462: Fires build with the given plan string and optional imageUrl. */
+  /** Forwarded to image_intent confirmation cards. */
   onImplementPlan?: (plan: string, imageUrl?: string) => void;
-  /** BEO-462: true while the API is analysing a pasted image — shows subtle loading indicator. */
   isAnalysingImage?: boolean;
-  /** BEO-496: true when the current build was detected as an iteration (short preamble). */
   isIterationBuild?: boolean;
-  /** BEO-484: user's first name for greeting personalisation */
   userFirstName?: string;
-  /** BEO-484: user avatar URL (proxied if needed) */
   userAvatarUrl?: string;
-  /** BEO-484: user initials fallback for avatar */
   userInitials?: string;
 }
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export function ChatPanel({
   messages,
@@ -121,23 +125,24 @@ export function ChatPanel({
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
   const [chipsDismissed, setChipsDismissed] = useState(false);
 
-  // BEO-719: track message IDs present on mount so typewriter only fires on NEW messages
+  // BEO-725: snapshot of message IDs present on mount. Only messages added
+  // AFTER mount get TypewriterText. Hard refresh → no re-animation.
   const initialMsgIdsRef = useRef<Set<string> | null>(null);
   if (initialMsgIdsRef.current === null) {
     initialMsgIdsRef.current = new Set(messages.map(m => m.id));
   }
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const userScrolledUp = useRef(false);
 
-  // BEO-587: stop button state — turn red immediately on click, show force stop after 2s
+  // Stop button — turns red on click, force-stop revealed after 2s
   const [stopClicked, setStopClicked] = useState(false);
   const [showForceStop, setShowForceStop] = useState(false);
   const forceStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset stop state once the build fully settles to idle
   useEffect(() => {
     if (!isBuilding && !isStopPending) {
       setStopClicked(false);
@@ -149,7 +154,7 @@ export function ChatPanel({
     }
   }, [isBuilding, isStopPending]);
 
-  // ─── BEO-182: Image state ─────────────────────────────────────────────────
+  // ─── Image attach state ───────────────────────────────────────────────────
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [pendingImagePreview, setPendingImagePreview] = useState<string | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null);
@@ -158,39 +163,36 @@ export function ChatPanel({
   const [imageError, setImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
-
-  const handleImageFile = useCallback(async (file: File) => {
-    setImageError(null);
-    if (file.size > MAX_IMAGE_BYTES) {
-      setImageError("Image must be under 10MB.");
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      setImageError("Only image files are supported.");
-      return;
-    }
-    // Preview (always — new projects have no projectId until the first build starts)
-    const objectUrl = URL.createObjectURL(file);
-    setPendingImageFile(file);
-    setPendingImagePreview(objectUrl);
-    setPendingImageUrl(null);
-
-    if (!projectId) {
-      return;
-    }
-
-    setImageUploading(true);
-    try {
-      const { imageUrl } = await uploadImage(file, projectId);
-      setPendingImageUrl(imageUrl);
-    } catch {
-      // Non-fatal: keep local file; image is sent as a data URL when the user sends.
+  const handleImageFile = useCallback(
+    async (file: File) => {
       setImageError(null);
-    } finally {
-      setImageUploading(false);
-    }
-  }, [projectId]);
+      if (file.size > MAX_IMAGE_BYTES) {
+        setImageError("Image must be under 10MB.");
+        return;
+      }
+      if (!file.type.startsWith("image/")) {
+        setImageError("Only image files are supported.");
+        return;
+      }
+      const objectUrl = URL.createObjectURL(file);
+      setPendingImageFile(file);
+      setPendingImagePreview(objectUrl);
+      setPendingImageUrl(null);
+
+      if (!projectId) return;
+
+      setImageUploading(true);
+      try {
+        const { imageUrl } = await uploadImage(file, projectId);
+        setPendingImageUrl(imageUrl);
+      } catch {
+        setImageError(null);
+      } finally {
+        setImageUploading(false);
+      }
+    },
+    [projectId],
+  );
 
   const clearPendingImage = useCallback(() => {
     if (pendingImagePreview) URL.revokeObjectURL(pendingImagePreview);
@@ -294,26 +296,13 @@ export function ChatPanel({
     if (pendingImageFile) {
       setImagePreparing(true);
       void fileToDataUrl(pendingImageFile)
-        .then(dataUrl => {
-          finishSend(dataUrl);
-        })
-        .catch(() => {
-          setImageError("Could not read image.");
-        })
-        .finally(() => {
-          setImagePreparing(false);
-        });
+        .then(dataUrl => finishSend(dataUrl))
+        .catch(() => setImageError("Could not read image."))
+        .finally(() => setImagePreparing(false));
       return;
     }
     finishSend();
-  }, [
-    input,
-    isBuilding,
-    pendingImageUrl,
-    pendingImageFile,
-    onSendMessage,
-    clearPendingImage,
-  ]);
+  }, [input, isBuilding, pendingImageUrl, pendingImageFile, onSendMessage, clearPendingImage]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -337,15 +326,13 @@ export function ChatPanel({
   );
 
   const hasMessages = messages.length > 0;
-  // While a build is in progress, suppress all in-flight building cards — they are
-  // replaced by BuildingShimmer. After BEO-459, type:"building" is always in-flight,
-  // so a simple type filter is sufficient (no need to check for .summary).
+  // While a build is in progress, suppress in-flight `building` messages —
+  // BuildProgressCard.Shimmer renders below the message list instead.
   const visibleMessages = isBuilding
     ? messages.filter(m => m.type !== "building")
     : messages;
-  const showBuildingShimmer = isBuilding;
+  const showShimmer = isBuilding;
 
-  // Send disabled when no text and no image, or out of credits
   const sendDisabled =
     (!input.trim() && !pendingImageUrl && !pendingImageFile)
     || outOfCredits
@@ -382,30 +369,30 @@ export function ChatPanel({
               <div key={msg.id}>
                 <ChatMessageView
                   message={msg}
+                  isBuilding={isBuilding}
+                  isNewMessage={!initialMsgIdsRef.current!.has(msg.id)}
                   onRetry={onRetry}
                   onReportIssue={onReportIssue}
                   onPopulateInput={populateInputWithoutSend}
                   onImplementPlan={onImplementPlan}
                   userAvatarUrl={userAvatarUrl}
                   userInitials={userInitials}
-                  isNewMessage={!initialMsgIdsRef.current!.has(msg.id)}
                 />
               </div>
             ))}
 
-            {/* BuildingShimmer or analysing-image indicator */}
-            {isBuilding && isAnalysingImage
-              ? <AnalysingImageCard />
-              : showBuildingShimmer
-                ? <BuildingShimmer isIteration={isIterationBuild} />
-                : null}
-
+            {/* In-flight build indicator: analysing-image card while we
+                wait for image_intent, otherwise the 4-step shimmer. */}
+            {isBuilding && isAnalysingImage ? (
+              <AnalysingImageCard />
+            ) : showShimmer ? (
+              <BuildProgressCard.Shimmer isIteration={isIterationBuild} />
+            ) : null}
           </div>
         )}
 
         <div ref={chatEndRef} />
 
-        {/* Scroll to bottom FAB */}
         {showScrollBtn && (
           <button
             onClick={scrollToBottom}
@@ -416,25 +403,26 @@ export function ChatPanel({
         )}
       </div>
 
-      {/* Suggestion chips above input */}
+      {/* Suggestion chips — pill style, 11px, 0.5px border, 20px radius */}
       {showChips && (
         <div className="flex flex-shrink-0 flex-wrap gap-1.5 px-3 pb-2">
           {suggestionChips!
             .filter(chip => !DB_CHIP_FILTER.test(chip))
             .map(chip => (
-            <button
-              key={chip}
-              onClick={() => handleChipClick(chip)}
-              className="rounded-[20px] px-2.5 py-[3px] text-[11px] text-[#9ca3af] transition-all hover:text-[#6b7280]"
-              style={{ border: "0.5px solid #e5e5e5" }}
-            >
-              {chip}
-            </button>
-          ))}
+              <button
+                key={chip}
+                onClick={() => handleChipClick(chip)}
+                className="rounded-[20px] px-2.5 py-[3px] text-[11px] text-[#9ca3af] transition-all hover:text-[#6b7280]"
+                style={{ border: "0.5px solid #e5e5e5" }}
+              >
+                {chip}
+              </button>
+            ))}
         </div>
       )}
 
-      {/* BEO-398: Sticky ImplementBar — between messages and input */}
+      {/* Floating ImplementBar — pinned above the input, never scrolls.
+          This is the ONLY Implement button on the page. */}
       {implementSuggestion && (
         <ImplementBar
           summary={implementSuggestion.summary}
@@ -445,7 +433,6 @@ export function ChatPanel({
 
       {/* Input bar */}
       <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
-        {/* BEO-396: Chat mode active indicator */}
         {chatModeActive && (
           <div className="mb-1.5 flex items-center gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full bg-[#F97316]/10 px-2 py-0.5 text-xs font-medium text-[#F97316]">
@@ -456,16 +443,14 @@ export function ChatPanel({
           </div>
         )}
 
-        {/* BEO-182: Image error */}
-        {imageError && (
-          <p className="mb-1.5 text-xs text-red-500">{imageError}</p>
-        )}
+        {imageError && <p className="mb-1.5 text-xs text-red-500">{imageError}</p>}
 
-        <div className={cn(
-          "rounded-xl border bg-white focus-within:border-[#F97316]/50",
-          chatModeActive ? "border-[#F97316]/30" : "border-[#e5e5e5]",
-        )}>
-          {/* BEO-182: Image thumbnail strip */}
+        <div
+          className={cn(
+            "rounded-xl border bg-white focus-within:border-[#F97316]/50",
+            chatModeActive ? "border-[#F97316]/30" : "border-[#e5e5e5]",
+          )}
+        >
           {pendingImagePreview && (
             <div className="flex items-center gap-2 px-3 pt-2">
               <div className="relative inline-flex">
@@ -495,7 +480,13 @@ export function ChatPanel({
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder={chatModeActive ? "Chat with Beomz…" : (!projectId ? "What are we building today?" : "Ask Beomz to build or change...")}
+              placeholder={
+                chatModeActive
+                  ? "Chat with Beomz…"
+                  : !projectId
+                    ? "What are we building today?"
+                    : "Ask Beomz to build or change..."
+              }
               rows={1}
               className="max-h-[120px] w-full resize-none bg-transparent text-sm text-[#1a1a1a] outline-none placeholder:text-[#9ca3af]"
             />
@@ -503,7 +494,6 @@ export function ChatPanel({
 
           <div className="flex items-center justify-between px-2 pb-1.5">
             <div className="flex items-center gap-0.5">
-              {/* BEO-182: Paperclip — opens file picker */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded p-1.5 text-[#9ca3af] transition-colors hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]"
@@ -546,11 +536,9 @@ export function ChatPanel({
 
             {isBuilding ? (
               <div className="flex flex-col items-end gap-1">
-                {/* Stop button — turns red immediately on click */}
                 <button
                   onClick={() => {
                     setStopClicked(true);
-                    // Arm force-stop reveal after 2s
                     if (forceStopTimerRef.current) clearTimeout(forceStopTimerRef.current);
                     forceStopTimerRef.current = setTimeout(() => {
                       forceStopTimerRef.current = null;
@@ -560,15 +548,12 @@ export function ChatPanel({
                   }}
                   className={cn(
                     "rounded-lg p-1.5 text-white transition-colors",
-                    stopClicked
-                      ? "bg-red-500 hover:bg-red-600"
-                      : "bg-[#1a1a1a] hover:bg-[#333]",
+                    stopClicked ? "bg-red-500 hover:bg-red-600" : "bg-[#1a1a1a] hover:bg-[#333]",
                   )}
                   title="Stop generating"
                 >
                   <Square size={14} />
                 </button>
-                {/* Force stop — appears 2s after stop click if still building */}
                 {showForceStop && (
                   <button
                     onClick={() => {
@@ -600,7 +585,6 @@ export function ChatPanel({
           </div>
         </div>
 
-        {/* Hidden file input */}
         <input
           ref={fileInputRef}
           type="file"
