@@ -4,6 +4,10 @@
  * BEO-725: extracted from the legacy ChatMessage.tsx unchanged. Owns its own
  * timer, fires `onDone` exactly once when the full string has been printed,
  * and renders rendered markdown inline via MarkdownText.
+ *
+ * BEO-729: During animation the partial `displayed` string is rendered as
+ * plain text (markdown stripped) so the cursor always stays on the same line.
+ * Once done, the full text swaps in as rich MarkdownText.
  */
 import { useEffect, useRef, useState } from "react";
 import { MarkdownText } from "./MarkdownText";
@@ -12,6 +16,14 @@ interface TypewriterTextProps {
   text: string;
   speed?: number;
   onDone?: () => void;
+}
+
+function stripMarkdown(t: string): string {
+  return t
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/#{1,6}\s/g, "")
+    .replace(/`(.*?)`/g, "$1");
 }
 
 export function TypewriterText({ text, speed = 20, onDone }: TypewriterTextProps) {
@@ -39,12 +51,14 @@ export function TypewriterText({ text, speed = 20, onDone }: TypewriterTextProps
     return () => clearInterval(id);
   }, [text, speed]);
 
+  if (done) {
+    return <MarkdownText text={text} />;
+  }
+
   return (
-    <>
-      <MarkdownText text={displayed} />
-      {!done && (
-        <span className="typewriter-cursor ml-0.5 inline-block align-middle text-[#F97316]">|</span>
-      )}
-    </>
+    <span>
+      {stripMarkdown(displayed)}
+      <span className="typewriter-cursor ml-0.5 inline-block align-middle text-[#F97316]">|</span>
+    </span>
   );
 }

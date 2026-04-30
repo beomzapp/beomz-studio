@@ -73,7 +73,7 @@ export function ChatMessageView({
     case "chat_response": {
       if (message.implementPlan) {
         if (isBuilding) return null;
-        return <AIIntroMessage content={message.content} isNewMessage={isNewMessage} />;
+        return <AIIntroMessage content={message.content} isNewMessage={isNewMessage} isBuilding={isBuilding} />;
       }
       return <AIChatResponse message={message} isNewMessage={isNewMessage} />;
     }

@@ -20,9 +20,13 @@ import { TypewriterText } from "./TypewriterText";
 interface AIIntroMessageProps {
   content: string;
   isNewMessage: boolean;
+  /** When a build is in flight this message must be invisible (BEO-729). */
+  isBuilding?: boolean;
 }
 
-export function AIIntroMessage({ content, isNewMessage }: AIIntroMessageProps) {
+export function AIIntroMessage({ content, isNewMessage, isBuilding }: AIIntroMessageProps) {
+  if (isBuilding) return null;
+
   return (
     <div className="flex items-start gap-2">
       <BAvatar />
