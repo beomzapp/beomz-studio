@@ -625,7 +625,7 @@ function AIMessage({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ─── BEO-719: Typewriter effect for build_summary messages ─────────────────
+// ─── BEO-719 / BEO-724: Typewriter effect ──────────────────────────────────
 
 function TypewriterText({ text, speed = 20, onDone }: { text: string; speed?: number; onDone?: () => void }) {
   const [displayed, setDisplayed] = useState("");
@@ -694,6 +694,41 @@ function BuildSummaryMessage({
             onSelectPrompt={prompt => onPopulateInput?.(prompt)}
           />
         </>
+      )}
+    </AIMessage>
+  );
+}
+
+// ─── BEO-724: AI intro message with TypewriterText + Implement button ─────────
+
+function IntroWithImplementCard({
+  message,
+  onImplementPlan,
+  isNew,
+}: {
+  message: Extract<ChatMessage, { type: "chat_response" }>;
+  onImplementPlan?: (plan: string, imageUrl?: string) => void;
+  isNew?: boolean;
+}) {
+  const [typewriterDone, setTypewriterDone] = useState(!isNew);
+  const handleTypewriterDone = useCallback(() => setTypewriterDone(true), []);
+
+  return (
+    <AIMessage>
+      <div className="text-sm leading-relaxed text-[#374151] break-words">
+        {isNew && !typewriterDone ? (
+          <TypewriterText text={message.content} onDone={handleTypewriterDone} />
+        ) : (
+          <MarkdownText text={message.content} />
+        )}
+      </div>
+      {typewriterDone && message.implementPlan && onImplementPlan && (
+        <button
+          onClick={() => onImplementPlan(message.implementPlan!)}
+          className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-[#F97316] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#ea6c10]"
+        >
+          🚀 Implement this
+        </button>
       )}
     </AIMessage>
   );
@@ -1083,6 +1118,15 @@ export function ChatMessageView({
       return <ServerRestartedCard onRetry={onRetry ?? (() => {})} />;
 
     case "chat_response":
+      if (message.implementPlan) {
+        return (
+          <IntroWithImplementCard
+            message={message}
+            onImplementPlan={onImplementPlan}
+            isNew={isNewMessage}
+          />
+        );
+      }
       return (
         <AIMessage>
           <div className="text-sm leading-relaxed text-[#374151] break-words">
