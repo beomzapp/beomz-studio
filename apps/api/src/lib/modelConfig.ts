@@ -9,10 +9,15 @@ let cacheTime = 0;
 
 const providerKeyCache = new Map<string, { key: string; ts: number }>();
 
+// Shared singleton — avoids re-creating the client on every call
+const studioDb = createClient(apiConfig.STUDIO_SUPABASE_URL, apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
 export const MODEL_DEFAULTS: Record<string, string> = {
-  web_apps: "claude-sonnet-4-6",
-  websites: "claude-sonnet-4-6",
-  agents: "claude-sonnet-4-6",
+  web_apps: "gpt-5.5-pro",
+  websites: "claude-sonnet-4-5-20251001",
+  agents: "claude-sonnet-4-5-20251001",
   chat: "claude-haiku-4-5-20251001",
 };
 
@@ -22,29 +27,20 @@ export interface ModelConfig {
   provider: string;
 }
 
-function createModelConfigClient() {
-  return createClient(apiConfig.STUDIO_SUPABASE_URL, apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
-
 export async function getModelForBuilder(
   builder: "web_apps" | "websites" | "agents" | "chat",
 ): Promise<string> {
   const now = Date.now();
   if (!cache || now - cacheTime > CACHE_TTL_MS) {
     try {
-      const client = createModelConfigClient();
-      const { data } = await client
+      const { data } = await studioDb
         .from("feature_flags")
         .select("value")
         .eq("key", "ai_models")
         .single();
       cache = (data?.value as Record<string, string>) ?? MODEL_DEFAULTS;
-    } catch {
+    } catch (err) {
+      console.error("[modelConfig] DB fetch failed:", err instanceof Error ? err.message : String(err));
       cache = MODEL_DEFAULTS;
     }
     cacheTime = now;
@@ -78,8 +74,7 @@ export async function getProviderApiKey(provider: string): Promise<string | null
   }
 
   try {
-    const client = createModelConfigClient();
-    const { data } = await client
+    const { data } = await studioDb
       .from("ai_providers")
       .select("api_key_encrypted, enabled")
       .eq("provider", provider)
@@ -92,7 +87,8 @@ export async function getProviderApiKey(provider: string): Promise<string | null
 
     providerKeyCache.set(provider, { key: decrypted, ts: Date.now() });
     return decrypted;
-  } catch {
+  } catch (err) {
+    console.error(`[modelConfig] getProviderApiKey(${provider}) failed:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
