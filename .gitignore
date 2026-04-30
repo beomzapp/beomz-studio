@@ -8,3 +8,4 @@ dist
 .env.*.local
 *.log
 .DS_Store
+apps/api/ecosystem.config.cjs
