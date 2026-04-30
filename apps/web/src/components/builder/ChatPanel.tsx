@@ -378,20 +378,23 @@ export function ChatPanel({
 
         {(hasMessages || isBuilding) && (
           <div className="min-w-0 space-y-4">
-            {visibleMessages.map(msg => (
-              <div key={msg.id}>
-                <ChatMessageView
-                  message={msg}
-                  onRetry={onRetry}
-                  onReportIssue={onReportIssue}
-                  onPopulateInput={populateInputWithoutSend}
-                  onImplementPlan={onImplementPlan}
-                  userAvatarUrl={userAvatarUrl}
-                  userInitials={userInitials}
-                  isNewMessage={!initialMsgIdsRef.current!.has(msg.id)}
-                />
-              </div>
-            ))}
+            {visibleMessages.map(msg => {
+              if (msg.type === 'chat_response' && msg.implementPlan) return null;
+              return (
+                <div key={msg.id}>
+                  <ChatMessageView
+                    message={msg}
+                    onRetry={onRetry}
+                    onReportIssue={onReportIssue}
+                    onPopulateInput={populateInputWithoutSend}
+                    onImplementPlan={onImplementPlan}
+                    userAvatarUrl={userAvatarUrl}
+                    userInitials={userInitials}
+                    isNewMessage={!initialMsgIdsRef.current!.has(msg.id)}
+                  />
+                </div>
+              );
+            })}
 
             {/* BuildingShimmer or analysing-image indicator */}
             {isBuilding && isAnalysingImage
