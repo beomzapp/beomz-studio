@@ -12,6 +12,7 @@ import {
   type AiModelSelections,
   type AiProvider,
   type AiProviderStatus,
+  type AvailableModel,
 } from "../lib/api.ts";
 import { useAuthToken } from "../lib/useAuthToken.ts";
 
@@ -70,52 +71,24 @@ const PROVIDERS: ProviderDef[] = [
     bgColor: "bg-pink-50",
     textColor: "text-pink-700",
   },
+  {
+    id: "dit",
+    name: "DIT.ai Exchange",
+    color: "#0d9488",
+    bgColor: "bg-teal-50",
+    textColor: "text-teal-700",
+  },
 ];
 
-// ── Model definitions ──────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-interface ModelOption {
-  id: string;
-  label: string;
-  provider: "anthropic" | "openai";
-  description: string;
+function groupBy<T>(arr: T[], keyFn: (item: T) => string): Record<string, T[]> {
+  return arr.reduce<Record<string, T[]>>((acc, item) => {
+    const key = keyFn(item);
+    (acc[key] ??= []).push(item);
+    return acc;
+  }, {});
 }
-
-const ANTHROPIC_MODELS: ModelOption[] = [
-  {
-    id: "claude-opus-4-5-20251001",
-    label: "claude-opus-4-5",
-    provider: "anthropic",
-    description: "Opus — most capable, slowest",
-  },
-  {
-    id: "claude-sonnet-4-5-20251001",
-    label: "claude-sonnet-4-5",
-    provider: "anthropic",
-    description: "Sonnet — balanced",
-  },
-  {
-    id: "claude-haiku-4-5-20251001",
-    label: "claude-haiku-4-5",
-    provider: "anthropic",
-    description: "Haiku — fastest, cheapest",
-  },
-];
-
-const OPENAI_MODELS: ModelOption[] = [
-  {
-    id: "gpt-4o",
-    label: "gpt-4o",
-    provider: "openai",
-    description: "GPT-4o — flagship",
-  },
-  {
-    id: "gpt-4o-mini",
-    label: "gpt-4o-mini",
-    provider: "openai",
-    description: "GPT-4o mini — faster, cheaper",
-  },
-];
 
 interface BuilderDef {
   key: AiModelKey;
@@ -151,26 +124,22 @@ const BUILDERS: BuilderDef[] = [
   },
 ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+const PROVIDER_BADGE_COLORS: Record<string, string> = {
+  anthropic: "bg-orange-100 text-orange-700",
+  openai: "bg-green-100 text-green-700",
+  google: "bg-blue-100 text-blue-700",
+  moonshot: "bg-violet-100 text-violet-700",
+  mistral: "bg-indigo-100 text-indigo-700",
+  groq: "bg-pink-100 text-pink-700",
+  dit: "bg-teal-100 text-teal-700",
+};
 
-function getProvider(modelId: string): "anthropic" | "openai" | null {
-  if (modelId.startsWith("claude")) return "anthropic";
-  if (modelId.startsWith("gpt")) return "openai";
-  return null;
-}
-
-function ProviderBadge({ provider }: { provider: "anthropic" | "openai" | null }) {
+function ProviderBadge({ provider }: { provider: string | null }) {
   if (!provider) return null;
-  const isAnthropic = provider === "anthropic";
+  const colors = PROVIDER_BADGE_COLORS[provider.toLowerCase()] ?? "bg-slate-100 text-slate-600";
   return (
-    <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
-        isAnthropic
-          ? "bg-orange-100 text-orange-700"
-          : "bg-green-100 text-green-700"
-      }`}
-    >
-      {isAnthropic ? "Anthropic" : "OpenAI"}
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${colors}`}>
+      {provider}
     </span>
   );
 }
@@ -218,18 +187,15 @@ function Toast({ message, type }: { message: string; type: ToastType }) {
 interface ModelRowProps {
   builder: BuilderDef;
   value: string;
-  openaiAvailable: boolean;
+  availableModels: AvailableModel[];
   onChange: (key: AiModelKey, model: string) => void;
 }
 
-function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) {
+function ModelRow({ builder, value, availableModels, onChange }: ModelRowProps) {
   const { key, name, description, icon: Icon } = builder;
-  const allModels = openaiAvailable
-    ? [...ANTHROPIC_MODELS, ...OPENAI_MODELS]
-    : ANTHROPIC_MODELS;
-
-  const activeModel = allModels.find((m) => m.id === value) ?? null;
-  const provider = activeModel ? activeModel.provider : getProvider(value);
+  const activeModel = availableModels.find((m) => m.id === value) ?? null;
+  const provider = activeModel?.provider ?? null;
+  const grouped = groupBy(availableModels, (m) => m.provider);
 
   return (
     <div className="flex items-center gap-4 px-5 py-4 bg-white border-b border-slate-100 last:border-0">
@@ -246,7 +212,7 @@ function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) 
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
         <span className="text-sm text-slate-700 font-mono truncate">
-          {activeModel?.label ?? value}
+          {activeModel?.name ?? value}
         </span>
         <ProviderBadge provider={provider} />
       </div>
@@ -257,22 +223,15 @@ function ModelRow({ builder, value, openaiAvailable, onChange }: ModelRowProps) 
           onChange={(e) => onChange(key, e.target.value)}
           className="text-sm border border-slate-200 rounded-md px-3 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent cursor-pointer"
         >
-          <optgroup label="Anthropic">
-            {ANTHROPIC_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} — {m.description}
-              </option>
-            ))}
-          </optgroup>
-          {openaiAvailable && (
-            <optgroup label="OpenAI">
-              {OPENAI_MODELS.map((m) => (
+          {Object.entries(grouped).map(([prov, models]) => (
+            <optgroup key={prov} label={prov.toUpperCase()}>
+              {models.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label} — {m.description}
+                  {m.name}{m.description ? ` — ${m.description}` : ""}
                 </option>
               ))}
             </optgroup>
-          )}
+          ))}
         </select>
       </div>
     </div>
@@ -484,11 +443,13 @@ interface ProviderCardProps {
   def: ProviderDef;
   status: AiProviderStatus | undefined;
   onConfigure: () => void;
+  onDisconnect: () => void;
 }
 
-function ProviderCard({ def, status, onConfigure }: ProviderCardProps) {
-  const connected = status?.connected ?? def.alwaysConnected ?? false;
-  const maskedKey = status?.masked_key;
+function ProviderCard({ def, status, onConfigure, onDisconnect }: ProviderCardProps) {
+  // Anthropic is always connected (server env key). For others, trust has_key from API.
+  const connected = def.alwaysConnected ? true : (status?.has_key ?? status?.connected ?? false);
+  const maskedKey = !def.alwaysConnected && connected ? status?.masked_key : undefined;
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg px-5 py-4 flex items-center gap-4">
@@ -516,20 +477,33 @@ function ProviderCard({ def, status, onConfigure }: ProviderCardProps) {
         </span>
       </div>
 
-      {/* Masked key */}
+      {/* Masked key (non-Anthropic connected) */}
       {maskedKey && (
         <span className="text-xs text-slate-400 font-mono shrink-0">{maskedKey}</span>
       )}
 
-      {/* Configure button */}
-      {!def.alwaysConnected && (
-        <button
-          type="button"
-          onClick={onConfigure}
-          className="shrink-0 px-3 py-1.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 transition-colors"
-        >
-          Configure
-        </button>
+      {/* Anthropic: server key label — no action buttons */}
+      {def.alwaysConnected ? (
+        <span className="text-xs text-slate-400 shrink-0">Uses server API key</span>
+      ) : (
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onConfigure}
+            className="px-3 py-1.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            Configure
+          </button>
+          {connected && (
+            <button
+              type="button"
+              onClick={onDisconnect}
+              className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-md hover:bg-red-50 transition-colors"
+            >
+              Disconnect
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -583,9 +557,22 @@ function ProvidersTab({ token, showToast }: ProvidersTabProps) {
 
   const handleDeleted = (provider: AiProvider) => {
     setStatuses((prev) =>
-      prev.map((s) => (s.provider === provider ? { ...s, connected: false, masked_key: undefined } : s)),
+      prev.map((s) =>
+        s.provider === provider
+          ? { ...s, connected: false, has_key: false, masked_key: undefined }
+          : s,
+      ),
     );
     showToast(`${PROVIDERS.find((p) => p.id === provider)?.name ?? provider} removed`, "success");
+  };
+
+  const handleDisconnect = async (provider: AiProvider) => {
+    try {
+      await deleteProvider(token, provider);
+      handleDeleted(provider);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Failed to disconnect", "error");
+    }
   };
 
   const configuringDef = PROVIDERS.find((p) => p.id === configuring);
@@ -616,6 +603,7 @@ function ProvidersTab({ token, showToast }: ProvidersTabProps) {
             def={def}
             status={getStatus(def.id)}
             onConfigure={() => setConfiguring(def.id)}
+            onDisconnect={() => { void handleDisconnect(def.id); }}
           />
         ))}
       </div>
@@ -644,7 +632,7 @@ interface ModelsTabProps {
 function ModelsTab({ token, showToast }: ModelsTabProps) {
   const [serverModels, setServerModels] = useState<AiModelSelections>(DEFAULT_AI_MODELS);
   const [draft, setDraft] = useState<AiModelSelections>(DEFAULT_AI_MODELS);
-  const [openaiAvailable, setOpenaiAvailable] = useState(false);
+  const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -654,7 +642,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
     setLoadError(null);
     try {
       const data = await fetchAdminAiModels(token);
-      const { openai_available, ...models } = data;
+      const { availableModels: avail, ...models } = data;
       const selections: AiModelSelections = {
         ...DEFAULT_AI_MODELS,
         web_apps: models.web_apps ?? DEFAULT_AI_MODELS.web_apps,
@@ -664,7 +652,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
       };
       setServerModels(selections);
       setDraft(selections);
-      setOpenaiAvailable(openai_available ?? false);
+      if (avail && avail.length > 0) setAvailableModels(avail);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load AI model settings");
     } finally {
@@ -695,7 +683,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
     setServerModels(draft);
     try {
       const data = await postAdminAiModels(token, draft);
-      const { openai_available, ...models } = data;
+      const { availableModels: avail, ...models } = data;
       const saved: AiModelSelections = {
         ...DEFAULT_AI_MODELS,
         web_apps: models.web_apps ?? draft.web_apps,
@@ -705,7 +693,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
       };
       setServerModels(saved);
       setDraft(saved);
-      if (openai_available !== undefined) setOpenaiAvailable(openai_available);
+      if (avail && avail.length > 0) setAvailableModels(avail);
       showToast("Model settings saved — changes apply to all new builds immediately", "success");
     } catch (e) {
       setServerModels(previousServer);
@@ -789,7 +777,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
               key={builder.key}
               builder={builder}
               value={draft[builder.key]}
-              openaiAvailable={openaiAvailable}
+              availableModels={availableModels}
               onChange={handleChange}
             />
           ))}
@@ -797,22 +785,15 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
       )}
 
       {/* Provider legend */}
-      {!loading && (
-        <div className="flex items-center gap-4 text-xs text-slate-500">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold uppercase tracking-wide">
-              Anthropic
+      {!loading && availableModels.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          {[...new Set(availableModels.map((m) => m.provider))].map((prov) => (
+            <span key={prov} className="flex items-center gap-1.5">
+              <ProviderBadge provider={prov} />
+              {availableModels.filter((m) => m.provider === prov).length} model
+              {availableModels.filter((m) => m.provider === prov).length !== 1 ? "s" : ""}
             </span>
-            Claude models
-          </span>
-          {openaiAvailable && (
-            <span className="flex items-center gap-1.5">
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-semibold uppercase tracking-wide">
-                OpenAI
-              </span>
-              GPT models (OPENAI_API_KEY detected)
-            </span>
-          )}
+          ))}
         </div>
       )}
     </>

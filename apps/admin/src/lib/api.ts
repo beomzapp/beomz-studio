@@ -283,11 +283,13 @@ export async function patchAdminFeatureFlags(
 
 // ── Admin: AI Providers ───────────────────────────────────────────────────────
 
-export type AiProvider = "anthropic" | "openai" | "google" | "moonshot" | "mistral" | "groq";
+export type AiProvider = "anthropic" | "openai" | "google" | "moonshot" | "mistral" | "groq" | "dit";
 
 export interface AiProviderStatus {
   provider: AiProvider;
   connected: boolean;
+  has_key?: boolean;
+  enabled?: boolean;
   masked_key?: string;
 }
 
@@ -362,8 +364,16 @@ export type AiModelKey = "web_apps" | "websites" | "agents" | "chat_plan";
 
 export type AiModelSelections = Record<AiModelKey, string>;
 
+export interface AvailableModel {
+  id: string;
+  name: string;
+  provider: string;
+  description?: string;
+}
+
 export interface AiModelsResponse extends AiModelSelections {
   openai_available?: boolean;
+  availableModels?: AvailableModel[];
 }
 
 export const DEFAULT_AI_MODELS: AiModelSelections = {
