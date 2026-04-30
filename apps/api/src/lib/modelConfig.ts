@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 import { apiConfig } from "../config.js";
 import { decryptProjectSecret } from "./projectSecrets.js";
@@ -9,7 +9,8 @@ let cacheTime = 0;
 
 const providerKeyCache = new Map<string, { key: string; ts: number }>();
 
-let _studioDb: ReturnType<typeof createClient> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _studioDb: SupabaseClient<any> | null = null;
 
 function getStudioDb() {
   if (!_studioDb) {
