@@ -23,6 +23,10 @@ module.exports = {
         NODE_ENV: "production",
         MOCK_ANTHROPIC: process.env.MOCK_ANTHROPIC,
         TAVILY_API_KEY: process.env.TAVILY_API_KEY,
+        STUDIO_SUPABASE_URL: process.env.STUDIO_SUPABASE_URL,
+        STUDIO_SUPABASE_SERVICE_ROLE_KEY: process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY,
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+        ENCRYPTION_SECRET: process.env.ENCRYPTION_SECRET,
       },
     },
     {
