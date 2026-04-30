@@ -1,5 +1,6 @@
 const path = require("node:path");
-require("dotenv").config({ path: path.join(__dirname, ".env.local") });
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+require("dotenv").config({ path: path.join(__dirname, ".env.local"), override: true });
 
 // PM2 ecosystem config for beomz-api.
 // BEO-418: pm2 reload should give active SSE streams time to drain while the
