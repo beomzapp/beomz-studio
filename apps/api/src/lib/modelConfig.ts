@@ -57,7 +57,7 @@ export function invalidateModelCache(): void {
   cacheTime = 0;
 }
 
-function inferProviderFromModel(model: string): string {
+export function inferProviderFromModel(model: string): string {
   if (model.startsWith("claude-")) return "anthropic";
   if (model.startsWith("gpt-") || model.startsWith("o1") || model.startsWith("o3")) return "openai";
   if (model.startsWith("gemini-")) return "google";
@@ -110,6 +110,7 @@ export async function getModelConfigForBuilder(
 ): Promise<ModelConfig> {
   const model = await getModelForBuilder(builder);
   const provider = inferProviderFromModel(model);
+  console.log("[build/model]", { builder, model, provider });
   const apiKey = (await getProviderApiKey(provider)) ?? apiConfig.ANTHROPIC_API_KEY;
   return { model, apiKey, provider };
 }

@@ -107,7 +107,7 @@ import { uploadProjectAsset } from "../../lib/images/index.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
 import { injectUrlContextIntoBuildPrompt, loadUrlContext } from "../../lib/webFetch.js";
 import { provisionProjectDatabase } from "../db/enable.js";
-import { getModelForBuilder, getProviderApiKey } from "../../lib/modelConfig.js";
+import { getModelForBuilder, getProviderApiKey, inferProviderFromModel } from "../../lib/modelConfig.js";
 
 export {
   buildIterationSystemPrompt,
@@ -2669,7 +2669,7 @@ async function callModelCustomise(
   dbContextBlock?: string,
   abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
-  console.log("[generate] calling model:", model);
+  console.log("[build/model]", { builder: "web_apps", model, provider: inferProviderFromModel(model) });
 
   const designSystemId = contextBuilder.detectDesignSystem(prompt);
   const designSystemSpec = designSystemId ? contextBuilder.getDesignSystemSpec(designSystemId) : undefined;
@@ -2768,7 +2768,7 @@ async function callModelIterate(
   abortSignal?: AbortSignal,
   dbContextBlock?: string,
 ): Promise<CustomiseResult> {
-  console.log("[generate] iterating with model:", model);
+  console.log("[build/model]", { builder: "web_apps", model, provider: inferProviderFromModel(model) });
   throwIfAborted(abortSignal);
   const isIteration = Boolean(instrumentation?.isIteration);
   const maxTokens = isIteration ? ITERATION_MAX_TOKENS : DEFAULT_BUILD_MAX_TOKENS;
