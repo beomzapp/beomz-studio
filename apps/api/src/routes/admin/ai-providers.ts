@@ -9,6 +9,22 @@ import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { requireAdmin } from "../../middleware/requireAdmin.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 
+const encryptionEnabled = Boolean(apiConfig.ENCRYPTION_SECRET?.trim());
+if (!encryptionEnabled) {
+  console.warn("[ai-providers] ENCRYPTION_SECRET is not set — API keys will be stored without encryption. Set ENCRYPTION_SECRET in .env to enable encryption.");
+}
+
+function safeEncrypt(value: string): string {
+  if (!encryptionEnabled) return value;
+  return encryptProjectSecret(value);
+}
+
+function safeDecrypt(value: string | null): string | null {
+  if (!value) return null;
+  if (!encryptionEnabled) return value;
+  return decryptProjectSecret(value);
+}
+
 interface AiProviderRow {
   id: string;
   provider: string;
@@ -34,7 +50,7 @@ function createStudioClient() {
 
 function maskApiKey(encrypted: string | null): string | null {
   if (!encrypted) return null;
-  const decrypted = decryptProjectSecret(encrypted);
+  const decrypted = safeDecrypt(encrypted);
   if (!decrypted || decrypted.length < 4) return "****";
   return `****${decrypted.slice(-4)}`;
 }
@@ -127,7 +143,7 @@ export function createAdminAiProvidersRoute(deps: AdminAiProvidersRouteDeps = {}
         return c.json({ error: "api_key is required." }, 400);
       }
 
-      const encrypted = encryptProjectSecret(rawKey);
+      const encrypted = safeEncrypt(rawKey);
       const db = createStudioClient();
 
       const { data, error } = await db
@@ -191,7 +207,7 @@ export function createAdminAiProvidersRoute(deps: AdminAiProvidersRouteDeps = {}
         return c.json({ success: false, error: "Provider not enabled or has no API key." });
       }
 
-      const decrypted = decryptProjectSecret(data.api_key_encrypted);
+      const decrypted = safeDecrypt(data.api_key_encrypted);
       if (!decrypted) {
         return c.json({ success: false, error: "Failed to decrypt API key." });
       }

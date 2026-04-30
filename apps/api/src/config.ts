@@ -73,6 +73,8 @@ const envSchema = z.object({
   VERCEL_TOKEN: z.string().min(1).optional(),
   VERCEL_PROJECT_ID: z.string().min(1).optional(),
   VERCEL_TEAM_ID: z.string().min(1).optional(),
+  // AES-256-GCM key for encrypting AI provider keys at rest
+  ENCRYPTION_SECRET: z.string().min(1).optional(),
 });
 
 export type ApiConfig = z.infer<typeof envSchema>;

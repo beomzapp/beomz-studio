@@ -13,7 +13,8 @@ const AUTH_TAG_LENGTH_BYTES = 16;
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 
 function getProjectSecretBase(): string {
-  return apiConfig.PROJECT_JWT_SECRET?.trim()
+  return apiConfig.ENCRYPTION_SECRET?.trim()
+    || apiConfig.PROJECT_JWT_SECRET?.trim()
     || apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY;
 }
 
