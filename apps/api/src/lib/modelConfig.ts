@@ -9,10 +9,16 @@ let cacheTime = 0;
 
 const providerKeyCache = new Map<string, { key: string; ts: number }>();
 
-// Shared singleton — avoids re-creating the client on every call
-const studioDb = createClient(apiConfig.STUDIO_SUPABASE_URL, apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+let _studioDb: ReturnType<typeof createClient> | null = null;
+
+function getStudioDb() {
+  if (!_studioDb) {
+    _studioDb = createClient(apiConfig.STUDIO_SUPABASE_URL, apiConfig.STUDIO_SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+  }
+  return _studioDb;
+}
 
 export const MODEL_DEFAULTS: Record<string, string> = {
   web_apps: "gpt-5.5-pro",
@@ -30,10 +36,11 @@ export interface ModelConfig {
 export async function getModelForBuilder(
   builder: "web_apps" | "websites" | "agents" | "chat",
 ): Promise<string> {
+  console.log("[modelConfig] STUDIO_SUPABASE_URL:", apiConfig.STUDIO_SUPABASE_URL ? "set" : "MISSING");
   const now = Date.now();
   if (!cache || now - cacheTime > CACHE_TTL_MS) {
     try {
-      const { data } = await studioDb
+      const { data } = await getStudioDb()
         .from("feature_flags")
         .select("value")
         .eq("key", "ai_models")
@@ -74,7 +81,7 @@ export async function getProviderApiKey(provider: string): Promise<string | null
   }
 
   try {
-    const { data } = await studioDb
+    const { data } = await getStudioDb()
       .from("ai_providers")
       .select("api_key_encrypted, enabled")
       .eq("provider", provider)
