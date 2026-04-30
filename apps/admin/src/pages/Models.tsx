@@ -177,18 +177,31 @@ function ProviderBadge({ provider }: { provider: "anthropic" | "openai" | null }
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
 
-function Toast({ message, type }: { message: string; type: "success" | "error" }) {
+type ToastType = "success" | "error" | "warning";
+
+function Toast({ message, type }: { message: string; type: ToastType }) {
+  const bg =
+    type === "success"
+      ? "bg-green-600 text-white"
+      : type === "warning"
+        ? "bg-amber-500 text-white"
+        : "bg-red-600 text-white";
+
   return (
     <div
-      className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all ${
-        type === "success"
-          ? "bg-green-600 text-white"
-          : "bg-red-600 text-white"
-      }`}
+      className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium transition-all ${bg}`}
     >
       {type === "success" ? (
         <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ) : type === "warning" ? (
+        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+          />
         </svg>
       ) : (
         <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -275,7 +288,7 @@ interface ConfigureModalProps {
   status: AiProviderStatus | undefined;
   token: string;
   onClose: () => void;
-  onSaved: (updated: AiProviderStatus) => void;
+  onSaved: (updated: AiProviderStatus, verified: boolean) => void;
   onDeleted: (provider: AiProvider) => void;
 }
 
@@ -299,7 +312,8 @@ function ConfigureModal({
   }, []);
 
   const isConnected = status?.connected ?? providerDef.alwaysConnected ?? false;
-  const canSave = testState === "success" && apiKey.trim().length > 0;
+  const hasKey = apiKey.trim().length > 0;
+  const canSave = hasKey;
 
   const handleTest = async () => {
     if (!apiKey.trim()) return;
@@ -325,7 +339,7 @@ function ConfigureModal({
     setSaving(true);
     try {
       const updated = await saveProviderKey(token, providerDef.id, apiKey.trim());
-      onSaved(updated);
+      onSaved(updated, testState === "success");
       onClose();
     } catch (e) {
       setTestState("error");
@@ -525,7 +539,7 @@ function ProviderCard({ def, status, onConfigure }: ProviderCardProps) {
 
 interface ProvidersTabProps {
   token: string;
-  showToast: (message: string, type: "success" | "error") => void;
+  showToast: (message: string, type: ToastType) => void;
 }
 
 function ProvidersTab({ token, showToast }: ProvidersTabProps) {
@@ -553,13 +567,18 @@ function ProvidersTab({ token, showToast }: ProvidersTabProps) {
 
   const getStatus = (id: AiProvider) => statuses.find((s) => s.provider === id);
 
-  const handleSaved = (updated: AiProviderStatus) => {
+  const handleSaved = (updated: AiProviderStatus, verified: boolean) => {
     setStatuses((prev) => {
       const existing = prev.find((s) => s.provider === updated.provider);
       if (existing) return prev.map((s) => (s.provider === updated.provider ? updated : s));
       return [...prev, updated];
     });
-    showToast(`${PROVIDERS.find((p) => p.id === updated.provider)?.name ?? updated.provider} connected`, "success");
+    const providerName = PROVIDERS.find((p) => p.id === updated.provider)?.name ?? updated.provider;
+    if (verified) {
+      showToast(`${providerName} connected`, "success");
+    } else {
+      showToast("Key saved — run a build to verify it works", "warning");
+    }
   };
 
   const handleDeleted = (provider: AiProvider) => {
@@ -619,7 +638,7 @@ function ProvidersTab({ token, showToast }: ProvidersTabProps) {
 
 interface ModelsTabProps {
   token: string;
-  showToast: (message: string, type: "success" | "error") => void;
+  showToast: (message: string, type: ToastType) => void;
 }
 
 function ModelsTab({ token, showToast }: ModelsTabProps) {
@@ -807,9 +826,9 @@ type TabId = "providers" | "models";
 export default function ModelsPage() {
   const token = useAuthToken();
   const [activeTab, setActiveTab] = useState<TabId>("providers");
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
 
-  const showToast = (message: string, type: "success" | "error") => {
+  const showToast = (message: string, type: ToastType) => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
