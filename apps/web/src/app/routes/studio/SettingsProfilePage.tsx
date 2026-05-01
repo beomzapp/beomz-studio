@@ -38,8 +38,8 @@ const REFERRAL_OPTIONS = [
 
 const PLAN_LABELS: Record<string, string> = {
   free: "Free",
-  pro_starter: "Pro Starter",
-  pro_builder: "Pro Builder",
+  pro_starter: "Starter",
+  pro_builder: "Pro",
   business: "Business",
 };
 

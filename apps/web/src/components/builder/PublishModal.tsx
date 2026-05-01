@@ -58,10 +58,10 @@ interface PublishModalProps {
   onVercelUnpublished?: () => void;
   /** BEO-576: called after active domain is removed so parent state is cleared. */
   onDomainRemoved?: () => void;
-  /** Same gating as TopBar: Pro Builder+ can export; optional so embedders can omit. */
+  /** Same gating as TopBar: Pro+ can export; optional so embedders can omit. */
   onExportZip?: () => void;
   isExporting?: boolean;
-  /** BEO-656: BYO hosting handler for Pro Builder+; omit to show "Coming soon". */
+  /** BEO-656: BYO hosting handler for Pro+; omit to show "Coming soon". */
   onByoHosting?: () => void;
 }
 
@@ -392,7 +392,7 @@ export function PublishModal({
 }
 
 // ─────────────────────────────────────────────────────────────
-// BEO-656 — Export ZIP card (locked for free/starter, full card for Pro Builder+)
+// BEO-656 — Export ZIP card (locked for free/starter, full card for Pro+)
 // ─────────────────────────────────────────────────────────────
 function ExportZipCard({
   plan,
@@ -418,7 +418,7 @@ function ExportZipCard({
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-[#1a1a1a]">Export ZIP</span>
             <span className="flex items-center gap-1 rounded-full bg-[#e5e5e5] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
-              <Lock size={8} /> Pro Builder+
+              <Lock size={8} /> Pro+
             </span>
           </div>
           <p className="mt-0.5 text-xs text-[#6b7280]">
@@ -460,7 +460,7 @@ function ExportZipCard({
 }
 
 // ─────────────────────────────────────────────────────────────
-// BEO-656 — BYO Hosting card (locked for free/starter, full card for Pro Builder+)
+// BEO-656 — BYO Hosting card (locked for free/starter, full card for Pro+)
 // ─────────────────────────────────────────────────────────────
 function ByoHostingCard({
   plan,
@@ -484,7 +484,7 @@ function ByoHostingCard({
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-[#1a1a1a]">BYO Hosting</span>
             <span className="flex items-center gap-1 rounded-full bg-[#e5e5e5] px-2 py-0.5 text-[10px] font-semibold text-[#6b7280]">
-              <Lock size={8} /> Pro Builder+
+              <Lock size={8} /> Pro+
             </span>
           </div>
           <p className="mt-0.5 text-xs text-[#6b7280]">

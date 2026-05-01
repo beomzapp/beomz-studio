@@ -153,8 +153,8 @@ function CreditsCard() {
   const remainingPct = total > 0 ? Math.min(100, (balance / total) * 100) : 0;
 
   const planLabel =
-    planKey === "pro_starter" ? "Pro Starter" :
-    planKey === "pro_builder" ? "Pro Builder" :
+    planKey === "pro_starter" ? "Starter" :
+    planKey === "pro_builder" ? "Pro" :
     planKey === "business" ? "Business" :
     "Free";
 

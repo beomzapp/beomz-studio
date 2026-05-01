@@ -37,9 +37,9 @@ const PLANS: Plan[] = [
   },
   {
     id: "starter",
-    name: "Pro Starter",
+    name: "Starter",
     priceMonthly: 19,
-    credits: "2,000 credits/mo",
+    credits: "1,000 credits/mo",
     bonus: "",
     features: [
       "5 projects",
@@ -51,9 +51,9 @@ const PLANS: Plan[] = [
   },
   {
     id: "builder",
-    name: "Pro Builder",
+    name: "Pro",
     priceMonthly: 39,
-    credits: "4,000 credits/mo",
+    credits: "2,000 credits/mo",
     bonus: "",
     features: [
       "Unlimited projects",
@@ -70,10 +70,10 @@ const PLANS: Plan[] = [
     id: "business",
     name: "Business",
     priceMonthly: 199,
-    credits: "20,000 credits/mo",
+    credits: "10,000 credits/mo",
     bonus: "",
     features: [
-      "Everything in Pro Builder",
+      "Everything in Pro",
       "Dedicated support",
       "SSO & SAML",
       "Custom contracts",

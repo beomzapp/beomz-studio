@@ -84,7 +84,7 @@ const FAQ_ITEMS: FaqItem[] = [
     category: "Credits & Billing",
     question: "What are the paid plans?",
     answer:
-      "Pro Starter at $19/mo includes 300 credits. Pro Builder at $39/mo includes 750 credits. Business at $199/mo includes 4,000 credits. All paid plans include unlimited projects, custom domains, and rollover credits.",
+      "Starter at $19/mo includes 1,000 credits. Pro at $39/mo includes 2,000 credits. Business at $199/mo includes 10,000 credits. All paid plans include unlimited projects, custom domains, and rollover credits.",
   },
 
   // Building Apps

@@ -236,8 +236,8 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
       : (PLAN_CREDITS[planKey] ?? 0);
   const remainingPct = planTotal > 0 ? Math.min(100, (totalBalance / planTotal) * 100) : 0;
   const planLabel =
-    planKey === "pro_starter" ? "Pro Starter" :
-    planKey === "pro_builder" ? "Pro Builder" :
+    planKey === "pro_starter" ? "Starter" :
+    planKey === "pro_builder" ? "Pro" :
     planKey === "business" ? "Business" :
     "Free";
   const subLabel =

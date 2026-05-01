@@ -19,8 +19,8 @@ import {
 
 const PLAN_META: Record<string, { label: string; price: string }> = {
   free: { label: "Free", price: "$0" },
-  pro_starter: { label: "Pro Starter", price: "$19/mo" },
-  pro_builder: { label: "Pro Builder", price: "$39/mo" },
+  pro_starter: { label: "Starter", price: "$19/mo" },
+  pro_builder: { label: "Pro", price: "$39/mo" },
   business: { label: "Business", price: "$199/mo" },
 };
 

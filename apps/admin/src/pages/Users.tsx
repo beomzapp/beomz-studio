@@ -33,8 +33,8 @@ function formatDate(iso: string | null | undefined): string {
 
 const PLAN_LABELS: Record<string, string> = {
   free: "Free",
-  pro_starter: "Pro Starter",
-  pro_builder: "Pro Builder",
+  pro_starter: "Starter",
+  pro_builder: "Pro",
   business: "Business",
 };
 
@@ -59,8 +59,8 @@ function PlanBadge({ plan }: { plan: string }) {
 const PLAN_OPTIONS = [
   { value: "", label: "All Plans" },
   { value: "free", label: "Free" },
-  { value: "pro_starter", label: "Pro Starter" },
-  { value: "pro_builder", label: "Pro Builder" },
+  { value: "pro_starter", label: "Starter" },
+  { value: "pro_builder", label: "Pro" },
   { value: "business", label: "Business" },
 ];
 
