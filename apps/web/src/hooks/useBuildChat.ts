@@ -402,6 +402,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const latestStageChecklistRef = useRef<ReturnType<typeof makeInitialChecklist> | null>(null);
   const latestStagePhaseRef = useRef<string | undefined>(undefined);
   const summaryDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BEO-733: stores a function that immediately finalises the in-flight building
+  // message to build_summary.  Invoked by clearPreambleAndStageTimers when the
+  // drain animation is cancelled mid-flight so the Done card stays in the right
+  // position (before any new-iteration messages) rather than being appended later.
+  const flushSummaryRef = useRef<(() => void) | null>(null);
   // BEO-399: set true when server-ready fires before prior checklist items finish dwell
   const serverReadyPendingRef = useRef(false);
 
@@ -438,7 +443,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     if (summaryDrainTimerRef.current) {
       clearTimeout(summaryDrainTimerRef.current);
       summaryDrainTimerRef.current = null;
+      // BEO-733: drain was in-progress when cancelled — flush immediately so the
+      // Done card is already in the correct position before any new-iteration
+      // messages are appended (user message + plan card).
+      flushSummaryRef.current?.();
     }
+    flushSummaryRef.current = null;
     serverReadyPendingRef.current = false;
   }, []);
 
@@ -889,6 +899,22 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             return next;
           };
 
+          // BEO-733: register an immediate-flush function so that if the user sends
+          // an iteration request while the checklist drain animation is still running,
+          // clearPreambleAndStageTimers() can call this to instantly convert the
+          // building card to build_summary before any iteration messages are appended.
+          // The function self-disables on first call and guards against duplicates.
+          const capturedBid = bid;
+          flushSummaryRef.current = () => {
+            flushSummaryRef.current = null;
+            setMessages(prev => {
+              if (prev.some(m => m.type === "build_summary")) return prev;
+              const j = findLiveBuildingIndex(prev, capturedBid);
+              if (j === -1) return pushOrphanSummary(prev);
+              return finalizeBuilding(prev, j);
+            });
+          };
+
           const drainStartedAt = Date.now();
 
           const runDrainStep = () => {
@@ -900,12 +926,14 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               if (b.summary) return prev;
               const checklist = b.checklist ?? makeInitialChecklist();
               if (checklist.every(i => i.status === "done")) {
+                flushSummaryRef.current = null;
                 return finalizeBuilding(prev, j);
               }
               const stepped = stepChecklistOnceTowardAllDone(checklist);
               const next = [...prev];
               next[j] = { ...b, checklist: stepped };
               if (stepped.every(i => i.status === "done")) {
+                flushSummaryRef.current = null;
                 return finalizeBuilding(next, j);
               }
               const elapsed = Date.now() - drainStartedAt;
@@ -921,13 +949,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           };
 
           setMessages(prev => {
-            if (!bid) return pushOrphanSummary(prev);
+            if (!bid) {
+              flushSummaryRef.current = null;
+              return pushOrphanSummary(prev);
+            }
             const idx = findLiveBuildingIndex(prev, bid);
-            if (idx === -1) return pushOrphanSummary(prev);
+            if (idx === -1) {
+              flushSummaryRef.current = null;
+              return pushOrphanSummary(prev);
+            }
 
             const existing = prev[idx] as BuildingMsg;
             const cl = existing.checklist ?? makeInitialChecklist();
             if (cl.every(i => i.status === "done")) {
+              flushSummaryRef.current = null;
               return finalizeBuilding(prev, idx);
             }
 
@@ -935,6 +970,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             const first = [...prev];
             first[idx] = { ...existing, checklist: stepped };
             if (stepped.every(i => i.status === "done")) {
+              flushSummaryRef.current = null;
               return finalizeBuilding(first, idx);
             }
             const elapsed = Date.now() - drainStartedAt;
