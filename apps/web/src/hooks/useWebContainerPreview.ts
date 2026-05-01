@@ -91,44 +91,60 @@ async function hotPatchFiles(
   currentFiles: readonly StudioFile[],
   currentProject: Pick<Project, "id" | "name" | "templateId">,
   previousSnapshot: ReadonlyMap<string, string>,
-): Promise<{ written: number; deleted: number }> {
+): Promise<{ written: number; deleted: number; failedPaths: string[] }> {
   const nextPaths = new Set<string>();
-  const writes: Promise<void>[] = [];
+  const writeJobs: { path: string; promise: Promise<void> }[] = [];
 
   for (const file of currentFiles) {
     const path = normalizeGeneratedPath(file.path);
     nextPaths.add(path);
     if (previousSnapshot.get(path) !== file.content) {
-      writes.push(writeFileEnsuringDir(wc, path, file.content));
+      writeJobs.push({ path, promise: writeFileEnsuringDir(wc, path, file.content) });
     }
   }
 
   // Remove files that were in the previous snapshot but are no longer
   // present — keeps the running tree in sync so deleted files don't
   // shadow newly added ones via Vite's module cache.
-  const deletions: Promise<void>[] = [];
+  const deletionJobs: { path: string; promise: Promise<void> }[] = [];
   for (const path of previousSnapshot.keys()) {
     if (!nextPaths.has(path)) {
-      deletions.push(wc.fs.rm(path).catch(() => { /* already gone */ }));
+      deletionJobs.push({
+        path,
+        promise: wc.fs.rm(path).catch(() => { /* already gone */ }),
+      });
     }
   }
 
-  // Always rewrite runtime.json — the route manifest depends on the current
-  // file set, and a cached stale manifest would cause Vite to render the old
-  // entry component until the next full reload.
-  writes.push(
-    writeFileEnsuringDir(
+  // BEO-737 A12: report which paths failed instead of letting a single
+  // rejection abort the whole batch. Use Promise.allSettled so the runtime
+  // manifest is only written if every source-file write succeeded — this
+  // guarantees the manifest is never ahead of the actual file set.
+  const sourceResults = await Promise.allSettled([
+    ...writeJobs.map(j => j.promise),
+    ...deletionJobs.map(j => j.promise),
+  ]);
+  const allJobs = [...writeJobs, ...deletionJobs];
+  const failedPaths: string[] = [];
+  sourceResults.forEach((r, i) => {
+    if (r.status === "rejected") failedPaths.push(allJobs[i].path);
+  });
+
+  // BEO-737 A12: write runtime.json LAST — only after every source file is
+  // committed to disk. If any source write failed, the manifest stays at its
+  // previous (consistent) state and the caller surfaces the error.
+  if (failedPaths.length === 0) {
+    await writeFileEnsuringDir(
       wc,
       "apps/web/src/.beomz/runtime.json",
       buildRuntimeJson(currentFiles, currentProject),
-    ),
-  );
-
-  await Promise.all([...writes, ...deletions]);
+    );
+  }
 
   return {
-    written: writes.length,
-    deleted: deletions.length,
+    written: writeJobs.length,
+    deleted: deletionJobs.length,
+    failedPaths,
   };
 }
 
@@ -434,7 +450,21 @@ export function useWebContainerPreview(
         // its module graph; per-file writes here would fight with Vite's
         // initial dep optimisation.
         const tree = buildPreviewFileTree(currentFiles, currentProject, dbEnvRef.current, scaffoldTypeRef.current);
-        await wc.mount(tree);
+        try {
+          await wc.mount(tree);
+        } catch (err) {
+          // BEO-737 A12: surface mount failures rather than letting them
+          // bubble as unhandled rejections. The preview is unrecoverable
+          // without a successful mount.
+          console.error("[BEO-737 A12] wc.mount(first build) failed", err);
+          setStatus("error");
+          setProgressMessage(
+            err instanceof Error
+              ? `Preview mount failed: ${err.message}`
+              : "Preview mount failed.",
+          );
+          return;
+        }
       } else {
         // BEO-586 hot-patch: iteration — container is already running and
         // Vite HMR is live. Write only the files that actually changed
@@ -461,15 +491,48 @@ export function useWebContainerPreview(
           await deleteStaleStubFiles(wc, generatedDir);
         }
 
-        const stats = await hotPatchFiles(
-          wc,
-          currentFiles,
-          currentProject,
-          lastDeliveredFilesRef.current,
-        );
-        console.log(
-          `[BEO-586] Hot-patched WC: wrote ${stats.written} file(s), removed ${stats.deleted} — Vite HMR will update preview in-place`,
-        );
+        // BEO-737 A12: wrap hot-patch in try/catch + report partial failures.
+        // hotPatchFiles now uses Promise.allSettled internally, returns the
+        // list of failed paths, and skips the runtime.json write if any
+        // source-file write failed (so the manifest never points at files
+        // that aren't on disk).
+        try {
+          const stats = await hotPatchFiles(
+            wc,
+            currentFiles,
+            currentProject,
+            lastDeliveredFilesRef.current,
+          );
+          if (stats.failedPaths.length > 0) {
+            console.error(
+              `[BEO-737 A12] Hot-patch partial failure: ${stats.failedPaths.length} file(s) failed to write — runtime.json NOT updated`,
+              stats.failedPaths,
+            );
+            setStatus("error");
+            setProgressMessage(
+              `Preview update failed for ${stats.failedPaths.length} file(s). Try again.`,
+            );
+            // Drop the snapshot so the next iteration re-writes everything
+            // from scratch instead of diffing against a possibly-stale state.
+            lastDeliveredFilesRef.current = new Map();
+            setIsHotPatching(false);
+            return;
+          }
+          console.log(
+            `[BEO-586] Hot-patched WC: wrote ${stats.written} file(s), removed ${stats.deleted} — Vite HMR will update preview in-place`,
+          );
+        } catch (err) {
+          console.error("[BEO-737 A12] hotPatchFiles threw", err);
+          setStatus("error");
+          setProgressMessage(
+            err instanceof Error
+              ? `Preview update failed: ${err.message}`
+              : "Preview update failed.",
+          );
+          lastDeliveredFilesRef.current = new Map();
+          setIsHotPatching(false);
+          return;
+        }
 
         // BEO-651: start settle window AFTER writes complete.
         // Vite chokidar detects the changes and may trigger a full-page reload
