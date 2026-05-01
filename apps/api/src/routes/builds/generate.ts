@@ -3243,7 +3243,7 @@ Example: "Done — I've built a todo app with task creation, completion tracking
  * Writes events directly to the generation row's builderTrace so the
  * existing events.ts SSE polling loop delivers them to the frontend.
  */
-const BUILD_TIMEOUT_MS = 5 * 60 * 1000;
+const BUILD_TIMEOUT_MS = 8 * 60 * 1000;
 
 export async function runBuildInBackground(
   input: BuildGenerateInput,
