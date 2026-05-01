@@ -4,10 +4,10 @@ import { getCredits, getBillingPortalUrl, type CreditsResponse } from "../../../
 import { usePricingModal } from "../../../contexts/PricingModalContext";
 
 const PLAN_META: Record<string, { label: string; price: string; credits: number }> = {
-  free: { label: "Free", price: "$0", credits: 100 },
-  pro_starter: { label: "Pro Starter", price: "$19/mo", credits: 300 },
-  pro_builder: { label: "Pro Builder", price: "$39/mo", credits: 750 },
-  business: { label: "Business", price: "$199/mo", credits: 4000 },
+  free: { label: "Free", price: "$0", credits: 200 },
+  pro_starter: { label: "Starter", price: "$19/mo", credits: 1000 },
+  pro_builder: { label: "Pro", price: "$39/mo", credits: 2000 },
+  business: { label: "Business", price: "$199/mo", credits: 10000 },
 };
 
 function getPlanMeta(plan: string) {
