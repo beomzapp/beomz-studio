@@ -56,6 +56,12 @@ export type WebsiteIterationResult = {
   outputTokens: number;
 };
 
+export type LockedImageReference = {
+  filePath: string;
+  slotIndex: number;
+  url: string;
+};
+
 interface WebsiteIterationAckEvent extends Record<string, unknown> {
   type: "iteration_ack";
   id: string;
@@ -133,6 +139,17 @@ const WEBSITE_ITERATION_TOOL: Anthropic.Messages.Tool = {
     required: ["files"],
     additionalProperties: false,
   },
+};
+
+const IMAGE_CHANGE_REQUEST_PATTERN = /image|photo|picture|hero image|background/i;
+const IMAGE_SRC_PATTERN = /\bsrc=\{?(["'])(https?:\/\/[^\s"'`)<>{}]+)\1\}?/g;
+const CSS_URL_PATTERN = /url\((["']?)(https?:\/\/[^\s"'`)<>{}]+)\1\)/g;
+const FAL_IMAGE_HOST_PATTERN = /\b(?:fal\.ai|fal\.media|fal\.run)\b/i;
+
+type ImageUrlSlot = {
+  url: string;
+  start: number;
+  end: number;
 };
 
 function ts(): string {
@@ -354,6 +371,8 @@ function buildSectionUserPrompt(input: {
   prompt: string;
   activeSection: WebsiteSectionKey;
   file: StudioFile;
+  lockedImages: readonly LockedImageReference[];
+  imageChangeRequested: boolean;
 }): string {
   return [
     `Project name: ${input.projectName}`,
@@ -362,6 +381,9 @@ function buildSectionUserPrompt(input: {
     "",
     "User instruction:",
     input.prompt.trim(),
+    "",
+    `Image change requested: ${input.imageChangeRequested ? "yes" : "no"}`,
+    ...buildLockedImagePromptLines(input.lockedImages),
     "",
     "Current file:",
     buildFileContext([input.file]),
@@ -372,6 +394,8 @@ function buildGeneralUserPrompt(input: {
   projectName: string;
   prompt: string;
   files: readonly StudioFile[];
+  lockedImages: readonly LockedImageReference[];
+  imageChangeRequested: boolean;
 }): string {
   return [
     `Project name: ${input.projectName}`,
@@ -379,9 +403,229 @@ function buildGeneralUserPrompt(input: {
     "User instruction:",
     input.prompt.trim(),
     "",
+    `Image change requested: ${input.imageChangeRequested ? "yes" : "no"}`,
+    ...buildLockedImagePromptLines(input.lockedImages),
+    "",
     "Current website files:",
     buildFileContext(input.files),
   ].join("\n");
+}
+
+function buildLockedImagePromptLines(lockedImages: readonly LockedImageReference[]): string[] {
+  if (lockedImages.length === 0) {
+    return ["Locked images: none detected."];
+  }
+
+  return [
+    "Locked images (preserve these exact URLs unless the user explicitly requested an image change):",
+    ...lockedImages.map((image) => `- ${image.filePath} [image ${image.slotIndex + 1}]: ${image.url}`),
+  ];
+}
+
+function safeDecodeUrl(value: string): string {
+  let current = value;
+
+  for (let i = 0; i < 2; i += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) {
+        return decoded;
+      }
+      current = decoded;
+    } catch {
+      return current;
+    }
+  }
+
+  return current;
+}
+
+function toFalComparableUrl(url: string): string {
+  const variants = new Set<string>([url, safeDecodeUrl(url)]);
+
+  try {
+    const parsed = new URL(url);
+    const proxiedUrl = parsed.searchParams.get("url");
+    if (proxiedUrl) {
+      variants.add(proxiedUrl);
+      variants.add(safeDecodeUrl(proxiedUrl));
+    }
+  } catch {
+    // Ignore invalid URL parsing and fall back to raw string matching.
+  }
+
+  return [...variants].join(" ");
+}
+
+function isFalImageUrl(url: string): boolean {
+  return FAL_IMAGE_HOST_PATTERN.test(toFalComparableUrl(url));
+}
+
+function pushImageUrlMatches(
+  pattern: RegExp,
+  groupIndex: number,
+  content: string,
+  matches: ImageUrlSlot[],
+): void {
+  for (const match of content.matchAll(pattern)) {
+    const url = match[groupIndex];
+    if (typeof url !== "string" || typeof match.index !== "number") {
+      continue;
+    }
+
+    const relativeStart = match[0].indexOf(url);
+    if (relativeStart < 0) {
+      continue;
+    }
+
+    const start = match.index + relativeStart;
+    matches.push({
+      url,
+      start,
+      end: start + url.length,
+    });
+  }
+}
+
+function extractImageUrlSlots(content: string): ImageUrlSlot[] {
+  const matches: ImageUrlSlot[] = [];
+  pushImageUrlMatches(IMAGE_SRC_PATTERN, 2, content, matches);
+  pushImageUrlMatches(CSS_URL_PATTERN, 2, content, matches);
+
+  return matches
+    .sort((left, right) => left.start - right.start)
+    .filter((match, index, all) => index === 0
+      || match.start !== all[index - 1]!.start
+      || match.end !== all[index - 1]!.end
+      || match.url !== all[index - 1]!.url);
+}
+
+export function isImageChangeRequested(prompt: string): boolean {
+  return IMAGE_CHANGE_REQUEST_PATTERN.test(prompt);
+}
+
+export function extractLockedImageReferences(files: readonly StudioFile[]): LockedImageReference[] {
+  const lockedImages: LockedImageReference[] = [];
+
+  for (const file of files) {
+    const slots = extractImageUrlSlots(file.content);
+    slots.forEach((slot, slotIndex) => {
+      if (!isFalImageUrl(slot.url)) {
+        return;
+      }
+
+      lockedImages.push({
+        filePath: file.path,
+        slotIndex,
+        url: slot.url,
+      });
+    });
+  }
+
+  return lockedImages;
+}
+
+function replaceRanges(content: string, replacements: Array<{ start: number; end: number; value: string }>): string {
+  let nextContent = content;
+
+  for (const replacement of [...replacements].sort((left, right) => right.start - left.start)) {
+    nextContent = `${nextContent.slice(0, replacement.start)}${replacement.value}${nextContent.slice(replacement.end)}`;
+  }
+
+  return nextContent;
+}
+
+function restoreLockedImageUrlsInContent(
+  content: string,
+  lockedImages: readonly LockedImageReference[],
+): {
+  content: string;
+  restoredCount: number;
+} {
+  const currentSlots = extractImageUrlSlots(content);
+  const replacements: Array<{ start: number; end: number; value: string }> = [];
+  const usedSlotKeys = new Set<string>();
+
+  for (const lockedImage of lockedImages) {
+    const exactSlot = currentSlots[lockedImage.slotIndex];
+    const targetSlot = exactSlot ?? currentSlots.find((slot) => isFalImageUrl(slot.url));
+    if (!targetSlot || targetSlot.url === lockedImage.url) {
+      continue;
+    }
+
+    const slotKey = `${targetSlot.start}:${targetSlot.end}`;
+    if (usedSlotKeys.has(slotKey)) {
+      continue;
+    }
+    usedSlotKeys.add(slotKey);
+
+    replacements.push({
+      start: targetSlot.start,
+      end: targetSlot.end,
+      value: lockedImage.url,
+    });
+  }
+
+  if (replacements.length === 0) {
+    return { content, restoredCount: 0 };
+  }
+
+  return {
+    content: replaceRanges(content, replacements),
+    restoredCount: replacements.length,
+  };
+}
+
+export function restoreLockedImagesAfterMerge(input: {
+  mergedFiles: readonly StudioFile[];
+  lockedImages: readonly LockedImageReference[];
+  imageChangeRequested: boolean;
+}): {
+  files: StudioFile[];
+  restoredCount: number;
+  restoredPaths: string[];
+} {
+  if (input.imageChangeRequested || input.lockedImages.length === 0) {
+    return {
+      files: [...input.mergedFiles],
+      restoredCount: 0,
+      restoredPaths: [],
+    };
+  }
+
+  const lockedByFile = new Map<string, LockedImageReference[]>();
+  for (const lockedImage of input.lockedImages) {
+    const current = lockedByFile.get(lockedImage.filePath) ?? [];
+    current.push(lockedImage);
+    lockedByFile.set(lockedImage.filePath, current);
+  }
+
+  let restoredCount = 0;
+  const restoredPaths = new Set<string>();
+  const files = input.mergedFiles.map((file) => {
+    const fileLocks = lockedByFile.get(file.path);
+    if (!fileLocks || fileLocks.length === 0) {
+      return file;
+    }
+
+    const restored = restoreLockedImageUrlsInContent(file.content, fileLocks);
+    if (restored.restoredCount === 0 || restored.content === file.content) {
+      return file;
+    }
+
+    restoredCount += restored.restoredCount;
+    restoredPaths.add(file.path);
+    return {
+      ...file,
+      content: restored.content,
+    };
+  });
+
+  return {
+    files,
+    restoredCount,
+    restoredPaths: [...restoredPaths],
+  };
 }
 
 function isSocketDropError(err: unknown): boolean {
@@ -396,9 +640,13 @@ export async function callAnthropicWebsiteIteration(input: {
   prompt: string;
   existingFiles: readonly StudioFile[];
   activeSection?: WebsiteSectionKey;
+  lockedImages?: readonly LockedImageReference[];
+  imageChangeRequested?: boolean;
   abortSignal?: AbortSignal;
 }): Promise<WebsiteIterationResult> {
   const activeSection = input.activeSection;
+  const lockedImages = input.lockedImages ?? [];
+  const imageChangeRequested = input.imageChangeRequested ?? isImageChangeRequested(input.prompt);
   const targetFile = activeSection
     ? input.existingFiles.find((file) => file.path === SECTION_FILE_PATHS[activeSection])
     : null;
@@ -409,6 +657,9 @@ export async function callAnthropicWebsiteIteration(input: {
         WEBSITE_STRICT_ITERATION_RULE,
         "Rewrite ONLY this component based on the instruction.",
         "Keep the data-section attribute.",
+        imageChangeRequested
+          ? "Only change image URLs if the user explicitly asked for an image change."
+          : "Do not change any existing image src/background URL. Locked image URLs must remain byte-for-byte identical.",
         "Return only the updated file.",
       ].join(" ")
     : [
@@ -416,6 +667,9 @@ export async function callAnthropicWebsiteIteration(input: {
         WEBSITE_STRICT_ITERATION_RULE,
         "Return only the changed files through the deliver_updated_website_files tool.",
         "Preserve every existing data-section attribute on section components.",
+        imageChangeRequested
+          ? "Only change image URLs where the user explicitly requested an image update."
+          : "Locked image URLs are immutable for this iteration. Do not generate, replace, or restyle image src/background URLs.",
         "Do not add backend files, package manager files, or unrelated rewrites.",
         "Keep the website polished, responsive, and production-ready.",
       ].join(" ");
@@ -426,11 +680,15 @@ export async function callAnthropicWebsiteIteration(input: {
         prompt: input.prompt,
         activeSection,
         file: targetFile,
+        lockedImages,
+        imageChangeRequested,
       })
     : buildGeneralUserPrompt({
         projectName: input.projectName,
         prompt: input.prompt,
         files: input.existingFiles,
+        lockedImages,
+        imageChangeRequested,
       });
 
   const executeCall = async (model: string): Promise<WebsiteIterationResult> => {
@@ -536,6 +794,14 @@ export function mergeStudioFiles(
   });
 }
 
+export function diffStudioFiles(
+  previousFiles: readonly StudioFile[],
+  nextFiles: readonly StudioFile[],
+): StudioFile[] {
+  const previousByPath = new Map(previousFiles.map((file) => [file.path, file.content]));
+  return nextFiles.filter((file) => previousByPath.get(file.path) !== file.content);
+}
+
 function createAbortError(): Error {
   const error = new Error("The operation was aborted.");
   error.name = "AbortError";
@@ -616,6 +882,8 @@ websitesIterateRoute.post(
     }
 
     const existingFiles = sourceGeneration.files as readonly StudioFile[];
+    const lockedImages = extractLockedImageReferences(existingFiles);
+    const imageChangeRequested = isImageChangeRequested(prompt);
     if (activeSection && !existingFiles.some((file) => file.path === SECTION_FILE_PATHS[activeSection])) {
       return c.json({ error: `Could not find the ${activeSection} section file.` }, 400);
     }
@@ -736,9 +1004,11 @@ websitesIterateRoute.post(
               projectName: project.name,
               prompt,
               existingFiles: activeSection
-                ? existingFiles.filter((file) => file.path === SECTION_FILE_PATHS[activeSection])
-                : existingFiles,
+                  ? existingFiles.filter((file) => file.path === SECTION_FILE_PATHS[activeSection])
+                  : existingFiles,
               activeSection,
+              lockedImages,
+              imageChangeRequested,
               abortSignal: abortController.signal,
             });
 
@@ -746,8 +1016,26 @@ websitesIterateRoute.post(
           throw new Error("Website iteration returned no changed files.");
         }
 
-        const changedStudioFiles = toStudioFiles(iteration.files);
-        const mergedFiles = mergeStudioFiles(existingFiles, changedStudioFiles);
+        const aiChangedStudioFiles = toStudioFiles(iteration.files);
+        const mergedFiles = mergeStudioFiles(existingFiles, aiChangedStudioFiles);
+        const restoredMerge = restoreLockedImagesAfterMerge({
+          mergedFiles,
+          lockedImages,
+          imageChangeRequested,
+        });
+        const finalMergedFiles = restoredMerge.files;
+        const changedStudioFiles = diffStudioFiles(existingFiles, finalMergedFiles);
+        if (changedStudioFiles.length === 0) {
+          throw new Error("Website iteration returned no non-image changes after preserving locked images.");
+        }
+
+        if (restoredMerge.restoredCount > 0) {
+          console.log("[websites/iterate] restored locked images:", {
+            restoredCount: restoredMerge.restoredCount,
+            restoredPaths: restoredMerge.restoredPaths,
+            buildId,
+          });
+        }
 
         const filesEvent: WebsiteFilesEvent = {
           type: "files",
@@ -760,8 +1048,8 @@ websitesIterateRoute.post(
         };
 
         await writeEvent("files", filesEvent, {
-          files: mergedFiles,
-          output_paths: mergedFiles.map((file) => file.path),
+          files: finalMergedFiles,
+          output_paths: finalMergedFiles.map((file) => file.path),
           preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
         });
 
@@ -814,8 +1102,8 @@ websitesIterateRoute.post(
 
         await writeEvent("done", doneEvent, {
           completed_at: completedAt,
-          files: mergedFiles,
-          output_paths: mergedFiles.map((file) => file.path),
+          files: finalMergedFiles,
+          output_paths: finalMergedFiles.map((file) => file.path),
           preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
           status: "completed",
           summary: doneMessage,
@@ -851,7 +1139,7 @@ websitesIterateRoute.post(
         void saveProjectVersion(
           projectId,
           prompt.slice(0, 100),
-          studioFilesToVersionFiles(mergedFiles),
+          studioFilesToVersionFiles(finalMergedFiles),
         ).catch((error) => {
           console.error("[websites/iterate] auto-save failed:", error);
         });

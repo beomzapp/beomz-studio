@@ -31,8 +31,12 @@ import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
 import {
   callAnthropicWebsiteIteration,
+  diffStudioFiles,
+  extractLockedImageReferences,
   findLatestWebsiteGenerationWithFiles,
+  isImageChangeRequested,
   mergeStudioFiles,
+  restoreLockedImagesAfterMerge,
   SECTION_FILE_PATHS,
   type WebsiteSectionKey,
 } from "./iterate.js";
@@ -1568,6 +1572,9 @@ websitesGenerateRoute.post(
     const existingFiles = isIteration && Array.isArray(sourceGeneration.files)
       ? sourceGeneration.files as readonly StudioFile[]
       : [];
+    const lockedImages = isIteration ? extractLockedImageReferences(existingFiles) : [];
+    const imageChangeRequested = isIteration ? isImageChangeRequested(modelPrompt) : false;
+    const skipImageGeneration = isIteration && !imageChangeRequested;
 
     if (activeSection && !existingFiles.some((file) => file.path === SECTION_FILE_PATHS[activeSection])) {
       return c.json({ error: `Could not find the ${activeSection} section file.` }, 400);
@@ -1771,6 +1778,8 @@ websitesGenerateRoute.post(
                   ? existingFiles.filter((file) => file.path === SECTION_FILE_PATHS[activeSection])
                   : existingFiles,
                 activeSection,
+                lockedImages,
+                imageChangeRequested,
                 abortSignal: abortController.signal,
               });
 
@@ -1778,8 +1787,28 @@ websitesGenerateRoute.post(
             throw new Error("Website iteration returned no changed files.");
           }
 
-          const changedStudioFiles = toStudioFiles(iteration.files);
-          finalFiles = mergeStudioFiles(existingFiles, changedStudioFiles);
+          const aiChangedStudioFiles = toStudioFiles(iteration.files);
+          const mergedFiles = mergeStudioFiles(existingFiles, aiChangedStudioFiles);
+          const restoredMerge = restoreLockedImagesAfterMerge({
+            mergedFiles,
+            lockedImages,
+            imageChangeRequested,
+          });
+          finalFiles = restoredMerge.files;
+
+          const changedStudioFiles = diffStudioFiles(existingFiles, finalFiles);
+          if (changedStudioFiles.length === 0) {
+            throw new Error("Website iteration returned no non-image changes after preserving locked images.");
+          }
+
+          if (restoredMerge.restoredCount > 0) {
+            console.log("[websites/generate] restored locked images:", {
+              restoredCount: restoredMerge.restoredCount,
+              restoredPaths: restoredMerge.restoredPaths,
+              buildId,
+            });
+          }
+
           summary = buildIterationDoneMessage(changedStudioFiles.length, activeSection);
           inputTokens = iteration.inputTokens;
           outputTokens = iteration.outputTokens;
@@ -1846,7 +1875,7 @@ websitesGenerateRoute.post(
 
         throwIfAborted(abortController.signal);
 
-        if (!isIteration) {
+        if (!isIteration && !skipImageGeneration) {
           const heroImagePrompt = buildHeroImagePrompt({
             projectName: project.name,
             prompt,
