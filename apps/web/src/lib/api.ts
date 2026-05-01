@@ -14,6 +14,14 @@ import type {
 } from "@beomz-studio/contracts";
 
 import { supabase } from "./supabase";
+import { buildFullDesignBlock } from "./designPersonalities";
+
+/**
+ * BEO-744 Track A — Design Directive marker. We prepend a single block
+ * (personality + images + copy) to every fresh web app build prompt.
+ * The marker lets us no-op on iterations and on already-decorated prompts.
+ */
+const DESIGN_DIRECTIVE_MARKER = "─── DESIGN DIRECTIVE";
 
 export interface BuildPayload {
   completedAt: string | null;
@@ -256,8 +264,26 @@ export function startBuild(body: {
   withDatabase?: boolean;
   withAuth?: boolean;
 } & BuildPlanContext): Promise<StartBuildResponse> {
+  // BEO-744 Track A — Inject the design directive (personality + images + copy)
+  // into the prompt for fresh web app builds. We skip iterations (existingFiles
+  // present) and skip prompts that already contain the marker so it never doubles.
+  const isFreshBuild = !body.existingFiles || body.existingFiles.length === 0;
+  const alreadyDecorated = typeof body.prompt === "string"
+    && body.prompt.includes(DESIGN_DIRECTIVE_MARKER);
+
+  let finalPrompt = body.prompt;
+  if (isFreshBuild && !alreadyDecorated && typeof body.prompt === "string" && body.prompt.trim().length > 0) {
+    const { block, personality } = buildFullDesignBlock(body.prompt);
+    finalPrompt = `${block}\n\n${body.prompt}`;
+    try {
+      console.log(`[BEO-744] Design personality selected: ${personality.name} (refs: ${personality.refs.join(", ")})`);
+    } catch {
+      // logging is best-effort
+    }
+  }
+
   return requestJson<StartBuildResponse>("/builds/start", {
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, prompt: finalPrompt }),
     method: "POST",
   });
 }
