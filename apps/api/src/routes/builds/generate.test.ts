@@ -588,3 +588,20 @@ test("generate build flow keeps the Anthropic stream alive across SSE reconnects
   assert.doesNotMatch(eventsSource, /abortActiveBuild\(buildId\)/);
   assert.match(activeBuildsSource, /export function abortActiveBuild\(buildId: string, reason: unknown = "cancelled_by_user"\): boolean/);
 });
+
+test("timed_out builds persist a terminal error event and replay as terminal", async () => {
+  const generateSource = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+  const eventsSource = await readFile(new URL("./events.ts", import.meta.url), "utf8");
+  const sharedSource = await readFile(new URL("./shared.ts", import.meta.url), "utf8");
+
+  assert.match(generateSource, /const timeoutMessage = "Build timed out after 8 minutes\.";/);
+  assert.match(generateSource, /abortController\.abort\("build_timed_out"\);/);
+  assert.match(generateSource, /await appendEventToDb\(db, buildId, \{/);
+  assert.match(generateSource, /code: "build_timed_out"/);
+  assert.match(generateSource, /id: `\$\{buildId\}:timed_out`/);
+  assert.match(generateSource, /status: "timed_out"/);
+  assert.match(eventsSource, /row\.status === "failed" \|\| row\.status === "cancelled" \|\| row\.status === "timed_out"/);
+  assert.match(eventsSource, /currentGenerationRow\.status === "timed_out"/);
+  assert.match(sharedSource, /row\.status === "failed" \|\| row\.status === "cancelled" \|\| row\.status === "timed_out"/);
+  assert.match(sharedSource, /isTimedOut \? "build_timed_out" : "build_failed"/);
+});

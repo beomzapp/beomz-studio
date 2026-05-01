@@ -215,16 +215,17 @@ function synthesizeBuilderTrace(
     });
   }
 
-  if (row.status === "failed" || row.status === "cancelled") {
+  if (row.status === "failed" || row.status === "cancelled" || row.status === "timed_out") {
     const isServerRestart = metadata.startError === undefined
       && (row.error === "Server restarted during build");
+    const isTimedOut = row.status === "timed_out";
     events.push({
       buildId: row.id,
-      code: isServerRestart ? "server_restarting" : "build_failed",
+      code: isServerRestart ? "server_restarting" : (isTimedOut ? "build_timed_out" : "build_failed"),
       id: isServerRestart ? `${row.id}:server-restarting` : (events.length === 0 ? "legacy-1" : "legacy-2"),
       message: isServerRestart
         ? "Server is restarting. Your build will resume shortly."
-        : (row.error ?? "Build failed."),
+        : (row.error ?? (isTimedOut ? "Build timed out after 8 minutes." : "Build failed.")),
       operation,
       payload: {
         phase: metadata.phase ?? null,

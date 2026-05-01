@@ -3268,16 +3268,41 @@ export async function runBuildInBackground(
 
     if (outcome === "timed_out") {
       timedOutRef.value = true;
-      console.error("[build/timeout] build exceeded 5min:", buildId);
+      const timedOutAt = new Date().toISOString();
+      const timeoutMessage = "Build timed out after 8 minutes.";
+      console.error("[build/timeout] build exceeded 8 minutes.", { buildId, projectId });
       console.log("[build/state]", { buildId, from: "running", to: "timed_out" });
-      abortController.abort();
-      await db.updateGeneration(buildId, {
-        completed_at: new Date().toISOString(),
-        error: "Build timed out after 5 minutes.",
+      abortController.abort("build_timed_out");
+      await appendEventToDb(db, buildId, {
+        type: "error",
+        id: `${buildId}:timed_out`,
+        timestamp: timedOutAt,
+        operation: input.isIteration ? "iteration" : "initial_build",
+        code: "build_timed_out",
+        message: timeoutMessage,
+        buildId,
+        projectId,
+      }, {
+        completed_at: timedOutAt,
+        error: timeoutMessage,
         status: "timed_out",
         summary: "Build timed out.",
-      }).catch((err) => {
-        console.error("[build/timeout] failed to update timed_out status:", err instanceof Error ? err.message : String(err));
+      }).catch(async (err) => {
+        console.error("[build/timeout] failed to persist terminal timeout event.", {
+          buildId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await db.updateGeneration(buildId, {
+          completed_at: timedOutAt,
+          error: timeoutMessage,
+          status: "timed_out",
+          summary: "Build timed out.",
+        }).catch((updateErr) => {
+          console.error("[build/timeout] failed to update timed_out status.", {
+            buildId,
+            error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          });
+        });
       });
       await db.updateProject(projectId, { status: "draft" }).catch(() => undefined);
     }

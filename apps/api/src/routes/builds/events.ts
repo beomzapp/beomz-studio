@@ -54,18 +54,19 @@ function buildTerminalSafetyEvent(
   const fallbackUsed = metadata.resultSource === "fallback";
   const timestamp = row.completed_at ?? row.started_at;
 
-  if (row.status === "failed" || row.status === "cancelled") {
+  if (row.status === "failed" || row.status === "cancelled" || row.status === "timed_out") {
     // BEO-318: Use server_restarting code when the build was interrupted by a
     // server shutdown. The frontend CC handler checks this code to keep the
     // WebContainer overlay up instead of dropping it.
     const isServerRestart = row.error === "Server restarted during build";
+    const isTimedOut = row.status === "timed_out";
     return {
       buildId: row.id,
-      code: isServerRestart ? "server_restarting" : "build_failed",
+      code: isServerRestart ? "server_restarting" : (isTimedOut ? "build_timed_out" : "build_failed"),
       id: isServerRestart ? `${row.id}:server-restarting` : `${row.id}:error`,
       message: isServerRestart
         ? "Server is restarting. Your build will resume shortly."
-        : (row.error ?? "Build failed."),
+        : (row.error ?? (isTimedOut ? "Build timed out after 8 minutes." : "Build failed.")),
       operation: "initial_build" as const,
       payload: {
         phase: metadata.phase ?? null,
@@ -285,6 +286,7 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
         currentGenerationRow.status === "completed"
         || currentGenerationRow.status === "failed"
         || currentGenerationRow.status === "cancelled"
+        || currentGenerationRow.status === "timed_out"
       ) {
         if (terminalEventAlreadySeen) {
           clearPingInterval();
