@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuilderV3Event, StudioFile, TemplateId } from "@beomz-studio/contracts";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useBlocker, useNavigate, useParams } from "@tanstack/react-router";
 import { Copy, Check, Code2, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   TopBar,
@@ -158,6 +158,17 @@ export function ProjectPage() {
       setIsHardBlockCredits(isHardBlock);
       setShowOutOfCreditsModal(true);
     },
+  });
+
+  // ─── BEO-739: Warn before navigating away mid-build ─────────────────────
+  useBlocker({
+    shouldBlockFn: () => {
+      if (!isBuilding) return false;
+      return !window.confirm(
+        "Build in progress — navigating away will interrupt your preview. Are you sure?",
+      );
+    },
+    enableBeforeUnload: () => isBuilding,
   });
 
   // ─── BEO-587: Stop / force-stop state ────────────────────────────────────
