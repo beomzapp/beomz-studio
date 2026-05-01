@@ -31,7 +31,7 @@ export function SettingsBillingPage() {
   const planMeta = getPlanMeta(plan);
   const isFree = plan === "free";
   const balance = credits?.balance ?? 0;
-  const planCredits = credits?.planCredits ?? planMeta.credits;
+  const planCredits = (credits?.planCredits || 0) > 0 ? credits!.planCredits : planMeta.credits;
   const creditsPct = Math.min(100, planCredits > 0 ? (balance / planCredits) * 100 : 0);
 
   const handleOpenPortal = async () => {
@@ -142,7 +142,7 @@ export function SettingsBillingPage() {
 
               {isFree && (
                 <p className="mb-4 text-xs text-[#9ca3af]">
-                  Free plan · one-time credits (100 cr on signup, never reset)
+                  Free plan · 200 credits on signup
                 </p>
               )}
 
