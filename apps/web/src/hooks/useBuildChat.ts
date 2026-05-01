@@ -1679,6 +1679,14 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         "BEO-410: Build fired while chat mode active",
       );
 
+      // BEO-737 A3: abort any orphan chat SSE stream before opening a build
+      // path. Without this, toggling chat mode mid-stream and then sending a
+      // build message leaves the chat stream's reader/decoder/buffer alive
+      // until the API closes the socket — leaking TCP connections under
+      // rapid toggling.
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
+
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -1779,6 +1787,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   useEffect(() => {
     sendMessageInternalRef.current = (text: string, imageUrl?: string, implementPlan?: string) => {
       // Call without going through chatModeRef check — directly triggers build flow
+      // BEO-737 A3: abort orphan chat SSE before opening a build path.
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -1845,6 +1856,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   const startBuildSilently = useCallback(
     (prompt: string) => {
+      // BEO-737 A3: abort orphan chat SSE before opening a build path.
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
