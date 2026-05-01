@@ -337,6 +337,40 @@ export function useWebContainerPreview(
   const scaffoldTypeRef = useRef(scaffoldType);
   scaffoldTypeRef.current = scaffoldType;
 
+  // BEO-737 A11: track previous project.id so the project-change effect can
+  // detect a real navigation between two distinct projects (vs. initial mount).
+  const prevProjectIdRef = useRef<string | null | undefined>(project?.id);
+
+  // BEO-737 A11: reset the generated source directory in the WC FS so files
+  // from a previous project never ghost into the next. The WebContainer
+  // singleton (apps/web/src/lib/webcontainer.ts) deliberately persists across
+  // navigations to keep node_modules warm — but `wc.mount()` MERGES, so any
+  // file in the previous project that does not exist in the new one stays on
+  // disk and Vite resolves it from its module cache. We rm -rf the generated
+  // dir + runtime.json AND reset the hot-patch snapshot so the next delivery
+  // takes the first-build (full mount) path against a clean tree.
+  const resetGeneratedFiles = useCallback(async (instance: WcInstance | null) => {
+    if (!instance) return;
+    try {
+      await instance.wc.fs.rm("apps/web/src/app/generated", {
+        recursive: true,
+        force: true,
+      });
+    } catch {
+      /* dir may not exist on cold container — safe to ignore */
+    }
+    try {
+      await instance.wc.fs.rm("apps/web/src/.beomz/runtime.json");
+    } catch {
+      /* runtime.json may not exist yet — safe to ignore */
+    }
+    lastDeliveredFilesRef.current = new Map();
+    firstBuildDeliveredRef.current = false;
+    prevFilesRef.current = null;
+    pendingDeliverRef.current = false;
+    setFirstFilesDelivered(false);
+  }, []);
+
   // ── BEO-456: Deliver real files to the WC + signal HMR ────────────────────
   // Uses the same path the iteration hot-swap uses: wc.mount(previewFileTree)
   // at root while Vite is running. Vite's file watcher picks up the change and
@@ -994,9 +1028,32 @@ export function useWebContainerPreview(
         clearTimeout(stuckDevServerTimerRef.current);
         stuckDevServerTimerRef.current = null;
       }
+      // BEO-737 A11: tear down generated files on unmount so the persistent
+      // WC singleton doesn't carry this project's generated tree into the
+      // next mount (e.g. when ProjectPage unmounts and another project is
+      // navigated to). node_modules + shell stay warm; only the generated
+      // source dir + runtime.json are wiped.
+      void resetGeneratedFiles(instanceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run exactly once per component mount
+
+  // ── BEO-737 A11: reset generated dir on project navigation ────────────────
+  // The WC singleton persists across project navigations to keep node_modules
+  // warm. Without this effect, files from the previous project remain on disk
+  // and Vite serves them via its module cache — manifesting as "Route not
+  // found" errors and ghost components from the old project. On a real
+  // project.id transition, wipe the generated source dir + runtime.json AND
+  // reset the hot-patch snapshot so the next delivery takes the full-mount
+  // first-build path against a clean tree.
+  useEffect(() => {
+    const prev = prevProjectIdRef.current;
+    const curr = project?.id;
+    if (prev && curr && prev !== curr) {
+      void resetGeneratedFiles(instanceRef.current);
+    }
+    prevProjectIdRef.current = curr;
+  }, [project?.id, resetGeneratedFiles]);
 
   // ── BEO-375: when generationId becomes known after boot finishes ──────────
   // Handle the case where the WC is already warm (installedAt set, no live files)
