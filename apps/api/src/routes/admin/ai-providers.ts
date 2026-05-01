@@ -124,6 +124,9 @@ export function createAdminAiProvidersRoute(deps: AdminAiProvidersRouteDeps = {}
         ...row,
         api_key_encrypted: undefined,
         api_key_masked: maskApiKey(row.api_key_encrypted),
+        connected: !!row.api_key_encrypted && row.enabled,
+        has_key: !!row.api_key_encrypted,
+        masked_key: maskApiKey(row.api_key_encrypted),
       }));
 
       return c.json(rows);
