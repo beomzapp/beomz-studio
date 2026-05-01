@@ -336,6 +336,17 @@ export function createWebhookRoute(deps: CreateWebhookRouteDeps = {}): Hono {
           ?? await resolveOrgByCustomer(db, stripe, sub.customer as string);
         if (!orgId) { console.warn("[webhook] subscription.updated: no org_id", { subId: sub.id }); break; }
 
+        // Handle cancel_at_period_end — user clicked "Cancel" in Stripe portal
+        if (sub.cancel_at_period_end && !prevSub?.cancel_at_period_end) {
+          await db.updateOrg(orgId, {
+            stripe_subscription_id: sub.id,
+            downgrade_at_period_end: true,
+            pending_plan: "free",
+          });
+          console.log("[webhook] subscription.updated: cancel_at_period_end set, downgrade to free scheduled", { orgId });
+          break;
+        }
+
         const priceId  = sub.items.data[0]?.price.id;
         const newPlan  = priceId ? (PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan) : undefined;
 
@@ -402,23 +413,34 @@ export function createWebhookRoute(deps: CreateWebhookRouteDeps = {}): Hono {
           });
         }
 
-        void prevSub; // suppress unused var warning
         break;
       }
 
-      // ── Subscription cancelled ───────────────────────────────────────────────
-      // Schedule downgrade to free at period end — credits survive until then.
+      // ── Subscription cancelled / deleted ─────────────────────────────────────
+      // Stripe fires customer.subscription.deleted at the end of the billing
+      // period (after cancel_at_period_end expires). Apply the downgrade now.
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
         const orgId = (sub.metadata?.org_id as string | undefined)
           ?? await resolveOrgByCustomer(db, stripe, sub.customer as string);
         if (!orgId) { console.warn("[webhook] subscription.deleted: no org_id", { subId: sub.id }); break; }
 
+        const org = await db.getOrgWithBalance(orgId);
+        const topupCredits = Number(org?.topup_credits ?? 0);
+
         await db.updateOrg(orgId, {
-          downgrade_at_period_end: true,
-          pending_plan: "free",
+          plan: "free",
+          monthly_credits: 200,
+          rollover_credits: 0,
+          rollover_cap: 0,
+          credits: topupCredits,
+          downgrade_at_period_end: false,
+          pending_plan: null,
+          stripe_subscription_id: undefined,
         });
-        console.log("[webhook] subscription.deleted: downgrade to free scheduled at period end", { orgId });
+
+        await recordSubscriptionAllocation(db, orgId, 0, "Subscription cancelled — downgraded to Free");
+        console.log("[webhook] subscription.deleted: downgrade to free applied", { orgId, topupCredits });
         break;
       }
 
