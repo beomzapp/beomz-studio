@@ -366,12 +366,27 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   /** Latest plan for ⚡ Implement from SSE (chat or /builds/start conversational_response). */
   const pendingImplementPlanRef = useRef<string | null>(null);
   const implementWithPlanRef = useRef<((plan: string, imageUrl?: string) => Promise<void>) | null>(null);
+  // ─── BEO-746: Dedupe plan UI re-renders ───────────────────────────────────
+  // Tracks plans the user has already implemented or dismissed. Once a plan is
+  // in this set, ANY downstream re-render attempt — trace event replay during
+  // startAndStreamBuild, SSE reconnect, or a `done` event re-emitting
+  // readyToImplement — is silently ignored. Required because the API's stale
+  // /builds/start response after an Implement click can replay a completed
+  // build's `conversational_response` + `done` (no pre_build_ack, no
+  // build_confirmed), which previously re-set both the inline plan card and
+  // the floating ImplementBar.
+  const implementedPlansRef = useRef<Set<string>>(new Set());
 
   // ─── BEO-398: Sticky implement suggestion zone ────────────────────────────
   const [implementSuggestion, setImplementSuggestion] = useState<{ summary: string } | null>(null);
 
   const dismissImplementSuggestion = useCallback(() => {
-    setImplementSuggestion(null);
+    setImplementSuggestion(prev => {
+      if (prev?.summary) {
+        implementedPlansRef.current.add(prev.summary.trim());
+      }
+      return null;
+    });
   }, []);
 
   const toggleChatMode = useCallback(() => {
@@ -720,6 +735,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           const plan = ready ? String(e.plan ?? e.implementPlan ?? "").trim() : "";
           console.log("[BEO-conversational] ready:", ready, "plan set:", Boolean(plan));
           if (plan) {
+            // BEO-746: API may replay this exact event from a completed plan-mode
+            // build's trace after the user already clicked Implement (terminal
+            // events bypass build_confirmed / pre_build_ack, so the normal
+            // cleanup paths never run). Drop it so the plan UI never duplicates.
+            if (implementedPlansRef.current.has(plan)) {
+              console.log("[BEO-746] Skipping conversational_response — plan already implemented");
+              setMessages(prev => prev.filter(m => m.type !== "thinking"));
+              setIsBuilding(false);
+              break;
+            }
             pendingImplementPlanRef.current = plan;
             console.log("[BEO-conversational] pendingImplementPlanRef set ✓");
             // BEO-478: surface plan in the floating ImplementBar so it persists
@@ -1045,9 +1070,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             // signal without a preceding conversational_response. Wire the ImplementBar here
             // so it appears even when clarifying questions are bypassed entirely.
             // BEO-496: skip ImplementBar for iteration builds — they are surgical edits, not new plans.
+            // BEO-746: also skip if this exact plan was already implemented — guards
+            // against done re-emission via stale trace replay or SSE reconnect.
             if (!isIterationBuildRef.current && event.readyToImplement && (event.plan || event.implementPlan)) {
               const plan = String(event.plan ?? event.implementPlan ?? "").trim();
-              if (plan) {
+              if (plan && !implementedPlansRef.current.has(plan)) {
                 pendingImplementPlanRef.current = plan;
                 setImplementSuggestion({ summary: plan });
               }
@@ -1644,10 +1671,24 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   // ─── BEO-460/461/462: Implement a specific plan (⚡ button on chat_response or image_intent CTA) ───
   const implementWithPlan = useCallback(async (plan: string, imageUrl?: string) => {
+    // BEO-746: Lock this exact plan from re-rendering its UI before any new
+    // SSE arrives. Must run BEFORE clearing pendingImplementPlanRef and BEFORE
+    // sendMessageInternalRef so trace replay during startAndStreamBuild sees
+    // the plan in the set and short-circuits the conversational_response /
+    // done re-render paths.
+    const trimmedPlan = plan.trim();
+    if (trimmedPlan) implementedPlansRef.current.add(trimmedPlan);
     pendingImplementPlanRef.current = null;
     setImplementSuggestion(null);
     setChatModeActive(false);
     chatModeRef.current = false;
+    // BEO-746: pre_build_ack normally strips the inline plan card, but if the
+    // API replays a stale "completed" build (terminal events only), pre_build_ack
+    // never fires. Strip the plan card immediately so it can't double up against
+    // any leak path we haven't anticipated.
+    setMessages(prev => prev.filter(
+      m => !(m.type === "chat_response" && m.implementPlan),
+    ));
     await delay(50);
     // Pass plan as implementPlan so the API's hasExplicitImplementSignal() bypasses detectIntent.
     sendMessageInternalRef.current?.(plan, imageUrl, plan);
