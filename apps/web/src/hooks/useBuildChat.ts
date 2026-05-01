@@ -949,6 +949,19 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           };
 
           setMessages(prev => {
+            // BEO-737 A2: dedup guard — if a build_summary already exists in
+            // the message list (e.g. the `done` handler's getBuildStatus
+            // post-fetch already rendered one before the real `build_summary`
+            // SSE event landed, or SSE reconnected and replayed past a
+            // previously-emitted summary), do not append a second one.
+            if (prev.some(m => m.type === "build_summary")) {
+              flushSummaryRef.current = null;
+              if (summaryDrainTimerRef.current) {
+                clearTimeout(summaryDrainTimerRef.current);
+                summaryDrainTimerRef.current = null;
+              }
+              return prev;
+            }
             if (!bid) {
               flushSummaryRef.current = null;
               return pushOrphanSummary(prev);
