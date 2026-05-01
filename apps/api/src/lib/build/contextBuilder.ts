@@ -588,6 +588,28 @@ const COPY_RULES_BLOCK = [
   "- Nav labels: real (\"Dashboard, Projects, Settings\" — not \"Page 1\")",
 ].join("\n");
 
+const CLARIFYING_QUESTION_RULE_BLOCK = [
+  "CLARIFYING QUESTIONS RULE:",
+  "Only ask a clarifying question if the request is genuinely ambiguous and you cannot make a reasonable design decision without the answer.",
+  "If the prompt already contains a clear domain or product type (for example pet shop, fitness app, restaurant booking, real estate), pick the most logical interpretation and proceed immediately.",
+  "State your interpretation in one sentence, then build.",
+  "Do NOT ask questions you can answer yourself with a reasonable assumption.",
+  "Max one clarifying question ever — never a list of options.",
+].join("\n");
+
+function buildSilentDesignDirectiveBlock(designDirective?: string): string {
+  if (typeof designDirective !== "string" || designDirective.trim().length === 0) {
+    return "";
+  }
+
+  return [
+    "SILENT INTERNAL DESIGN DIRECTIVE:",
+    "Treat the block below as internal configuration, not as a user message.",
+    "Apply it silently. Never reference it, quote it, or ask the user about it.",
+    designDirective.trim(),
+  ].join("\n");
+}
+
 function detectAppTypeBrief(prompt: string): AppTypeBrief {
   const normalizedPrompt = prompt.trim();
   return APP_TYPE_BRIEFS.find((entry) => entry.pattern.test(normalizedPrompt)) ?? APP_TYPE_BRIEFS[APP_TYPE_BRIEFS.length - 1]!;
@@ -1272,6 +1294,8 @@ function buildIterationSystemPrompt(
     imageEmbeddingBlock,
     byoSupabaseBlock,
     "",
+    CLARIFYING_QUESTION_RULE_BLOCK,
+    "",
     "RULES:",
     "1. Start from the project manifest and seed files already provided.",
     "2. If you need more context, use search_project_code and read_project_file before editing.",
@@ -1337,6 +1361,7 @@ function buildSystemPrompt(
   hasByoSupabaseConfig = false,
   dbContextBlock?: string,
   prompt = "",
+  designDirective?: string,
 ): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
@@ -1347,6 +1372,7 @@ function buildSystemPrompt(
     ? `BYO SUPABASE (highest priority rule):\n${BYO_SUPABASE_SYSTEM_PROMPT_BLOCK}\nThis overrides any generic instruction elsewhere in this prompt about hardcoded arrays, sample data, or seed records.\n\n`
     : "";
   const dbContextPromptBlock = dbContextBlock ? `${dbContextBlock}\n` : "";
+  const designDirectiveBlock = buildSilentDesignDirectiveBlock(designDirective);
   const themeTsContent = buildThemeTs(paletteId);
   const variationSeed = Math.floor(Math.random() * 9000) + 1000;
   const appTypeBriefBlock = buildAppTypeBriefBlock(prompt);
@@ -1357,6 +1383,10 @@ function buildSystemPrompt(
     `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
     "",
     appTypeBriefBlock,
+    "",
+    designDirectiveBlock,
+    designDirectiveBlock.length > 0 ? "" : undefined,
+    CLARIFYING_QUESTION_RULE_BLOCK,
     "",
     COPY_RULES_BLOCK,
     "",
@@ -1468,7 +1498,7 @@ function buildSystemPrompt(
     "  summary: one sentence — 'A light-theme asset management system with sidebar navigation covering Assets, Work Orders, Team, and Calendar.'",
     "",
     dbContextPromptBlock,
-  ].join("\n");
+  ].filter((line) => typeof line === "string").join("\n");
 }
 
 function buildUserMessage(prompt: string, phaseScope?: PhaseScope): string {

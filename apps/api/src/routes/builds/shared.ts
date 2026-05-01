@@ -54,6 +54,7 @@ const studioFileSchema = z.object({
 
 export interface StartBuildRequest extends BuildPlanContext {
   confirmedIntent?: BuilderImageIntent;
+  designDirective?: string;
   forceIteration?: boolean;
   imageUrl?: string;
   prompt: string;
@@ -69,6 +70,7 @@ const imageIntentSchema = z.enum(["logo", "reference", "error", "theme", "genera
 
 export const startBuildRequestSchema = z.object({
   confirmedIntent: imageIntentSchema.optional(),
+  designDirective: z.string().trim().min(1).max(50000).optional(),
   existingFiles: z.array(studioFileSchema).optional(),
   forceIteration: z.boolean().optional(),
   imageUrl: z.string().trim().refine(isSupportedAnthropicImageUrl, {

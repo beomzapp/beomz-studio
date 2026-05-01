@@ -409,6 +409,7 @@ export function ensureRequestedDatabaseApp(args: {
 type BuildPipelineArgs = {
   input: {
     buildId: string;
+    designDirective?: string;
     projectId: string;
     orgId: string;
     userId: string | null;
@@ -654,6 +655,7 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
       input.forcedSimple ? 32000 : undefined,
       hasByoSupabaseConfig,
       modelDbContextBlock,
+      input.designDirective,
       abortSignal,
     );
     throwIfBuildAborted();

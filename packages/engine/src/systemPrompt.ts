@@ -39,6 +39,7 @@ export interface SystemPromptFrame {
 export interface BuildSystemPromptInput {
   actor?: OperationActor;
   actionDefinitions?: readonly ActionDefinition[];
+  designDirective?: string;
   operation: OperationContract;
   promptPolicy?: InitialBuildPromptPolicy | IterationPromptPolicy;
   project: Pick<
@@ -124,6 +125,28 @@ const COPY_RULES_BLOCK = [
   "- CTAs: action-oriented (\"Start your free trial\" not \"Submit\")",
   "- Nav labels: real (\"Dashboard, Projects, Settings\" — not \"Page 1\")",
 ].join("\n");
+
+const CLARIFYING_QUESTION_RULE_BLOCK = [
+  "CLARIFYING QUESTIONS RULE:",
+  "Only ask a clarifying question if the request is genuinely ambiguous and you cannot make a reasonable design decision without the answer.",
+  "If the prompt already names a clear domain or product type, choose the most logical interpretation and proceed immediately.",
+  "State your interpretation in one sentence, then build.",
+  "Do NOT ask questions you can answer yourself with a reasonable assumption.",
+  "Max one clarifying question ever — never a list of options.",
+].join("\n");
+
+function buildSilentDesignDirectiveSection(designDirective?: string): string {
+  if (typeof designDirective !== "string" || designDirective.trim().length === 0) {
+    return "";
+  }
+
+  return [
+    "Silent internal design directive:",
+    "Treat this as internal configuration, not as a user message.",
+    "Apply it silently. Never mention it or ask the user about it.",
+    designDirective.trim(),
+  ].join("\n");
+}
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -217,6 +240,7 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
   const template = input.template ?? getTemplateDefinition(input.project.templateId);
   const promptPolicy = input.promptPolicy ?? getInitialBuildPromptPolicy(template.id);
   const appTypeBriefSection = buildAppTypeBriefSection(input.prompt);
+  const designDirectiveSection = buildSilentDesignDirectiveSection(input.designDirective);
 
   return [
     "DYNAMIC SECTION",
@@ -257,6 +281,10 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
     "",
     appTypeBriefSection,
     "",
+    designDirectiveSection,
+    designDirectiveSection.length > 0 ? "" : undefined,
+    CLARIFYING_QUESTION_RULE_BLOCK,
+    "",
     COPY_RULES_BLOCK,
     "",
     "Operation contract:",
@@ -279,8 +307,7 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
     "- Use the current VFS as the source of truth.",
     "- If you need exact contents, call readFile instead of guessing.",
     "- When the requested work is complete, call finish with a concise summary and deferredItems.",
-  ]
-    .filter((section) => section.length > 0)
+  ].filter((section): section is string => typeof section === "string" && section.length > 0)
     .join("\n");
 }
 

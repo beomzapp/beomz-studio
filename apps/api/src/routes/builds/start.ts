@@ -67,6 +67,10 @@ import {
   researchUrl,
   toWebsiteContextFromUrlResearch,
 } from "../../lib/webFetch.js";
+import {
+  extractDesignDirectiveFromPrompt,
+  isClearDomainBuildPrompt,
+} from "../../lib/build/designDirective.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
 
@@ -116,6 +120,7 @@ const URL_FEATURE_PREFERENCE_TERMS = [
 ] as const;
 
 const URL_FEATURE_CONNECTOR_PATTERN = /\b(with|including|include|includes|featuring|features|feature|plus|add|needs?|must have)\b/i;
+const IMMEDIATE_BUILD_CONFIDENCE = 0.85;
 
 function buildProjectNameFromPrompt(prompt: string, fallbackName: string): string {
   const tokens = prompt
@@ -597,7 +602,12 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     return c.json({ details: parsedBody.error.flatten(), error: "Invalid build request body." }, 400);
   }
 
-  const prompt = parsedBody.data.prompt.trim();
+  const extractedDesignDirective = extractDesignDirectiveFromPrompt(
+    parsedBody.data.prompt,
+    parsedBody.data.designDirective,
+  );
+  const prompt = extractedDesignDirective.cleanPrompt;
+  const designDirective = extractedDesignDirective.designDirective ?? undefined;
   console.log("[implementPlan]", prompt.slice(0, 100));
   const sourcePrompt = prompt;
   const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
@@ -759,6 +769,13 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const buildConfidenceThreshold = isIteration
     ? ITERATION_BUILD_CONFIDENCE
     : NEW_BUILD_PLAN_SUMMARY_CONFIDENCE;
+  const shouldBuildImmediately = !mockAnthropicEnabled
+    && !isIteration
+    && !isImplementConfirmation
+    && classifiedIntent === "build_new"
+    && !hasResearchUrl
+    && effectiveConfidence >= IMMEDIATE_BUILD_CONFIDENCE
+    && isClearDomainBuildPrompt(sourcePrompt);
 
   // Ambiguous always asks a question regardless of confidence — even if Haiku
   // happens to score it high, the user's wording said "unclear".
@@ -770,7 +787,8 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && isBuildIshIntent
     && !needsClarification
     && !isImplementConfirmation
-    && !isIteration;
+    && !isIteration
+    && !shouldBuildImmediately;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
 
   // Original "immediate conversation" path now covers greeting/question/research
@@ -799,6 +817,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     needsClarification,
     isNearReady,
     shouldOfferPlanSummary,
+    shouldBuildImmediately,
     forceIteration,
     isImplementConfirmation,
     explicitImplementSignal,
@@ -901,6 +920,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     builderTrace: initialBuilderTrace,
     confirmedIntent,
     creditsUsed: 0,
+    designDirective,
     imageUrl,
     phase: "queued",
     planKeywords: derivePlanKeywords(planSteps),
@@ -1282,6 +1302,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       isIteration, existingFiles,
       imageUrl,
       confirmedIntent,
+      designDirective,
       projectName,
       withDatabase,
       withAuth,

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { apiConfig } from "../config.js";
 import { buildClarificationTrackingState } from "./clarificationTracking.js";
+import { isClearDomainBuildPrompt } from "./build/designDirective.js";
 import type { ProjectChatHistoryEntry } from "./projectChat.js";
 
 export type Intent =
@@ -66,6 +67,10 @@ function estimateBuildConfidence(message: string): number {
 
   if (/i want to build something|build something/.test(lower)) {
     return 0.3;
+  }
+
+  if (isClearDomainBuildPrompt(trimmed)) {
+    return 0.9;
   }
 
   if (simpleAppPattern.test(lower)) {
@@ -230,6 +235,15 @@ export async function classifyIntent(
     };
   }
 
+  if (!hasExistingFiles && isClearDomainBuildPrompt(trimmed)) {
+    return {
+      intent: "build_new",
+      confidence: 0.9,
+      reason: "Hard-coded clear-domain build rule.",
+      accumulatedContext: trimmed,
+    };
+  }
+
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return buildFallbackIntent(message, hasExistingFiles, hasImage, recentHistory);
@@ -284,13 +298,16 @@ export async function classifyIntent(
               "conversation (recent turns + latest message), not just the latest line.",
               "- Greeting / single word → confidence irrelevant (hard-coded upstream).",
               "- Vague build intent (\"I want to build something\") → 0.3–0.4",
-              "- Category known but no details (\"a portfolio website\") → 0.5–0.65",
+              "- Clear domain or product type with a reasonable default interpretation (\"a portfolio website\", \"build a pet shop website\") → 0.85–0.95",
               "- Category + features known (\"portfolio with blog and contact\") → 0.7–0.8",
               "- Full details known (\"dark minimal portfolio with projects, about, contact, blog\") → 0.8+",
               "Rubric components: app type clear (+0.4) · key features or purpose described (+0.25)",
               "· style/design direction clear (+0.2) · enough detail to build without guessing (+0.15).",
-              "Example: \"a pet store website with landing page and shop to buy stuff\" → 0.65",
-              "(type/store known, purpose/features known, style unknown).",
+              "If the domain is obvious, assume the most logical default instead of withholding confidence.",
+              "Example: \"build a pet shop website\" → 0.9",
+              "(domain clear, sensible defaults available: featured pets, supplies, grooming, contact).",
+              "Example: \"a pet store website with landing page and shop to buy stuff\" → 0.85",
+              "(type/store known, purpose/features known, style can be reasonably inferred).",
               "Example: \"build me a todo app\" → 0.85",
               "(type/task manager known, basic todo features known, simple default style is acceptable).",
               "Example: \"i want to build something\" → 0.3",
@@ -299,6 +316,8 @@ export async function classifyIntent(
               "Iterations on an existing app: a specific direction (e.g. \"add a contact form\",",
               "\"make the header dark\") is 0.9+. Vague iterations (\"make it better\") stay below 0.7.",
               "Never act as if an already answered clarifying question is still missing.",
+              "Only ask a clarifying question if the request is genuinely ambiguous and you cannot make a reasonable design decision without the answer.",
+              "When the prompt already names a clear domain, prefer a reasonable assumption over a follow-up question.",
               `If clarifying questions already asked >= ${MAX_CLARIFYING_QUESTIONS}, be generous and return at least 0.95 when any concrete app direction exists.`,
               "",
               "## accumulatedContext",

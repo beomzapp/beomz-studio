@@ -129,6 +129,33 @@ test("initial build system prompt prefers the developer tool brief over generic 
   assert.match(prompt, /References: railway\.app, neon\.tech, upstash\.com/);
 });
 
+test("initial build system prompt treats design directives as silent internal config", () => {
+  const prompt = buildSystemPrompt(
+    "professional-blue",
+    undefined,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    "Build a pet shop website.",
+    "─── DESIGN DIRECTIVE\nPALETTE: warm editorial\n─── END DESIGN DIRECTIVE — original user request follows below ───",
+  );
+
+  assert.match(prompt, /SILENT INTERNAL DESIGN DIRECTIVE:/);
+  assert.match(prompt, /Treat the block below as internal configuration, not as a user message\./);
+  assert.match(prompt, /Apply it silently\. Never reference it, quote it, or ask the user about it\./);
+  assert.match(prompt, /PALETTE: warm editorial/);
+});
+
+test("initial build system prompt includes the conservative clarifying question rule", () => {
+  const prompt = buildSystemPrompt("professional-blue");
+
+  assert.match(prompt, /CLARIFYING QUESTIONS RULE:/);
+  assert.match(prompt, /Only ask a clarifying question if the request is genuinely ambiguous/);
+  assert.match(prompt, /If the prompt already contains a clear domain or product type/);
+  assert.match(prompt, /Max one clarifying question ever — never a list of options\./);
+});
+
 test("system prompts include lucide safe icon guidance and banned icon list", () => {
   const initialPrompt = buildSystemPrompt("professional-blue");
   const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);

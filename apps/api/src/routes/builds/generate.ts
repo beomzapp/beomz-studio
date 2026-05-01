@@ -120,6 +120,7 @@ export {
 export interface BuildGenerateInput {
   buildId: string;
   confirmedIntent?: BuilderImageIntent;
+  designDirective?: string;
   projectId: string;
   orgId: string;
   userId: string | null;
@@ -2232,6 +2233,7 @@ async function callAnthropicCustomise(
   maxTokens?: number,
   hasByoSupabaseConfig = false,
   dbContextBlock?: string,
+  designDirective?: string,
   abortSignal?: AbortSignal,
   apiKey?: string,
 ): Promise<CustomiseResult> {
@@ -2245,6 +2247,7 @@ async function callAnthropicCustomise(
       hasByoSupabaseConfig,
       dbContextBlock,
       prompt,
+      designDirective,
     ),
     contextBuilder.buildAnthropicUserContent(contextBuilder.buildUserMessage(prompt, phaseScope), imageUrl),
     prompt,
@@ -2648,6 +2651,7 @@ async function callOpenAICompatibleCustomise(
   phaseScope?: PhaseScope,
   hasByoSupabaseConfig = false,
   dbContextBlock?: string,
+  designDirective?: string,
 ): Promise<CustomiseResult> {
   return callOpenAICompatibleWithMessages(
     model, apiKey,
@@ -2659,6 +2663,7 @@ async function callOpenAICompatibleCustomise(
       hasByoSupabaseConfig,
       dbContextBlock,
       prompt,
+      designDirective,
     ),
     contextBuilder.buildUserMessage(prompt, phaseScope),
     prompt, baseURL,
@@ -2679,6 +2684,7 @@ async function callModelCustomise(
   maxTokens?: number,
   hasByoSupabaseConfig = false,
   dbContextBlock?: string,
+  designDirective?: string,
   abortSignal?: AbortSignal,
 ): Promise<CustomiseResult> {
   console.log("[build/model]", { builder: "web_apps", model, provider: inferProviderFromModel(model) });
@@ -2704,6 +2710,7 @@ async function callModelCustomise(
       maxTokens,
       hasByoSupabaseConfig,
       dbContextBlock,
+      designDirective,
       abortSignal,
       anthropicKey ?? undefined,
     );
@@ -2724,6 +2731,7 @@ async function callModelCustomise(
       phaseScope,
       hasByoSupabaseConfig,
       dbContextBlock,
+      designDirective,
     );
   }
 
@@ -2733,7 +2741,7 @@ async function callModelCustomise(
     return callOpenAICompatibleCustomise(
       prompt, model, apiKey, paletteId,
       "https://generativelanguage.googleapis.com/v1beta/openai/",
-      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope, hasByoSupabaseConfig, dbContextBlock,
+      designSystemSpec, phaseContextBlock, imageContextBlock, phaseScope, hasByoSupabaseConfig, dbContextBlock, designDirective,
     );
   }
 
@@ -2753,6 +2761,7 @@ async function callModelCustomise(
     maxTokens,
     hasByoSupabaseConfig,
     dbContextBlock,
+    designDirective,
     abortSignal,
     anthropicKey ?? undefined,
   );
@@ -3054,10 +3063,11 @@ async function generatePreBuildAck(prompt: string, intent: "edit" | "build"): Pr
     ? `Generate a one-sentence acknowledgement that you're about to make the edit the user requested.
 Format: "I'll [verb] the [target]..." — max 15 words, present tense, no filler.
 Examples: "I'll darken the sidebar and update the icon contrast." "I'll add a delete button to the table rows."`
-    : `Generate a one-sentence acknowledgement that you're about to build what the user requested.
-Format: "Building your [app type]..." — max 15 words, present tense, no filler.
+    : `Generate a one-sentence acknowledgement that states your interpretation of the build and confirms you're starting it.
+Format: "Building your [interpreted app type]..." — max 15 words, present tense, no filler.
+Make a reasonable assumption when the domain is clear instead of asking a follow-up question.
 Do not mention HTML, CSS, or JavaScript. If you mention the stack, say React and TypeScript.
-Examples: "Building your restaurant POS system." "Building your task management dashboard."`;
+Examples: "Building your full-service pet shop website." "Building your task management dashboard."`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4_000);
