@@ -22,7 +22,6 @@ import {
   wcCacheGetNodeModules,
   wcCacheSetNodeModules,
   wcCacheDeleteNodeModules,
-  wcCacheHasAnyFilesForProject,
 } from "../lib/wcCache";
 import { fixFile } from "../lib/api";
 
@@ -839,43 +838,22 @@ export function useWebContainerPreview(
         let usedCachedNm = false;
 
         if (instance.installedAt === null) {
-          // ── BEO-690: remount detection ─────────────────────────────────
-          // Skip the IndexedDB node_modules restore when this hook mount is
-          // a navigate-back into an existing project (vs. a fresh generate).
-          // The cache mount + re-deliver of files conflicts with the WC's
-          // mount sequence and silently wedges Vite on "Starting dev server…".
-          // For initial builds the cache is still very valuable (saves the
-          // ~20-30s npm install), so we only skip it on confirmed remounts.
-          //
-          // Detection signals (any one is enough):
-          //   1. files prop is already populated synchronously at boot —
-          //      the parent loaded them from DB before this hook even
-          //      requested them, so this can't be a fresh generate.
-          //   2. wcCache has at least one cached files entry for this
-          //      project — we've successfully built it before, so a return
-          //      visit is by definition a remount.
-          // Both signals are gated on !isBuildInProgress so an in-flight
-          // build (where wcCache might already exist from a prior attempt)
-          // still uses the node_modules cache to keep cold-start fast.
-          const projectId = projectRef.current?.id ?? null;
-          const hasFilesAtBoot = !!(
-            filesRef.current && filesRef.current.length > 0
-          );
-          const hasCachedFilesForProject = projectId
-            ? await wcCacheHasAnyFilesForProject(projectId)
-            : false;
-          if (cancelled) return;
-          const isRemount =
-            !isBuildInProgressRef.current &&
-            (hasFilesAtBoot || hasCachedFilesForProject);
-          if (isRemount) {
-            console.log(
-              "[BEO-690] Remount detected — skipping node_modules cache restore, running fresh npm install",
-            );
-          }
-
-          // ── BEO-375: try restoring node_modules from IndexedDB cache ──
-          const cachedNm = isRemount ? null : await wcCacheGetNodeModules();
+          // ── BEO-743: ALWAYS try restoring node_modules from cache ──────
+          // The previous BEO-690 heuristic skipped the IndexedDB cache on
+          // any "remount" (files-at-boot OR cached-files-for-project), but
+          // that meant every hard refresh of an existing project triggered
+          // a fresh 5+ minute npm install — the website builder was
+          // unusable post-refresh. The wedge case BEO-690 was guarding
+          // against is already covered by the other safety nets:
+          //   • readdir("node_modules") mount verification below — bad
+          //     cache is cleared and we fall through to a fresh install.
+          //   • startViteShell() 30s stuck-dev-server timer (BEO-690 A) —
+          //     forces full recovery if Vite never binds its port.
+          //   • [FS] ERROR debounce (BEO-688) + 15s stale-cache fallback.
+          // So: hard refresh of an existing project ALWAYS tries the cache
+          // first; only when the cache is genuinely empty or its mount
+          // fails verification do we fall through to a fresh npm install.
+          const cachedNm = await wcCacheGetNodeModules();
           if (cancelled) return;
 
           if (cachedNm) {
