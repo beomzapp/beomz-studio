@@ -117,7 +117,7 @@ const BUILDERS: BuilderDef[] = [
     icon: Bot,
   },
   {
-    key: "chat_plan",
+    key: "chat",
     name: "Chat / Plan",
     description: "Planning & chat interactions",
     icon: MessageSquare,
@@ -648,7 +648,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
         web_apps: models.web_apps ?? DEFAULT_AI_MODELS.web_apps,
         websites: models.websites ?? DEFAULT_AI_MODELS.websites,
         agents: models.agents ?? DEFAULT_AI_MODELS.agents,
-        chat_plan: models.chat_plan ?? DEFAULT_AI_MODELS.chat_plan,
+        chat: (models as Record<string, string>).chat ?? DEFAULT_AI_MODELS.chat,
       };
       setServerModels(selections);
       setDraft(selections);
@@ -689,7 +689,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
         web_apps: models.web_apps ?? draft.web_apps,
         websites: models.websites ?? draft.websites,
         agents: models.agents ?? draft.agents,
-        chat_plan: models.chat_plan ?? draft.chat_plan,
+        chat: (models as Record<string, string>).chat ?? draft.chat,
       };
       setServerModels(saved);
       setDraft(saved);

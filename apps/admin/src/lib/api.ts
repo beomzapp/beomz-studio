@@ -360,7 +360,7 @@ export async function deleteProvider(
 
 // ── Admin: AI Models ──────────────────────────────────────────────────────────
 
-export type AiModelKey = "web_apps" | "websites" | "agents" | "chat_plan";
+export type AiModelKey = "web_apps" | "websites" | "agents" | "chat";
 
 export type AiModelSelections = Record<AiModelKey, string>;
 
@@ -380,7 +380,7 @@ export const DEFAULT_AI_MODELS: AiModelSelections = {
   web_apps: "claude-sonnet-4-5-20251001",
   websites: "claude-sonnet-4-5-20251001",
   agents: "claude-sonnet-4-5-20251001",
-  chat_plan: "claude-haiku-4-5-20251001",
+  chat: "claude-haiku-4-5-20251001",
 };
 
 export async function fetchAdminAiModels(accessToken: string): Promise<AiModelsResponse> {
