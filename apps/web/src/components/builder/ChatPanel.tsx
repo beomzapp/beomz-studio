@@ -18,7 +18,7 @@
  *
  *   Data-layer: untouched; useBuildChat.ts owns all state and SSE handling.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
 import { ArrowDown, MessageSquare, Paperclip, Send, Square, X } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -125,12 +125,22 @@ export function ChatPanel({
   const outOfCredits = typeof creditsBalance === "number" && creditsBalance <= 0;
   const [chipsDismissed, setChipsDismissed] = useState(false);
 
-  // BEO-725: snapshot of message IDs present on mount. Only messages added
-  // AFTER mount get TypewriterText. Hard refresh → no re-animation.
+  // BEO-737 A1: snapshot of message IDs present at hydration. Capturing in
+  // a useLayoutEffect (rather than during render) defers the snapshot until
+  // AFTER `useBuildChat` has restored from localStorage / build session, so
+  // restored messages are seeded as "old" and never re-animate. Until the
+  // snapshot is set, we treat ALL messages as old (isNewMessage === false).
   const initialMsgIdsRef = useRef<Set<string> | null>(null);
-  if (initialMsgIdsRef.current === null) {
-    initialMsgIdsRef.current = new Set(messages.map(m => m.id));
-  }
+  useLayoutEffect(() => {
+    if (initialMsgIdsRef.current === null && messages.length > 0) {
+      initialMsgIdsRef.current = new Set(messages.map(m => m.id));
+    }
+  }, [messages]);
+  const isNewMessage = useCallback(
+    (id: string) =>
+      initialMsgIdsRef.current ? !initialMsgIdsRef.current.has(id) : false,
+    [],
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -370,7 +380,7 @@ export function ChatPanel({
                 <ChatMessageView
                   message={msg}
                   isBuilding={isBuilding}
-                  isNewMessage={!initialMsgIdsRef.current!.has(msg.id)}
+                  isNewMessage={isNewMessage(msg.id)}
                   onRetry={onRetry}
                   onReportIssue={onReportIssue}
                   onPopulateInput={populateInputWithoutSend}
