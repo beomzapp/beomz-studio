@@ -161,14 +161,17 @@ export default function UsersPage() {
 
     try {
       if (!token) throw new Error("Not authenticated");
-      await postCreditAdjustment(token, selected.id, n, reason.trim());
-      // Refresh credit history
+      const result = await postCreditAdjustment(token, selected.id, n, reason.trim());
+      applyOptimistic(result.credits);
       const entries = await fetchUserCreditHistory(token, selected.id);
       setHistory(entries);
       setDelta("");
       setReason("");
+      if (result.clamped) {
+        setAdjustError(`Clamped to floor: applied ${result.appliedDelta} instead of ${result.requestedDelta}`);
+      }
     } catch (e) {
-      applyOptimistic(prev); // revert
+      applyOptimistic(prev);
       setAdjustError(e instanceof Error ? e.message : "Failed to apply adjustment");
     } finally {
       setAdjusting(false);

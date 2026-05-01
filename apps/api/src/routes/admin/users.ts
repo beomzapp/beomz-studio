@@ -407,17 +407,8 @@ async function adjustUserCreditsInDb(input: { delta: number; reason: string; use
   const updatedCredits = Math.max(0, currentCredits + input.delta);
   const appliedDelta = updatedCredits - currentCredits;
 
-  const updateResponse = await client
-    .from("orgs")
-    .update({ credits: updatedCredits })
-    .eq("id", org.id)
-    .select("credits")
-    .maybeSingle<{ credits: number }>();
-
-  if (updateResponse.error) {
-    throw new Error(updateResponse.error.message);
-  }
-
+  // Insert ledger entry first — it's the audit trail and is safe if the
+  // subsequent balance update fails (a ledger-only orphan is recoverable).
   const insertResponse = await client
     .from("credit_transactions")
     .insert({
@@ -428,20 +419,26 @@ async function adjustUserCreditsInDb(input: { delta: number; reason: string; use
     });
 
   if (insertResponse.error) {
-    const rollbackResponse = await client
-      .from("orgs")
-      .update({ credits: currentCredits })
-      .eq("id", org.id);
-
-    if (rollbackResponse.error) {
-      console.error("[admin/users] failed to rollback credits after ledger insert failure:", rollbackResponse.error.message);
-    }
-
     throw new Error(insertResponse.error.message);
+  }
+
+  const updateResponse = await client
+    .from("orgs")
+    .update({ credits: updatedCredits })
+    .eq("id", org.id)
+    .select("credits")
+    .maybeSingle<{ credits: number }>();
+
+  if (updateResponse.error) {
+    console.error("[admin/users] balance update failed after ledger insert:", updateResponse.error.message);
+    throw new Error(updateResponse.error.message);
   }
 
   return {
     credits: Number(updateResponse.data?.credits ?? updatedCredits),
+    appliedDelta,
+    requestedDelta: input.delta,
+    clamped: appliedDelta !== input.delta,
   };
 }
 

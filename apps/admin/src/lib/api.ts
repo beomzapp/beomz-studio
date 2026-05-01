@@ -93,12 +93,19 @@ export async function fetchUserCreditHistory(
   return Array.isArray(data) ? data : (data.transactions ?? data.history ?? []);
 }
 
+export interface CreditAdjustmentResult {
+  credits: number;
+  appliedDelta?: number;
+  requestedDelta?: number;
+  clamped?: boolean;
+}
+
 export async function postCreditAdjustment(
   accessToken: string,
   userId: string,
   delta: number,
   reason: string,
-): Promise<void> {
+): Promise<CreditAdjustmentResult> {
   const res = await fetch(`${getApiBaseUrl()}/admin/users/${userId}/credits`, {
     method: "POST",
     headers: {
@@ -111,6 +118,7 @@ export async function postCreditAdjustment(
     const err = (await res.json().catch(() => ({}))) as { message?: string };
     throw new Error(err.message ?? `HTTP ${res.status}`);
   }
+  return res.json() as Promise<CreditAdjustmentResult>;
 }
 
 // ── Admin: Builds ─────────────────────────────────────────────────────────────
