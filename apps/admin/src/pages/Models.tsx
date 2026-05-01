@@ -648,7 +648,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
         web_apps: models.web_apps ?? DEFAULT_AI_MODELS.web_apps,
         websites: models.websites ?? DEFAULT_AI_MODELS.websites,
         agents: models.agents ?? DEFAULT_AI_MODELS.agents,
-        chat: (models as Record<string, string>).chat ?? DEFAULT_AI_MODELS.chat,
+        chat: models.chat ?? DEFAULT_AI_MODELS.chat,
       };
       setServerModels(selections);
       setDraft(selections);
@@ -689,7 +689,7 @@ function ModelsTab({ token, showToast }: ModelsTabProps) {
         web_apps: models.web_apps ?? draft.web_apps,
         websites: models.websites ?? draft.websites,
         agents: models.agents ?? draft.agents,
-        chat: (models as Record<string, string>).chat ?? draft.chat,
+        chat: models.chat ?? draft.chat,
       };
       setServerModels(saved);
       setDraft(saved);
