@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { apiConfig } from "../../config.js";
 import { updateFeatureFlagsInDb, listFeatureFlagsFromDb, type FeatureFlagsMap } from "../../lib/featureFlags.js";
-import { invalidateModelCache, MODEL_DEFAULTS } from "../../lib/modelConfig.js";
+import { broadcastModelCacheInvalidation, invalidateModelCache, MODEL_DEFAULTS } from "../../lib/modelConfig.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { requireAdmin } from "../../middleware/requireAdmin.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
@@ -121,6 +121,7 @@ export function createAdminAiModelsRoute(deps: AdminAiModelsRouteDeps = {}) {
 
       await updateFeatureFlags({ ai_models: updated });
       invalidateModelCache();
+      await broadcastModelCacheInvalidation();
 
       return c.json(updated);
     } catch (error) {

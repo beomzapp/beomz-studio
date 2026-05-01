@@ -6,6 +6,7 @@ import { decryptProjectSecret } from "./projectSecrets.js";
 const CACHE_TTL_MS = 60_000;
 let cache: Record<string, string> | null = null;
 let cacheTime = 0;
+let lastKnownBustTs: string | null = null;
 
 const providerKeyCache = new Map<string, { key: string; ts: number }>();
 
@@ -34,31 +35,63 @@ export interface ModelConfig {
   provider: string;
 }
 
+async function checkCacheBust(): Promise<boolean> {
+  try {
+    const { data } = await getStudioDb()
+      .from("feature_flags")
+      .select("value")
+      .eq("key", "model_cache_bust_at")
+      .maybeSingle();
+    const ts = (data?.value as string) ?? null;
+    if (ts && ts !== lastKnownBustTs) {
+      lastKnownBustTs = ts;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function getModelForBuilder(
   builder: "web_apps" | "websites" | "agents" | "chat",
 ): Promise<string> {
-  console.log("[modelConfig] STUDIO_SUPABASE_URL:", apiConfig.STUDIO_SUPABASE_URL ? "set" : "MISSING");
   const now = Date.now();
-  if (!cache || now - cacheTime > CACHE_TTL_MS) {
-    try {
-      const { data } = await getStudioDb()
-        .from("feature_flags")
-        .select("value")
-        .eq("key", "ai_models")
-        .single();
-      cache = (data?.value as Record<string, string>) ?? MODEL_DEFAULTS;
-    } catch (err) {
-      console.error("[modelConfig] DB fetch failed:", err instanceof Error ? err.message : String(err));
-      cache = MODEL_DEFAULTS;
-    }
-    cacheTime = now;
+  const ttlExpired = !cache || now - cacheTime > CACHE_TTL_MS;
+
+  if (cache && !ttlExpired) {
+    const busted = await checkCacheBust();
+    if (!busted) return cache[builder] ?? MODEL_DEFAULTS[builder];
   }
+
+  try {
+    const { data } = await getStudioDb()
+      .from("feature_flags")
+      .select("value")
+      .eq("key", "ai_models")
+      .single();
+    cache = (data?.value as Record<string, string>) ?? MODEL_DEFAULTS;
+  } catch (err) {
+    console.error("[modelConfig] DB fetch failed:", err instanceof Error ? err.message : String(err));
+    cache = MODEL_DEFAULTS;
+  }
+  cacheTime = now;
   return cache[builder] ?? MODEL_DEFAULTS[builder];
 }
 
 export function invalidateModelCache(): void {
   cache = null;
   cacheTime = 0;
+}
+
+export async function broadcastModelCacheInvalidation(): Promise<void> {
+  try {
+    await getStudioDb()
+      .from("feature_flags")
+      .upsert({ key: "model_cache_bust_at", value: new Date().toISOString() }, { onConflict: "key" });
+  } catch (err) {
+    console.error("[modelConfig] broadcastModelCacheInvalidation failed:", err instanceof Error ? err.message : String(err));
+  }
 }
 
 export function inferProviderFromModel(model: string): string {
