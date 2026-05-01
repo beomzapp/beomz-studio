@@ -504,7 +504,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     try {
       const saved = localStorage.getItem(`chat:${pid}`);
       if (!saved) return;
-      const parsed = JSON.parse(saved) as ChatMessage[];
+      // BEO-737 A7: JSON.stringify serialises Date → ISO string. Without a
+      // reviver, restored user messages have timestamp:string instead of
+      // timestamp:Date, so consumers calling .toLocaleTimeString() throw.
+      const parsed = JSON.parse(saved, (key, value) =>
+        key === "timestamp" && typeof value === "string" ? new Date(value) : value,
+      ) as ChatMessage[];
       if (!Array.isArray(parsed) || parsed.length === 0) return;
       setMessages(prev => (prev.length > 0 ? prev : parsed));
     } catch { /* corrupted data — ignore */ }
