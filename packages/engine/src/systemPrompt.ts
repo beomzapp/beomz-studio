@@ -52,8 +52,96 @@ export interface BuildSystemPromptInput {
   vfs: VirtualFileSystem;
 }
 
+type AppTypeBrief = {
+  id:
+    | "dashboard"
+    | "saas / marketing"
+    | "e-commerce"
+    | "productivity / tool"
+    | "portfolio / creative"
+    | "social / community"
+    | "finance / business"
+    | "developer tool"
+    | "default";
+  brief: string;
+  pattern: RegExp;
+};
+
+const APP_TYPE_BRIEFS: AppTypeBrief[] = [
+  {
+    id: "developer tool",
+    pattern: /\b(developer|dev tool|devtool|cli|sdk|api platform|api tool|observability|logs?|metrics|telemetry|deployment|infra|infrastructure|database tool|analytics tool)\b/i,
+    brief: "Dev-focused. Dark mode preferred, code blocks prominent, minimal chrome. References: railway.app, neon.tech, upstash.com",
+  },
+  {
+    id: "finance / business",
+    pattern: /\b(finance|financial|bank|banking|invoice|invoicing|billing|accounting|payroll|expense|expenses|revenue|treasury|cash flow|bookkeeping)\b/i,
+    brief: "Trust and clarity. Clean tables, strong data hierarchy, conservative palette. References: mercury.com, stripe.com/dashboard, brex.com",
+  },
+  {
+    id: "e-commerce",
+    pattern: /\b(e-?commerce|store|shop|shopping|checkout|cart|product catalog|merch|merchandise|retail)\b/i,
+    brief: "Product-first. Large imagery, clean product cards, trust signals, persistent cart indicator. References: shopify.com, gumroad.com, fourthwall.com",
+  },
+  {
+    id: "social / community",
+    pattern: /\b(social|community|forum|feed|timeline|chat|messaging|creator network|members|group)\b/i,
+    brief: "People-first. Avatars prominent, activity feeds, card-based content, warm palette. References: discord.com, are.na, cosmos.so",
+  },
+  {
+    id: "portfolio / creative",
+    pattern: /\b(portfolio|creative|agency|photography|designer|artist|studio|showcase|gallery)\b/i,
+    brief: "Visual showcase. Full-bleed imagery, generous whitespace, typography-led. References: read.cv, are.na, cosmos.so",
+  },
+  {
+    id: "saas / marketing",
+    pattern: /\b(saas|marketing|landing page|homepage|waitlist|startup|product site|b2b|lead gen|lead generation)\b/i,
+    brief: "Conversion-focused. Bold hero, benefit sections, social proof, strong CTA hierarchy. References: linear.app, resend.com, raycast.com",
+  },
+  {
+    id: "dashboard",
+    pattern: /\b(dashboard|admin|admin panel|control panel|backoffice|back office|console|analytics dashboard|operations dashboard)\b/i,
+    brief: "Data-focused UI. Prioritize information density, clear hierarchy, sidebar navigation, muted palette with strong accent for key metrics. References: linear.app/features, vercel.com/dashboard, stripe.com/dashboard",
+  },
+  {
+    id: "productivity / tool",
+    pattern: /\b(productivity|planner|calendar|todo|to-do|task|tracker|tool|workspace|notes|editor|crm)\b/i,
+    brief: "Utilitarian but polished. High info density, keyboard-friendly patterns, minimal decoration. References: cron.com, height.app, retool.com",
+  },
+  {
+    id: "default",
+    pattern: /[\s\S]*/i,
+    brief: "Professional SaaS. Clean layout, clear hierarchy, trustworthy palette. References: linear.app, vercel.com, notion.so",
+  },
+];
+
+const COPY_RULES_BLOCK = [
+  "COPY RULES:",
+  "- No Lorem ipsum, no \"Feature title\", no \"Card heading\", no \"Description goes here\"",
+  "- Write copy relevant to the app's domain and purpose",
+  "- Headlines: punchy, max 8 words",
+  "- Body: max 2 sentences per block",
+  "- CTAs: action-oriented (\"Start your free trial\" not \"Submit\")",
+  "- Nav labels: real (\"Dashboard, Projects, Settings\" — not \"Page 1\")",
+].join("\n");
+
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function detectAppTypeBrief(prompt: string): AppTypeBrief {
+  const normalizedPrompt = prompt.trim();
+  return APP_TYPE_BRIEFS.find((entry) => entry.pattern.test(normalizedPrompt)) ?? APP_TYPE_BRIEFS[APP_TYPE_BRIEFS.length - 1]!;
+}
+
+function buildAppTypeBriefSection(prompt: string): string {
+  const appTypeBrief = detectAppTypeBrief(prompt);
+  return [
+    "App-type design brief:",
+    `Detected app type: ${appTypeBrief.id}`,
+    appTypeBrief.brief,
+    "Treat the references above as design cues for layout, density, spacing, typography, and overall product feel. Do not clone them literally.",
+  ].join("\n");
 }
 
 function buildStaticSection(actionDefinitions: readonly ActionDefinition[]): string {
@@ -128,6 +216,7 @@ function buildVfsSection(vfs: VirtualFileSystem, maxInlineChars = 16_000): strin
 function buildDynamicSection(input: BuildSystemPromptInput): string {
   const template = input.template ?? getTemplateDefinition(input.project.templateId);
   const promptPolicy = input.promptPolicy ?? getInitialBuildPromptPolicy(template.id);
+  const appTypeBriefSection = buildAppTypeBriefSection(input.prompt);
 
   return [
     "DYNAMIC SECTION",
@@ -165,6 +254,10 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
       systemPrompt: promptPolicy.systemPrompt,
       templateId: promptPolicy.templateId,
     }),
+    "",
+    appTypeBriefSection,
+    "",
+    COPY_RULES_BLOCK,
     "",
     "Operation contract:",
     formatJson({

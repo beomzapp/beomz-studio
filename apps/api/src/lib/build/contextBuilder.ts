@@ -515,6 +515,94 @@ const DEFAULT_THEME: ThemeTokens = {
   borderRadiusLg: "12px",
 };
 
+type AppTypeBrief = {
+  id:
+    | "dashboard"
+    | "saas / marketing"
+    | "e-commerce"
+    | "productivity / tool"
+    | "portfolio / creative"
+    | "social / community"
+    | "finance / business"
+    | "developer tool"
+    | "default";
+  brief: string;
+  pattern: RegExp;
+};
+
+const APP_TYPE_BRIEFS: AppTypeBrief[] = [
+  {
+    id: "developer tool",
+    pattern: /\b(developer|dev tool|devtool|cli|sdk|api platform|api tool|observability|logs?|metrics|telemetry|deployment|infra|infrastructure|database tool|analytics tool)\b/i,
+    brief: "Dev-focused. Dark mode preferred, code blocks prominent, minimal chrome. References: railway.app, neon.tech, upstash.com",
+  },
+  {
+    id: "finance / business",
+    pattern: /\b(finance|financial|bank|banking|invoice|invoicing|billing|accounting|payroll|expense|expenses|revenue|treasury|cash flow|bookkeeping)\b/i,
+    brief: "Trust and clarity. Clean tables, strong data hierarchy, conservative palette. References: mercury.com, stripe.com/dashboard, brex.com",
+  },
+  {
+    id: "e-commerce",
+    pattern: /\b(e-?commerce|store|shop|shopping|checkout|cart|product catalog|merch|merchandise|retail)\b/i,
+    brief: "Product-first. Large imagery, clean product cards, trust signals, persistent cart indicator. References: shopify.com, gumroad.com, fourthwall.com",
+  },
+  {
+    id: "social / community",
+    pattern: /\b(social|community|forum|feed|timeline|chat|messaging|creator network|members|group)\b/i,
+    brief: "People-first. Avatars prominent, activity feeds, card-based content, warm palette. References: discord.com, are.na, cosmos.so",
+  },
+  {
+    id: "portfolio / creative",
+    pattern: /\b(portfolio|creative|agency|photography|designer|artist|studio|showcase|gallery)\b/i,
+    brief: "Visual showcase. Full-bleed imagery, generous whitespace, typography-led. References: read.cv, are.na, cosmos.so",
+  },
+  {
+    id: "saas / marketing",
+    pattern: /\b(saas|marketing|landing page|homepage|waitlist|startup|product site|b2b|lead gen|lead generation)\b/i,
+    brief: "Conversion-focused. Bold hero, benefit sections, social proof, strong CTA hierarchy. References: linear.app, resend.com, raycast.com",
+  },
+  {
+    id: "dashboard",
+    pattern: /\b(dashboard|admin|admin panel|control panel|backoffice|back office|console|analytics dashboard|operations dashboard)\b/i,
+    brief: "Data-focused UI. Prioritize information density, clear hierarchy, sidebar navigation, muted palette with strong accent for key metrics. References: linear.app/features, vercel.com/dashboard, stripe.com/dashboard",
+  },
+  {
+    id: "productivity / tool",
+    pattern: /\b(productivity|planner|calendar|todo|to-do|task|tracker|tool|workspace|notes|editor|crm)\b/i,
+    brief: "Utilitarian but polished. High info density, keyboard-friendly patterns, minimal decoration. References: cron.com, height.app, retool.com",
+  },
+  {
+    id: "default",
+    pattern: /[\s\S]*/i,
+    brief: "Professional SaaS. Clean layout, clear hierarchy, trustworthy palette. References: linear.app, vercel.com, notion.so",
+  },
+];
+
+const COPY_RULES_BLOCK = [
+  "══ COPY RULES ══",
+  "- No Lorem ipsum, no \"Feature title\", no \"Card heading\", no \"Description goes here\"",
+  "- Write copy relevant to the app's domain and purpose",
+  "- Headlines: punchy, max 8 words",
+  "- Body: max 2 sentences per block",
+  "- CTAs: action-oriented (\"Start your free trial\" not \"Submit\")",
+  "- Nav labels: real (\"Dashboard, Projects, Settings\" — not \"Page 1\")",
+].join("\n");
+
+function detectAppTypeBrief(prompt: string): AppTypeBrief {
+  const normalizedPrompt = prompt.trim();
+  return APP_TYPE_BRIEFS.find((entry) => entry.pattern.test(normalizedPrompt)) ?? APP_TYPE_BRIEFS[APP_TYPE_BRIEFS.length - 1]!;
+}
+
+function buildAppTypeBriefBlock(prompt: string): string {
+  const appTypeBrief = detectAppTypeBrief(prompt);
+  return [
+    "══ APP-TYPE DESIGN BRIEF ══",
+    `Detected app type: ${appTypeBrief.id}`,
+    appTypeBrief.brief,
+    "Treat the references above as design cues for layout, density, spacing, typography, and overall product feel. Do not clone them literally.",
+  ].join("\n");
+}
+
 const PALETTE_THEME_TOKENS: Record<string, ThemeTokens> = {
   "professional-blue": DEFAULT_THEME,
   "crypto-dark": {
@@ -1248,6 +1336,7 @@ function buildSystemPrompt(
   imageContextBlock?: string,
   hasByoSupabaseConfig = false,
   dbContextBlock?: string,
+  prompt = "",
 ): string {
   const designBlock = designSystemSpec
     ? `${designSystemSpec}\n\nThe design system spec above takes priority for all visual decisions. Apply all tokens, typography, spacing, and component patterns exactly as specified.\n\n`
@@ -1260,11 +1349,16 @@ function buildSystemPrompt(
   const dbContextPromptBlock = dbContextBlock ? `${dbContextBlock}\n` : "";
   const themeTsContent = buildThemeTs(paletteId);
   const variationSeed = Math.floor(Math.random() * 9000) + 1000;
+  const appTypeBriefBlock = buildAppTypeBriefBlock(prompt);
   return [
     designBlock + phaseBlock + imageBlock + byoSupabaseBlock + "You are an expert React developer. BUILD the app the user describes — do NOT merely restyle a template.",
     "Design the architecture from scratch based on what the app actually needs.",
     "",
     `VARIATION SEED: ${variationSeed}. Every build must be unique — use different layouts, data examples, copy text, component structures, and visual arrangements even when the prompt is identical to a previous build. Never produce a cookie-cutter result.`,
+    "",
+    appTypeBriefBlock,
+    "",
+    COPY_RULES_BLOCK,
     "",
     "══ SCOPE CONSERVATIVELY ══",
     "If the prompt requests 4 or more distinct features or modules, scope this build to the 3 most essential ones only.",

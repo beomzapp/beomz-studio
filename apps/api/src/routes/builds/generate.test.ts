@@ -95,6 +95,40 @@ test("initial build system prompt injects BYO Supabase guidance when credentials
   assert.match(prompt, /const supabase = createClient\(import\.meta\.env\.VITE_SUPABASE_URL, import\.meta\.env\.VITE_SUPABASE_ANON_KEY\)/);
 });
 
+test("initial build system prompt injects the e-commerce design brief and copy rules", () => {
+  const prompt = buildSystemPrompt(
+    "professional-blue",
+    undefined,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    "Build an e-commerce store for premium running gear.",
+  );
+
+  assert.match(prompt, /Detected app type: e-commerce/);
+  assert.match(prompt, /Product-first\. Large imagery, clean product cards, trust signals, persistent cart indicator\./);
+  assert.match(prompt, /References: shopify\.com, gumroad\.com, fourthwall\.com/);
+  assert.match(prompt, /No Lorem ipsum, no "Feature title", no "Card heading", no "Description goes here"/);
+  assert.match(prompt, /CTAs: action-oriented \("Start your free trial" not "Submit"\)/);
+});
+
+test("initial build system prompt prefers the developer tool brief over generic tool wording", () => {
+  const prompt = buildSystemPrompt(
+    "professional-blue",
+    undefined,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    "Build a developer analytics tool with logs, traces, and deploy insights.",
+  );
+
+  assert.match(prompt, /Detected app type: developer tool/);
+  assert.match(prompt, /Dev-focused\. Dark mode preferred, code blocks prominent, minimal chrome\./);
+  assert.match(prompt, /References: railway\.app, neon\.tech, upstash\.com/);
+});
+
 test("system prompts include lucide safe icon guidance and banned icon list", () => {
   const initialPrompt = buildSystemPrompt("professional-blue");
   const iterationPrompt = buildIterationSystemPrompt(undefined, undefined, false);
