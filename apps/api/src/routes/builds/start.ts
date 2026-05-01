@@ -822,7 +822,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     try {
       const slm = await slmMatchTemplate({ prompt: effectivePrompt });
       selectedTemplateId = slm.template.id;
-    } catch {
+    } catch (error) {
+      console.error("[builds/start] template match failed.", {
+        error: error instanceof Error ? error.message : String(error),
+        prompt: effectivePrompt.slice(0, 200),
+      });
       selectedTemplateId = "interactive-tool"; // safe fallback
     }
   }

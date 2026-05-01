@@ -463,7 +463,15 @@ type BuildPipelineArgs = {
     templateId: string,
     attachedImageAssetUrl?: string,
   ) => { files: StudioFile[]; missing: string[] };
-  injectProjectDatabaseEnv: (db: StudioDbClient, projectId: string, files: StudioFile[]) => Promise<StudioFile[]>;
+  injectProjectDatabaseEnv: (
+    db: StudioDbClient,
+    projectId: string,
+    files: StudioFile[],
+    options?: {
+      onWarning?: (reason: string) => Promise<void>;
+      requireDatabase?: boolean;
+    },
+  ) => Promise<StudioFile[]>;
   calcSonnetCostUsd: (inputTokens: number, outputTokens: number) => number;
   calcHaikuCostUsd: (inputTokens: number, outputTokens: number) => number;
   roundUsd: (costUsd: number) => number;
@@ -719,7 +727,9 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
       templateId,
     });
   }
-  const finalFiles = await injectProjectDatabaseEnv(db, projectId, databaseEnforced.files);
+  const finalFiles = await injectProjectDatabaseEnv(db, projectId, databaseEnforced.files, {
+    requireDatabase: input.withDatabase === true || input.withAuth === true,
+  });
   if (missingImports.length > 0) {
     console.warn("[generate] WARNING: missing imports detected:", missingImports);
     console.log("[generate] generating stub files for missing components...", { count: missingImports.length });

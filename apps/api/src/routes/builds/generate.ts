@@ -807,6 +807,10 @@ async function injectProjectDatabaseEnv(
   db: StudioDbClient,
   projectId: string,
   files: StudioFile[],
+  options?: {
+    onWarning?: (reason: string) => Promise<void>;
+    requireDatabase?: boolean;
+  },
 ): Promise<StudioFile[]> {
   try {
     const project = await db.findProjectById(projectId);
@@ -818,6 +822,9 @@ async function injectProjectDatabaseEnv(
     const provider = resolveProjectDbProvider(project, limits);
     const envVars = buildProjectDatabaseEnvVars(project, limits);
     if (!envVars) {
+      if (options?.requireDatabase) {
+        await options.onWarning?.("missing_project_db_env");
+      }
       return files;
     }
 
@@ -849,6 +856,9 @@ async function injectProjectDatabaseEnv(
       "[generate] failed to inject project DB env (non-fatal):",
       error instanceof Error ? error.message : String(error),
     );
+    if (options?.requireDatabase) {
+      await options.onWarning?.("db_env_injection_failed");
+    }
     return files;
   }
 }
@@ -3737,6 +3747,30 @@ async function _runBuildInBackground(
     message,
   });
 
+  const databaseProvisioningWarningMessage = "Database provisioning failed — app built without database. Try adding database from the Database tab.";
+  let databaseProvisioningWarningEmitted = false;
+  const emitDatabaseProvisioningWarning = async (reason: string): Promise<void> => {
+    if (databaseProvisioningWarningEmitted || !(input.withDatabase === true || input.withAuth === true)) {
+      return;
+    }
+
+    databaseProvisioningWarningEmitted = true;
+    console.warn("[build/provision] requested DB/auth build is continuing without database.", {
+      buildId,
+      projectId,
+      reason,
+    });
+    await appendEventToDb(db, buildId, {
+      type: "status",
+      id: nextId(),
+      timestamp: ts(),
+      operation: op,
+      code: "db_provisioning_failed",
+      phase: "warning",
+      message: databaseProvisioningWarningMessage,
+    });
+  };
+
   const emitStagePreamble = async (
     rawPrompt: string,
     isIteration: boolean,
@@ -3792,6 +3826,7 @@ async function _runBuildInBackground(
         ? neonResult.body.message
         : (typeof neonResult.body?.error === "string" ? neonResult.body.error : "Neon provision failed");
       console.error("[build/provision] provision returned error status, building without DB:", errMsg);
+      await emitDatabaseProvisioningWarning("db_provision_failed");
     }
   }
   throwIfBuildAborted();
@@ -3846,7 +3881,15 @@ async function _runBuildInBackground(
         filterBlockedGeneratedFiles,
         mergeFiles,
         postProcessGeneratedFiles,
-        injectProjectDatabaseEnv,
+        injectProjectDatabaseEnv: (dbArg, projectIdArg, filesArg, options) => injectProjectDatabaseEnv(
+          dbArg,
+          projectIdArg,
+          filesArg,
+          {
+            ...options,
+            onWarning: emitDatabaseProvisioningWarning,
+          },
+        ),
         callModelIterate,
         calcSonnetCostUsd,
         calcHaikuCostUsd,
@@ -3905,7 +3948,15 @@ async function _runBuildInBackground(
       callModelCustomise,
       mergeFiles,
       postProcessGeneratedFiles,
-      injectProjectDatabaseEnv,
+      injectProjectDatabaseEnv: (dbArg, projectIdArg, filesArg, options) => injectProjectDatabaseEnv(
+        dbArg,
+        projectIdArg,
+        filesArg,
+        {
+          ...options,
+          onWarning: emitDatabaseProvisioningWarning,
+        },
+      ),
       calcSonnetCostUsd,
       calcHaikuCostUsd,
       roundUsd,

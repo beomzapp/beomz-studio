@@ -605,3 +605,24 @@ test("timed_out builds persist a terminal error event and replay as terminal", a
   assert.match(sharedSource, /row\.status === "failed" \|\| row\.status === "cancelled" \|\| row\.status === "timed_out"/);
   assert.match(sharedSource, /isTimedOut \? "build_timed_out" : "build_failed"/);
 });
+
+test("requested DB/auth builds emit a warning event when provisioning falls back to no database", async () => {
+  const generateSource = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
+
+  assert.match(generateSource, /const databaseProvisioningWarningMessage = "Database provisioning failed — app built without database\. Try adding database from the Database tab\."/);
+  assert.match(generateSource, /const emitDatabaseProvisioningWarning = async \(reason: string\): Promise<void> => \{/);
+  assert.match(generateSource, /code: "db_provisioning_failed"/);
+  assert.match(generateSource, /phase: "warning"/);
+  assert.match(generateSource, /await emitDatabaseProvisioningWarning\("db_provision_failed"\);/);
+  assert.match(generateSource, /await options\.onWarning\?\.\("missing_project_db_env"\);/);
+  assert.match(generateSource, /await options\.onWarning\?\.\("db_env_injection_failed"\);/);
+});
+
+test("start and events routes log formerly silent failures with structured errors", async () => {
+  const startSource = await readFile(new URL("./start.ts", import.meta.url), "utf8");
+  const eventsSource = await readFile(new URL("./events.ts", import.meta.url), "utf8");
+
+  assert.match(startSource, /console\.error\("\[builds\/start] template match failed\."\, \{/);
+  assert.match(eventsSource, /console\.error\("\[builds\/events] failed to look up superseding build\."\, \{/);
+  assert.match(eventsSource, /console\.error\("\[builds\/events] polling failed\."\, \{/);
+});

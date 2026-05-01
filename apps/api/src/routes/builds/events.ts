@@ -154,8 +154,11 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       if (superseding && superseding.id !== buildId) {
         return c.json({ error: "build_superseded", latestBuildId: superseding.id }, 410);
       }
-    } catch {
-      // ignore — fall through to 404
+    } catch (error) {
+      console.error("[builds/events] failed to look up superseding build.", {
+        buildId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     return c.json({ error: "Build not found." }, 404);
   }
@@ -241,7 +244,11 @@ buildsEventsRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
           break;
         }
         currentProjectRow = await orgContext.db.findProjectById(currentGenerationRow.project_id);
-      } catch {
+      } catch (error) {
+        console.error("[builds/events] polling failed.", {
+          buildId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         // Supabase transient error — skip this poll tick and try again.
         const shouldContinue = await waitForNextPoll();
         if (!shouldContinue) {

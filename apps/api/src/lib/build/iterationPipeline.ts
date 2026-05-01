@@ -53,6 +53,8 @@ type IterationPipelineArgs = {
     existingFiles: readonly StudioFile[];
     projectName?: string;
     imageUrl?: string;
+    withAuth?: boolean;
+    withDatabase?: boolean;
   };
   db: StudioDbClient;
   op: "iteration";
@@ -82,7 +84,15 @@ type IterationPipelineArgs = {
     templateId: string,
     attachedImageAssetUrl?: string,
   ) => { files: StudioFile[]; missing: string[] };
-  injectProjectDatabaseEnv: (db: StudioDbClient, projectId: string, files: StudioFile[]) => Promise<StudioFile[]>;
+  injectProjectDatabaseEnv: (
+    db: StudioDbClient,
+    projectId: string,
+    files: StudioFile[],
+    options?: {
+      onWarning?: (reason: string) => Promise<void>;
+      requireDatabase?: boolean;
+    },
+  ) => Promise<StudioFile[]>;
   callModelIterate: (...args: any[]) => Promise<CustomiseResult>;
   calcSonnetCostUsd: (inputTokens: number, outputTokens: number) => number;
   calcHaikuCostUsd: (inputTokens: number, outputTokens: number) => number;
@@ -351,7 +361,9 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     templateId,
     iterResult.attachedImageAssetUrl,
   );
-  const iterFinalFiles = await injectProjectDatabaseEnv(db, projectId, iterPostProcessedFiles);
+  const iterFinalFiles = await injectProjectDatabaseEnv(db, projectId, iterPostProcessedFiles, {
+    requireDatabase: input.withDatabase === true || input.withAuth === true,
+  });
   if (iterMissingImports.length > 0) {
     console.warn("[generate] WARNING: missing imports detected in iteration:", iterMissingImports);
     console.log("[generate] generating stub files for missing components...", { count: iterMissingImports.length });
