@@ -21,6 +21,7 @@ import { z } from "zod";
 import { apiConfig } from "../../config.js";
 import {
   calcCreditCost,
+  calcIterationCreditCost,
   isAdminEmail,
 } from "../../lib/credits.js";
 import { getModelForBuilder } from "../../lib/modelConfig.js";
@@ -28,6 +29,13 @@ import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/project
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
+import {
+  callAnthropicWebsiteIteration,
+  findLatestWebsiteGenerationWithFiles,
+  mergeStudioFiles,
+  SECTION_FILE_PATHS,
+  type WebsiteSectionKey,
+} from "./iterate.js";
 
 const websitesGenerateRoute = new Hono();
 
@@ -96,8 +104,6 @@ type WebsiteGenerationResult = {
   inputTokens: number;
   outputTokens: number;
 };
-
-type WebsiteSectionKey = "nav" | "hero" | "features" | "about" | "cta" | "footer";
 
 const GENERIC_SITE_NAME_SEGMENTS = new Set([
   "agency",
@@ -1456,6 +1462,57 @@ function buildDoneMessage(
   return summary.trim().length > 0 ? summary.trim() : `${projectName} website generated.`;
 }
 
+function buildIterationAckMessage(activeSection?: WebsiteSectionKey): string {
+  if (!activeSection) {
+    return "Applying your website changes...";
+  }
+
+  return `Updating the ${activeSection} section...`;
+}
+
+function buildIterationRestatement(prompt: string, activeSection?: WebsiteSectionKey): string {
+  const brief = compactWhitespace(prompt).slice(0, 180);
+  if (activeSection) {
+    return `Updating the ${activeSection} section around: ${brief}${brief.length >= 180 ? "..." : ""}`;
+  }
+
+  return `Applying website changes around: ${brief}${brief.length >= 180 ? "..." : ""}`;
+}
+
+function buildIterationPreambleBullets(activeSection?: WebsiteSectionKey): string[] {
+  return [
+    activeSection
+      ? `Editing only the ${activeSection} section while preserving the rest of the website.`
+      : "Using the current website files as context so unchanged sections stay intact.",
+    "Keeping the existing design, layout, and copy unless the prompt explicitly asks for a broader redesign.",
+  ];
+}
+
+function buildIterationDoneMessage(changedCount: number, activeSection?: WebsiteSectionKey): string {
+  if (activeSection) {
+    return `Updated the ${activeSection} section.`;
+  }
+
+  return `Applied website changes across ${changedCount} file${changedCount === 1 ? "" : "s"}.`;
+}
+
+function parseWebsiteIterationPrompt(prompt: string): {
+  activeSection?: WebsiteSectionKey;
+  strippedPrompt: string;
+} {
+  const match = prompt.match(/^\s*\[(nav|hero|features|about|cta|footer)\s+section\]\s*/i);
+  if (!match) {
+    return { strippedPrompt: prompt.trim() };
+  }
+
+  const activeSection = match[1]?.toLowerCase() as WebsiteSectionKey | undefined;
+  const strippedPrompt = prompt.slice(match[0].length).trim();
+  return {
+    activeSection,
+    strippedPrompt: strippedPrompt.length > 0 ? strippedPrompt : prompt.trim(),
+  };
+}
+
 function createAbortError(): Error {
   const error = new Error("The operation was aborted.");
   error.name = "AbortError";
@@ -1503,9 +1560,25 @@ websitesGenerateRoute.post(
       return c.json({ error: "Project not found." }, 404);
     }
 
+    const sourceGeneration = await findLatestWebsiteGenerationWithFiles(orgContext.db, projectId);
+    const iterationPrompt = parseWebsiteIterationPrompt(prompt);
+    const isIteration = sourceGeneration !== null;
+    const activeSection = isIteration ? iterationPrompt.activeSection : undefined;
+    const modelPrompt = isIteration ? iterationPrompt.strippedPrompt : prompt;
+    const existingFiles = isIteration && Array.isArray(sourceGeneration.files)
+      ? sourceGeneration.files as readonly StudioFile[]
+      : [];
+
+    if (activeSection && !existingFiles.some((file) => file.path === SECTION_FILE_PATHS[activeSection])) {
+      return c.json({ error: `Could not find the ${activeSection} section file.` }, 400);
+    }
+
     const buildId = randomUUID();
     const requestedAt = ts();
-    const templateId = mapSiteTypeToTemplateId(siteType);
+    const operation: BuilderV3Operation = isIteration ? "iteration" : WEBSITE_OPERATION;
+    const templateId = typeof project.template === "string" && project.template.length > 0
+      ? project.template as TemplateId
+      : mapSiteTypeToTemplateId(siteType);
     const initialMetadata = {
       builderTrace: createEmptyBuilderV3TraceMetadata(),
       generationMode: "website",
@@ -1516,6 +1589,12 @@ websitesGenerateRoute.post(
       siteType,
       vibe,
       creditsUsed: 0,
+      ...(isIteration
+        ? {
+            activeSection: activeSection ?? null,
+            iterationSourceGenerationId: sourceGeneration?.id ?? null,
+          }
+        : {}),
     };
 
     await orgContext.db.createGeneration({
@@ -1528,7 +1607,13 @@ websitesGenerateRoute.post(
       started_at: requestedAt,
       completed_at: null,
       output_paths: [],
-      summary: `Generating website for ${project.name}.`,
+      summary: isIteration
+        ? (
+            activeSection
+              ? `Iterating ${activeSection} section for ${project.name}.`
+              : `Iterating website for ${project.name}.`
+          )
+        : `Generating website for ${project.name}.`,
       error: null,
       preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
       warnings: [],
@@ -1569,10 +1654,10 @@ websitesGenerateRoute.post(
         c.req.raw.signal.removeEventListener("abort", handleAbort);
       };
 
-      const writeEvent = async (
-        eventName: string,
-        payload: BuilderV3Event | WebsiteFilesEvent | WebsiteImageUpdateEvent,
-        extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
+        const writeEvent = async (
+          eventName: string,
+          payload: BuilderV3Event | WebsiteFilesEvent | WebsiteImageUpdateEvent,
+          extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
       ) => {
         await appendEventToDb(
           orgContext.db,
@@ -1617,7 +1702,7 @@ websitesGenerateRoute.post(
               type: "insufficient_credits",
               id: String(nextEventId++),
               timestamp: ts(),
-              operation: WEBSITE_OPERATION,
+              operation,
               available: totalAvailable,
               required: 0,
               features: [],
@@ -1638,8 +1723,8 @@ websitesGenerateRoute.post(
           type: "pre_build_ack",
           id: String(nextEventId++),
           timestamp: ts(),
-          operation: WEBSITE_OPERATION,
-          message: "Building your website scaffold...",
+          operation,
+          message: isIteration ? buildIterationAckMessage(activeSection) : "Building your website scaffold...",
         };
 
         await writeEvent("pre_build_ack", preBuildAckEvent, { status: "running" });
@@ -1655,61 +1740,100 @@ websitesGenerateRoute.post(
           type: "stage_preamble",
           id: String(nextEventId++),
           timestamp: ts(),
-          operation: WEBSITE_OPERATION,
-          restatement: buildRestatement(siteType, vibe, prompt),
-          bullets: buildPreambleBullets(siteType, vibe, pages),
+          operation,
+          restatement: isIteration
+            ? buildIterationRestatement(modelPrompt, activeSection)
+            : buildRestatement(siteType, vibe, prompt),
+          bullets: isIteration
+            ? buildIterationPreambleBullets(activeSection)
+            : buildPreambleBullets(siteType, vibe, pages),
         };
 
         await writeEvent("stage_preamble", preambleEvent);
 
-        const fallbackFiles = buildFallbackWebsiteFiles({
-          projectName: project.name,
-          prompt,
-          siteType,
-          vibe,
-          pages,
-        });
-
-        let generation = apiConfig.MOCK_ANTHROPIC
-          ? null
-          : await callAnthropicWebsiteGeneration({
-              prompt,
-              siteType,
-              vibe,
-              pages,
-              projectName: project.name,
-              abortSignal: abortController.signal,
-            }).catch((error) => {
-              console.error(
-                "[websites/generate] anthropic generation failed; falling back to scaffold:",
-                error instanceof Error ? error.message : String(error),
-              );
-              return null;
-            });
-
-        const normalized = normaliseWebsiteFiles({
-          aiFiles: generation?.files ?? [],
-          fallbackFiles,
-        });
-        let finalFiles = toStudioFiles(normalized.files);
-        const fallbackUsed = generation === null || normalized.scaffoldEnforced || apiConfig.MOCK_ANTHROPIC === true;
-        const fallbackReason = generation === null
-          ? (apiConfig.MOCK_ANTHROPIC ? "mock_anthropic" : "anthropic_error")
-          : normalized.scaffoldEnforced
-          ? "scaffold_enforced"
-          : null;
-        const summary = buildDoneMessage(
-          generation?.summary ?? `Generated a ${vibe} ${siteType} website for ${project.name}.`,
-          project.name,
-        );
+        let finalFiles: StudioFile[];
+        let fallbackUsed = false;
+        let fallbackReason: string | null = null;
+        let summary: string;
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let changedFileCount = 0;
 
         throwIfAborted(abortController.signal);
+
+        if (isIteration) {
+          const iteration = apiConfig.MOCK_ANTHROPIC
+            ? { files: [], inputTokens: 0, outputTokens: 0 }
+            : await callAnthropicWebsiteIteration({
+                projectName: project.name,
+                prompt: modelPrompt,
+                existingFiles: activeSection
+                  ? existingFiles.filter((file) => file.path === SECTION_FILE_PATHS[activeSection])
+                  : existingFiles,
+                activeSection,
+                abortSignal: abortController.signal,
+              });
+
+          if (iteration.files.length === 0) {
+            throw new Error("Website iteration returned no changed files.");
+          }
+
+          const changedStudioFiles = toStudioFiles(iteration.files);
+          finalFiles = mergeStudioFiles(existingFiles, changedStudioFiles);
+          summary = buildIterationDoneMessage(changedStudioFiles.length, activeSection);
+          inputTokens = iteration.inputTokens;
+          outputTokens = iteration.outputTokens;
+          changedFileCount = changedStudioFiles.length;
+        } else {
+          const fallbackFiles = buildFallbackWebsiteFiles({
+            projectName: project.name,
+            prompt,
+            siteType,
+            vibe,
+            pages,
+          });
+
+          const generation = apiConfig.MOCK_ANTHROPIC
+            ? null
+            : await callAnthropicWebsiteGeneration({
+                prompt,
+                siteType,
+                vibe,
+                pages,
+                projectName: project.name,
+                abortSignal: abortController.signal,
+              }).catch((error) => {
+                console.error(
+                  "[websites/generate] anthropic generation failed; falling back to scaffold:",
+                  error instanceof Error ? error.message : String(error),
+                );
+                return null;
+              });
+
+          const normalized = normaliseWebsiteFiles({
+            aiFiles: generation?.files ?? [],
+            fallbackFiles,
+          });
+          finalFiles = toStudioFiles(normalized.files);
+          fallbackUsed = generation === null || normalized.scaffoldEnforced || apiConfig.MOCK_ANTHROPIC === true;
+          fallbackReason = generation === null
+            ? (apiConfig.MOCK_ANTHROPIC ? "mock_anthropic" : "anthropic_error")
+            : normalized.scaffoldEnforced
+            ? "scaffold_enforced"
+            : null;
+          summary = buildDoneMessage(
+            generation?.summary ?? `Generated a ${vibe} ${siteType} website for ${project.name}.`,
+            project.name,
+          );
+          inputTokens = generation?.inputTokens ?? 0;
+          outputTokens = generation?.outputTokens ?? 0;
+        }
 
         const filesEvent: WebsiteFilesEvent = {
           type: "files",
           id: String(nextEventId++),
           timestamp: ts(),
-          operation: WEBSITE_OPERATION,
+          operation,
           files: finalFiles.map((file) => ({ path: file.path, content: file.content })),
           totalFiles: finalFiles.length,
         };
@@ -1722,63 +1846,65 @@ websitesGenerateRoute.post(
 
         throwIfAborted(abortController.signal);
 
-        const heroImagePrompt = buildHeroImagePrompt({
-          projectName: project.name,
-          prompt,
-          siteType,
-          vibe,
-          pages,
-          summary,
-        });
-        const heroImageUrl = await generateFalHeroImageUrl({
-          heroPrompt: heroImagePrompt,
-          abortSignal: abortController.signal,
-        }).catch((error) => {
-          if (isAbortError(error) || abortController.signal.aborted || c.req.raw.signal.aborted) {
-            throw error;
-          }
+        if (!isIteration) {
+          const heroImagePrompt = buildHeroImagePrompt({
+            projectName: project.name,
+            prompt,
+            siteType,
+            vibe,
+            pages,
+            summary,
+          });
+          const heroImageUrl = await generateFalHeroImageUrl({
+            heroPrompt: heroImagePrompt,
+            abortSignal: abortController.signal,
+          }).catch((error) => {
+            if (isAbortError(error) || abortController.signal.aborted || c.req.raw.signal.aborted) {
+              throw error;
+            }
 
-          console.warn(
-            "[websites/generate] fal hero image generation failed; keeping existing hero image:",
-            error instanceof Error ? error.message : String(error),
-          );
-          return null;
-        });
+            console.warn(
+              "[websites/generate] fal hero image generation failed; keeping existing hero image:",
+              error instanceof Error ? error.message : String(error),
+            );
+            return null;
+          });
 
-        if (heroImageUrl) {
-          const proxiedUrl = buildImageProxyUrl(heroImageUrl);
-          const heroUpdate = applyHeroImageUpdate(finalFiles, proxiedUrl);
-          if (heroUpdate.updatedContent) {
-            finalFiles = heroUpdate.files;
+          if (heroImageUrl) {
+            const proxiedUrl = buildImageProxyUrl(heroImageUrl);
+            const heroUpdate = applyHeroImageUpdate(finalFiles, proxiedUrl);
+            if (heroUpdate.updatedContent) {
+              finalFiles = heroUpdate.files;
 
-            const imageUpdateEvent: WebsiteImageUpdateEvent = {
-              type: "image_update",
-              id: String(nextEventId++),
-              timestamp: ts(),
-              operation: WEBSITE_OPERATION,
-              file: WEBSITE_HERO_FILE_PATH,
-              content: heroUpdate.updatedContent,
-            };
+              const imageUpdateEvent: WebsiteImageUpdateEvent = {
+                type: "image_update",
+                id: String(nextEventId++),
+                timestamp: ts(),
+                operation,
+                file: WEBSITE_HERO_FILE_PATH,
+                content: heroUpdate.updatedContent,
+              };
 
-            await writeEvent("image_update", imageUpdateEvent, {
-              files: finalFiles,
-              output_paths: finalFiles.map((file) => file.path),
-              preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
-            });
+              await writeEvent("image_update", imageUpdateEvent, {
+                files: finalFiles,
+                output_paths: finalFiles.map((file) => file.path),
+                preview_entry_path: WEBSITE_PREVIEW_ENTRY_PATH,
+              });
+            }
           }
         }
 
-        const inputTokens = generation?.inputTokens ?? 0;
-        const outputTokens = generation?.outputTokens ?? 0;
         let creditsUsed = 0;
         if (!fallbackUsed && outputTokens > 0 && !isAdminEmail(orgContext.user.email)) {
-          const totalCost = calcCreditCost(inputTokens, outputTokens);
+          const totalCost = isIteration
+            ? calcIterationCreditCost(inputTokens, outputTokens)
+            : calcCreditCost(inputTokens, outputTokens);
           try {
             const deduction = await orgContext.db.applyOrgUsageDeduction(
               orgContext.org.id,
               totalCost,
               buildId,
-              "App generation",
+              isIteration ? "Website iteration" : "Website generation",
             );
             creditsUsed = deduction.deducted;
             console.log("[websites/generate] credits deducted:", {
@@ -1800,7 +1926,7 @@ websitesGenerateRoute.post(
           type: "done",
           id: String(nextEventId++),
           timestamp: completedAt,
-          operation: WEBSITE_OPERATION,
+          operation,
           code: "build_completed",
           message: summary,
           buildId,
@@ -1811,6 +1937,7 @@ websitesGenerateRoute.post(
             previewEntryPath: WEBSITE_PREVIEW_ENTRY_PATH,
             source: fallbackUsed ? "fallback" : "ai",
             totalFiles: finalFiles.length,
+            ...(isIteration ? { changedFiles: changedFileCount, activeSection: activeSection ?? null } : {}),
             siteType,
             vibe,
           },
@@ -1846,15 +1973,17 @@ websitesGenerateRoute.post(
           updated_at: completedAt,
         }).catch(() => undefined);
 
-        await syncGeneratedProjectName({
-          db: orgContext.db,
-          projectId,
-          currentProjectName: project.name,
-          files: finalFiles,
-          requestUrl: c.req.url,
-          authorizationHeader: c.req.header("authorization"),
-          abortSignal: abortController.signal,
-        });
+        if (!isIteration) {
+          await syncGeneratedProjectName({
+            db: orgContext.db,
+            projectId,
+            currentProjectName: project.name,
+            files: finalFiles,
+            requestUrl: c.req.url,
+            authorizationHeader: c.req.header("authorization"),
+            abortSignal: abortController.signal,
+          });
+        }
 
         void saveProjectVersion(
           projectId,
@@ -1894,7 +2023,7 @@ websitesGenerateRoute.post(
                   type: "error",
                   id: String(nextEventId - 1),
                   timestamp: failedAt,
-                  operation: WEBSITE_OPERATION,
+                  operation,
                   code: "build_failed",
                   message: error instanceof Error ? error.message : "Website generation failed.",
                   buildId,

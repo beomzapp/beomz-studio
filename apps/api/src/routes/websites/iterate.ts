@@ -43,14 +43,14 @@ const requestSchema = z.object({
   activeSection: websiteSectionSchema.optional(),
 });
 
-type WebsiteSectionKey = z.infer<typeof websiteSectionSchema>;
+export type WebsiteSectionKey = z.infer<typeof websiteSectionSchema>;
 
 type WebsiteFileOutput = {
   path: string;
   content: string;
 };
 
-type WebsiteIterationResult = {
+export type WebsiteIterationResult = {
   files: WebsiteFileOutput[];
   inputTokens: number;
   outputTokens: number;
@@ -89,7 +89,7 @@ const REQUIRED_FILE_PATHS = [
   "src/index.css",
 ] as const;
 
-const SECTION_FILE_PATHS: Record<WebsiteSectionKey, string> = {
+export const SECTION_FILE_PATHS: Record<WebsiteSectionKey, string> = {
   nav: "src/components/Nav.tsx",
   hero: "src/components/Hero.tsx",
   features: "src/components/Features.tsx",
@@ -391,7 +391,7 @@ function isSocketDropError(err: unknown): boolean {
   return cause?.code === "UND_ERR_SOCKET";
 }
 
-async function callAnthropicWebsiteIteration(input: {
+export async function callAnthropicWebsiteIteration(input: {
   projectName: string;
   prompt: string;
   existingFiles: readonly StudioFile[];
@@ -513,7 +513,7 @@ async function callAnthropicWebsiteIteration(input: {
   }
 }
 
-function mergeStudioFiles(
+export function mergeStudioFiles(
   existingFiles: readonly StudioFile[],
   changedFiles: readonly StudioFile[],
 ): StudioFile[] {
@@ -575,7 +575,7 @@ function isWebsiteGeneration(row: Awaited<ReturnType<StudioDbClient["findGenerat
   return metadata.generationMode === "website";
 }
 
-async function findLatestWebsiteGenerationWithFiles(
+export async function findLatestWebsiteGenerationWithFiles(
   db: StudioDbClient,
   projectId: string,
 ) {
