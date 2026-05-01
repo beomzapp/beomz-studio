@@ -4,7 +4,7 @@
  * Preview opens a new tab; Restore hot-patches the current WC preview.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Clock, FileCode, Loader2, Eye, RotateCcw } from "lucide-react";
+import { AlertCircle, Clock, FileCode, Loader2, Eye, RotateCcw } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
   listProjectVersions,
@@ -124,17 +124,22 @@ export interface VersionHistoryPanelProps {
 export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 0 }: VersionHistoryPanelProps) {
   const [versions, setVersions] = useState<ProjectVersion[]>([]);
   const [loading, setLoading] = useState(false);
+  // BEO-737 A19: surface fetch failures instead of swallowing them so the
+  // user can tell when the version-history endpoint is failing (e.g. the
+  // saveProjectVersion FK bug, BEO-726, or the API being unreachable).
+  const [error, setError] = useState<string | null>(null);
   const [confirmVersion, setConfirmVersion] = useState<ProjectVersion | null>(null);
   const [restoring, setRestoring] = useState(false);
 
   const fetchVersions = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
+    setError(null);
     try {
       const data = await listProjectVersions(projectId);
       setVersions(data);
-    } catch {
-      // silently fail if versions endpoint not ready yet
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load versions");
     } finally {
       setLoading(false);
     }
@@ -196,7 +201,7 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
             <Clock size={13} className="text-[#9ca3af]" />
             <span className="text-[12px] font-semibold text-[#1a1a1a]">Version history</span>
           </div>
-          {!loading && versions.length > 0 && (
+          {!loading && !error && versions.length > 0 && (
             <span className="text-[11px] text-[#9ca3af]">{versions.length} versions</span>
           )}
         </div>
@@ -208,8 +213,29 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
           </div>
         )}
 
+        {/* BEO-737 A19: error state — distinguishes "no versions yet" from
+            "couldn't load versions" so users (and Omar) can tell when the
+            API is failing rather than seeing a misleading empty state. */}
+        {!loading && error && (
+          <div className="flex flex-1 items-center justify-center p-6">
+            <div className="max-w-[260px] text-center">
+              <AlertCircle size={28} className="mx-auto mb-2 text-[#dc2626]" />
+              <p className="text-xs font-medium text-[#dc2626]">
+                Couldn&rsquo;t load versions
+              </p>
+              <p className="mt-0.5 line-clamp-3 text-[11px] text-[#9ca3af]">{error}</p>
+              <button
+                onClick={() => void fetchVersions()}
+                className="mt-3 rounded-md border border-[#e5e5e5] px-2.5 py-1 text-[11px] font-medium text-[#6b7280] transition-colors hover:border-[#d1d5db] hover:text-[#1a1a1a]"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Empty state */}
-        {!loading && versions.length === 0 && (
+        {!loading && !error && versions.length === 0 && (
           <div className="flex flex-1 items-center justify-center p-6">
             <div className="text-center">
               <Clock size={28} className="mx-auto mb-2 text-[#d1d5db]" />
@@ -222,7 +248,7 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
         )}
 
         {/* Version list */}
-        {!loading && versions.length > 0 && (
+        {!loading && !error && versions.length > 0 && (
           <div className="flex-1 overflow-y-auto">
             {versions.map((version, idx) => {
               const isCurrent = idx === 0;
