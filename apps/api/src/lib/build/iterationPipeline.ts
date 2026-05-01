@@ -13,10 +13,11 @@ import {
 import { buildPersistedAiUsage, persistGenerationAiUsage } from "./tokenUsage.js";
 import { maybeSendCreditsLowEmailForUser } from "../email/service.js";
 import { encryptProjectSecret } from "../projectSecrets.js";
-import { saveProjectVersion, studioFilesToVersionFiles } from "../projectVersions.js";
+import { studioFilesToVersionFiles } from "../projectVersions.js";
 import { readStoredSupabaseToken, runSupabaseManagementQueryWithOAuth } from "../supabaseManagement.js";
 import { buildSupabaseSetupSqlFromFiles } from "../supabaseSetupSql.js";
 import { isAllowedMigrationStatement, runSql } from "../userDataClient.js";
+import { autoSaveProjectVersion } from "./versionAutosave.js";
 
 type TokenUsage = {
   inputTokens: number;
@@ -580,12 +581,11 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     existingFiles: iterFinalFiles,
     projectName: input.projectName,
   });
-  void saveProjectVersion(
+  await autoSaveProjectVersion(db, {
+    buildId,
     projectId,
-    sourcePrompt.slice(0, 100),
-    studioFilesToVersionFiles(iterFinalFiles),
-  ).catch((err) => {
-    console.error("[versions] auto-save failed:", err);
+    label: sourcePrompt.slice(0, 100),
+    files: studioFilesToVersionFiles(iterFinalFiles),
   });
 
   return narrationUsage;

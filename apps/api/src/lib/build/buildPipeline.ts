@@ -15,7 +15,8 @@ import {
 } from "../credits.js";
 import { buildPersistedAiUsage, persistGenerationAiUsage } from "./tokenUsage.js";
 import { maybeSendCreditsLowEmailForUser } from "../email/service.js";
-import { saveProjectVersion, studioFilesToVersionFiles } from "../projectVersions.js";
+import { studioFilesToVersionFiles } from "../projectVersions.js";
+import { autoSaveProjectVersion } from "./versionAutosave.js";
 
 type TokenUsage = {
   inputTokens: number;
@@ -867,12 +868,11 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     existingFiles: finalFiles,
     projectName: input.projectName,
   });
-  void saveProjectVersion(
+  await autoSaveProjectVersion(db, {
+    buildId,
     projectId,
-    sourcePrompt.slice(0, 100),
-    studioFilesToVersionFiles(finalFiles),
-  ).catch((err) => {
-    console.error("[versions] auto-save failed:", err);
+    label: sourcePrompt.slice(0, 100),
+    files: studioFilesToVersionFiles(finalFiles),
   });
 
   const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);

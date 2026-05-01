@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import type { OrgContext } from "../../types.js";
 import type { ProjectRow } from "@beomz-studio/studio-db";
 import type { StudioFile } from "@beomz-studio/contracts";
+import { registerActiveBuild, unregisterActiveBuild } from "../../lib/activeBuilds.js";
 
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
 process.env.STUDIO_SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
@@ -240,6 +241,28 @@ test("GET /projects includes project_type for each project", async () => {
   assert.equal(body.projects[0]?.id, "website-1");
   assert.equal(body.projects[0]?.project_type, "website");
   assert.equal(body.projects[0]?.generationCount, 3);
+});
+
+test("DELETE /projects/:id rejects deletion while a build is active", async () => {
+  const project = createProject();
+  const orgContext = createOrgContext(project);
+  const app = createApp(orgContext);
+
+  registerActiveBuild("build-123", project.id);
+
+  try {
+    const response = await app.request(`http://localhost/projects/${project.id}`, {
+      method: "DELETE",
+    });
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      error: "build_already_running",
+      buildId: "build-123",
+    });
+  } finally {
+    unregisterActiveBuild("build-123");
+  }
 });
 
 test("POST /projects defaults project_type to app", async () => {

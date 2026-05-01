@@ -31,6 +31,7 @@ import {
   parsePostgresConnectionString,
   parseSupabaseProjectUrl,
 } from "../../lib/projectDb.js";
+import { findActiveBuildIdByProject } from "../../lib/activeBuilds.js";
 import { runBuildInBackground } from "../builds/generate.js";
 import {
   AUTO_WIRE_SUPABASE_ITERATION_PROMPT,
@@ -467,6 +468,16 @@ export function createProjectsRoute(deps: ProjectsRouteDeps = {}) {
     const project = await orgContext.db.findProjectById(projectId);
     if (!project || project.org_id !== orgContext.org.id) {
       return c.json({ error: "Project not found" }, 404);
+    }
+
+    const activeBuildId = findActiveBuildIdByProject(projectId);
+    if (activeBuildId) {
+      return c.json({ error: "build_already_running", buildId: activeBuildId }, 409);
+    }
+
+    const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectId).catch(() => null);
+    if (latestGeneration && (latestGeneration.status === "queued" || latestGeneration.status === "running")) {
+      return c.json({ error: "build_already_running", buildId: latestGeneration.id }, 409);
     }
 
     // Branch-per-app: read neon IDs from project row first (new strategy)
