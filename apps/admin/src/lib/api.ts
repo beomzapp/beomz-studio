@@ -89,8 +89,8 @@ export async function fetchUserCreditHistory(
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = (await res.json()) as CreditHistoryEntry[] | { history: CreditHistoryEntry[] };
-  return Array.isArray(data) ? data : (data.history ?? []);
+  const data = (await res.json()) as CreditHistoryEntry[] | { transactions: CreditHistoryEntry[]; history?: CreditHistoryEntry[] };
+  return Array.isArray(data) ? data : (data.transactions ?? data.history ?? []);
 }
 
 export async function postCreditAdjustment(
