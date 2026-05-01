@@ -3,7 +3,7 @@
  * Slide-out right panel showing project version snapshots.
  * Preview opens a new tab; Restore hot-patches the current WC preview.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Clock, FileCode, Loader2, Eye, RotateCcw } from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
@@ -145,6 +145,17 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
     }
   }, [projectId]);
 
+  // BEO-737 A20: never assume the API returns versions newest-first. Sort
+  // client-side by version_number descending and identify "current" by
+  // matching version_number against the highest one (instead of relying on
+  // index 0). Without this, a server-side sort change silently hides the
+  // Restore/Preview buttons on the actually-most-recent saved version.
+  const sortedVersions = useMemo(
+    () => [...versions].sort((a, b) => b.version_number - a.version_number),
+    [versions],
+  );
+  const currentVersionNumber = sortedVersions[0]?.version_number;
+
   useEffect(() => {
     void fetchVersions();
     // BEO-715 2c: refreshKey is part of the dep set so a parent-driven bump
@@ -201,8 +212,8 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
             <Clock size={13} className="text-[#9ca3af]" />
             <span className="text-[12px] font-semibold text-[#1a1a1a]">Version history</span>
           </div>
-          {!loading && !error && versions.length > 0 && (
-            <span className="text-[11px] text-[#9ca3af]">{versions.length} versions</span>
+          {!loading && !error && sortedVersions.length > 0 && (
+            <span className="text-[11px] text-[#9ca3af]">{sortedVersions.length} versions</span>
           )}
         </div>
 
@@ -235,7 +246,7 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
         )}
 
         {/* Empty state */}
-        {!loading && !error && versions.length === 0 && (
+        {!loading && !error && sortedVersions.length === 0 && (
           <div className="flex flex-1 items-center justify-center p-6">
             <div className="text-center">
               <Clock size={28} className="mx-auto mb-2 text-[#d1d5db]" />
@@ -248,10 +259,10 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
         )}
 
         {/* Version list */}
-        {!loading && !error && versions.length > 0 && (
+        {!loading && !error && sortedVersions.length > 0 && (
           <div className="flex-1 overflow-y-auto">
-            {versions.map((version, idx) => {
-              const isCurrent = idx === 0;
+            {sortedVersions.map((version) => {
+              const isCurrent = version.version_number === currentVersionNumber;
               return (
                 <div
                   key={version.id}
