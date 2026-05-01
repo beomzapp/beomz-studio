@@ -838,6 +838,12 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   if (!isAdminEmail(userEmail)) {
     const freshOrg = await orgContext.db.getOrgWithBalance(orgContext.org.id);
     if (freshOrg) {
+      if (freshOrg.payment_failed_at) {
+        return c.json(
+          { error: "Your payment has failed. Please update your payment method to continue building.", reason: "payment_failed" },
+          402,
+        );
+      }
       const monthlyCredits = Number(freshOrg.credits ?? 0);
       const topupCredits   = Number(freshOrg.topup_credits ?? 0);
 

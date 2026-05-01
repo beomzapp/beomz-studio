@@ -493,6 +493,11 @@ export function createWebhookRoute(deps: CreateWebhookRouteDeps = {}): Hono {
           periodEnd,
         );
 
+        // Clear payment failure flag on successful payment
+        if (org.payment_failed_at) {
+          await db.updateOrg(orgId, { payment_failed_at: null });
+        }
+
         // If downgrade was pending, apply the new plan now
         if (org.downgrade_at_period_end && org.pending_plan) {
           await db.updateOrg(orgId, { plan: effectivePlan });
@@ -517,6 +522,8 @@ export function createWebhookRoute(deps: CreateWebhookRouteDeps = {}): Hono {
       }
 
       // ── Invoice payment failed ───────────────────────────────────────────────
+      // Flag the org so new builds are blocked until payment resolves.
+      // Data is NOT deleted — only new builds are suspended.
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = invoice.customer as string;
@@ -527,7 +534,13 @@ export function createWebhookRoute(deps: CreateWebhookRouteDeps = {}): Hono {
           invoiceId: invoice.id,
           attemptCount: invoice.attempt_count,
         });
-        // TODO BEO-327: flag org for payment failure UI nudge
+
+        if (orgId) {
+          await db.updateOrg(orgId, {
+            payment_failed_at: new Date().toISOString(),
+          });
+          console.log("[webhook] invoice.payment_failed: org flagged — new builds suspended", { orgId });
+        }
         break;
       }
 

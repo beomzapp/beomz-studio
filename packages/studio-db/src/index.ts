@@ -68,6 +68,7 @@ export interface OrgRow extends Record<string, unknown> {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   daily_reset_at: string | null;
+  payment_failed_at: string | null;
   created_at: string;
   neon_project_id?: string | null;
 }
@@ -311,6 +312,7 @@ export interface OrgUpdate extends Record<string, unknown> {
   stripe_customer_id?: string | null;
   stripe_subscription_id?: string | null;
   daily_reset_at?: string | null;
+  payment_failed_at?: string | null;
   neon_project_id?: string | null;
 }
 
