@@ -23,6 +23,11 @@ import {
 import { matchTemplate as slmMatchTemplate } from "../../lib/slm/client.js";
 import { getModelForBuilder } from "../../lib/modelConfig.js";
 import {
+  findActiveBuildIdByProject,
+  registerActiveBuild,
+  unregisterActiveBuild,
+} from "../../lib/activeBuilds.js";
+import {
   filterBlockedGeneratedFiles,
   generateClarifyingQuestion,
   generateConversationalAnswer,
@@ -1144,24 +1149,52 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       ? accumulatedBuildContext
       : effectivePrompt);
 
+  const activeBuildId = findActiveBuildIdByProject(projectId);
+  if (activeBuildId) {
+    return c.json({ error: "build_already_running", buildId: activeBuildId }, 409);
+  }
+
+  const latestProjectGeneration = typeof orgContext.db.findLatestGenerationByProjectId === "function"
+    ? await orgContext.db.findLatestGenerationByProjectId(projectId)
+    : latestGeneration;
+  if (
+    latestProjectGeneration
+    && (latestProjectGeneration.status === "queued" || latestProjectGeneration.status === "running")
+  ) {
+    return c.json({ error: "build_already_running", buildId: latestProjectGeneration.id }, 409);
+  }
+
+  if (!registerActiveBuild(buildId, projectId)) {
+    return c.json({
+      error: "build_already_running",
+      buildId: findActiveBuildIdByProject(projectId),
+    }, 409);
+  }
+
+  let generationRow;
+  try {
+    generationRow = await orgContext.db.createGeneration({
+      completed_at: null, error: null, files: [],
+      id: buildId, metadata: initialMetadata, operation_id: operationId,
+      output_paths: [], preview_entry_path: "/",
+      project_id: projectId, prompt: buildPrompt, started_at: requestedAt,
+      status: "queued",
+      summary: isIteration
+        ? `Queued requested changes for ${projectName}.`
+        : `Queued initial build for ${projectName}.`,
+      template_id: selectedTemplateId as TemplateId, warnings: [],
+    });
+  } catch (error) {
+    unregisterActiveBuild(buildId);
+    throw error;
+  }
+
   console.log("[BEO-210] Build queued.", {
     buildId, operation, prompt: sourcePrompt, projectId,
     templateId: selectedTemplateId, userId: orgContext.user.id,
     confidence: effectiveConfidence,
     usingAccumulatedContext: !explicitBuildPrompt && buildPrompt !== effectivePrompt,
     usingStoredImplementPlan: Boolean(explicitBuildPrompt),
-  });
-
-  const generationRow = await orgContext.db.createGeneration({
-    completed_at: null, error: null, files: [],
-    id: buildId, metadata: initialMetadata, operation_id: operationId,
-    output_paths: [], preview_entry_path: "/",
-    project_id: projectId, prompt: buildPrompt, started_at: requestedAt,
-    status: "queued",
-    summary: isIteration
-      ? `Queued requested changes for ${projectName}.`
-      : `Queued initial build for ${projectName}.`,
-    template_id: selectedTemplateId as TemplateId, warnings: [],
   });
 
   // ── Balance-based credit gate ────────────────────────────────────────────
@@ -1195,6 +1228,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
         metadata: { ...initialMetadata, builderTrace: icTrace },
         status: "insufficient_credits",
       });
+      unregisterActiveBuild(buildId);
 
       console.log("[BEO-439] balance gate fired — build blocked.", {
         buildId,
@@ -1249,11 +1283,17 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       withAuth,
     },
     orgContext.db,
-  ).catch((err: unknown) => {
-    console.error("[BEO-210] Unhandled error in runBuildInBackground.", {
-      buildId, error: err instanceof Error ? err.message : String(err),
+  )
+    .catch((err: unknown) => {
+      console.error("[BEO-210] Unhandled error in runBuildInBackground.", {
+        buildId, error: err instanceof Error ? err.message : String(err),
+      });
+    })
+    .finally(() => {
+      if (deps.runBuildInBackground) {
+        unregisterActiveBuild(buildId);
+      }
     });
-  });
 
   // Return 202 immediately — client subscribes to /builds/:id/events
   const metadata = readBuildMetadata(generationRow.metadata);

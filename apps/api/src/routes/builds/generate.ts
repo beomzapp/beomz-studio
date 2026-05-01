@@ -3253,7 +3253,9 @@ export async function runBuildInBackground(
   const abortController = new AbortController();
   const timedOutRef = { value: false };
 
-  registerActiveBuild(buildId, abortController);
+  if (!registerActiveBuild(buildId, projectId, abortController)) {
+    throw new Error(`Active build already registered for project ${projectId}.`);
+  }
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<"timed_out">((resolve) => {

@@ -79,7 +79,7 @@ function createRoute(orgContext: OrgContext) {
 
 test("POST /builds/:id/cancel aborts an active build explicitly", async () => {
   const controller = new AbortController();
-  registerActiveBuild("build-1", controller);
+  registerActiveBuild("build-1", "project-1", controller);
 
   try {
     const route = createRoute(createOrgContext("running"));

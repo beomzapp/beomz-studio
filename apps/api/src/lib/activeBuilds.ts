@@ -5,15 +5,36 @@
  */
 export const activeBuilds = new Set<string>();
 const activeBuildControllers = new Map<string, AbortController>();
+const activeProjectBuilds = new Map<string, string>();
+const activeBuildProjects = new Map<string, string>();
 
-export function registerActiveBuild(buildId: string, controller: AbortController): void {
+export function registerActiveBuild(
+  buildId: string,
+  projectId: string,
+  controller?: AbortController,
+): boolean {
+  const existingBuildId = activeProjectBuilds.get(projectId);
+  if (existingBuildId && existingBuildId !== buildId) {
+    return false;
+  }
+
   activeBuilds.add(buildId);
-  activeBuildControllers.set(buildId, controller);
+  activeProjectBuilds.set(projectId, buildId);
+  activeBuildProjects.set(buildId, projectId);
+  if (controller) {
+    activeBuildControllers.set(buildId, controller);
+  }
+  return true;
 }
 
 export function unregisterActiveBuild(buildId: string): void {
   activeBuilds.delete(buildId);
   activeBuildControllers.delete(buildId);
+  const projectId = activeBuildProjects.get(buildId);
+  activeBuildProjects.delete(buildId);
+  if (projectId && activeProjectBuilds.get(projectId) === buildId) {
+    activeProjectBuilds.delete(projectId);
+  }
 }
 
 export function abortActiveBuild(buildId: string, reason: unknown = "cancelled_by_user"): boolean {
@@ -24,4 +45,8 @@ export function abortActiveBuild(buildId: string, reason: unknown = "cancelled_b
 
   controller.abort(reason);
   return true;
+}
+
+export function findActiveBuildIdByProject(projectId: string): string | null {
+  return activeProjectBuilds.get(projectId) ?? null;
 }

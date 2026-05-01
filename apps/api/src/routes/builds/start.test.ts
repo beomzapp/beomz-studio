@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import type { OrgContext } from "../../types.js";
+import { registerActiveBuild, unregisterActiveBuild } from "../../lib/activeBuilds.js";
 
 process.env.ANTHROPIC_API_KEY ??= "test-key";
 process.env.STUDIO_SUPABASE_URL ??= "https://example.supabase.co";
@@ -148,6 +149,103 @@ test("/builds/start forwards withDatabase and withAuth flags into the background
     withAuth: true,
     withDatabase: true,
   });
+});
+
+test("/builds/start rejects a second active build on the same project with 409", async () => {
+  const { createBuildsStartRoute } = await import("./start.js");
+  const project = {
+    id: "13131313-1313-1313-1313-131313131313",
+    name: "Ops Dashboard",
+    org_id: "org-1",
+    status: "ready",
+    template: "workspace-task",
+    icon: "CheckSquare",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    chat_history: [],
+    chat_summary: null,
+  };
+  const org = {
+    id: "org-1",
+    owner_id: "user-1",
+    name: "Test Org",
+    plan: "pro",
+    credits: 10,
+    topup_credits: 0,
+    monthly_credits: 0,
+    rollover_credits: 0,
+    rollover_cap: 0,
+    credits_period_start: null,
+    credits_period_end: null,
+    downgrade_at_period_end: false,
+    pending_plan: null,
+    stripe_customer_id: null,
+    stripe_subscription_id: null,
+    daily_reset_at: null,
+    created_at: new Date().toISOString(),
+  } satisfies OrgContext["org"];
+
+  registerActiveBuild("existing-build", project.id);
+
+  try {
+    const route = createBuildsStartRoute({
+      authMiddleware: async (_c, next) => {
+        await next();
+      },
+      loadOrgContextMiddleware: async (c, next) => {
+        c.set("orgContext", {
+          db: {
+            findLatestGenerationByProjectId: async () => null,
+            findProjectById: async () => project,
+            getOrgWithBalance: async () => org,
+            updateProject: async (_projectId: string, patch: Record<string, unknown>) => ({
+              ...project,
+              ...patch,
+            }),
+          } as OrgContext["db"],
+          jwt: { sub: "platform-user" },
+          membership: { org_id: "org-1", role: "owner", user_id: "user-1", created_at: new Date().toISOString() },
+          org,
+          user: {
+            id: "user-1",
+            email: "omar@example.com",
+            platform_user_id: "platform-user",
+            created_at: new Date().toISOString(),
+          },
+        });
+        await next();
+      },
+      classifyIntent: async () => ({
+        intent: "iteration",
+        confidence: 0.95,
+        reason: "Clear iteration request.",
+        accumulatedContext: "Update the dashboard styling.",
+      }),
+      runBuildInBackground: async () => {
+        throw new Error("should not start a second build");
+      },
+    });
+
+    const response = await route.request("http://localhost/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: "change the colors",
+        projectId: project.id,
+        forceIteration: true,
+      }),
+    });
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      error: "build_already_running",
+      buildId: "existing-build",
+    });
+  } finally {
+    unregisterActiveBuild("existing-build");
+  }
 });
 
 test("/builds/start returns a conversational generation for greeting intent and does not queue a build", async () => {
