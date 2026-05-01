@@ -3890,12 +3890,14 @@ async function _runBuildInBackground(
         await db.updateProject(projectId, { status: "draft" }).catch(() => undefined);
         return;
       }
+      const abortReason = abortSignal?.aborted ? abortSignal.reason : undefined;
+      const cancelledByUser = abortReason === "cancelled_by_user";
       console.log("[build/state]", { buildId, from: "running", to: "cancelled" });
-      console.log("[generate] client disconnected — stream aborted");
+      console.log("[generate] build aborted.", { buildId, reason: abortReason ?? "unknown" });
       const cancelledAt = ts();
       await db.updateGeneration(buildId, {
         completed_at: cancelledAt,
-        error: "Client disconnected",
+        error: cancelledByUser ? "Build cancelled by user." : "Build cancelled.",
         status: "cancelled",
         summary: "Build cancelled.",
       }).catch(() => undefined);

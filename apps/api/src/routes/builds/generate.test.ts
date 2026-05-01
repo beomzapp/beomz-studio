@@ -570,7 +570,7 @@ test("pipeline order: rewriteNeonImports runs before validateAndInjectStubs", ()
   );
 });
 
-test("generate build flow aborts the Anthropic stream when the client disconnects", async () => {
+test("generate build flow keeps the Anthropic stream alive across SSE reconnects and only cancels explicitly", async () => {
   const generateSource = await readFile(new URL("./generate.ts", import.meta.url), "utf8");
   const buildPipelineSource = await readFile(new URL("../../lib/build/buildPipeline.ts", import.meta.url), "utf8");
   const iterationPipelineSource = await readFile(new URL("../../lib/build/iterationPipeline.ts", import.meta.url), "utf8");
@@ -578,12 +578,13 @@ test("generate build flow aborts the Anthropic stream when the client disconnect
   const activeBuildsSource = await readFile(new URL("../../lib/activeBuilds.ts", import.meta.url), "utf8");
 
   assert.match(generateSource, /const abortController = new AbortController\(\);/);
-  assert.match(generateSource, /await _runBuildInBackground\(input, db, abortController\.signal\);/);
+  assert.match(generateSource, /_runBuildInBackground\(input, db, abortController\.signal, timedOutRef\)/);
   assert.match(generateSource, /client\.messages\.stream\([\s\S]*abortSignal \? \{ signal: abortSignal \} : undefined\);/);
   assert.match(iterationPipelineSource, /if \(isAbortError\(iterErr\)\) \{\s*throw iterErr;\s*\}/);
   assert.match(buildPipelineSource, /if \(isAbortError\(aiError\)\) \{\s*throw aiError;\s*\}/);
-  assert.match(generateSource, /console\.log\("\[generate\] client disconnected — stream aborted"\);/);
+  assert.match(generateSource, /const cancelledByUser = abortReason === "cancelled_by_user";/);
+  assert.match(generateSource, /error: cancelledByUser \? "Build cancelled by user\." : "Build cancelled\."/);
   assert.match(generateSource, /status: "cancelled"/);
-  assert.match(eventsSource, /abortActiveBuild\(buildId\)/);
-  assert.match(activeBuildsSource, /export function abortActiveBuild\(buildId: string\): boolean/);
+  assert.doesNotMatch(eventsSource, /abortActiveBuild\(buildId\)/);
+  assert.match(activeBuildsSource, /export function abortActiveBuild\(buildId: string, reason: unknown = "cancelled_by_user"\): boolean/);
 });

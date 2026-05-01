@@ -16,12 +16,12 @@ export function unregisterActiveBuild(buildId: string): void {
   activeBuildControllers.delete(buildId);
 }
 
-export function abortActiveBuild(buildId: string): boolean {
+export function abortActiveBuild(buildId: string, reason: unknown = "cancelled_by_user"): boolean {
   const controller = activeBuildControllers.get(buildId);
   if (!controller || controller.signal.aborted) {
     return false;
   }
 
-  controller.abort();
+  controller.abort(reason);
   return true;
 }
