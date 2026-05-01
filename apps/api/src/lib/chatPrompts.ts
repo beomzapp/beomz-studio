@@ -256,26 +256,31 @@ function buildPlanSummaryFallback(accumulatedContext: string, projectName?: stri
     .replace(/\s+/g, " ")
     .trim();
   const isTechnicalDetail = (part: string): boolean => /(\b[\w-]+\.(?:tsx?|jsx?|css|scss|json|md)\b|\/|\\|\b(component|components|file|files|folder|folders|directory|architecture|implementation)\b)/i.test(part);
-  const featureHints = brief
+  const allFeatureHints = brief
     .split(/[,.]| with | and /i)
     .map((part) => part.trim())
     .filter((part) => part.length >= 4)
-    .filter((part) => !isTechnicalDetail(part))
-    .slice(0, 4)
-    .map((part) => `- ${part.replace(/\.$/, "")}`);
+    .filter((part) => !isTechnicalDetail(part));
+  const scopedFeatures = allFeatureHints.slice(0, 3);
+  const deferredFeatures = allFeatureHints.slice(3, 5);
 
   const appName = projectName?.trim() || "Your app";
-  const bullets = featureHints.length > 0
-    ? featureHints.join("\n")
-    : "- Focused core flow\n- Clear user actions\n- Polished visual direction\n- Practical feature set";
+  const bullets = scopedFeatures.length > 0
+    ? scopedFeatures.map((part) => `- ${part.replace(/\.$/, "")}`).join("\n")
+    : "- Focused core flow\n- Clear user actions\n- Polished visual direction";
+
+  const scopeLine = deferredFeatures.length > 0
+    ? `\nI'll build ${scopedFeatures.slice(0, 2).join(" and ")} now. We can add ${deferredFeatures.join(" and ")} next.`
+    : "";
 
   return [
     "Here's what I'll do:",
     `**${appName}**`,
     bullets,
+    scopeLine,
     "",
     "Just say the word and I'll start building — or type any changes first.",
-  ].join("\n");
+  ].filter((line) => line !== "").join("\n");
 }
 
 export async function generatePlanSummary(
@@ -303,15 +308,18 @@ export async function generatePlanSummary(
         max_tokens: 140,
         system: [
           "Based on this build brief, write a short friendly plan summary.",
-          "Keep it under 60 words. Be specific. Use markdown.",
+          "Keep it under 70 words. Be specific. Use markdown.",
           "Do not mention HTML, CSS, or JavaScript.",
           "If you must mention the stack, say React and TypeScript.",
           "Start with \"Here's what I'll do:\".",
-          "Use short bullet points after the title. Use at most 4 bullet points.",
+          "Use short bullet points after the title. Use at most 3 bullet points for the current build.",
           "Bullets must be user-facing features only (what the app does).",
           "No filenames, no component names, no route names, and no file architecture breakdowns.",
           "No technical implementation details.",
           "Never say the build has already started or use phrases like \"Building now\".",
+          "SCOPE RULE: If the brief mentions 4 or more distinct features, only bullet the 3 most essential ones.",
+          "After the bullets, add a single line: \"I'll build X and Y now. We can add Z and W next.\" — naming the scoped-in features as X/Y and any deferred ones as Z/W.",
+          "Omit the 'next iteration' line entirely if the brief has 3 or fewer features.",
           'Format:',
           '"Here\'s what I\'ll do:',
           '[Suggested app name]',
@@ -319,7 +327,8 @@ export async function generatePlanSummary(
           '[Feature 1]',
           '[Feature 2]',
           '[Feature 3]',
-          '[Design style]',
+          '',
+          '[Optional: I\'ll build X and Y now. We can add Z and W next.]',
           '',
           'Just say the word and I\'ll start building — or type any changes first."',
           'No intro phrases like "Sure!" or "Great!". Just the plan.',
