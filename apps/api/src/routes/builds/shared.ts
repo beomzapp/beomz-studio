@@ -227,7 +227,7 @@ function synthesizeBuilderTrace(
       id: isServerRestart ? `${row.id}:server-restarting` : (events.length === 0 ? "legacy-1" : "legacy-2"),
       message: isServerRestart
         ? "Server is restarting. Your build will resume shortly."
-        : (row.error ?? (isTimedOut ? "Build timed out after 8 minutes." : "Build failed.")),
+        : (row.error ?? (isTimedOut ? "Build timed out after 10 minutes." : "Build failed.")),
       operation,
       payload: {
         phase: metadata.phase ?? null,

@@ -655,7 +655,7 @@ test("timed_out builds persist a terminal error event and replay as terminal", a
   const eventsSource = await readFile(new URL("./events.ts", import.meta.url), "utf8");
   const sharedSource = await readFile(new URL("./shared.ts", import.meta.url), "utf8");
 
-  assert.match(generateSource, /const timeoutMessage = "Build timed out after 8 minutes\.";/);
+  assert.match(generateSource, /const timeoutMessage = "Build timed out after 10 minutes\.";/);
   assert.match(generateSource, /abortController\.abort\("build_timed_out"\);/);
   assert.match(generateSource, /await appendEventToDb\(db, buildId, \{/);
   assert.match(generateSource, /code: "build_timed_out"/);

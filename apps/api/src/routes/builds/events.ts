@@ -66,7 +66,7 @@ function buildTerminalSafetyEvent(
       id: isServerRestart ? `${row.id}:server-restarting` : `${row.id}:error`,
       message: isServerRestart
         ? "Server is restarting. Your build will resume shortly."
-        : (row.error ?? (isTimedOut ? "Build timed out after 8 minutes." : "Build failed.")),
+        : (row.error ?? (isTimedOut ? "Build timed out after 10 minutes." : "Build failed.")),
       operation: "initial_build" as const,
       payload: {
         phase: metadata.phase ?? null,

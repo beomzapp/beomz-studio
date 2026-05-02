@@ -3265,7 +3265,7 @@ Example: "Done — I've built a todo app with task creation, completion tracking
  * Writes events directly to the generation row's builderTrace so the
  * existing events.ts SSE polling loop delivers them to the frontend.
  */
-const BUILD_TIMEOUT_MS = 8 * 60 * 1000;
+const BUILD_TIMEOUT_MS = 600000;
 
 export async function runBuildInBackground(
   input: BuildGenerateInput,
@@ -3293,8 +3293,8 @@ export async function runBuildInBackground(
     if (outcome === "timed_out") {
       timedOutRef.value = true;
       const timedOutAt = new Date().toISOString();
-      const timeoutMessage = "Build timed out after 8 minutes.";
-      console.error("[build/timeout] build exceeded 8 minutes.", { buildId, projectId });
+      const timeoutMessage = "Build timed out after 10 minutes.";
+      console.error("[build/timeout] build exceeded 10 minutes.", { buildId, projectId });
       console.log("[build/state]", { buildId, from: "running", to: "timed_out" });
       abortController.abort("build_timed_out");
       await appendEventToDb(db, buildId, {
