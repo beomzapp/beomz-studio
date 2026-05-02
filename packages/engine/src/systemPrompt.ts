@@ -142,6 +142,14 @@ const PRE_BUILD_CONFIRMATION_RULE_BLOCK = [
   "If this execution prompt is running, that confirmation has already happened — execute the work instead of re-asking for confirmation.",
 ].join("\n");
 
+const COMPLEXITY_RULE_BLOCK = [
+  "COMPLEXITY RULE:",
+  "Never decline a request as too complex or out of scope. Always attempt it.",
+  "If a request spans multiple features, build the most critical part first and complete it to a working, shippable state.",
+  "Surface 3-4 phased next steps in \"What next?\" that are specific to this app and this request — not generic suggestions.",
+  "Example: user asks \"add an admin portal\" → build the admin UI with the core management table, then offer \"→ Add admin auth\", \"→ Add bulk import\", \"→ Add inventory alerts\" as next steps.",
+].join("\n");
+
 function buildSilentDesignDirectiveSection(designDirective?: string): string {
   if (typeof designDirective !== "string" || designDirective.trim().length === 0) {
     return "";
@@ -293,6 +301,8 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
     CLARIFYING_QUESTION_RULE_BLOCK,
     "",
     PRE_BUILD_CONFIRMATION_RULE_BLOCK,
+    "",
+    COMPLEXITY_RULE_BLOCK,
     "",
     COPY_RULES_BLOCK,
     "",
