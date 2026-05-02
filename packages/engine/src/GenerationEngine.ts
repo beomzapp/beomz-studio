@@ -132,6 +132,10 @@ export interface AnthropicStreamingModelOptions {
   model: string;
   temperature?: number;
   timeoutMs?: number;
+  /** Max retry attempts on transient errors (408/429/502/503/504). Default: 3. */
+  maxRetries?: number;
+  /** Base backoff delay in ms. Each retry waits baseDelayMs × 3^(attempt-1). Default: 1000. */
+  retryDelayBaseMs?: number;
 }
 
 export interface GenerationTurnPersistenceInput {
@@ -252,6 +256,8 @@ export type GenerationEngineEvent =
       reason: FailureReason;
       error: string;
     };
+
+const RETRYABLE_ANTHROPIC_STATUSES = new Set([408, 429, 502, 503, 504]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -586,34 +592,71 @@ export class AnthropicStreamingModel implements StreamingModel {
     }, timeoutMs);
 
     try {
-      const response = await fetch(
-        `${(this.options.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "")}/v1/messages`,
-        {
-          body: JSON.stringify({
-            max_tokens: request.maxTokens ?? this.options.maxTokens ?? 4_096,
-            messages: request.messages,
-            model: this.options.model,
-            stream: true,
-            system: request.system,
-            temperature: request.temperature ?? this.options.temperature,
-            tools: request.tools,
-          }),
-          headers: {
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-            "x-api-key": this.options.apiKey,
-            ...this.options.headers,
-          },
-          method: "POST",
-          signal: controller.signal,
-        },
-      );
+      const maxRetries = this.options.maxRetries ?? 3;
+      const baseDelayMs = this.options.retryDelayBaseMs ?? 1000;
 
-      if (!response.ok) {
-        const errorBody = await response.text();
+      const requestBody = JSON.stringify({
+        max_tokens: request.maxTokens ?? this.options.maxTokens ?? 4_096,
+        messages: request.messages,
+        model: this.options.model,
+        stream: true,
+        system: request.system,
+        temperature: request.temperature ?? this.options.temperature,
+        tools: request.tools,
+      });
+
+      let response: Response | undefined;
+      let lastErrorBody = "";
+      let lastStatus = 0;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          const delayMs = baseDelayMs * Math.pow(3, attempt - 1);
+          console.log(
+            `[engine/anthropic] retrying after ${delayMs}ms (attempt ${attempt}/${maxRetries}, last status ${lastStatus})`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          if (controller.signal.aborted) {
+            throw new GenerationEngineError(
+              FailureReason.GENERATION_TIMEOUT,
+              "Anthropic streaming aborted during retry backoff.",
+            );
+          }
+        }
+
+        response = await fetch(
+          `${(this.options.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "")}/v1/messages`,
+          {
+            body: requestBody,
+            headers: {
+              "anthropic-version": "2023-06-01",
+              "content-type": "application/json",
+              "x-api-key": this.options.apiKey,
+              ...this.options.headers,
+            },
+            method: "POST",
+            signal: controller.signal,
+          },
+        );
+
+        if (response.ok) break;
+
+        lastStatus = response.status;
+        lastErrorBody = await response.text();
+
+        if (!RETRYABLE_ANTHROPIC_STATUSES.has(response.status) || attempt === maxRetries) {
+          throw new GenerationEngineError(
+            FailureReason.ANTHROPIC_ERROR,
+            `Anthropic returned ${response.status}: ${lastErrorBody}`,
+          );
+        }
+        // Otherwise loop continues for next retry attempt
+      }
+
+      if (!response || !response.ok) {
         throw new GenerationEngineError(
           FailureReason.ANTHROPIC_ERROR,
-          `Anthropic returned ${response.status}: ${errorBody}`,
+          `Anthropic retry exhausted after ${maxRetries + 1} attempts. Last status: ${lastStatus}. Body: ${lastErrorBody}`,
         );
       }
 
