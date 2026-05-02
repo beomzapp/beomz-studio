@@ -1080,12 +1080,13 @@ export class GenerationEngine {
           yield this.toActionEvent(turn, completedAction);
         }
 
-        const assistantMessage =
-          turnResult?.assistantMessage
-          ?? {
-            content: [],
-            role: "assistant" as const,
-          };
+        if (!turnResult?.assistantMessage || turnResult.assistantMessage.content.length === 0) {
+          throw new GenerationEngineError(
+            FailureReason.ANTHROPIC_ERROR,
+            `Turn ${turn} returned no assistant content (stop_reason=${turnResult?.stopReason ?? "unknown"}).`,
+          );
+        }
+        const assistantMessage = turnResult.assistantMessage;
 
         yield {
           assistantMessage,
