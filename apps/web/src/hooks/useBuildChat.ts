@@ -1505,25 +1505,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                   implementPlan?: string;
                 };
                 if (ev.type === "chat_response" && ev.delta) {
-                  setMessages(prev => {
-                    let phraseSummary: string | null = null;
-                    const next = prev.map(m => {
-                      if (m.id === chatMsgId && m.type === "chat_response") {
-                        const nextContent = m.content + ev.delta!;
-                        if (shouldShowImplementFromAssistantContent(nextContent)) {
-                          phraseSummary = nextContent;
-                        }
-                        return { ...m, content: nextContent };
+                  let phraseSummary: string | null = null;
+                  setMessages(prev => prev.map(m => {
+                    if (m.id === chatMsgId && m.type === "chat_response") {
+                      const nextContent = m.content + ev.delta!;
+                      if (shouldShowImplementFromAssistantContent(nextContent)) {
+                        phraseSummary = nextContent;
                       }
-                      return m;
-                    });
-                    if (phraseSummary) {
-                      queueMicrotask(() => {
-                        setImplementSuggestion({ summary: phraseSummary! });
-                      });
+                      return { ...m, content: nextContent };
                     }
-                    return next;
-                  });
+                    return m;
+                  }));
+                  if (phraseSummary) {
+                    setImplementSuggestion({ summary: phraseSummary });
+                  }
                 } else if (ev.type === "implement_suggestion" && ev.summary) {
                   setMessages(prev =>
                     prev.map(m =>
@@ -1596,6 +1591,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               }
             }
 
+            let finalSummary: string | null = null;
             setMessages(prev => {
               const next = prev.map(m =>
                 m.id === chatMsgId && m.type === "chat_response"
@@ -1606,12 +1602,13 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                 m => m.id === chatMsgId && m.type === "chat_response",
               ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
               if (final && shouldShowImplementFromAssistantContent(final.content)) {
-                queueMicrotask(() => {
-                  setImplementSuggestion({ summary: final.content });
-                });
+                finalSummary = final.content;
               }
               return next;
             });
+            if (finalSummary) {
+              setImplementSuggestion({ summary: finalSummary });
+            }
             activeChatMsgIdRef.current = null;
           } catch (err) {
             if (controller.signal.aborted) return;
