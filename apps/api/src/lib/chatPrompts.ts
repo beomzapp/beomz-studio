@@ -343,6 +343,18 @@ function buildPlanSummaryFallback(
   ].filter((line) => line !== "").join("\n");
 }
 
+function normalisePlanSummaryBullets(
+  raw: string,
+  fallback: string,
+): string {
+  const bulletLines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+/.test(line));
+
+  return bulletLines.length >= 3 ? bulletLines.slice(0, 5).join("\n") : fallback;
+}
+
 export async function generatePlanSummary(
   accumulatedContext: string,
   projectName?: string | null,
@@ -361,40 +373,32 @@ export async function generatePlanSummary(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PLAN_SUMMARY_TIMEOUT_MS);
   const personality = extractDesignPersonalitySummary(designDirective);
+  const appName = projectName?.trim() || "Your app";
+  const intro = buildIntroSentence(brief || `Build ${appName}`, designDirective);
+  const fallbackMessage = buildPlanSummaryFallback(brief, projectName, designDirective);
+  const fallbackBullets = fallbackMessage
+    .split("\n")
+    .filter((line) => /^-\s+/.test(line))
+    .join("\n");
 
   try {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 220,
+        max_tokens: 180,
         system: [
-          "Based on this build brief, write the short pre-build summary shown before the Implement this confirmation UI.",
-          "Use markdown.",
+          "Based on this build brief, write only the plan bullets for the pre-build Implement this confirmation UI.",
           "Do not mention HTML, CSS, or JavaScript.",
           "If you must mention the stack, say React and TypeScript.",
-          "Start with a 1-2 sentence intro that states what you understood.",
-          "If design personality details are provided, name the selected personality in the intro and briefly mention the font pairing.",
-          "After the intro, add a line that says exactly: \"Here's what I'll build:\".",
-          "Then use 3-5 short bullet points for the current build.",
+          "Return 3-5 short markdown bullet points only.",
           "Bullets must be user-facing features only (what the app does).",
           "No filenames, no component names, no route names, and no file architecture breakdowns.",
           "No technical implementation details.",
           "Never say the build has already started or use phrases like \"Building now\".",
           "SCOPE RULE: If the brief mentions more than 5 distinct features, bullet only the 5 most essential ones.",
-          'Format:',
-          '"[Short intro sentence about what is being built.]',
-          '[Optional second sentence naming the selected design personality.]',
-          '',
-          'Here\'s what I\'ll build:',
-          '[Suggested app name]',
-          '',
-          '[Feature 1]',
-          '[Feature 2]',
-          '[Feature 3]',
-          '[Feature 4 if needed]',
-          '[Feature 5 if needed]"',
-          'No intro phrases like "Sure!" or "Great!".',
+          'Every line must start with "- ".',
+          'Do not add an intro, title, heading, or closing sentence.',
         ].join("\n"),
         messages: [
           {
@@ -417,10 +421,16 @@ export async function generatePlanSummary(
       .map((block) => block.text)
       .join("\n")
       .trim();
+    const bullets = normalisePlanSummaryBullets(text, fallbackBullets);
 
-    return text || buildPlanSummaryFallback(brief, projectName, designDirective);
+    return [
+      intro,
+      "Here's what I'll build:",
+      `**${appName}**`,
+      bullets,
+    ].join("\n");
   } catch {
-    return buildPlanSummaryFallback(brief, projectName, designDirective);
+    return fallbackMessage;
   } finally {
     clearTimeout(timeoutId);
   }
