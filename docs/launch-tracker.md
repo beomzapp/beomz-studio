@@ -60,6 +60,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-772](https://linear.app/beomz/issue/BEO-772/) | S4-1 Engine adapter foundation — runEngineAdapter.ts (callEngineCustomise) | D | 4 | Claude direct | Done | `b76610e` all 4 builds clean ✅ (dead code; S4-2 wires flag) |
 | [BEO-773](https://linear.app/beomz/issue/BEO-773/) | S4-2 buildPipeline: flag-gated engine routing (USE_GENERATION_ENGINE) | D | 4 | Codex 5.4 / Med | Done | `0cb295c` api build clean ✅ (default off; engine wired but dormant) |
 | [BEO-774](https://linear.app/beomz/issue/BEO-774/) | S4-3 Engine systemPrompt: split dynamic into stable-per-build (cached) + per-turn | D | 4 | Codex 5.4 / High | Done | `9286516` engine+api builds clean ✅ (5-turn build cost: 150k→60k tokens) |
+| [BEO-775](https://linear.app/beomz/issue/BEO-775/) | S4-4 buildPipeline: structured telemetry log with path tag (engine \| legacy) | A | 4 | Codex 5.3 / Low | Done | `adb129a` api build clean ✅ (Vercel-grep-able pilot comparison) |
 
 (more tickets append here as they ship)
 
