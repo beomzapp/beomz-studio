@@ -31,6 +31,7 @@ import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
 const MOCK_CHAT_MODE = false;
 
 const CHAT_STREAM_BUFFER_BYTES = 256 * 1024; // 256KB — guard against runaway SSE buffers
+const IMPLEMENTBAR_QUIET_PERIOD_MS = 500; // wait this long after the last delta before showing ImplementBar mid-stream
 
 /** Phrases that mean "go build the plan we discussed" (BEO-197 / BEO-202). */
 const BUILD_CONFIRMATIONS = [
@@ -1448,6 +1449,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           }
         } else {
           // Real API path — active once Codex ships /api/builds/chat
+          let implementBarTimer: ReturnType<typeof setTimeout> | null = null;
           try {
             const accessToken = await getAccessToken();
             const url = `${getApiBaseUrl()}/builds/chat`;
@@ -1517,7 +1519,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                     return m;
                   }));
                   if (phraseSummary) {
-                    setImplementSuggestion({ summary: phraseSummary });
+                    if (implementBarTimer) clearTimeout(implementBarTimer);
+                    const summary = phraseSummary;
+                    implementBarTimer = setTimeout(() => {
+                      implementBarTimer = null;
+                      setImplementSuggestion({ summary });
+                    }, IMPLEMENTBAR_QUIET_PERIOD_MS);
                   }
                 } else if (ev.type === "implement_suggestion" && ev.summary) {
                   setMessages(prev =>
@@ -1591,6 +1598,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               }
             }
 
+            if (implementBarTimer) {
+              clearTimeout(implementBarTimer);
+              implementBarTimer = null;
+            }
+
             let finalSummary: string | null = null;
             setMessages(prev => {
               const next = prev.map(m =>
@@ -1611,6 +1623,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
             }
             activeChatMsgIdRef.current = null;
           } catch (err) {
+            if (implementBarTimer) {
+              clearTimeout(implementBarTimer);
+              implementBarTimer = null;
+            }
             if (controller.signal.aborted) return;
             const content = err instanceof Error ? err.message : "Chat failed. Try again.";
             setMessages(prev => [
