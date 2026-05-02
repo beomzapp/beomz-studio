@@ -49,8 +49,10 @@ import { getApiBaseUrl } from "../../../lib/api";
 type FileSection = "ROUTES" | "COMPONENTS" | "CONFIG" | "OTHER";
 
 /** BEO-715 2e: client-side build timeout. Last-line defence above the WC's
- *  own 30s stuck-dev-server safety net and Track B's server-side 5-min cap. */
-const BUILD_CLIENT_TIMEOUT_MS = 5 * 60 * 1000;
+ *  own 30s stuck-dev-server safety net and the server-side 10-min cap
+ *  (raised from 5 min in BEO-750). BEO-752 Bug 3: kept aligned with the
+ *  server timeout so the user-facing string here matches reality. */
+const BUILD_CLIENT_TIMEOUT_MS = 10 * 60 * 1000;
 
 function classifyFile(path: string, kind?: string): FileSection {
   if (kind === "route" || /\/(screens|pages|routes)\//.test(path) || /(^|\/)app\.tsx$/i.test(path)) return "ROUTES";
@@ -742,7 +744,7 @@ export function ProjectPage() {
 
   // BEO-715 2a: drives SSE for any active resumed build. The hook owns the
   // AbortController, so `setResumeBuildId(null)` from anywhere (Stop button,
-  // 5-min timeout in 2e, build completing) cleanly tears down the stream.
+  // 10-min timeout in 2e, build completing) cleanly tears down the stream.
   useSSEBuildStream({
     buildId: resumeBuildId,
     lastEventId: resumeLastEventId,
@@ -767,22 +769,22 @@ export function ProjectPage() {
     }
   }, [build, resumeBuildId]);
 
-  // ─── BEO-715 2e: 5-minute client-side build timeout ──────────────────────
+  // ─── BEO-715 2e: 10-minute client-side build timeout ─────────────────────
   //
-  // Server-side has its own 5-min timeout (Track B), but its `timed_out`
-  // status only reaches the client via SSE / poll. If the upstream stream is
-  // stalled (no events, polling hasn't yet escalated, etc.) the user could
-  // be parked on "Launching preview" indefinitely. This effect is the
-  // last-line defence: arm a timer on isBuilding false→true, cancel it on
-  // isBuilding true→false (done / error / stop), and on expiry abort every
-  // active controller and surface a Retry-able error.
+  // Server-side has its own 10-min timeout (BEO-750 raised it from 5 min),
+  // but its `timed_out` status only reaches the client via SSE / poll. If
+  // the upstream stream is stalled (no events, polling hasn't yet escalated,
+  // etc.) the user could be parked on "Launching preview" indefinitely. This
+  // effect is the last-line defence: arm a timer on isBuilding false→true,
+  // cancel it on isBuilding true→false (done / error / stop), and on expiry
+  // abort every active controller and surface a Retry-able error.
   //
   // preview_ready short-circuit: if the build has already produced a preview
   // (previewGenerationId === active build id), the WC owns the rest of the
   // lifecycle and has its own 30s stuck-dev-server safety net. Skip the
   // timeout in that case so a slow first paint doesn't error out a build
   // that effectively succeeded. Build id and preview-generation id are read
-  // via refs so the 5-min window is anchored to isBuilding and not restarted
+  // via refs so the 10-min window is anchored to isBuilding and not restarted
   // on every SSE-driven state update.
   useEffect(() => {
     if (!isBuilding) return;
@@ -790,12 +792,12 @@ export function ProjectPage() {
       const activeBuildId = activeBuildIdRef.current;
       if (activeBuildId && previewGenerationIdRef.current === activeBuildId) {
         console.log(
-          "[BEO-715] 5-min client timeout skipped — preview_ready already fired",
+          "[BEO-715] 10-min client timeout skipped — preview_ready already fired",
           { activeBuildId },
         );
         return;
       }
-      console.warn("[BEO-715] 5-min client build timeout — aborting build", {
+      console.warn("[BEO-715] 10-min client build timeout — aborting build", {
         activeBuildId,
       });
       // Abort fresh-send controller + chat controller; flips isBuilding=false,
@@ -814,8 +816,10 @@ export function ProjectPage() {
       setTransport("idle");
       // Surface the failure via PreviewPane's existing error overlay; the
       // Retry button is already wired to handleRetry → retryLastBuild.
+      // BEO-752 Bug 3: matches the 10-min cap (BUILD_CLIENT_TIMEOUT_MS) and
+      // server-side BEO-750 timeout.
       setBuildFailed(true);
-      setBuildErrorMessage("Build timed out after 5 minutes — try again");
+      setBuildErrorMessage("Build timed out after 10 minutes — try again");
     }, BUILD_CLIENT_TIMEOUT_MS);
     return () => clearTimeout(handle);
   }, [isBuilding, stopBuild, setTransport]);

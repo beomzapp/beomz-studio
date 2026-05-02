@@ -244,6 +244,16 @@ export function useWebContainerPreview(
   isBuildInProgress?: boolean,
   /** BEO-688: slim website-only scaffold skips app-only packages. */
   scaffoldType?: "app" | "website",
+  /**
+   * BEO-752 Bug 1: When `false`, defer the eager WebContainer boot + npm
+   * install until this flag transitions to `true`. PreviewPane uses this to
+   * keep the sandbox idle (no "Installing packages…" in the URL bar) until
+   * the user actually clicks "Implement this" — the plan-only path from
+   * /builds/start should be visually inert. WebsiteBuilderPage and any other
+   * caller that omits this argument continues to boot eagerly on mount
+   * (defaults to `true`).
+   */
+  enableBoot?: boolean,
 ): WcPreviewState {
   const [status, setStatus] = useState<WcStatus>("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -820,8 +830,18 @@ export function useWebContainerPreview(
   );
 
   // ── Eager boot + npm install ──────────────────────────────────────────────
+  // BEO-752 Bug 1: Gated on `enableBoot` (defaults to true for back-compat).
+  // When the caller passes `false`, the boot is deferred until the flag
+  // transitions to `true`. A `hasBootedRef` guard guarantees boot runs at
+  // most once per component lifetime, so the cleanup function tied to the
+  // booting effect run survives until unmount even though the effect deps
+  // include `enableBoot`.
+  const hasBootedRef = useRef(false);
   useEffect(() => {
+    if (hasBootedRef.current) return;
     if (!isWebContainerSupported()) return;
+    if (enableBoot === false) return;
+    hasBootedRef.current = true;
 
         let cancelled = false;
 
@@ -1077,7 +1097,7 @@ export function useWebContainerPreview(
       void resetGeneratedFiles(instanceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run exactly once per component mount
+  }, [enableBoot]); // BEO-752 Bug 1: re-run only when enableBoot flips false→true; hasBootedRef ensures boot runs at most once
 
   // ── BEO-737 A11: reset generated dir on project navigation ────────────────
   // The WC singleton persists across project navigations to keep node_modules

@@ -217,6 +217,20 @@ export function PreviewPane({
   const tabletViewportWidth = tabletPortrait ? 768 : 1024;
   const tabletViewportHeight = tabletPortrait ? 1024 : 768;
 
+  // ── BEO-752 Bug 1: Defer the WebContainer boot until a real build is in
+  // flight or the project already has files. The plan-only path from
+  // /builds/start (BEO-749) returns conversational_response without queuing
+  // a build, so eager boot here would surface "Installing packages…" in the
+  // URL bar before the user even clicks "Implement this". Sticky one-shot
+  // transition: once flipped true, stays true for the lifetime of the pane
+  // so completing-then-resting builds don't reset the WC.
+  const hasFiles = !!(files && files.length > 0);
+  const [wcBootEnabled, setWcBootEnabled] = useState(hasFiles || isBuildInProgress);
+  useEffect(() => {
+    if (wcBootEnabled) return;
+    if (hasFiles || isBuildInProgress) setWcBootEnabled(true);
+  }, [wcBootEnabled, hasFiles, isBuildInProgress]);
+
   // ── WebContainer (primary preview) ──────────────────────────────────────
   const {
     status: wcStatus,
@@ -234,6 +248,8 @@ export function PreviewPane({
     onPreviewServerReady,
     neonDbUrl,
     isBuildInProgress,
+    undefined, // scaffoldType — defaults to "app" for ProjectPage previews
+    wcBootEnabled,
   );
 
   // ── Inline srcDoc (shown immediately; stays visible until WC is ready) ──

@@ -1691,7 +1691,10 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     ));
     await delay(50);
     // Pass plan as implementPlan so the API's hasExplicitImplementSignal() bypasses detectIntent.
-    sendMessageInternalRef.current?.(plan, imageUrl, plan);
+    // BEO-752 Bug 2: pass a short visible bubble label ("✅ Implement this") so the chat
+    // doesn't show a duplicate of the original prompt — the original user prompt was
+    // already pushed when the conversation started.
+    sendMessageInternalRef.current?.(plan, imageUrl, plan, "✅ Implement this");
   }, []);
 
   useEffect(() => {
@@ -1700,7 +1703,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   // Ref that points to the raw build sender (set after sendMessage is defined)
   // Third arg `implementPlan` is forwarded to the API body to bypass detectIntent.
-  const sendMessageInternalRef = useRef<((text: string, imageUrl?: string, implementPlan?: string) => void) | null>(null);
+  // BEO-752 Bug 2: fourth arg `displayContent` overrides the chat-bubble text so the
+  // Implement click can show "✅ Implement this" while still POSTing the full plan.
+  const sendMessageInternalRef = useRef<((text: string, imageUrl?: string, implementPlan?: string, displayContent?: string) => void) | null>(null);
 
   const sendMessage = useCallback(
     (text: string, imageUrl?: string, isSystem?: boolean, buildMeta?: { withDatabase?: boolean; withAuth?: boolean }) => {
@@ -1831,7 +1836,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
   // BEO-396: expose the raw build sender to implementCard
   useEffect(() => {
-    sendMessageInternalRef.current = (text: string, imageUrl?: string, implementPlan?: string) => {
+    sendMessageInternalRef.current = (text: string, imageUrl?: string, implementPlan?: string, displayContent?: string) => {
       // Call without going through chatModeRef check — directly triggers build flow
       // BEO-737 A3: abort orphan chat SSE before opening a build path.
       chatAbortRef.current?.abort();
@@ -1849,9 +1854,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       } catch { /* ignore */ }
       clearPreambleAndStageTimers();
       // BEO-464: isBuilding is set by build_confirmed SSE, not here
+      // BEO-752 Bug 2: when displayContent is provided (Implement click), use it
+      // as the visible bubble text instead of the full plan/prompt. The original
+      // prompt was already pushed in the conversational turn.
       setMessages(prev => [
         ...prev.filter(m => m.type !== "server_restarting"),
-        { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date() },
+        { id: makeId(), type: "user", content: displayContent ?? text, imageUrl: imageUrl || undefined, timestamp: new Date() },
         { id: `thinking-${makeId()}`, type: "thinking" },
       ]);
       void startAndStreamBuild({
