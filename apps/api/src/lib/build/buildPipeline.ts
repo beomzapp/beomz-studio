@@ -7,6 +7,7 @@ import type {
 } from "@beomz-studio/contracts";
 import type { StudioDbClient } from "@beomz-studio/studio-db";
 
+import { apiConfig } from "../../config.js";
 import { generateNextStepsWithUsage } from "../buildNarration.js";
 import {
   calcCreditCost,
@@ -57,6 +58,21 @@ function remapPrebuiltPath(originalPath: string, templateId: string): string {
 function isAbortError(error: unknown): boolean {
   return error instanceof Error
     && (error.name === "AbortError" || error.message === "The operation was aborted.");
+}
+
+function isTransientAiError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  // Anthropic SDK errors carry a `status` property. Match common transient codes.
+  const status = (error as { status?: unknown }).status;
+  if (typeof status === "number" && [408, 429, 500, 502, 503, 504].includes(status)) {
+    return true;
+  }
+  // Heuristic fallback: error messages often include the status
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (/\b(503|502|504|429|408|overloaded|rate.?limit|gateway|timeout)\b/.test(message)) {
+    return true;
+  }
+  return false;
 }
 
 function buildRequestedDataContext(
@@ -679,12 +695,35 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     if (isAbortError(aiError)) {
       throw aiError;
     }
-    console.error("[generate] AI call failed — using scaffold fallback.", {
-      buildId,
-      model,
-      error: aiError instanceof Error ? aiError.message : String(aiError),
-      stack: aiError instanceof Error ? aiError.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
-    });
+
+    const useStrictHandling = apiConfig.STRICT_AI_ERROR_HANDLING === "true";
+    const isTransient = isTransientAiError(aiError);
+
+    if (useStrictHandling && !isTransient) {
+      const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
+      console.error("[generate] AI call failed — strict mode, propagating error (no scaffold fallback).", {
+        buildId,
+        model,
+        error: errorMessage,
+        stack: aiError instanceof Error ? aiError.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
+      });
+      await appendEventToDb(
+        db, buildId,
+        statusEvent("ai_error", `Generation failed: ${errorMessage}`, "failed"),
+        { status: "failed" },
+      );
+      throw aiError;
+    }
+
+    console.error(
+      `[generate] AI call failed — using scaffold fallback (${isTransient ? "transient error" : "strict mode off"}).`,
+      {
+        buildId,
+        model,
+        error: aiError instanceof Error ? aiError.message : String(aiError),
+        stack: aiError instanceof Error ? aiError.stack?.split("\n").slice(0, 5).join(" | ") : undefined,
+      },
+    );
     await stageEvents.emit("sanitising");
     const { sanitiseFiles } = await import("../sanitise.js");
     customised = {
