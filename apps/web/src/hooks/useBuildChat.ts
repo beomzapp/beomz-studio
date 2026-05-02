@@ -30,6 +30,8 @@ import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
 // Flip to `false` once /api/builds/chat and /api/builds/summarise-chat are deployed.
 const MOCK_CHAT_MODE = false;
 
+const CHAT_STREAM_BUFFER_BYTES = 256 * 1024; // 256KB — guard against runaway SSE buffers
+
 /** Phrases that mean "go build the plan we discussed" (BEO-197 / BEO-202). */
 const BUILD_CONFIRMATIONS = [
   "build it",
@@ -1567,13 +1569,23 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
                     );
                   }
                 }
-              } catch { /* ignore parse errors */ }
+              } catch (parseError) {
+                console.warn("[chat-stream] parse error", {
+                  prefix: payload.slice(0, 200),
+                  error: parseError instanceof Error ? parseError.message : String(parseError),
+                });
+              }
             };
 
             while (true) {
               const { done, value } = await reader.read();
               if (done) { flush(); break; }
               buf += decoder.decode(value, { stream: true });
+              if (buf.length > CHAT_STREAM_BUFFER_BYTES) {
+                console.error("[chat-stream] buffer overflow, aborting", { length: buf.length });
+                try { reader.cancel(); } catch {}
+                throw new Error("Chat stream buffer exceeded limit. Connection may be unhealthy.");
+              }
               while (true) {
                 const nl = buf.indexOf("\n");
                 if (nl === -1) break;
