@@ -629,13 +629,18 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           const pendingBuildId = makeId();
           activeBuildingMsgIdRef.current = pendingBuildId;
 
-          // Drop the thinking indicator and any stale pre-build plan card —
-          // BuildingShimmer takes over. The plan message (chat_response with
-          // implementPlan) is past-tense once the build starts; build_summary
-          // will replace it with the real "Done —" completion message (BEO-702).
-          setMessages(prev => prev.filter(
-            m => m.type !== "thinking" && !(m.type === "chat_response" && m.implementPlan),
-          ));
+          // Drop thinking indicator; keep the pre-build conversational message
+          // but strip its implementPlan field so the ⚡ button disappears without
+          // removing the intro text + plan bullets from chat history (BEO-753).
+          setMessages(prev =>
+            prev
+              .filter(m => m.type !== "thinking")
+              .map(m => {
+                if (m.type !== "chat_response" || !m.implementPlan) return m;
+                const { implementPlan: _ip, ...rest } = m;
+                return rest as ChatMessage;
+              }),
+          );
 
           // Safety net: if stage_preamble never fires in 5s, create the card ourselves
           preambleFallbackTimerRef.current = setTimeout(() => {
@@ -1684,11 +1689,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     chatModeRef.current = false;
     // BEO-746: pre_build_ack normally strips the inline plan card, but if the
     // API replays a stale "completed" build (terminal events only), pre_build_ack
-    // never fires. Strip the plan card immediately so it can't double up against
-    // any leak path we haven't anticipated.
-    setMessages(prev => prev.filter(
-      m => !(m.type === "chat_response" && m.implementPlan),
-    ));
+    // never fires. Strip the implementPlan field immediately (hides the ⚡ button)
+    // but keep the message text in history so it survives build completion and
+    // hard refresh (BEO-753).
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.type !== "chat_response" || !m.implementPlan) return m;
+        const { implementPlan: _ip, ...rest } = m;
+        return rest as ChatMessage;
+      }),
+    );
     await delay(50);
     // Pass plan as implementPlan so the API's hasExplicitImplementSignal() bypasses detectIntent.
     // BEO-752 Bug 2: pass a short visible bubble label ("✅ Implement this") so the chat
