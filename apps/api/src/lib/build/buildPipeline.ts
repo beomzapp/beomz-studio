@@ -8,6 +8,7 @@ import type {
 import type { StudioDbClient } from "@beomz-studio/studio-db";
 
 import { apiConfig } from "../../config.js";
+import { callEngineCustomise } from "./runEngineAdapter.js";
 import { generateNextStepsWithUsage } from "../buildNarration.js";
 import {
   calcCreditCost,
@@ -670,21 +671,51 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
   try {
     await stageEvents.emit("generating");
     throwIfBuildAborted();
-    customised = await callModelCustomise(
-      workingPrompt,
-      model,
-      paletteId,
-      { buildId, isIteration: input.isIteration },
-      phaseContextBlock,
-      imageContextBlock,
-      input.imageUrl,
-      phaseScope,
-      input.forcedSimple ? 32000 : undefined,
-      hasByoSupabaseConfig,
-      modelDbContextBlock,
-      input.designDirective,
-      abortSignal,
-    );
+
+    // Flag-gated engine routing (BEO-772 S4-1 + BEO-773 S4-2).
+    // Engine path supports surgical iterations + prompt caching but doesn't
+    // yet handle image attachments or phased builds - fall back to legacy
+    // `callModelCustomise` for those cases.
+    const engineEligible =
+      apiConfig.USE_GENERATION_ENGINE === "true"
+      && !input.imageUrl
+      && !phaseScope;
+
+    if (engineEligible) {
+      console.log("[generate] using engine path", { buildId, model, templateId });
+      customised = await callEngineCustomise({
+        buildId,
+        prompt: workingPrompt,
+        model,
+        templateId,
+        projectName: input.projectName,
+        orgId: input.orgId,
+        projectId: input.projectId,
+        existingFiles,
+        templateFiles,
+        designDirective: input.designDirective,
+        isIteration: input.isIteration,
+        abortSignal,
+        maxTokens: input.forcedSimple ? 32000 : undefined,
+      });
+    } else {
+      customised = await callModelCustomise(
+        workingPrompt,
+        model,
+        paletteId,
+        { buildId, isIteration: input.isIteration },
+        phaseContextBlock,
+        imageContextBlock,
+        input.imageUrl,
+        phaseScope,
+        input.forcedSimple ? 32000 : undefined,
+        hasByoSupabaseConfig,
+        modelDbContextBlock,
+        input.designDirective,
+        abortSignal,
+      );
+    }
+
     throwIfBuildAborted();
     console.log("[generate] Model returned files:", customised.files.map((file) => file.path));
     if (customised.files.length === 0) {
