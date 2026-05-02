@@ -970,6 +970,35 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
 
   const generationMs = Date.parse(completedAt) - Date.parse(requestedAt);
 
+  // S4-4: structured telemetry log for engine-vs-legacy pilot comparison.
+  // Emitted as console.log so Vercel log retention captures it without a
+  // schema migration. A proper `build_path` column on build_telemetry is
+  // a post-launch follow-up.
+  const enginePathUsed =
+    apiConfig.USE_GENERATION_ENGINE === "true"
+    && !input.imageUrl
+    && !phaseScope;
+  console.log(
+    "[telemetry] build complete",
+    JSON.stringify({
+      buildId,
+      projectId,
+      orgId,
+      path: enginePathUsed ? "engine" : "legacy",
+      isIteration: input.isIteration,
+      model,
+      templateId: prebuilt.manifest.id,
+      success: !fallbackUsed,
+      fallbackReason: fallbackUsed ? "anthropic_error" : null,
+      generationMs: generationMs > 0 ? generationMs : null,
+      filesGenerated: finalFiles.length,
+      inputTokens,
+      outputTokens,
+      creditsUsed,
+      costUsd,
+    }),
+  );
+
   await db.upsertBuildTelemetry({
     id: buildId,
     project_id: projectId,
