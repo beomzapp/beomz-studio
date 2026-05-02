@@ -2,7 +2,7 @@
 
 Single source of truth for the audit-2026-05 rollout. Every audit ticket gets logged here as it ships.
 
-**Tag:** `pre-audit-fixes` (commit: _to be filled in after tag push_)
+**Tag:** `pre-audit-fixes` (commit: `d3d35e9`)
 **Started:** 2026-05-02
 **Owner:** Omar (orchestrator: Claude)
 **Linear label:** `audit-2026-05`
@@ -11,7 +11,7 @@ Single source of truth for the audit-2026-05 rollout. Every audit ticket gets lo
 
 ## Sprint status
 
-- [x] **Sprint 0** — Pre-flight (BEO-757 in progress)
+- [x] **Sprint 0** — Pre-flight ✅ shipped 2026-05-02 (BEO-757, commit `d3d35e9`)
 - [ ] **Sprint 1** — Class A surgical fixes (5 tickets)
 - [ ] **Sprint 2** — Class B replacements behind kill switches (4 tickets)
 - [ ] **Sprint 3** — Class C stateful changes (5 tickets)
@@ -41,7 +41,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 
 | Linear | Title | Class | Sprint | Agent | Status | Verified |
 |---|---|---|---|---|---|---|
-| [BEO-757](https://linear.app/beomz/issue/BEO-757/) | PF-001 Pre-flight: feature flags + tracker + tag | infra | 0 | Claude | In Progress | — |
+| [BEO-757](https://linear.app/beomz/issue/BEO-757/) | PF-001 Pre-flight: feature flags + tracker + tag | infra | 0 | Claude | Done | `d3d35e9` build clean ✅ |
 
 (more tickets append here as they ship)
 
