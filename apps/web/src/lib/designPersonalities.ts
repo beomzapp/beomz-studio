@@ -370,7 +370,7 @@ export function buildImageDirective(): string {
     `  routine, soft beige tones, hand-drawn style".`,
     ``,
     `RULE: Every image slot in the UI gets a real image — never a grey div, never a placeholder`,
-    `box, never an empty <img/>. If you can't decide between tiers, default to Tier 1 (Unsplash).`,
+    `box, never an empty <img/>. If you can't decide between tiers, default to Tier 1 (loremflickr).`,
   ].join("\n");
 }
 
