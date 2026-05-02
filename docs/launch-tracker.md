@@ -61,6 +61,6 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 ## Decision log
 
 - **2026-05-02** — Working contract: 1 prompt per agent, max 2 concurrent if non-conflicting. "Fired" = working, "paste" = done. Claude reviews each return before closing in Linear.
-- **2026-05-02** — Codex = backend (apps/api, packages/engine). Cursor = frontend (apps/web, apps/admin). Linear label `codex-task` description is currently inverted in the UI — fix manually when convenient (cosmetic only).
+- **2026-05-02** — Codex = backend (apps/api, packages/engine), runs **GPT-5.4**. Cursor = frontend (apps/web, apps/admin), runs **Sonnet 4.6** by default (small/medium changes) or **Opus 4.7** for bigger refactors. Every handoff prompt must lead with the agent + model header. Linear label `codex-task` description is currently inverted in the UI — fix manually when convenient (cosmetic only).
 - **2026-05-02** — Using labels (`audit-2026-05`) not a Linear project. Lighter ceremony for solo founder.
 - **2026-05-02** — Engine wiring (Sprint 4) runs in parallel with Sprints 2–3 because it's flag-gated and on a separate code path.
