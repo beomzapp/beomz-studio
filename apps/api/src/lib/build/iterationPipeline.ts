@@ -247,6 +247,7 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
 
   let iterResult: CustomiseResult;
   let iterErrorReason: string | null = null;
+  const failedMigrations: Array<{ sql: string; reason: string }> = [];
   try {
     await stageEvents.emit("generating");
     throwIfBuildAborted();
@@ -319,13 +320,16 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
         if (!sql) continue;
         if (!isAdminEmail(userEmail) && !isAllowedMigrationStatement(sql, dbSchemaName)) {
           console.warn("[generate] iteration: migration rejected by allowlist:", sql.slice(0, 100));
+          failedMigrations.push({ sql: sql.slice(0, 200), reason: "rejected by allowlist" });
           continue;
         }
         try {
           await runSql(sql.endsWith(";") ? sql : `${sql};`);
           migrationsApplied += 1;
         } catch (migErr) {
-          console.error("[generate] iteration: migration failed (non-fatal):", migErr instanceof Error ? migErr.message : String(migErr));
+          const reason = migErr instanceof Error ? migErr.message : String(migErr);
+          console.error("[generate] iteration: migration failed (non-fatal):", reason);
+          failedMigrations.push({ sql: sql.slice(0, 200), reason });
         }
       }
       if (migrationsApplied > 0) {
@@ -568,7 +572,12 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     files_generated: iterFinalFiles.length,
     succeeded: iterResult.files.length > 0,
     fallback_reason: iterErrorReason,
-    error_log: iterErrorReason ? { message: iterErrorReason } : null,
+    error_log: (iterErrorReason || failedMigrations.length > 0)
+      ? {
+          ...(iterErrorReason ? { message: iterErrorReason } : {}),
+          ...(failedMigrations.length > 0 ? { failedMigrations } : {}),
+        }
+      : null,
     generation_time_ms: Date.parse(iterCompletedAt) - Date.parse(requestedAt) || null,
     credits_used: iterCreditsUsed,
     input_tokens: iterInputTokens,
