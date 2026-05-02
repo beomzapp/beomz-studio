@@ -26,12 +26,16 @@ function stripMarkdown(t: string): string {
     .replace(/`(.*?)`/g, "$1");
 }
 
-export function TypewriterText({ text, speed = 20, onDone }: TypewriterTextProps) {
+export function TypewriterText({ text, speed, onDone }: TypewriterTextProps) {
   const [displayed, setDisplayed] = useState("");
   const [done, setDone] = useState(false);
   const indexRef = useRef(0);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+
+  // Cap total animation at ~1.5s regardless of text length, while keeping
+  // the typewriter feel for short messages (max 20ms/char).
+  const effectiveSpeed = speed ?? Math.max(2, Math.min(20, Math.ceil(1500 / Math.max(text.length, 1))));
 
   useEffect(() => {
     indexRef.current = 0;
@@ -47,9 +51,9 @@ export function TypewriterText({ text, speed = 20, onDone }: TypewriterTextProps
       } else {
         setDisplayed(text.slice(0, indexRef.current));
       }
-    }, speed);
+    }, effectiveSpeed);
     return () => clearInterval(id);
-  }, [text, speed]);
+  }, [text, effectiveSpeed]);
 
   if (done) {
     return <MarkdownText text={text} />;
