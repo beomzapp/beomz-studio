@@ -195,8 +195,11 @@ export function ChatPanel({
       try {
         const { imageUrl } = await uploadImage(file, projectId);
         setPendingImageUrl(imageUrl);
-      } catch {
-        setImageError(null);
+      } catch (uploadError) {
+        setImageError(uploadError instanceof Error ? uploadError.message : "Image upload failed. Try again.");
+        setPendingImageFile(null);
+        if (pendingImagePreview) URL.revokeObjectURL(pendingImagePreview);
+        setPendingImagePreview(null);
       } finally {
         setImageUploading(false);
       }
