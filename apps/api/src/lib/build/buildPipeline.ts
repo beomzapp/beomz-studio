@@ -672,12 +672,23 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
     await stageEvents.emit("generating");
     throwIfBuildAborted();
 
-    // Flag-gated engine routing (BEO-772 S4-1 + BEO-773 S4-2).
+    // Flag-gated engine routing (BEO-772 S4-1 + BEO-773 S4-2 + BEO-776 S4-5).
     // Engine path supports surgical iterations + prompt caching but doesn't
     // yet handle image attachments or phased builds - fall back to legacy
     // `callModelCustomise` for those cases.
-    const engineEligible =
+    //
+    // Two ways the engine path can activate:
+    //   1. Global flag: USE_GENERATION_ENGINE=true (rolls out to all orgs)
+    //   2. Pilot allowlist: ENGINE_PILOT_ORG_IDS contains this orgId
+    const enginePilotOrgIds = apiConfig.ENGINE_PILOT_ORG_IDS
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+    const engineEnabledForOrg =
       apiConfig.USE_GENERATION_ENGINE === "true"
+      || enginePilotOrgIds.includes(input.orgId);
+    const engineEligible =
+      engineEnabledForOrg
       && !input.imageUrl
       && !phaseScope;
 
@@ -974,8 +985,13 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
   // Emitted as console.log so Vercel log retention captures it without a
   // schema migration. A proper `build_path` column on build_telemetry is
   // a post-launch follow-up.
+  const telemetryPilotOrgIds = apiConfig.ENGINE_PILOT_ORG_IDS
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
   const enginePathUsed =
-    apiConfig.USE_GENERATION_ENGINE === "true"
+    (apiConfig.USE_GENERATION_ENGINE === "true"
+      || telemetryPilotOrgIds.includes(orgId))
     && !input.imageUrl
     && !phaseScope;
   console.log(

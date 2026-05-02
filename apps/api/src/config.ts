@@ -80,6 +80,8 @@ const envSchema = z.object({
   // String flags read as "true"/"false". Consumers compare via
   // `apiConfig.FLAG === "true"`. Defaults preserve current production behavior.
   USE_GENERATION_ENGINE: z.string().optional().default("false"),
+  /** Comma-separated list of org UUIDs allowed to opt into the engine path even when USE_GENERATION_ENGINE is "false". Pilot rollout (BEO-776). */
+  ENGINE_PILOT_ORG_IDS: z.string().optional().default(""),
   ENABLE_ANTHROPIC_RETRY: z.string().optional().default("true"),
   STRICT_AI_ERROR_HANDLING: z.string().optional().default("false"),
   ENABLE_TODO_SCAFFOLD_FALLBACK: z.string().optional().default("true"),
