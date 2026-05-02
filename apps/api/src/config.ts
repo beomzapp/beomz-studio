@@ -76,6 +76,17 @@ const envSchema = z.object({
   VERCEL_TEAM_ID: z.string().min(1).optional(),
   // AES-256-GCM key for encrypting AI provider keys at rest
   ENCRYPTION_SECRET: z.string().min(1).optional(),
+  // ─── Audit rollout flags (BEO-757, audit-2026-05) ──────────────────────────
+  // String flags read as "true"/"false". Consumers compare via
+  // `apiConfig.FLAG === "true"`. Defaults preserve current production behavior.
+  USE_GENERATION_ENGINE: z.string().optional().default("false"),
+  ENABLE_ANTHROPIC_RETRY: z.string().optional().default("true"),
+  STRICT_AI_ERROR_HANDLING: z.string().optional().default("false"),
+  ENABLE_TODO_SCAFFOLD_FALLBACK: z.string().optional().default("true"),
+  BATCH_STREAMING_DELTAS: z.string().optional().default("false"),
+  IMPLEMENTBAR_QUIET_PERIOD_MS: z.string().optional().default("0"),
+  USE_TRANSACTIONAL_MIGRATIONS: z.string().optional().default("false"),
+  STALE_BUILD_WATCHDOG_MODE: z.enum(["off", "dry-run", "on"]).optional().default("off"),
 });
 
 export type ApiConfig = z.infer<typeof envSchema>;
