@@ -344,24 +344,26 @@ export function buildDesignDirective(p: DesignPersonality): string {
 }
 
 /**
- * Two-tier image strategy injected into the prompt. Tier 1 = Unsplash for
- * photos, Tier 2 = our /api/images/generate FLUX endpoint for hero artwork
+ * Two-tier image strategy injected into the prompt. Tier 1 = keyword photos
+ * via loremflickr (picsum seed fallback), Tier 2 = absolute FLUX endpoint for
+ * hero artwork
  * and brand visuals. No grey placeholder boxes anywhere.
  */
 export function buildImageDirective(): string {
   return [
     `─── IMAGES — two-tier strategy (zero grey placeholder boxes) ───`,
     ``,
-    `Tier 1 — Unsplash photos (use for: avatars, feature photos, banners, backgrounds):`,
-    `  https://source.unsplash.com/featured/?{relevant,keywords}`,
+    `Tier 1 — Real photos (use for: avatars, feature photos, banners, backgrounds):`,
+    `  Primary:  https://loremflickr.com/800/600/{relevant,keywords}`,
+    `  Fallback: https://picsum.photos/seed/{keyword}/800/600`,
     `  Pick keywords from the app's domain. E.g. for a fitness dashboard:`,
-    `    https://source.unsplash.com/featured/?running,workout`,
-    `    https://source.unsplash.com/featured/?gym,athlete`,
+    `    https://loremflickr.com/800/600/running,workout`,
+    `    https://loremflickr.com/800/600/gym,athlete`,
     `  Always use 2-3 keywords joined with commas. Vary keywords across slots so images differ.`,
     ``,
     `Tier 2 — AI-generated artwork (use for: hero artwork, custom illustrations, brand visuals,`,
-    `        anything compositionally unique that Unsplash won't have):`,
-    `  POST /api/images/generate { prompt: string, width: number, height: number } → { url: string }`,
+    `        anything compositionally unique that stock photos won't have):`,
+    `  POST https://beomz.ai/api/images/generate { prompt: string, width: number, height: number } → { url: string }`,
     `  Call this endpoint from within the generated app code at runtime (e.g. in a useEffect`,
     `  or directly in JSX with a small fetch wrapper). Pass a descriptive prompt that matches`,
     `  the personality and domain — e.g. "minimalist editorial illustration of a calm morning`,
