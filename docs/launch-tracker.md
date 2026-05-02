@@ -53,6 +53,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-765](https://linear.app/beomz/issue/BEO-765/) | S2-4 useBuildChat: hoist phrase detection out of setMessages reducer | A | 2 | Cursor Sonnet 4.6 | Done | `b19dca0` web build clean ✅ (parallel with 764) |
 | [BEO-766](https://linear.app/beomz/issue/BEO-766/) | S2-5 buildPipeline: STRICT_AI_ERROR_HANDLING flag-gated strict path | B | 2 | Codex 5.4 / Med | Done | `0a3c810` api build clean ✅ (flag default off, flip env to enable) |
 | [BEO-767](https://linear.app/beomz/issue/BEO-767/) | S2-6 ChatPanel: debounce scroll handler + raise threshold to 200px | A | 2 | Cursor Sonnet 4.6 | Done | `e6ae446` web build clean ✅ (parallel with 766) |
+| [BEO-768](https://linear.app/beomz/issue/BEO-768/) | S3-1 buildPipeline: gate todo App.tsx fallback behind kill switch | B | 3 | Codex 5.4 / Med | Done | `23a829a` api build clean ✅ (default on, flip env to enable fix) |
 
 (more tickets append here as they ship)
 
