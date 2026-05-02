@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@beomz-studio/contracts";
-import { ArrowDown, MessageSquare, Paperclip, Send, Square, X } from "lucide-react";
+import { ArrowDown, Loader2, MessageSquare, Paperclip, Send, Square, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { uploadImage } from "../../lib/api";
 import { BAvatar } from "./Avatars";
@@ -560,12 +560,13 @@ export function ChatPanel({
                     onStopStreaming?.();
                   }}
                   className={cn(
-                    "rounded-lg p-1.5 text-white transition-colors",
+                    "flex items-center gap-1.5 rounded-lg p-1.5 text-white transition-colors",
                     stopClicked ? "bg-red-500 hover:bg-red-600" : "bg-[#1a1a1a] hover:bg-[#333]",
                   )}
-                  title="Stop generating"
+                  title={stopClicked ? "Stopping…" : "Stop generating"}
                 >
-                  <Square size={14} />
+                  {stopClicked ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />}
+                  {stopClicked && !showForceStop && <span className="text-[11px] font-medium">Stopping</span>}
                 </button>
                 {showForceStop && (
                   <button
