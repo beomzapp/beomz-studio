@@ -14,8 +14,8 @@ Single source of truth for the audit-2026-05 rollout. Every audit ticket gets lo
 - [x] **Sprint 0** — Pre-flight ✅ shipped 2026-05-02 (BEO-757, commit `d3d35e9`)
 - [x] **Sprint 1** — Class A surgical fixes ✅ 5/5 shipped 2026-05-02 (tag `sprint-1-complete`)
 - [x] **Sprint 2** — Reliability + UX hardening ✅ 6/6 shipped 2026-05-02 (tag `sprint-2-complete`)
-- [ ] **Sprint 3** — Class C stateful changes (5 tickets)
-- [ ] **Sprint 4** — Engine wiring (parallel with sprints 2–3)
+- [x] **Sprint 3** — Production reliability + UX polish ✅ 4/4 shipped 2026-05-02 (tag `sprint-3-complete`)
+- [ ] **Sprint 4** — Engine wiring (the foundation; biggest token-cost reduction)
 - [ ] **Sprint 5** — Cleanup, hook split, polish
 
 ---
@@ -56,6 +56,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-768](https://linear.app/beomz/issue/BEO-768/) | S3-1 buildPipeline: gate todo App.tsx fallback behind kill switch | B | 3 | Codex 5.4 / Med | Done | `23a829a` api build clean ✅ (default on, flip env to enable fix) |
 | [BEO-769](https://linear.app/beomz/issue/BEO-769/) | S3-2 useBuildChat: 500ms quiet-period gate before ImplementBar mid-stream | A | 3 | Cursor Sonnet 4.6 | Done | `a0ad836` web build clean ✅ (parallel with 768) |
 | [BEO-771](https://linear.app/beomz/issue/BEO-771/) | S3-4 ChatMessage: render fallback for unknown message types | A | 3 | Cursor Sonnet 4.6 | Done | `4c40328` web build clean ✅ |
+| [BEO-770](https://linear.app/beomz/issue/BEO-770/) | S3-3 Stale-build watchdog: sweep abandoned generations at API startup | C | 3 | Codex 5.4 / High | Done | `aaec468` studio-db+api builds clean ✅ (default off; +drive-by fix on getOrgWithBalance SELECT) |
 
 (more tickets append here as they ship)
 
