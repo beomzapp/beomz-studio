@@ -94,6 +94,8 @@ interface ChatPanelProps {
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const SCROLL_USER_OFFSET_THRESHOLD_PX = 200;
+const SCROLL_HANDLER_DEBOUNCE_MS = 100;
 
 export function ChatPanel({
   messages,
@@ -152,6 +154,7 @@ export function ChatPanel({
   const [stopClicked, setStopClicked] = useState(false);
   const [showForceStop, setShowForceStop] = useState(false);
   const forceStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!isBuilding && !isStopPending) {
@@ -163,6 +166,15 @@ export function ChatPanel({
       }
     }
   }, [isBuilding, isStopPending]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollDebounceTimerRef.current) {
+        clearTimeout(scrollDebounceTimerRef.current);
+        scrollDebounceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // ─── Image attach state ───────────────────────────────────────────────────
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
@@ -266,11 +278,16 @@ export function ChatPanel({
   }, [messages.length, isBuilding]);
 
   const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    userScrolledUp.current = distFromBottom > 80;
-    setShowScrollBtn(distFromBottom > 80);
+    if (scrollDebounceTimerRef.current) clearTimeout(scrollDebounceTimerRef.current);
+    scrollDebounceTimerRef.current = setTimeout(() => {
+      scrollDebounceTimerRef.current = null;
+      const el = scrollRef.current;
+      if (!el) return;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const isScrolledUp = distFromBottom > SCROLL_USER_OFFSET_THRESHOLD_PX;
+      userScrolledUp.current = isScrolledUp;
+      setShowScrollBtn(isScrolledUp);
+    }, SCROLL_HANDLER_DEBOUNCE_MS);
   }, []);
 
   const scrollToBottom = useCallback(() => {
