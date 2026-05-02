@@ -118,7 +118,21 @@ export function ChatMessageView({
     case "url_research":
       return <AIUrlResearch message={message} />;
 
-    default:
+    default: {
+      // Future-proofing: if the API ships a new message type before the FE is
+      // updated, render a tiny placeholder in dev so we notice; in prod, log
+      // once per render so the issue surfaces in telemetry without spamming.
+      const unknownMsg = message as { type?: string; id?: string };
+      const unknownType = unknownMsg.type ?? "unknown";
+      if (import.meta.env.DEV) {
+        return (
+          <div className="text-xs italic text-[#9ca3af]">
+            (unsupported message type: {unknownType} — refresh after deploy)
+          </div>
+        );
+      }
+      console.warn("[ChatMessage] unknown message type, skipping render:", { type: unknownType, id: unknownMsg.id });
       return null;
+    }
   }
 }
