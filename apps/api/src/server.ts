@@ -260,6 +260,11 @@ const server = serve(
     if (process.send) {
       process.send("ready");
     }
+    // Sweep stale builds (queued/running > 10 min) abandoned by a previous
+    // process. Gated by STALE_BUILD_WATCHDOG_MODE - defaults to "off".
+    void import("./lib/staleBuildWatchdog.js").then(({ runStaleBuildWatchdog }) =>
+      runStaleBuildWatchdog(),
+    );
   },
 );
 

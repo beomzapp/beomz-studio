@@ -1194,6 +1194,61 @@ export class StudioDbClient {
     return unwrapSingle(response);
   }
 
+  /**
+   * Find generation rows stuck in running/queued past the cutoff and (optionally)
+   * mark them failed. Used by the stale-build watchdog at API startup.
+   *
+   * @param cutoffMs how far back (ms) before "now" a still-running build counts as stale
+   * @param mode "dry-run" returns the rows it WOULD mark; "apply" marks them failed and returns the marked rows
+   */
+  async markStaleBuildsFailed(args: {
+    cutoffMs: number;
+    mode: "dry-run" | "apply";
+  }): Promise<GenerationRow[]> {
+    const cutoffIso = new Date(Date.now() - args.cutoffMs).toISOString();
+
+    const findResponse = await this.client
+      .from("generations")
+      .select("*")
+      .in("status", ["queued", "running"])
+      .lt("started_at", cutoffIso);
+
+    if (findResponse.error) {
+      throw new Error(findResponse.error.message);
+    }
+
+    const stale = findResponse.data ?? [];
+
+    if (args.mode === "dry-run" || stale.length === 0) {
+      return stale;
+    }
+
+    const ids = stale.map((row) => row.id);
+    const failedAt = new Date().toISOString();
+    const errorLog = {
+      message: "Stale-build watchdog: build had no progress past the cutoff and was marked failed at API startup.",
+      cutoffMs: args.cutoffMs,
+      markedAt: failedAt,
+    };
+
+    const updateResponse = await this.client
+      .from("generations")
+      .update({
+        status: "failed",
+        completed_at: failedAt,
+        error: "Watchdog: build abandoned",
+        error_log: errorLog,
+      })
+      .in("id", ids)
+      .select("*");
+
+    if (updateResponse.error) {
+      throw new Error(updateResponse.error.message);
+    }
+
+    return updateResponse.data ?? [];
+  }
+
   async createPreview(
     input: PreviewInsert,
   ): Promise<PreviewRow> {
@@ -1381,7 +1436,7 @@ export class StudioDbClient {
   async getOrgWithBalance(orgId: string): Promise<OrgRow | null> {
     const response = await this.client
       .from("orgs")
-      .select("id,owner_id,name,plan,credits,topup_credits,monthly_credits,rollover_credits,rollover_cap,credits_period_start,credits_period_end,downgrade_at_period_end,pending_plan,stripe_customer_id,stripe_subscription_id,daily_reset_at,created_at")
+      .select("id,owner_id,name,plan,credits,topup_credits,monthly_credits,rollover_credits,rollover_cap,credits_period_start,credits_period_end,downgrade_at_period_end,pending_plan,stripe_customer_id,stripe_subscription_id,daily_reset_at,created_at,payment_failed_at")
       .eq("id", orgId)
       .maybeSingle();
 
