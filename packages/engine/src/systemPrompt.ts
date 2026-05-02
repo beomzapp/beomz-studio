@@ -251,15 +251,14 @@ function buildVfsSection(vfs: VirtualFileSystem, maxInlineChars = 16_000): strin
   ].join("\n");
 }
 
-function buildDynamicSection(input: BuildSystemPromptInput): string {
+function buildStablePerBuildSection(input: BuildSystemPromptInput): string {
   const template = input.template ?? getTemplateDefinition(input.project.templateId);
   const promptPolicy = input.promptPolicy ?? getInitialBuildPromptPolicy(template.id);
   const appTypeBriefSection = buildAppTypeBriefSection(input.prompt);
   const designDirectiveSection = buildSilentDesignDirectiveSection(input.designDirective);
 
   return [
-    "DYNAMIC SECTION",
-    `Turn: ${input.turn}`,
+    "STABLE PER-BUILD SECTION",
     `User request: ${input.prompt}`,
     "",
     "Project context:",
@@ -320,8 +319,6 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
     "User preferences:",
     formatJson(input.userPreferences ?? {}),
     "",
-    buildVfsSection(input.vfs),
-    "",
     "Execution guidance:",
     "- Use the current VFS as the source of truth.",
     "- If you need exact contents, call readFile instead of guessing.",
@@ -330,24 +327,46 @@ function buildDynamicSection(input: BuildSystemPromptInput): string {
     .join("\n");
 }
 
+function buildPerTurnSection(input: BuildSystemPromptInput): string {
+  return [
+    "PER-TURN SECTION",
+    `Turn: ${input.turn}`,
+    "",
+    buildVfsSection(input.vfs),
+  ].join("\n");
+}
+
 export function buildSystemPromptFrame(input: BuildSystemPromptInput): SystemPromptFrame {
   const staticSection = buildStaticSection(input.actionDefinitions ?? CORE_ACTIONS);
-  const dynamicSection = buildDynamicSection(input);
+  const stablePerBuildSection = buildStablePerBuildSection(input);
+  const perTurnSection = buildPerTurnSection(input);
+
+  // Concatenated for backwards-compat with consumers that read `dynamicSection`.
+  const dynamicSection = `${stablePerBuildSection}\n\n${perTurnSection}`;
 
   return {
     cacheBoundaryMarker: ANTHROPIC_CACHE_BOUNDARY_MARKER,
     dynamicSection,
     staticSection,
     system: [
+      // Block 1: tool definitions + non-negotiable rules. Cached, broadly stable.
       {
-        cache_control: {
-          type: "ephemeral",
-        },
+        cache_control: { type: "ephemeral" },
         text: `${staticSection}\n${ANTHROPIC_CACHE_BOUNDARY_MARKER}`,
         type: "text",
       },
+      // Block 2: stable-per-build context (operation, template, design, rules,
+      // prompt, user preferences). Cached — same content across all turns of
+      // the same build, so turns 2..N hit cache.
       {
-        text: dynamicSection,
+        cache_control: { type: "ephemeral" },
+        text: stablePerBuildSection,
+        type: "text",
+      },
+      // Block 3: per-turn dynamic content (turn number + VFS state). Not cached
+      // — changes every turn as the engine writes files.
+      {
+        text: perTurnSection,
         type: "text",
       },
     ],
