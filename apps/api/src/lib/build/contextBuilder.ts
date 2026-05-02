@@ -597,6 +597,13 @@ const CLARIFYING_QUESTION_RULE_BLOCK = [
   "Max one clarifying question ever — never a list of options.",
 ].join("\n");
 
+const PRE_BUILD_CONFIRMATION_RULE_BLOCK = [
+  "FRESH BUILD HANDOFF:",
+  "For new clear-domain build requests, the upstream assistant first sends a short intro naming what it understood and the selected design personality.",
+  "Then it sends 3-5 user-facing plan bullets and waits for explicit Implement confirmation.",
+  "If this generation prompt is running, that confirmation has already happened — execute the work instead of re-asking for confirmation.",
+].join("\n");
+
 function buildSilentDesignDirectiveBlock(designDirective?: string): string {
   if (typeof designDirective !== "string" || designDirective.trim().length === 0) {
     return "";
@@ -1387,6 +1394,8 @@ function buildSystemPrompt(
     designDirectiveBlock,
     designDirectiveBlock.length > 0 ? "" : undefined,
     CLARIFYING_QUESTION_RULE_BLOCK,
+    "",
+    PRE_BUILD_CONFIRMATION_RULE_BLOCK,
     "",
     COPY_RULES_BLOCK,
     "",

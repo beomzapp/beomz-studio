@@ -156,11 +156,19 @@ test("generatePlanSummary falls back to the required plan format when Haiku is u
   const result = await generatePlanSummary(
     "Build a playful colorful pet store website with product listings, grooming services, and a kid-centric design.",
     "PetPals",
+    [
+      "─── DESIGN DIRECTIVE (apply every value explicitly — no Tailwind defaults) ───",
+      "DESIGN PERSONALITY: Warm Artisan",
+      '  Use "Lora" for all headings (h1-h3, display).',
+      '  Use "Source Serif 4" for all body, labels, buttons, captions.',
+      "─── END DESIGN DIRECTIVE — original user request follows below ───",
+    ].join("\n"),
   );
 
-  assert.match(result, /^Here's what I'll do:/);
+  assert.match(result, /^Building .*Warm Artisan design personality \(Lora \+ Source Serif 4\)\./);
+  assert.match(result, /Here's what I'll build:/);
   assert.match(result, /\*\*PetPals\*\*/);
-  assert.match(result, /Just say the word and I'll start building — or type any changes first\./);
+  assert.match(result, /- /);
 });
 
 test("chat prompt source forbids 'building now' phrasing in conversational and plan responses", async () => {
@@ -168,7 +176,8 @@ test("chat prompt source forbids 'building now' phrasing in conversational and p
 
   assert.match(chatPromptSource, /NEVER say phrases like \\"Building now\\", \\"I'm building this\\", \\"Creating now\\", or \\"On it, building\\"/);
   assert.match(chatPromptSource, /Here's what I'll do:/);
-  assert.doesNotMatch(chatPromptSource, /Here's what I'll build:/);
+  assert.match(chatPromptSource, /Here's what I'll build:/);
+  assert.match(chatPromptSource, /name the selected personality in the intro/i);
 });
 
 test("plan summary and build acknowledgement prompts forbid HTML/CSS/JavaScript copy", async () => {
@@ -176,7 +185,7 @@ test("plan summary and build acknowledgement prompts forbid HTML/CSS/JavaScript 
   const generateSource = await readFile(new URL("../routes/builds/generate.ts", import.meta.url), "utf8");
 
   assert.match(chatPromptSource, /Do not mention HTML, CSS, or JavaScript\./);
-  assert.match(chatPromptSource, /Use at most 4 bullet points\./);
+  assert.match(chatPromptSource, /Then use 3-5 short bullet points for the current build\./);
   assert.match(chatPromptSource, /Bullets must be user-facing features only/);
   assert.match(chatPromptSource, /No filenames, no component names/);
   assert.match(chatPromptSource, /No technical implementation details\./);

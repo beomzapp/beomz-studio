@@ -23,6 +23,12 @@ export interface StructuredChatResponse {
   readyToImplement: boolean;
 }
 
+interface DesignPersonalitySummary {
+  bodyFont: string | null;
+  displayFont: string | null;
+  name: string;
+}
+
 const PLAN_SUMMARY_TIMEOUT_MS = 4_000;
 const STRICT_URL_CLARIFYING_RULE = `The website content has been fetched and provided to you as context.
 You MUST NOT ask about anything that can be clearly determined from this content — including industry, sector, purpose, target audience, or type of application. Only ask about implementation decisions the user must make that cannot be inferred from the URL content, such as:
@@ -89,6 +95,54 @@ const JSON_OUTPUT_RULES = [
   "- implementPlan: null unless readyToImplement is true.",
   "- When implementPlan is set, keep it to 1-3 sentences. Name likely files and concrete changes when you can infer them from context.",
 ].join("\n");
+
+function extractDesignPersonalitySummary(
+  designDirective?: string | null,
+): DesignPersonalitySummary | null {
+  if (typeof designDirective !== "string" || designDirective.trim().length === 0) {
+    return null;
+  }
+
+  const personalityMatch = designDirective.match(/DESIGN PERSONALITY:\s*(.+)/i);
+  const displayFontMatch = designDirective.match(/Use "([^"]+)" for all headings/i);
+  const bodyFontMatch = designDirective.match(/Use "([^"]+)" for all body/i);
+
+  if (!personalityMatch?.[1]) {
+    return null;
+  }
+
+  return {
+    bodyFont: bodyFontMatch?.[1]?.trim() || null,
+    displayFont: displayFontMatch?.[1]?.trim() || null,
+    name: personalityMatch[1].trim(),
+  };
+}
+
+function buildIntroSentence(
+  brief: string,
+  designDirective?: string | null,
+): string {
+  const trimmedBrief = brief.trim().replace(/\s+/g, " ").replace(/\.$/, "");
+  const normalizedBrief = trimmedBrief.length === 0
+    ? "Building this project"
+    : /^(build|create|make|design|generate)\b/i.test(trimmedBrief)
+    ? trimmedBrief.replace(/^(build|create|make|design|generate)\b/i, "Building")
+    : /^building\b/i.test(trimmedBrief)
+    ? trimmedBrief
+    : `Building ${trimmedBrief}`;
+  const capitalizedBrief = normalizedBrief.charAt(0).toUpperCase() + normalizedBrief.slice(1);
+  const personality = extractDesignPersonalitySummary(designDirective);
+
+  if (!personality) {
+    return `${capitalizedBrief}.`;
+  }
+
+  const fontPair = personality.displayFont && personality.bodyFont
+    ? ` (${personality.displayFont} + ${personality.bodyFont})`
+    : "";
+
+  return `${capitalizedBrief} with the ${personality.name} design personality${fontPair}.`;
+}
 
 function buildWebsiteContextBlock(websiteContext?: WebsiteContext | null): string {
   if (!websiteContext) {
@@ -251,7 +305,11 @@ export function buildClarifyingQuestionSystemPrompt(input: BuildChatPromptInput)
     .join("\n\n");
 }
 
-function buildPlanSummaryFallback(accumulatedContext: string, projectName?: string | null): string {
+function buildPlanSummaryFallback(
+  accumulatedContext: string,
+  projectName?: string | null,
+  designDirective?: string | null,
+): string {
   const brief = accumulatedContext
     .replace(/\s+/g, " ")
     .trim();
@@ -262,76 +320,81 @@ function buildPlanSummaryFallback(accumulatedContext: string, projectName?: stri
     .filter((part) => part.length >= 4)
     .filter((part) => !isTechnicalDetail(part));
   const scopedFeatures = allFeatureHints.slice(0, 3);
-  const deferredFeatures = allFeatureHints.slice(3, 5);
-
   const appName = projectName?.trim() || "Your app";
-  const bullets = scopedFeatures.length > 0
-    ? scopedFeatures.map((part) => `- ${part.replace(/\.$/, "")}`).join("\n")
-    : "- Focused core flow\n- Clear user actions\n- Polished visual direction";
-
-  const scopeLine = deferredFeatures.length > 0
-    ? `\nI'll build ${scopedFeatures.slice(0, 2).join(" and ")} now. We can add ${deferredFeatures.join(" and ")} next.`
-    : "";
+  const personality = extractDesignPersonalitySummary(designDirective);
+  const bulletItems = scopedFeatures.length >= 3
+    ? scopedFeatures.slice(0, 5)
+    : [
+        ...scopedFeatures,
+        "A clear core user journey with obvious calls to action",
+        personality
+          ? `${personality.name} styling applied consistently across the full experience`
+          : "A polished visual direction that fits the request",
+      ].slice(0, 3);
+  const bullets = bulletItems
+    .map((part) => `- ${part.replace(/\.$/, "")}`)
+    .join("\n");
 
   return [
-    "Here's what I'll do:",
+    buildIntroSentence(brief || `Build ${appName}`, designDirective),
+    "Here's what I'll build:",
     `**${appName}**`,
     bullets,
-    scopeLine,
-    "",
-    "Just say the word and I'll start building — or type any changes first.",
   ].filter((line) => line !== "").join("\n");
 }
 
 export async function generatePlanSummary(
   accumulatedContext: string,
   projectName?: string | null,
+  designDirective?: string | null,
 ): Promise<string> {
   const brief = accumulatedContext.trim();
   if (!brief) {
-    return buildPlanSummaryFallback(accumulatedContext, projectName);
+    return buildPlanSummaryFallback(accumulatedContext, projectName, designDirective);
   }
 
   const apiKey = apiConfig.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return buildPlanSummaryFallback(brief, projectName);
+    return buildPlanSummaryFallback(brief, projectName, designDirective);
   }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PLAN_SUMMARY_TIMEOUT_MS);
+  const personality = extractDesignPersonalitySummary(designDirective);
 
   try {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create(
       {
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 140,
+        max_tokens: 220,
         system: [
-          "Based on this build brief, write a short friendly plan summary.",
-          "Keep it under 70 words. Be specific. Use markdown.",
+          "Based on this build brief, write the short pre-build summary shown before the Implement this confirmation UI.",
+          "Use markdown.",
           "Do not mention HTML, CSS, or JavaScript.",
           "If you must mention the stack, say React and TypeScript.",
-          "Start with \"Here's what I'll do:\".",
-          "Use short bullet points after the title. Use at most 3 bullet points for the current build.",
+          "Start with a 1-2 sentence intro that states what you understood.",
+          "If design personality details are provided, name the selected personality in the intro and briefly mention the font pairing.",
+          "After the intro, add a line that says exactly: \"Here's what I'll build:\".",
+          "Then use 3-5 short bullet points for the current build.",
           "Bullets must be user-facing features only (what the app does).",
           "No filenames, no component names, no route names, and no file architecture breakdowns.",
           "No technical implementation details.",
           "Never say the build has already started or use phrases like \"Building now\".",
-          "SCOPE RULE: If the brief mentions 4 or more distinct features, only bullet the 3 most essential ones.",
-          "After the bullets, add a single line: \"I'll build X and Y now. We can add Z and W next.\" — naming the scoped-in features as X/Y and any deferred ones as Z/W.",
-          "Omit the 'next iteration' line entirely if the brief has 3 or fewer features.",
+          "SCOPE RULE: If the brief mentions more than 5 distinct features, bullet only the 5 most essential ones.",
           'Format:',
-          '"Here\'s what I\'ll do:',
+          '"[Short intro sentence about what is being built.]',
+          '[Optional second sentence naming the selected design personality.]',
+          '',
+          'Here\'s what I\'ll build:',
           '[Suggested app name]',
           '',
           '[Feature 1]',
           '[Feature 2]',
           '[Feature 3]',
-          '',
-          '[Optional: I\'ll build X and Y now. We can add Z and W next.]',
-          '',
-          'Just say the word and I\'ll start building — or type any changes first."',
-          'No intro phrases like "Sure!" or "Great!". Just the plan.',
+          '[Feature 4 if needed]',
+          '[Feature 5 if needed]"',
+          'No intro phrases like "Sure!" or "Great!".',
         ].join("\n"),
         messages: [
           {
@@ -339,6 +402,9 @@ export async function generatePlanSummary(
             content: [
               `Project name: ${projectName?.trim() || "Infer from the brief."}`,
               `Brief: ${brief}`,
+              personality
+                ? `Selected design personality: ${personality.name}${personality.displayFont && personality.bodyFont ? ` (${personality.displayFont} + ${personality.bodyFont})` : ""}`
+                : "Selected design personality: not provided",
             ].join("\n"),
           },
         ],
@@ -352,9 +418,9 @@ export async function generatePlanSummary(
       .join("\n")
       .trim();
 
-    return text || buildPlanSummaryFallback(brief, projectName);
+    return text || buildPlanSummaryFallback(brief, projectName, designDirective);
   } catch {
-    return buildPlanSummaryFallback(brief, projectName);
+    return buildPlanSummaryFallback(brief, projectName, designDirective);
   } finally {
     clearTimeout(timeoutId);
   }

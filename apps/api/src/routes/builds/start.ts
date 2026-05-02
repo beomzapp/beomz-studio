@@ -69,7 +69,6 @@ import {
 } from "../../lib/webFetch.js";
 import {
   extractDesignDirectiveFromPrompt,
-  isClearDomainBuildPrompt,
 } from "../../lib/build/designDirective.js";
 
 // ─── Inlined from workers/temporal/src/shared/planner.ts ────────────────────
@@ -120,8 +119,6 @@ const URL_FEATURE_PREFERENCE_TERMS = [
 ] as const;
 
 const URL_FEATURE_CONNECTOR_PATTERN = /\b(with|including|include|includes|featuring|features|feature|plus|add|needs?|must have)\b/i;
-const IMMEDIATE_BUILD_CONFIDENCE = 0.85;
-
 function buildProjectNameFromPrompt(prompt: string, fallbackName: string): string {
   const tokens = prompt
     .trim()
@@ -273,6 +270,17 @@ function readPendingImplementPlan(metadata: unknown): string | null {
   const implementPlan = (metadata as Record<string, unknown>).implementPlan;
   return typeof implementPlan === "string" && implementPlan.trim().length > 0
     ? implementPlan
+    : null;
+}
+
+function readStoredDesignDirective(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const designDirective = (metadata as Record<string, unknown>).designDirective;
+  return typeof designDirective === "string" && designDirective.trim().length > 0
+    ? designDirective
     : null;
 }
 
@@ -607,7 +615,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     parsedBody.data.designDirective,
   );
   const prompt = extractedDesignDirective.cleanPrompt;
-  const designDirective = extractedDesignDirective.designDirective ?? undefined;
+  let designDirective = extractedDesignDirective.designDirective ?? undefined;
   console.log("[implementPlan]", prompt.slice(0, 100));
   const sourcePrompt = prompt;
   const imageUrl = parsedBody.data.imageUrl?.trim() || undefined;
@@ -669,6 +677,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const clarificationState = buildClarificationTrackingState(recentHistory);
   const clarifyingQuestionCount = clarificationState.askedCount;
   const storedImplementPlan = normalisePromptForComparison(readPendingImplementPlan(latestGeneration?.metadata));
+  const storedDesignDirective = readStoredDesignDirective(latestGeneration?.metadata);
   const sourcePromptForComparison = normalisePromptForComparison(sourcePrompt);
   const matchingStoredImplementPlan = Boolean(
     storedImplementPlan
@@ -682,6 +691,9 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const implementConfirmationIntent: Intent = isIteration ? "iteration" : "build_new";
   const storedRequestedBuildSetup = readRequestedBuildSetup(latestGeneration?.metadata);
   if (isImplementConfirmation) {
+    if (!designDirective && storedDesignDirective) {
+      designDirective = storedDesignDirective;
+    }
     if (!hasWithAuthFlag && storedRequestedBuildSetup?.withAuth) {
       withAuth = true;
     }
@@ -769,14 +781,6 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
   const buildConfidenceThreshold = isIteration
     ? ITERATION_BUILD_CONFIDENCE
     : NEW_BUILD_PLAN_SUMMARY_CONFIDENCE;
-  const shouldBuildImmediately = !mockAnthropicEnabled
-    && !isIteration
-    && !isImplementConfirmation
-    && classifiedIntent === "build_new"
-    && !hasResearchUrl
-    && effectiveConfidence >= IMMEDIATE_BUILD_CONFIDENCE
-    && isClearDomainBuildPrompt(sourcePrompt);
-
   // Ambiguous always asks a question regardless of confidence — even if Haiku
   // happens to score it high, the user's wording said "unclear".
   const needsClarification = !forcedPlanSummary && (
@@ -787,8 +791,7 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     && isBuildIshIntent
     && !needsClarification
     && !isImplementConfirmation
-    && !isIteration
-    && !shouldBuildImmediately;
+    && !isIteration;
   const isNearReady = needsClarification && effectiveConfidence >= 0.7;
 
   // Original "immediate conversation" path now covers greeting/question/research
@@ -817,7 +820,6 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     needsClarification,
     isNearReady,
     shouldOfferPlanSummary,
-    shouldBuildImmediately,
     forceIteration,
     isImplementConfirmation,
     explicitImplementSignal,
@@ -1011,7 +1013,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
     let assistantMessage: string;
 
     if (shouldOfferPlanSummary) {
-      assistantMessage = await generatePlanSummaryFn(finalImplementPlan ?? effectivePrompt, projectName);
+      assistantMessage = await generatePlanSummaryFn(
+        finalImplementPlan ?? effectivePrompt,
+        projectName,
+        designDirective ?? null,
+      );
     } else if (eventType === "clarifying_question") {
       const generatedQuestion = await generateClarifyingQuestionFn({
         chatHistory,
@@ -1032,7 +1038,11 @@ export function createBuildsStartRoute(deps: BuildsStartRouteDeps = {}) {
       if (isDuplicateClarifyingQuestion && !isIteration) {
         finalEventType = "conversational_response";
         finalImplementPlan = accumulatedBuildContext ?? effectivePrompt;
-        assistantMessage = await generatePlanSummaryFn(finalImplementPlan, projectName);
+        assistantMessage = await generatePlanSummaryFn(
+          finalImplementPlan,
+          projectName,
+          designDirective ?? null,
+        );
       } else {
         assistantMessage = generatedQuestion;
       }

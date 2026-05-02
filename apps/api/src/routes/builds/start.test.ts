@@ -19,7 +19,8 @@ test("/builds/start reads generation model from feature flags", async () => {
   assert.match(source, /const NEW_BUILD_PLAN_SUMMARY_CONFIDENCE = 0\.8;/);
   assert.match(source, /const ITERATION_BUILD_CONFIDENCE = 0\.7;/);
   assert.match(source, /clarifyingQuestionCount >= MAX_CLARIFYING_QUESTIONS/);
-  assert.match(source, /const shouldOfferPlanSummary = !mockAnthropicEnabled[\s\S]*&& !isIteration[\s\S]*&& !shouldBuildImmediately;/);
+  assert.match(source, /const shouldOfferPlanSummary = !mockAnthropicEnabled[\s\S]*&& !isImplementConfirmation[\s\S]*&& !isIteration;/);
+  assert.doesNotMatch(source, /const shouldBuildImmediately =/);
   assert.match(source, /const forceIteration = parsedBody\.data\.forceIteration === true;/);
   assert.match(source, /let withDatabase = parsedBody\.data\.withDatabase === true;/);
   assert.match(source, /let withAuth = parsedBody\.data\.withAuth === true;/);
@@ -835,7 +836,15 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
 
   let runBuildCalls = 0;
   let capturedBuildPrompt: string | null = null;
+  let capturedBuildDesignDirective: string | null = null;
   const implementPlan = "Build a playful colorful pet store website with product listings, grooming services, and a kid-centric design.";
+  const designDirective = [
+    "─── DESIGN DIRECTIVE (apply every value explicitly — no Tailwind defaults) ───",
+    "DESIGN PERSONALITY: Warm Artisan",
+    '  Use "Lora" for all headings (h1-h3, display).',
+    '  Use "Source Serif 4" for all body, labels, buttons, captions.',
+    "─── END DESIGN DIRECTIVE — original user request follows below ───",
+  ].join("\n");
   const project = {
     id: "33333333-3333-3333-3333-333333333333",
     name: "Pet Store",
@@ -895,7 +904,7 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
           }),
           findLatestGenerationByProjectId: async () => ({
             files: [],
-            metadata: { implementPlan, readyToImplement: true },
+            metadata: { designDirective, implementPlan, readyToImplement: true },
           }),
           findProjectById: async () => project,
           getOrgWithBalance: async () => org,
@@ -922,6 +931,7 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
     runBuildInBackground: async (input) => {
       runBuildCalls += 1;
       capturedBuildPrompt = input.prompt;
+      capturedBuildDesignDirective = input.designDirective ?? null;
     },
   });
 
@@ -947,6 +957,7 @@ test("/builds/start proceeds to build when the implementPlan is sent back unchan
   assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
   assert.equal(runBuildCalls, 1);
   assert.equal(capturedBuildPrompt, implementPlan);
+  assert.equal(capturedBuildDesignDirective, designDirective);
 });
 
 test("/builds/start restores stored DB/auth setup when implementPlan confirmation omits flags", async () => {
@@ -1562,13 +1573,12 @@ test("/builds/start accepts short non-empty build prompts", async () => {
   assert.equal(runBuildCalls, 0);
 });
 
-test("/builds/start strips a prepended design directive and queues a clear-domain build immediately", async () => {
+test("/builds/start strips a prepended design directive and returns a plan summary for a clear-domain build", async () => {
   const { createBuildsStartRoute } = await import("./start.js");
 
   let runBuildCalls = 0;
-  let capturedSourcePrompt: string | null = null;
-  let capturedDesignDirective: string | null = null;
-  let capturedGenerationPrompt: string | null = null;
+  let capturedPlanSummaryPrompt: string | null = null;
+  let capturedPlanSummaryDirective: string | null = null;
   const org = {
     id: "org-1",
     owner_id: "user-1",
@@ -1601,26 +1611,23 @@ test("/builds/start strips a prepended design directive and queues a clear-domai
             credits: 9,
             topup_credits: 0,
           }),
-          createGeneration: async (input: Record<string, unknown>) => {
-            capturedGenerationPrompt = input.prompt as string;
-            return {
-              completed_at: input.completed_at as string | null,
-              error: input.error as string | null,
-              id: input.id as string,
-              metadata: input.metadata as Record<string, unknown>,
-              operation_id: input.operation_id as string,
-              output_paths: input.output_paths as string[],
-              preview_entry_path: input.preview_entry_path as string | null,
-              project_id: input.project_id as string,
-              prompt: input.prompt as string,
-              session_events: [],
-              started_at: input.started_at as string,
-              status: input.status as string,
-              summary: input.summary as string | null,
-              template_id: input.template_id as string,
-              warnings: [],
-            };
-          },
+          createGeneration: async (input: Record<string, unknown>) => ({
+            completed_at: input.completed_at as string | null,
+            error: input.error as string | null,
+            id: input.id as string,
+            metadata: input.metadata as Record<string, unknown>,
+            operation_id: input.operation_id as string,
+            output_paths: input.output_paths as string[],
+            preview_entry_path: input.preview_entry_path as string | null,
+            project_id: input.project_id as string,
+            prompt: input.prompt as string,
+            session_events: [],
+            started_at: input.started_at as string,
+            status: input.status as string,
+            summary: input.summary as string | null,
+            template_id: input.template_id as string,
+            warnings: [],
+          }),
           createProject: async (input: Record<string, unknown>) => ({
             id: input.id as string,
             name: input.name as string,
@@ -1666,11 +1673,19 @@ test("/builds/start strips a prepended design directive and queues a clear-domai
       reason: "Clear domain request.",
       accumulatedContext: "Build a pet shop website.",
     }),
-    generatePlanSummary: async () => "This should not be used.",
-    runBuildInBackground: async (input) => {
+    generatePlanSummary: async (prompt, _projectName, designDirective) => {
+      capturedPlanSummaryPrompt = prompt;
+      capturedPlanSummaryDirective = designDirective ?? null;
+      return [
+        "Building a pet shop website with the Warm Artisan design personality (Lora + Source Serif 4).",
+        "Here's what I'll build:",
+        "- Hero section with a friendly pet-focused welcome",
+        "- Services overview for adoptions, supplies, and grooming",
+        "- Contact section with clear next steps",
+      ].join("\n");
+    },
+    runBuildInBackground: async () => {
       runBuildCalls += 1;
-      capturedSourcePrompt = input.sourcePrompt;
-      capturedDesignDirective = input.designDirective ?? null;
     },
   });
 
@@ -1692,17 +1707,29 @@ test("/builds/start strips a prepended design directive and queues a clear-domai
 
   assert.equal(response.status, 202);
   const payload = await response.json() as {
-    build: { status: string };
-    trace: { events: Array<{ type: string }>; lastEventId: string | null };
+    build: { status: string; summary: string | null };
+    trace: {
+      events: Array<{
+        implementPlan?: string;
+        message?: string;
+        readyToImplement?: boolean;
+        type: string;
+      }>;
+      lastEventId: string | null;
+    };
   };
 
-  assert.equal(payload.build.status, "queued");
-  assert.equal(payload.trace.lastEventId, "1");
-  assert.equal(payload.trace.events.some((event) => event.type === "conversational_response"), false);
-  assert.equal(runBuildCalls, 1);
-  assert.equal(capturedSourcePrompt, "Build a pet shop website");
-  assert.equal(capturedGenerationPrompt, "Build a pet shop website.");
-  assert.equal(capturedDesignDirective, designDirective);
+  assert.equal(payload.build.status, "completed");
+  assert.equal(payload.build.summary, "Plan summary ready - awaiting build confirmation.");
+  assert.equal(payload.trace.lastEventId, null);
+  const summaryEvent = payload.trace.events.find((event) => event.type === "conversational_response");
+  assert.ok(summaryEvent);
+  assert.equal(summaryEvent?.readyToImplement, true);
+  assert.equal(summaryEvent?.implementPlan, "Build a pet shop website.");
+  assert.match(summaryEvent?.message ?? "", /Warm Artisan design personality/);
+  assert.equal(runBuildCalls, 0);
+  assert.equal(capturedPlanSummaryPrompt, "Build a pet shop website.");
+  assert.equal(capturedPlanSummaryDirective, designDirective);
 });
 
 test("/builds/start asks one clarifying question for a vague build prompt", async () => {
