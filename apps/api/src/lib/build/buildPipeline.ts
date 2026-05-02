@@ -380,6 +380,17 @@ export function ensureRequestedDatabaseApp(args: {
     return { files: args.files, appliedFallback: false };
   }
 
+  // Kill switch — when flag is "false" we never overwrite the AI's App.tsx,
+  // even when `withDatabase: true` and the model didn't wire Neon. We just log
+  // a warning so it's visible in production logs / telemetry.
+  if (apiConfig.ENABLE_TODO_SCAFFOLD_FALLBACK !== "true") {
+    console.warn(
+      "[generate] requested database app but model did not wire Neon — todo scaffold fallback DISABLED by ENABLE_TODO_SCAFFOLD_FALLBACK flag. Returning AI output unchanged.",
+      { templateId: args.templateId, promptHead: args.sourcePrompt.slice(0, 80) },
+    );
+    return { files: args.files, appliedFallback: false };
+  }
+
   const appPath = remapPrebuiltPath("App.tsx", args.templateId);
   const promptText = `${args.prompt}\n${args.sourcePrompt}`;
   const shouldApplyTaskFallback = args.templateId === "workspace-task" || isTodoTaskPrompt(promptText);
