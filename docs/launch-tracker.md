@@ -119,6 +119,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-777](https://linear.app/beomz/issue/BEO-777/) | S4-hotfix Engine: tool_choice=any to stop "ended without finish" crash | A | 4 | Codex 5.4 / Med | Done | `23ce909` engine+api build clean ✅, deployed to droplet, retry showed throw still fires (tool_choice insufficient) |
 | [BEO-778](https://linear.app/beomz/issue/BEO-778/) | S4-hotfix2 Engine: diagnostic log when turn ends without finish | A | 4 | Codex 5.3 / Low | Done | `f2a3b5e` engine+api+web build clean ✅ deployed; revealed real cause = `stopReason: max_tokens` at 4096 |
 | [BEO-779](https://linear.app/beomz/issue/BEO-779/) | S4-hotfix3 Engine: bump maxTokens 4096→16000 + clearer max_tokens error | A | 4 | Claude direct | Done | `1f4be83` engine+api build clean ✅ deployed (real fix for the engine-path failures) |
+| [BEO-780](https://linear.app/beomz/issue/BEO-780/) | S5-1 Engine: per-turn cache stats logging (mirror legacy observability) | A | 5 | Claude direct | Done | `c16fc00` api build clean ✅ deployed (diagnostic for BEO-781 cost measurement) |
 
 (more tickets append here as they ship)
 
