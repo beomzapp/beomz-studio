@@ -1201,6 +1201,21 @@ export class GenerationEngine {
         }
 
         if (!needsFollowUp) {
+          console.error("[engine] turn ended without tool_use — diagnostic dump", {
+            generationId: this.options.generationId,
+            turn,
+            stopReason: turnResult?.stopReason,
+            usage: turnResult?.usage,
+            assistantContentBlocks: assistantMessage.content.map((block) => ({
+              type: block.type,
+              preview:
+                block.type === "text"
+                  ? block.text.slice(0, 500)
+                  : block.type === "tool_use"
+                    ? { name: block.name, id: block.id }
+                    : undefined,
+            })),
+          });
           throw new GenerationEngineError(
             FailureReason.INVALID_OUTPUT,
             "Model ended a turn without calling finish.",
