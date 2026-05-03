@@ -92,6 +92,15 @@ export interface EngineCustomiseResult {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+// BEO-779: Sonnet 4.6 supports up to 64k output tokens per turn. The engine's
+// streaming model defaults to 4_096, which truncates `createFile`/`editFile`
+// tool calls mid-stream on any non-trivial file, leaving `needsFollowUp`
+// stuck false (the parser only flips it on `content_block_stop`, which
+// never arrives for a truncated tool block) and the engine then throws
+// "Model ended a turn without calling finish." 16k is a conservative
+// ceiling that fits any single file the model will realistically emit.
+const ENGINE_MAX_TOKENS = 16_000;
+
 function toVirtualFileEntries(
   templateFiles: readonly StudioFile[] | undefined,
   existingFiles: readonly StudioFile[],
@@ -157,7 +166,7 @@ export async function callEngineCustomise(
   const model = new AnthropicStreamingModel({
     apiKey,
     model: args.model,
-    maxTokens: args.maxTokens,
+    maxTokens: args.maxTokens ?? ENGINE_MAX_TOKENS,
     temperature: args.temperature,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     // BEO-764 retry defaults apply automatically.
@@ -180,7 +189,7 @@ export async function callEngineCustomise(
     initialFiles,
     userPreferences: args.userPreferences,
     promptPolicy: undefined, // engine resolves default per-template
-    maxTokens: args.maxTokens,
+    maxTokens: args.maxTokens ?? ENGINE_MAX_TOKENS,
     maxTurns: args.maxTurns,
     temperature: args.temperature,
     // Disable Supabase persistence — `runBuildPipeline` already persists the

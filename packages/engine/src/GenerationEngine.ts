@@ -1216,6 +1216,20 @@ export class GenerationEngine {
                     : undefined,
             })),
           });
+          // BEO-779: distinguish output-cap truncation from a true text-only
+          // turn. When stop_reason === "max_tokens", the model was almost
+          // certainly mid-way through a `createFile`/`editFile` tool call —
+          // the partial tool block is in assistantMessage.content but the
+          // stream parser never received `content_block_stop`, so
+          // `needsFollowUp` stayed false. Surface the real cause instead of
+          // the misleading "no finish" message so future debugging starts
+          // from the right place.
+          if (turnResult?.stopReason === "max_tokens") {
+            throw new GenerationEngineError(
+              FailureReason.INVALID_OUTPUT,
+              `Output truncated at max_tokens=${turnResult.usage?.output_tokens ?? "?"} mid tool call (turn ${turn}). Bump maxTokens or split the work.`,
+            );
+          }
           throw new GenerationEngineError(
             FailureReason.INVALID_OUTPUT,
             "Model ended a turn without calling finish.",
