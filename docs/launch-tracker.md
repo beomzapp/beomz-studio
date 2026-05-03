@@ -122,8 +122,9 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-780](https://linear.app/beomz/issue/BEO-780/) | S5-1 Engine: per-turn cache stats logging (mirror legacy observability) | A | 5 | Claude direct | Done | `c16fc00` api build clean ✅ deployed (diagnostic for BEO-781 cost measurement) |
 | [BEO-781](https://linear.app/beomz/issue/BEO-781/) | S5-2 Engine: cache messages history (cache_control on last tool_result) | B | 5 | Claude direct | Done | `a8ed0ea` engine+api build clean ✅ deployed (caching works — turn 2 input_tokens dropped 5996→16) |
 | [BEO-782](https://linear.app/beomz/issue/BEO-782/) | S5-hotfix Engine: strip stale cache_control on prior tool_results (4-breakpoint limit) | A | 5 | Claude direct | Done | `ecdad67` engine+api build clean ✅ deployed (BEO-781 hit Anthropic's 4-breakpoint limit on turn 4; this strips priors) |
-| [BEO-783](https://linear.app/beomz/issue/BEO-783/) | S5-3 Engine: route iterations through the engine path | C | 5 | Claude direct | Done | `7530d07` api build clean ✅ deployed (iterations now use engine when org is on pilot — but first test went legacy; investigating in BEO-784) |
-| [BEO-784](https://linear.app/beomz/issue/BEO-784/) | S5-hotfix2 Engine: diagnostic log of iteration engine eligibility | A | 5 | Claude direct | Done | `6854133` api build clean ✅ deployed (logs orgId, pilot list, hasImageUrl, useGlobalFlag to find why BEO-783 picked legacy) |
+| [BEO-783](https://linear.app/beomz/issue/BEO-783/) | S5-3 Engine: route iterations through the engine path | C | 5 | Claude direct | **Reverted** | `7530d07` shipped → real test ran 30 turns, 0 files changed, ~$4 wasted spend; reverted at `4db3548`; integration deferred to BEO-785 |
+| [BEO-784](https://linear.app/beomz/issue/BEO-784/) | S5-hotfix2 Engine: diagnostic log of iteration engine eligibility | A | 5 | Claude direct | **Reverted** | `6854133` shipped → confirmed engine path was firing on iterations; reverted alongside BEO-783 at `4db3548` |
+| [BEO-785](https://linear.app/beomz/issue/BEO-785/) | S5-followup Engine: integrate iteration paths properly (path remapping + prompt tuning) | D | 5 | (parked) | Backlog | Not started — likely path-prefix mismatch (`apps/web/src/app/generated/<templateId>/<basename>` vs engine basenames). Investigation steps in ticket. |
 
 (more tickets append here as they ship)
 
