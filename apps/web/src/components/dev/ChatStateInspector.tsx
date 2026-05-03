@@ -367,21 +367,29 @@ function InspectorInner() {
   const [width, setWidth] = useState(420);
   const resizingRef = useRef(false);
 
-  // Toggle via Cmd+Shift+D / Ctrl+Shift+D
+  // BEO-795: toggle via Cmd+Shift+K / Ctrl+Shift+K (Cmd+Shift+D was hijacked by
+  // Chrome's "Bookmark all tabs" shortcut and never fired the React handler).
+  // Also handle lowercase "k" for safety since some browsers report differently
+  // depending on Shift handling.
+  const toggleOpen = useCallback(() => {
+    setOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem(OPEN_KEY, String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "D" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
+      const key = (e.key || "").toLowerCase();
+      if (key === "k" && e.shiftKey && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen(prev => {
-          const next = !prev;
-          try { localStorage.setItem(OPEN_KEY, String(next)); } catch { /* ignore */ }
-          return next;
-        });
+        toggleOpen();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [toggleOpen]);
 
   // Resize handle
   const startResize = useCallback((e: React.MouseEvent) => {
@@ -433,7 +441,21 @@ function InspectorInner() {
   const storageMismatch =
     storageCount !== null && storageCount !== messages.length;
 
-  if (!open) return null;
+  if (!open) {
+    // BEO-795: small floating launcher when the panel is hidden — fallback for
+    // users who can't get the keyboard shortcut to work (browser intercept,
+    // different layout, etc.). 24×24 dot in the bottom-right corner.
+    return (
+      <button
+        onClick={toggleOpen}
+        title="Open chat state inspector (Cmd+Shift+K)"
+        className="fixed bottom-3 right-3 z-[9998] flex h-6 w-6 items-center justify-center rounded-full bg-[#F97316] text-[10px] font-bold text-white shadow-lg hover:bg-[#ea6b15] transition-colors"
+        aria-label="Open chat state inspector"
+      >
+        🔍
+      </button>
+    );
+  }
 
   return (
     <div
