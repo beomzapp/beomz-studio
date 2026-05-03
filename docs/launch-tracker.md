@@ -16,7 +16,61 @@ Single source of truth for the audit-2026-05 rollout. Every audit ticket gets lo
 - [x] **Sprint 2** — Reliability + UX hardening ✅ 6/6 shipped 2026-05-02 (tag `sprint-2-complete`)
 - [x] **Sprint 3** — Production reliability + UX polish ✅ 4/4 shipped 2026-05-02 (tag `sprint-3-complete`)
 - [x] **Sprint 4** — Engine wiring + pilot rollout ✅ 5/5 shipped 2026-05-03 (tag `sprint-4-complete`)
+- [x] **Sprint 4 hotfix** — BEO-777 `tool_choice: any` ✅ shipped 2026-05-03 (commit `23ce909`, deployed to droplet)
 - [ ] **Sprint 5** — Cleanup, hook split, polish
+
+---
+
+## 🔁 Handover snapshot — 2026-05-03
+
+**Where we are:** Sprints 0–4 shipped + BEO-777 hotfix deployed to production droplet. Awaiting Omar's retry of a build at beomz.ai/studio to validate the engine path completes end-to-end.
+
+**Production environment (the API does NOT run on Vercel/Railway):**
+- DigitalOcean Droplet `beomz-web-api-sfo3` at `143.198.154.126`
+- SSH: `ssh -i ~/.ssh/beomz_do root@143.198.154.126`
+- Process manager: pm2, app name `beomz-api`, cluster mode (workers `10`, `11`)
+- Repo path on droplet: `/root/beomz-studio` (or similar — check `pm2 show beomz-api`)
+- Restart after env change: `pm2 restart beomz-api --update-env`
+- Tail logs: `pm2 logs beomz-api --lines 200`
+- Frontend (apps/web) IS on Vercel; only the API is on the Droplet.
+
+**Engine pilot allowlist on the droplet** (`ENGINE_PILOT_ORG_IDS`):
+- `f7f5ffc7-…` (org: beomz.com)
+- `3e11937b-…` (org: ofareda)
+Both opted in for the engine path. Omar's last attempt ran under `3e11937b`.
+
+**Last verified state on droplet:**
+- HEAD: `23ce909` (BEO-777)
+- `dist/lib/build/runEngineAdapter.js` exists; `packages/engine/dist/GenerationEngine.js` contains `tool_choice:{type:"any"}`
+- pm2 workers online, fresh restart
+
+**Immediate next step:**
+1. Omar retries the same simple-recipe-finder build at beomz.ai/studio.
+2. New Claude tails pm2 logs: `pm2 logs beomz-api --lines 300 | grep -E "telemetry|engine|anthropic"`
+3. Success looks like: `[telemetry] build complete {"path":"engine","success":true,"filesGenerated":N,...}`. Failure repeats `GenerationEngineError`.
+
+**Known follow-ups (not yet ticketed):**
+1. **picsum.photos / external `<img src>` COEP errors** — `apps/api/src/lib/sanitise.ts` `externalUrls` fixer (lines ~342-359) strips external `<link>`/`<script>` but NOT `<img src="https://...">`. Caused 18,786 console errors in Omar's first test build under WebContainer COEP. Class A surgical fix — extend the regex to `<img>` and replace with a data-uri placeholder or a same-origin proxy.
+2. **`.claude/launch.json`** — local-only Claude Code preview-tool config left as `M` in working tree on the droplet. Revert or `git update-index --skip-worktree`.
+3. **Engine first-cut limitations** still open (image attachments, phaseScope, palette/design-system propagation) — see Sprint 4 playbook below.
+
+**Working agreement (carry forward):**
+- 1 prompt per agent at a time, max 2 concurrent if non-conflicting.
+- Codex 5.3 / Low–Med = backend surgical (apps/api, packages/engine spec-locked work).
+- Codex 5.4 / Med–High = backend stateful reasoning (migrations, retry, engine wiring).
+- Cursor Sonnet 4.6 = frontend default (apps/web, apps/admin); Cursor Opus 4.7 for bigger refactors.
+- Every agent prompt: lead with **Agent + Model + Reasoning level + WHY**.
+- Use **tilde fences `~~~`** inside outer triple-backtick blocks so copy-to-clipboard captures the full prompt.
+- "Fired" = agent working. "Done" / "paste" = ready for Claude to verify.
+- Claude verifies every commit (diff exact to spec, build clean) before closing in Linear.
+
+**Reference files for the next session:**
+- This tracker (`docs/launch-tracker.md`) — SSOT for everything shipped.
+- `apps/api/src/config.ts` — all 9 audit feature flags.
+- `apps/api/src/lib/build/runEngineAdapter.ts` — the engine drop-in.
+- `apps/api/src/lib/build/buildPipeline.ts` — flag-gated routing + telemetry log.
+- `packages/engine/src/GenerationEngine.ts` — engine main loop (BEO-758 / 764 / 777 land here).
+- `packages/engine/src/systemPrompt.ts` — stable-vs-per-turn split (BEO-774).
 
 ---
 
@@ -62,6 +116,8 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-774](https://linear.app/beomz/issue/BEO-774/) | S4-3 Engine systemPrompt: split dynamic into stable-per-build (cached) + per-turn | D | 4 | Codex 5.4 / High | Done | `9286516` engine+api builds clean ✅ (5-turn build cost: 150k→60k tokens) |
 | [BEO-775](https://linear.app/beomz/issue/BEO-775/) | S4-4 buildPipeline: structured telemetry log with path tag (engine \| legacy) | A | 4 | Codex 5.3 / Low | Done | `adb129a` api build clean ✅ (Vercel-grep-able pilot comparison) |
 | [BEO-776](https://linear.app/beomz/issue/BEO-776/) | S4-5 Pilot rollout: ENGINE_PILOT_ORG_IDS allowlist | B | 4 | Codex 5.4 / Med | Done | `42b19a9` api build clean ✅ (per-org opt-in for safe pilot) |
+| [BEO-777](https://linear.app/beomz/issue/BEO-777/) | S4-hotfix Engine: tool_choice=any to stop "ended without finish" crash | A | 4 | Codex 5.4 / Med | Done | `23ce909` engine+api build clean ✅, deployed to droplet, retry showed throw still fires (tool_choice insufficient) |
+| [BEO-778](https://linear.app/beomz/issue/BEO-778/) | S4-hotfix2 Engine: diagnostic log when turn ends without finish | A | 4 | Codex 5.3 / Low | Done | `f2a3b5e` engine+api+web build clean ✅ (logging-only, awaiting deploy + next retry to capture model output) |
 
 (more tickets append here as they ship)
 
