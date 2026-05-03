@@ -24,6 +24,7 @@ import {
 } from "./actions/index.js";
 import {
   buildSystemPromptFrame,
+  type AnthropicCacheControl,
   type AnthropicSystemTextBlock,
   type BuildSystemPromptInput,
   type SystemPromptFrame,
@@ -53,6 +54,12 @@ export interface AnthropicToolResultBlock {
   tool_use_id: string;
   content: string;
   is_error?: boolean;
+  // BEO-781: when set on the LAST tool_result of a user message, Anthropic
+  // caches the entire conversation history up to and including this point.
+  // Subsequent turns then read prior tool_results from cache at $0.30/M
+  // instead of re-billing as fresh input at $3/M. The engine sets this on
+  // every new user message it pushes onto the conversation.
+  cache_control?: AnthropicCacheControl;
 }
 
 export type AnthropicMessageContentBlock =
@@ -1154,8 +1161,18 @@ export class GenerationEngine {
         const nextMessages = [...messages, assistantMessage];
 
         if (needsFollowUp) {
+          // BEO-781: cache the messages history. Marking the LAST tool_result
+          // with cache_control tells Anthropic to cache the whole prior
+          // conversation up to this point. Without this, every turn re-bills
+          // the full accumulated tool_results (~360k uncached input across
+          // a 22-turn build, observed in BEO-780). With it, turn N+1 reads
+          // turn N's history from cache at $0.30/M instead of $3/M.
+          const toolResults = actionResults.map(buildToolResultBlock);
+          if (toolResults.length > 0) {
+            toolResults[toolResults.length - 1].cache_control = { type: "ephemeral" };
+          }
           nextMessages.push({
-            content: actionResults.map(buildToolResultBlock),
+            content: toolResults,
             role: "user",
           });
         }
