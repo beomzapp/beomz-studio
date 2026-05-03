@@ -1161,6 +1161,20 @@ export class GenerationEngine {
         const nextMessages = [...messages, assistantMessage];
 
         if (needsFollowUp) {
+          // BEO-782: strip cache_control from any prior tool_results before
+          // marking the new one. Anthropic enforces a hard limit of 4
+          // cache_control breakpoints per request — we already have 2 on the
+          // system blocks (BEO-774). Without this strip, accumulated
+          // tool_result markers from prior turns push the total over 4 and
+          // the API returns 400 invalid_request_error after ~3 turns.
+          for (const msg of messages) {
+            if (msg.role !== "user") continue;
+            for (const block of msg.content) {
+              if (block.type === "tool_result" && block.cache_control) {
+                delete block.cache_control;
+              }
+            }
+          }
           // BEO-781: cache the messages history. Marking the LAST tool_result
           // with cache_control tells Anthropic to cache the whole prior
           // conversation up to this point. Without this, every turn re-bills
