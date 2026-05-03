@@ -130,6 +130,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-788](https://linear.app/beomz/issue/BEO-788/) | S6-1-hotfix Chat: additive merge — never drop localStorage events | A | 6 | Claude direct | Done | `3a5c3c5` web build clean ✅ Vercel auto-deploy (overlay-only merge; preserves chat_response + implementPlan + nextSteps) |
 | [BEO-789](https://linear.app/beomz/issue/BEO-789/) | S6-1-backend Chat: persist nextSteps into build_summary session_event | A | 6 | Claude direct | Done | `3a5c3c5` api build clean ✅ deployed (cross-device replay can now show real chips, not fallback) |
 | [BEO-790](https://linear.app/beomz/issue/BEO-790/) | S6-1-diag Chat persistence diagnostic — log restore + merge state | A | 6 | Claude direct | Done | `7559516` web build clean ✅ Vercel auto-deploy (3 `[chat-diag]` log lines to pinpoint why build_summary disappears post-refresh) |
+| [BEO-791](https://linear.app/beomz/issue/BEO-791/) | S6-engine-timeout Engine: plumb build-level abortSignal into AnthropicStreamingModel | A | 6 | Claude direct | Done | `5f016fd` engine+api build clean ✅ deployed (in-flight Anthropic stream now aborts within ~1s when BUILD_TIMEOUT_MS or Stop fires, instead of waiting up to 120s) |
 
 (more tickets append here as they ship)
 
