@@ -5,11 +5,13 @@ import type {
 } from "@beomz-studio/contracts";
 import type { StudioDbClient } from "@beomz-studio/studio-db";
 
+import { apiConfig } from "../../config.js";
 import {
   calcCreditCostHaiku,
   calcIterationCreditCost,
   isAdminEmail,
 } from "../credits.js";
+import { callEngineCustomise } from "./runEngineAdapter.js";
 import { buildPersistedAiUsage, persistGenerationAiUsage } from "./tokenUsage.js";
 import { maybeSendCreditsLowEmailForUser } from "../email/service.js";
 import { encryptProjectSecret } from "../projectSecrets.js";
@@ -256,22 +258,54 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     } else if (imageContextBlock) {
       console.warn("[generate] iteration has image context but no image URL was provided.");
     }
-    iterResult = await callModelIterate(
-      prompt,
-      model,
-      projectId,
-      existingFiles,
-      { buildId, isIteration: true },
-      iterSchemaSummary,
-      imageContextBlock,
-      input.imageUrl,
-      hasWiredSupabaseClient,
-      iterDbProvider,
-      iterNeonAuthBaseUrl,
-      hasByoSupabaseConfigForIteration,
-      abortSignal,
-      dbContextBlock,
-    );
+    // BEO-783: route iterations through the engine path when the org is on
+    // the engine pilot or the global flag is on. Mirrors the eligibility
+    // check at buildPipeline.ts:683-693. Iterations are the engine's biggest
+    // theoretical win — `editFile` ships a unified diff instead of a full
+    // file rewrite, and `readFile` reads from cache (post-BEO-781).
+    const enginePilotOrgIds = apiConfig.ENGINE_PILOT_ORG_IDS
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+    const engineEnabledForOrg =
+      apiConfig.USE_GENERATION_ENGINE === "true"
+      || enginePilotOrgIds.includes(orgId);
+    const engineEligibleForIteration =
+      engineEnabledForOrg && !input.imageUrl;
+
+    if (engineEligibleForIteration) {
+      console.log("[generate] iteration using engine path", { buildId, model, templateId });
+      iterResult = await callEngineCustomise({
+        buildId,
+        prompt,
+        model,
+        templateId,
+        projectName: input.projectName,
+        orgId,
+        projectId,
+        existingFiles,
+        isIteration: true,
+        abortSignal,
+      });
+    } else {
+      console.log("[generate] iteration using legacy path", { buildId, model, templateId });
+      iterResult = await callModelIterate(
+        prompt,
+        model,
+        projectId,
+        existingFiles,
+        { buildId, isIteration: true },
+        iterSchemaSummary,
+        imageContextBlock,
+        input.imageUrl,
+        hasWiredSupabaseClient,
+        iterDbProvider,
+        iterNeonAuthBaseUrl,
+        hasByoSupabaseConfigForIteration,
+        abortSignal,
+        dbContextBlock,
+      );
+    }
     throwIfBuildAborted();
     console.log("[generate] iteration model returned files:", iterResult.files.map((file) => file.path));
 
