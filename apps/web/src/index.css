@@ -110,6 +110,25 @@ body {
   animation: build-shimmer 2.5s linear infinite;
 }
 
+/* BEO-798: Live status pill shimmer — left-to-right, muted grey, low contrast, 2s */
+@keyframes live-status-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.live-status-shimmer {
+  background: linear-gradient(
+    90deg,
+    #6b7280 20%,
+    #9ca3af 50%,
+    #6b7280 80%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: live-status-shimmer 2s linear infinite;
+}
+
 /* BEO-719: Typewriter blinking cursor */
 @keyframes typewriter-blink {
   0%, 100% { opacity: 1; }
@@ -135,15 +154,17 @@ body {
   .plan-step-icon-pop,
   .checklist-orb-active,
   .build-shimmer-text,
+  .live-status-shimmer,
   .typewriter-cursor {
     animation: none !important;
   }
 
   .streaming-shimmer,
   .thinking-shimmer,
-  .build-shimmer-text {
+  .build-shimmer-text,
+  .live-status-shimmer {
     -webkit-text-fill-color: unset;
     background: none;
-    color: #71717a;
+    color: #6b7280;
   }
 }

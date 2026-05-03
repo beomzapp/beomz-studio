@@ -26,6 +26,7 @@ import { uploadImage } from "../../lib/api";
 import { BAvatar } from "./Avatars";
 import { ChatMessageView } from "./ChatMessage";
 import { BuildProgressCard } from "./BuildProgressCard";
+import { LiveStatusPill } from "./LiveStatusPill";
 import { ImplementBar } from "./ImplementBar";
 
 const DB_CHIP_FILTER = /database|supabase|neon|postgres|persist/i;
@@ -86,6 +87,8 @@ interface ChatPanelProps {
   onImplementPlan?: (plan: string, imageUrl?: string) => void;
   isAnalysingImage?: boolean;
   isIterationBuild?: boolean;
+  /** BEO-798: live tool action from the SSE stream, shown in the iteration status pill. */
+  currentAction?: string | null;
   userFirstName?: string;
   userAvatarUrl?: string;
   userInitials?: string;
@@ -119,6 +122,7 @@ export function ChatPanel({
   onImplementPlan,
   isAnalysingImage,
   isIterationBuild,
+  currentAction,
   userFirstName,
   userAvatarUrl,
   userInitials,
@@ -411,12 +415,15 @@ export function ChatPanel({
               </div>
             ))}
 
-            {/* In-flight build indicator: analysing-image card while we
-                wait for image_intent, otherwise the 4-step shimmer. */}
+            {/* In-flight build indicator: analysing-image card while we wait for
+                image_intent; live single-line pill for iterations (BEO-798);
+                4-step shimmer for initial builds. */}
             {isBuilding && isAnalysingImage ? (
               <AnalysingImageCard />
             ) : showShimmer ? (
-              <BuildProgressCard.Shimmer isIteration={isIterationBuild} />
+              isIterationBuild
+                ? <LiveStatusPill currentAction={currentAction} />
+                : <BuildProgressCard.Shimmer />
             ) : null}
           </div>
         )}

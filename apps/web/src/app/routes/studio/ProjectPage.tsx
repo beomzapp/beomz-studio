@@ -121,6 +121,7 @@ export function ProjectPage() {
     messages,
     isBuilding,
     isIterationBuild,
+    currentAction,
     sendMessage,
     retryLastBuild,
     stopBuild,
@@ -1191,6 +1192,7 @@ export function ProjectPage() {
               onImplementPlan={(plan, imageUrl) => { void implementWithPlan(plan, imageUrl); }}
               isAnalysingImage={isAnalysingImage}
               isIterationBuild={isIterationBuild}
+              currentAction={currentAction}
               userFirstName={chatUserData.userFirstName}
               userAvatarUrl={chatUserData.userAvatarUrl}
               userInitials={chatUserData.userInitials}

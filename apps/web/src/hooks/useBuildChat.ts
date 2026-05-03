@@ -164,6 +164,68 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ─── BEO-798: Live action label helpers ──────────────────────────────────────
+
+/** Map stage_* event types to user-facing copy for the live status pill. */
+const STAGE_ACTION_LABELS: Readonly<Record<string, string>> = {
+  stage_classifying: "Understanding your request",
+  stage_enriching: "Planning the build",
+  stage_generating: "Writing components",
+  stage_sanitising: "Polishing the code",
+  stage_persisting: "Saving changes",
+  stage_deploying: "Updating preview",
+};
+
+/**
+ * Map a raw tool/status event code + message to a user-facing action string.
+ * Returns null when no meaningful label can be derived.
+ */
+function mapActionToLabel(
+  code: string,
+  message: string,
+  payload?: Record<string, unknown> | null,
+): string | null {
+  const normalized = code.toLowerCase().replace(/[_\-\s]/g, "");
+  const pathFromPayload = typeof payload?.path === "string" ? payload.path : null;
+  const pathMatch = (code + " " + message).match(/path[=:\s]+([^\s,]+)/i);
+  const path = pathFromPayload ?? pathMatch?.[1] ?? null;
+
+  if (/createfile|writefile|newfile|addfile/.test(normalized)) {
+    return path ? `Writing ${path}` : "Writing file";
+  }
+  if (/editfile|updatefile|modifyfile|patchfile|changefile/.test(normalized)) {
+    return path ? `Editing ${path}` : "Editing file";
+  }
+  if (/readfile|getfile|loadfile/.test(normalized)) {
+    return path ? `Reading ${path}` : "Reading file";
+  }
+  if (/migrat/.test(normalized)) return "Running migrations";
+  if (/deploy|preview|serve/.test(normalized)) return "Updating preview";
+  if (/plan|blueprint/.test(normalized)) return "Planning the build";
+  if (/generat|scaffold/.test(normalized)) return "Writing components";
+  if (/validate|lint|verify/.test(normalized)) return "Checking the code";
+  if (/persist|commit/.test(normalized)) return "Saving changes";
+
+  // Fallback: try to derive from the human-readable message
+  const msgLower = message.toLowerCase();
+  if (/\bcreating\b|\bwriting\b|\bgenerating\b/.test(msgLower)) {
+    return path ? `Writing ${path}` : "Writing components";
+  }
+  if (/\bediting\b|\bupdating\b|\bmodifying\b|\bpatching\b/.test(msgLower)) {
+    return path ? `Editing ${path}` : "Editing file";
+  }
+  if (/\breading\b|\bloading\b/.test(msgLower)) {
+    return path ? `Reading ${path}` : "Reading file";
+  }
+
+  if (code.trim()) {
+    console.warn("[LiveStatusPill] unknown action code:", code, "| message:", message);
+    return (code + (message ? ` ${message}` : "")).toLowerCase().trim().slice(0, 60);
+  }
+
+  return null;
+}
+
 /** BEO-393: minimum time a checklist row stays ◌ before advancing to ✓ */
 const CHECKLIST_MIN_DWELL_MS = 2000;
 /** BEO-393: cap artificial checklist drain before showing build_summary */
@@ -370,6 +432,9 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   const [isAnalysingImage, setIsAnalysingImage] = useState(false);
   // BEO-496: true when the current build is detected as an iteration (short preamble)
   const [isIterationBuild, setIsIterationBuild] = useState(false);
+  // BEO-798: current live tool action shown in the status pill
+  const [currentAction, setCurrentAction] = useState<string | null>(null);
+  const actionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isIterationBuildRef = useRef(false);
   // BEO-496: mirrors isBuilding so event handlers can guard without stale closures
   const isBuildInProgressRef = useRef(false);
@@ -776,6 +841,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
           // The first real message card is created when stage_preamble arrives.
           // BEO-464: isBuilding is set only on build_confirmed — avoids preview progress bar
           // and other "build in flight" UI during conversational / classify-only turns.
+          // BEO-798: reset action label at build start so pill shows "Working…"
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
           const now = Date.now();
           buildStartedAtRef.current = now;
           try {
@@ -1036,6 +1107,20 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               },
             ];
           });
+          // BEO-798: update live action label (debounced ~150ms to avoid strobing)
+          {
+            const code = event.type === "status" ? event.code : event.code;
+            const msg = "message" in event ? (event.message ?? "") : "";
+            const pl = "payload" in event ? (event.payload ?? null) : null;
+            const label = mapActionToLabel(code, msg, pl as Record<string, unknown> | null);
+            if (label) {
+              if (actionDebounceRef.current) clearTimeout(actionDebounceRef.current);
+              actionDebounceRef.current = setTimeout(() => {
+                actionDebounceRef.current = null;
+                setCurrentAction(label);
+              }, 150);
+            }
+          }
           break;
         }
 
@@ -1062,6 +1147,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         case "build_summary": {
           clearPreambleAndStageTimers();
+          // BEO-798: clear action label on build completion
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
           try {
             sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
             sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
@@ -1204,6 +1295,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         }
 
         case "done":
+          // BEO-798: clear action label when build finishes
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
           if (event.fallbackUsed) {
             buildDoneRef.current = false;
             clearPreambleAndStageTimers();
@@ -1322,6 +1419,12 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
         case "error":
           clearPreambleAndStageTimers();
+          // BEO-798: clear action label on error
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
           setIsAnalysingImage(false);
           if (event.code === "server_restarting") {
             buildDoneRef.current = false;
@@ -1500,6 +1603,17 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               },
             ];
           });
+          // BEO-798: update live action label for pipeline stage
+          {
+            const stageLabel = STAGE_ACTION_LABELS[event.type] ?? null;
+            if (stageLabel) {
+              if (actionDebounceRef.current) clearTimeout(actionDebounceRef.current);
+              actionDebounceRef.current = setTimeout(() => {
+                actionDebounceRef.current = null;
+                setCurrentAction(stageLabel);
+              }, 150);
+            }
+          }
           break;
         }
 
@@ -2277,6 +2391,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     isBuilding,
     isAnalysingImage,
     isIterationBuild,
+    // BEO-798: current live tool action for the status pill
+    currentAction,
     sendMessage,
     retryLastBuild,
     // BEO-587: immediate abort + idle
