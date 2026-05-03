@@ -220,6 +220,19 @@ export async function callEngineCustomise(
     }
     const event: GenerationEngineEvent = next.value;
     if (event.type === "llm_turn_completed") {
+      // BEO-780: per-turn cache stats so we can measure prompt-cache
+      // effectiveness in production. Mirrors legacy `[generate] cache stats:`
+      // in routes/builds/generate.ts:2150. Logged BEFORE aggregation so the
+      // values are per-turn deltas, not running totals.
+      console.log("[engine] turn cache stats:", {
+        buildId: args.buildId,
+        turn: event.turn,
+        stopReason: event.stopReason,
+        input_tokens: event.usage?.input_tokens ?? 0,
+        cache_creation_input_tokens: event.usage?.cache_creation_input_tokens ?? 0,
+        cache_read_input_tokens: event.usage?.cache_read_input_tokens ?? 0,
+        output_tokens: event.usage?.output_tokens ?? 0,
+      });
       aggregatedUsage = sumUsage(aggregatedUsage, event.usage);
     }
     // Other event types intentionally ignored in the first cut.
