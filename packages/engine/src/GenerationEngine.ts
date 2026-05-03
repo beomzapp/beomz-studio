@@ -603,6 +603,12 @@ export class AnthropicStreamingModel implements StreamingModel {
         system: request.system,
         temperature: request.temperature ?? this.options.temperature,
         tools: request.tools,
+        // BEO-777: force the model to call a tool every turn. Without this,
+        // Sonnet sometimes returns text-only on the first turn and the engine
+        // loop throws "Model ended a turn without calling finish." With "any",
+        // the model is required to pick SOME tool — including `finish` if
+        // it's done — so the loop always makes progress.
+        tool_choice: { type: "any" },
       });
 
       let response: Response | undefined;
