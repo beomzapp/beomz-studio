@@ -301,7 +301,9 @@ function mapSessionEventsToMessages(
   for (const ev of events) {
     const type = ev.type;
     const content = typeof ev.content === "string" ? ev.content : "";
-    const timestamp = typeof ev.timestamp === "string" ? new Date(ev.timestamp) : new Date();
+    // BEO-787: use epoch-0 as a stable sentinel for missing timestamps instead of
+    // fabricating "now" — the UI can check getTime() === 0 to suppress display.
+    const timestamp = typeof ev.timestamp === "string" ? new Date(ev.timestamp) : new Date(0);
 
     if (type === "user") {
       result.push({ id: makeId(), type: "user", content, timestamp });
@@ -335,6 +337,17 @@ function mapSessionEventsToMessages(
         durationMs: typeof ev.durationMs === "number" ? ev.durationMs : undefined,
         creditsUsed: typeof ev.creditsUsed === "number" ? ev.creditsUsed : undefined,
         nextSteps,
+      });
+    } else if (type === "chat_response") {
+      // BEO-787 Fix 2: replay plan-response cards with their implementPlan so the
+      // plan card and ⚡ button are restored from session_events after refresh.
+      const implementPlan = typeof ev.implementPlan === "string" ? ev.implementPlan : undefined;
+      result.push({
+        id: makeId(),
+        type: "chat_response",
+        content,
+        streaming: false,
+        implementPlan,
       });
     }
   }
@@ -494,7 +507,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     } catch { /* ignore */ }
   }, [messages]);
 
-  // ─── BEO-447: persist chat messages to localStorage ───────────────────────
+  // ─── BEO-447 / BEO-787: persist chat messages + implementSuggestion to localStorage ───
   useEffect(() => {
     const pid = resolvedProjectIdRef.current;
     if (!pid) return;
@@ -511,11 +524,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     });
     if (persistable.length === 0) return;
     try {
-      localStorage.setItem(`chat:${pid}`, JSON.stringify(persistable.slice(-20)));
+      // BEO-787: wrap in an object so implementSuggestion survives refresh.
+      // Old format was a bare ChatMessage[] — restore handles both.
+      localStorage.setItem(
+        `chat:${pid}`,
+        JSON.stringify({ messages: persistable.slice(-20), implementSuggestion }),
+      );
     } catch { /* quota exceeded — ignore */ }
-  }, [messages]);
+  }, [messages, implementSuggestion]);
 
-  // ─── BEO-447: restore chat from localStorage on mount (fast path) ─────────
+  // ─── BEO-447 / BEO-787: restore chat + implementSuggestion from localStorage on mount ──
   useEffect(() => {
     const pid = projectId !== "new" ? projectId : "";
     if (!pid) return;
@@ -525,16 +543,36 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
       // BEO-737 A7: JSON.stringify serialises Date → ISO string. Without a
       // reviver, restored user messages have timestamp:string instead of
       // timestamp:Date, so consumers calling .toLocaleTimeString() throw.
-      const parsed = JSON.parse(saved, (key, value) =>
+      const raw = JSON.parse(saved, (key, value) =>
         key === "timestamp" && typeof value === "string" ? new Date(value) : value,
-      ) as ChatMessage[];
+      ) as unknown;
+      // BEO-787: support both old bare-array format and new wrapped-object format.
+      let parsed: ChatMessage[];
+      let storedImpl: { summary: string } | null = null;
+      if (Array.isArray(raw)) {
+        parsed = raw as ChatMessage[];
+      } else if (raw && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).messages)) {
+        const wrapper = raw as { messages: ChatMessage[]; implementSuggestion?: { summary: string } | null };
+        parsed = wrapper.messages;
+        storedImpl = wrapper.implementSuggestion ?? null;
+      } else {
+        return;
+      }
       if (!Array.isArray(parsed) || parsed.length === 0) return;
       setMessages(prev => (prev.length > 0 ? prev : parsed));
+      if (storedImpl?.summary) {
+        setImplementSuggestion(storedImpl);
+      }
     } catch { /* corrupted data — ignore */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Seed chat history from session_events on mount (BEO-370) ─────────────
+  // ─── Seed / merge chat history from session_events on mount (BEO-370 / BEO-787) ──
+  // BEO-787: localStorage fast-paints on mount (above). When the backend resolves,
+  // we merge rather than wholesale-replace: find where the latest build's first user
+  // event appears in localStorage, keep everything BEFORE that boundary from
+  // localStorage (older iterations), and replace FROM the boundary with backend's
+  // authoritative session_events (complete build_summary + nextSteps + chat_response).
   const historySeededRef = useRef(false);
   useEffect(() => {
     const pid = resolvedProjectIdRef.current;
@@ -546,7 +584,38 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         if (status.build.status !== "completed" && status.build.status !== "failed") return;
         const events = status.build.sessionEvents;
         if (!events?.length) return;
-        setMessages(prev => (prev.length > 0 ? prev : mapSessionEventsToMessages(events)));
+        const backendMsgs = mapSessionEventsToMessages(events);
+        if (!backendMsgs.length) return;
+        setMessages(prev => {
+          if (prev.length === 0) return backendMsgs;
+          // Identify the boundary: find the first user-type message in backend events.
+          // That content identifies where the latest build starts in localStorage.
+          const firstBackendUser = backendMsgs.find(m => m.type === "user") as
+            | Extract<ChatMessage, { type: "user" }>
+            | undefined;
+          if (!firstBackendUser) {
+            // No user event in backend — cannot identify a boundary; keep localStorage.
+            return prev;
+          }
+          // Search backwards in localStorage for the matching user message (last occurrence
+          // is correct when the same prompt appears in multiple iterations).
+          let boundaryIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i];
+            if (m.type === "user" && m.content === firstBackendUser.content) {
+              boundaryIdx = i;
+              break;
+            }
+          }
+          if (boundaryIdx === -1) {
+            // Boundary not found in the cached window — keep localStorage; the
+            // backend belongs to a build that has scrolled past the 20-message cap.
+            return prev;
+          }
+          // Keep pre-boundary history from localStorage; replace latest build segment
+          // with backend's authoritative view (includes nextSteps, implementPlan, etc.).
+          return [...prev.slice(0, boundaryIdx), ...backendMsgs];
+        });
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -923,6 +992,8 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
 
           // BEO-459: convert in-flight building message → build_summary on completion.
           // After this point type:"building" = always in-flight, type:"build_summary" = always done.
+          // BEO-787 Fix 3: copy nextSteps from the building message so chips survive
+          // the finalise transition and are not stripped on the way to localStorage.
           const finalizeBuilding = (prev: ChatMessage[], idx: number): ChatMessage[] => {
             const next = [...prev];
             const existing = next[idx] as BuildingMsg;
@@ -933,6 +1004,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               filesChanged: event.filesChanged,
               durationMs: event.durationMs,
               creditsUsed: event.creditsUsed,
+              nextSteps: existing.nextSteps,
             };
             return next;
           };
