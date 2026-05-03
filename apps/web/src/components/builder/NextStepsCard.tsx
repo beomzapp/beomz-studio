@@ -39,13 +39,13 @@ export function NextStepsCard({ chips, summaryAnchoredAt, onSelectPrompt }: Next
 
   return (
     <div className="mt-3 transition-opacity duration-300">
-      <p className="text-xs font-medium text-zinc-500">What next?</p>
+      <p className="text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">What next?</p>
       <div className="mt-2 flex flex-col gap-2">
         {effective.map((c, i) => (
           <button
             key={`${c.label}-${i}`}
             type="button"
-            className="rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-left text-sm text-[#374151] transition-colors hover:border-[#F97316]/40 hover:bg-[#faf9f6]"
+            className="rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-left text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#374151] transition-colors hover:border-[#F97316]/40 hover:bg-[#faf9f6]"
             onClick={() => onSelectPrompt(c.prompt)}
           >
             → {c.label}

@@ -97,7 +97,7 @@ export function UserBubble({ message, avatarUrl, initials }: UserBubbleProps) {
 
   return (
     <div className="flex items-end justify-end gap-2">
-      <div className="max-w-[70%] min-w-0 rounded-tl-2xl rounded-tr-2xl rounded-bl-2xl rounded-br-[4px] border border-[rgba(255,104,0,0.25)] bg-[rgba(255,104,0,0.18)] px-3.5 py-2 text-sm leading-relaxed text-[#1a1a1a] break-words">
+      <div className="max-w-[70%] min-w-0 rounded-tl-2xl rounded-tr-2xl rounded-bl-2xl rounded-br-[4px] border border-[rgba(255,104,0,0.25)] bg-[rgba(255,104,0,0.18)] px-3.5 py-2 text-[14px] leading-[1.55] tracking-[-0.01em] text-[#1a1a1a] break-words">
         {imageSrc && <ImageThumb src={imageSrc} />}
         {showAttachedFallback && "Attached"}
         {showBodyText && (showTextBody ? displayText : message.content)}
@@ -151,17 +151,17 @@ function CollapsibleBubble({ message, avatarUrl, initials }: UserBubbleProps) {
         onClick={() => setExpanded(e => !e)}
       >
         {imageSrc && <ImageThumb src={imageSrc} />}
-        {showAttachedFallback && <span className="text-sm text-[#1a1a1a]">Attached</span>}
+        {showAttachedFallback && <span className="text-[14px] leading-[1.55] tracking-[-0.01em] text-[#1a1a1a]">Attached</span>}
         {expanded ? (
           <div className="flex items-start gap-2">
-            <span className="min-w-0 flex-1 break-words text-sm leading-relaxed text-[#1a1a1a]">
+            <span className="min-w-0 flex-1 break-words text-[14px] leading-[1.55] tracking-[-0.01em] text-[#1a1a1a]">
               {expandedText}
             </span>
             <ChevronUp size={14} className="mt-0.5 flex-shrink-0 text-[#6b7280]" />
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm text-[#6b7280]">{collapsedPreview}</span>
+            <span className="min-w-0 flex-1 truncate text-[14px] leading-[1.55] tracking-[-0.01em] text-[#6b7280]">{collapsedPreview}</span>
             <ChevronDown size={14} className="flex-shrink-0 text-[#6b7280]" />
           </div>
         )}

@@ -126,7 +126,7 @@ export function ChatMessageView({
       const unknownType = unknownMsg.type ?? "unknown";
       if (import.meta.env.DEV) {
         return (
-          <div className="text-xs italic text-[#9ca3af]">
+          <div className="text-[12px] leading-[1.4] tracking-[-0.005em] italic text-[#9ca3af]">
             (unsupported message type: {unknownType} — refresh after deploy)
           </div>
         );

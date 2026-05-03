@@ -31,7 +31,7 @@ export function AIIntroMessage({ content, isNewMessage, isBuilding }: AIIntroMes
     <div className="flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 break-words">
-        <div className="text-sm leading-relaxed text-[#374151] break-words">
+        <div className="text-[14px] leading-[1.55] tracking-[-0.01em] text-[#374151] break-words">
           {isNewMessage ? <TypewriterText text={content} /> : <MarkdownText text={content} />}
         </div>
       </div>

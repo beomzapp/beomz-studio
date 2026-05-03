@@ -54,7 +54,7 @@ function SummaryFooter({
 
   return (
     <>
-      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-400">
         {filesChanged.length > 0 && (
           <button
             className="flex cursor-pointer items-center gap-1 hover:text-zinc-300 transition-colors"
@@ -81,7 +81,7 @@ function SummaryFooter({
       {filesExpanded && filesChanged.length > 0 && (
         <div className="mt-1 space-y-0.5 pl-4">
           {filesChanged.map((filename, i) => (
-            <p key={i} className="font-mono text-xs text-zinc-400">
+            <p key={i} className="font-mono text-[12px] leading-[1.5] tracking-normal text-zinc-400">
               {filename}
             </p>
           ))}
@@ -108,7 +108,7 @@ export function BuildSummary({ message, isNewMessage, onPopulateInput }: BuildSu
     <div className="flex items-start gap-2">
       <BAvatar />
       <div className="min-w-0 flex-1 break-words">
-        <div className="text-sm leading-relaxed text-[#374151] break-words">
+        <div className="text-[14px] leading-[1.55] tracking-[-0.01em] text-[#374151] break-words">
           {isNewMessage && !typewriterDone ? (
             <TypewriterText text={message.content} onDone={handleDone} />
           ) : (

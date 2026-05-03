@@ -29,12 +29,12 @@ export function PlanCard({
     <div className="mx-auto w-full max-w-xl">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         {/* Header */}
-        <h3 className="mb-1 text-base font-semibold text-[#1a1a1a]">
+        <h3 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#1a1a1a]">
           {appName}
         </h3>
 
         {/* Summary with typewriter */}
-        <p className="mb-4 text-sm leading-relaxed text-[#6b7280]">
+        <p className="mb-4 text-[14px] leading-[1.55] tracking-[-0.01em] text-[#6b7280]">
           <PlanTypewriter
             text={summary}
             speed={12}
@@ -45,7 +45,7 @@ export function PlanCard({
         {/* Steps — fade in after summary */}
         {summaryDone && steps.length > 0 && (
           <div className="space-y-2 animate-[fadeIn_300ms_ease-out]">
-            <p className="text-xs font-medium text-[#9ca3af]">Build plan</p>
+            <p className="text-[12px] leading-[1.4] tracking-[-0.005em] text-[#9ca3af]">Build plan</p>
             {steps.map((step, i) => (
               <div
                 key={i}
@@ -55,11 +55,11 @@ export function PlanCard({
                   {i + 1}
                 </span>
                 <div>
-                  <span className="text-sm font-medium text-[#1a1a1a]">
+                  <span className="text-[14px] leading-[1.55] tracking-[-0.01em] text-[#1a1a1a]">
                     {step.label}
                   </span>
                   {step.description && (
-                    <p className="text-xs text-[#9ca3af]">
+                    <p className="text-[12px] leading-[1.4] tracking-[-0.005em] text-[#9ca3af]">
                       {step.description}
                     </p>
                   )}
@@ -71,7 +71,7 @@ export function PlanCard({
             <button
               onClick={onBuild}
               disabled={isBuilding}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-60"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-60"
             >
               {isBuilding ? (
                 <Loader2 size={14} className="animate-spin" />
