@@ -35,6 +35,7 @@ import { consumeProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { useBuilderPersistence } from "../../../hooks/useBuilderPersistence";
 import { useBuilderSessionHealth } from "../../../hooks/useBuilderSessionHealth";
 import { useBuildChat } from "../../../hooks/useBuildChat";
+import { ChatDebugContext, ChatStateInspector } from "../../../components/dev/ChatStateInspector";
 import { useSSEBuildStream } from "../../../hooks/useSSEBuildStream";
 import { useAuth } from "../../../lib/useAuth";
 import { cn } from "../../../lib/cn";
@@ -1121,7 +1122,15 @@ export function ProjectPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
+  const chatDebugValue = {
+    messages,
+    implementSuggestion: implementSuggestion ?? null,
+    isBuilding,
+    pid: projectId,
+  };
+
   return (
+    <ChatDebugContext.Provider value={chatDebugValue}>
     <div className="flex h-full flex-col bg-[#faf9f6]">
       <TopBar
         projectName={projectName}
@@ -1269,6 +1278,9 @@ export function ProjectPage() {
           isExporting={isExporting}
         />
       )}
+
+      <ChatStateInspector />
     </div>
+    </ChatDebugContext.Provider>
   );
 }
