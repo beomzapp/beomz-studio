@@ -600,15 +600,16 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         if (!status) return;
         // BEO-790 diagnostic: backend response shape.
         try {
+          const evs = (status.build.sessionEvents ?? []) as ReadonlyArray<Record<string, unknown>>;
           console.log("[chat-diag] backend latestBuild:", {
             pid,
             buildStatus: status.build.status,
-            sessionEventsCount: status.build.sessionEvents?.length ?? 0,
-            sessionEventTypes: status.build.sessionEvents?.map((e: { type: string }) => e.type) ?? [],
-            sessionEventSnippets: status.build.sessionEvents?.map((e: { type: string; content?: string }) => ({
+            sessionEventsCount: evs.length,
+            sessionEventTypes: evs.map(e => e.type),
+            sessionEventSnippets: evs.map(e => ({
               type: e.type,
-              contentTail: typeof e.content === "string" ? e.content.slice(-60) : "(no content)",
-            })) ?? [],
+              contentTail: typeof e.content === "string" ? (e.content as string).slice(-60) : "(no content)",
+            })),
           });
         } catch { /* logging never blocks */ }
         if (status.build.status !== "completed" && status.build.status !== "failed") return;
