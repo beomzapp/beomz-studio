@@ -170,6 +170,10 @@ export async function callEngineCustomise(
     temperature: args.temperature,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     // BEO-764 retry defaults apply automatically.
+    // BEO-791: forward the build-level abortSignal so that BUILD_TIMEOUT_MS or
+    // the user's Stop button interrupts the in-flight Anthropic stream within
+    // ~1s instead of waiting up to DEFAULT_TIMEOUT_MS for the per-call timeout.
+    abortSignal: args.abortSignal,
   });
 
   const engine = new GenerationEngine({

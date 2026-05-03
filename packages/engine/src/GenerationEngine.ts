@@ -143,6 +143,14 @@ export interface AnthropicStreamingModelOptions {
   maxRetries?: number;
   /** Base backoff delay in ms. Each retry waits baseDelayMs × 3^(attempt-1). Default: 1000. */
   retryDelayBaseMs?: number;
+  /**
+   * BEO-791: external abort signal that can interrupt the in-flight Anthropic
+   * stream. Used by the build pipeline to propagate the build-level
+   * BUILD_TIMEOUT_MS (10 min) and the user's Stop button into the engine. Without
+   * this, an aborted build still has to wait up to `timeoutMs` (120s default) for
+   * the per-call timeout to fire before the engine unwinds.
+   */
+  abortSignal?: AbortSignal;
 }
 
 export interface GenerationTurnPersistenceInput {
@@ -592,11 +600,23 @@ export class AnthropicStreamingModel implements StreamingModel {
   async *stream(
     request: StreamingModelRequest,
   ): AsyncGenerator<ModelStreamEvent, StreamingModelTurnResult> {
+    // BEO-791: bail fast if the external signal already aborted before we even start.
+    if (this.options.abortSignal?.aborted) {
+      throw new GenerationEngineError(
+        FailureReason.GENERATION_TIMEOUT,
+        "Anthropic streaming aborted before start (external signal already aborted).",
+      );
+    }
     const controller = new AbortController();
     const timeoutMs = this.options.timeoutMs ?? 120_000;
     const timeoutHandle = setTimeout(() => {
       controller.abort("timeout");
     }, timeoutMs);
+    // BEO-791: forward external abortSignal aborts (build-level timeout, Stop
+    // button) into the local controller so the in-flight fetch is interrupted
+    // immediately instead of waiting up to timeoutMs.
+    const externalAbortListener = () => controller.abort("external");
+    this.options.abortSignal?.addEventListener("abort", externalAbortListener, { once: true });
 
     try {
       const maxRetries = this.options.maxRetries ?? 3;
@@ -868,10 +888,19 @@ export class AnthropicStreamingModel implements StreamingModel {
           `Anthropic streaming timed out after ${timeoutMs}ms.`,
         );
       }
+      // BEO-791: external abort surfaces as a clear timeout error so the build
+      // pipeline's catch block recognises this as a non-retryable terminal state.
+      if (controller.signal.aborted && controller.signal.reason === "external") {
+        throw new GenerationEngineError(
+          FailureReason.GENERATION_TIMEOUT,
+          "Anthropic streaming aborted by external signal (build-level timeout or Stop).",
+        );
+      }
 
       throw toGenerationEngineError(error, FailureReason.ANTHROPIC_ERROR);
     } finally {
       clearTimeout(timeoutHandle);
+      this.options.abortSignal?.removeEventListener("abort", externalAbortListener);
     }
   }
 }
