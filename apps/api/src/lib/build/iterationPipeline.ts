@@ -273,6 +273,17 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
     const engineEligibleForIteration =
       engineEnabledForOrg && !input.imageUrl;
 
+    // BEO-784 diagnostic: confirm what the eligibility check is seeing in production.
+    console.log("[generate] iteration engine eligibility:", {
+      buildId,
+      orgId,
+      hasImageUrl: Boolean(input.imageUrl),
+      pilotOrgCount: enginePilotOrgIds.length,
+      pilotIncludesOrg: enginePilotOrgIds.includes(orgId),
+      useGlobalFlag: apiConfig.USE_GENERATION_ENGINE,
+      engineEligibleForIteration,
+    });
+
     if (engineEligibleForIteration) {
       console.log("[generate] iteration using engine path", { buildId, model, templateId });
       iterResult = await callEngineCustomise({
