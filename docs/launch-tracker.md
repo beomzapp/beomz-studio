@@ -133,6 +133,7 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-791](https://linear.app/beomz/issue/BEO-791/) | S6-engine-timeout Engine: plumb build-level abortSignal into AnthropicStreamingModel | A | 6 | Claude direct | Done | `5f016fd` engine+api build clean ✅ deployed (in-flight Anthropic stream now aborts within ~1s when BUILD_TIMEOUT_MS or Stop fires, instead of waiting up to 120s) |
 | [BEO-792](https://linear.app/beomz/issue/BEO-792/) | S6-1-fix2 Chat: skip backend events not in localStorage (pre_build_ack tail bug) | A | 6 | Claude direct | Done | `7839f84` web build clean ✅ Vercel auto-deploy (BEO-790 diagnostic confirmed pre_build_ack was being appended after build_summary) |
 | [BEO-793](https://linear.app/beomz/issue/BEO-793/) | S7-A Chat dev panel: live state inspector for messages + storage + backend | A | 7 | Cursor Sonnet 4.6 | Done | `0266a44` web build clean ✅ Vercel auto-deploy (Cmd+Shift+D toggles floating panel; Context-based, DEV-gated, no production impact) |
+| [BEO-794](https://linear.app/beomz/issue/BEO-794/) | S7-A-fixup Chat dev panel: also enable via localStorage flag | A | 7 | Claude direct | Done | `aff8240` web build clean ✅ Vercel auto-deploy (panel now works on prod when `localStorage["beomz:devMode"]==="true"`) |
 
 (more tickets append here as they ship)
 
