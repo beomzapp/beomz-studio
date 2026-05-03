@@ -7,7 +7,9 @@
  * Toggle: Cmd+Shift+D (Mac) / Ctrl+Shift+D (other).
  * Visibility persisted in localStorage key "beomz:devInspector:open".
  *
- * Gating: import.meta.env.DEV — never ships to production builds.
+ * Gating: enabled in DEV builds OR when localStorage["beomz:devMode"] === "true".
+ * The localStorage flag lets you debug Vercel production builds too — set it in
+ * DevTools console: localStorage.setItem("beomz:devMode", "true") then refresh.
  * State exposure: React Context (ChatDebugContext) — type-safe, no global side effects.
  */
 import {
@@ -324,9 +326,22 @@ function BackendSection({ pid }: { pid: string | null }) {
 // ─── Main inspector ───────────────────────────────────────────────────────────
 
 const OPEN_KEY = "beomz:devInspector:open";
+const DEV_MODE_KEY = "beomz:devMode";
+
+function isDevModeEnabled(): boolean {
+  if (import.meta.env.DEV) return true;
+  try {
+    return localStorage.getItem(DEV_MODE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 export function ChatStateInspector() {
-  if (!import.meta.env.DEV) return null;
+  // BEO-794: gate on DEV build OR localStorage flag so the panel can be
+  // enabled in Vercel production builds for live debugging without redeploying.
+  // Set via DevTools: localStorage.setItem("beomz:devMode", "true"); then refresh.
+  if (!isDevModeEnabled()) return null;
 
   return <InspectorInner />;
 }
