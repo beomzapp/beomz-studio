@@ -126,7 +126,9 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-784](https://linear.app/beomz/issue/BEO-784/) | S5-hotfix2 Engine: diagnostic log of iteration engine eligibility | A | 5 | Claude direct | **Reverted** | `6854133` shipped → confirmed engine path was firing on iterations; reverted alongside BEO-783 at `4db3548` |
 | [BEO-785](https://linear.app/beomz/issue/BEO-785/) | S5-followup Engine: integrate iteration paths properly (path remapping + prompt tuning) | D | 5 | (parked) | Backlog | Not started — likely path-prefix mismatch (`apps/web/src/app/generated/<templateId>/<basename>` vs engine basenames). Investigation steps in ticket. |
 | [BEO-786](https://linear.app/beomz/issue/BEO-786/) | S6-discovery Chat panel deep analysis (Codex + Cursor + Claude) | N/A | 6 | All three | Done | 3 reports synthesized; revised Sprint 6 queue approved by Omar (BEO-787-792) |
-| [BEO-787](https://linear.app/beomz/issue/BEO-787/) | S6-1 Chat: persistence completeness (merge backend + persist implementSuggestion + nextSteps + replay chat_response + timestamps) | B | 6 | Cursor Sonnet 4.6 | Done | `f96c649` web build clean ✅ pushed; Vercel auto-deploy; visual verification pending |
+| [BEO-787](https://linear.app/beomz/issue/BEO-787/) | S6-1 Chat: persistence completeness (merge backend + persist implementSuggestion + nextSteps + replay chat_response + timestamps) | B | 6 | Cursor Sonnet 4.6 | Done | `f96c649` web build clean ✅ — partial fix; merge dropped chat_response post-boundary, addressed in BEO-788 |
+| [BEO-788](https://linear.app/beomz/issue/BEO-788/) | S6-1-hotfix Chat: additive merge — never drop localStorage events | A | 6 | Claude direct | Done | `3a5c3c5` web build clean ✅ Vercel auto-deploy (overlay-only merge; preserves chat_response + implementPlan + nextSteps) |
+| [BEO-789](https://linear.app/beomz/issue/BEO-789/) | S6-1-backend Chat: persist nextSteps into build_summary session_event | A | 6 | Claude direct | Done | `3a5c3c5` api build clean ✅ deployed (cross-device replay can now show real chips, not fallback) |
 
 (more tickets append here as they ship)
 
