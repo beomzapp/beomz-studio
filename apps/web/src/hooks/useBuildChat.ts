@@ -666,8 +666,24 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               }
               merged[matchIdx] = enriched as unknown as ChatMessage;
             } else {
-              // No equivalent in localStorage — append (cross-device / cleared-storage case).
-              merged.push(backendMsg);
+              // BEO-792: backend has an event type localStorage never captured (e.g.
+              // pre_build_ack — backend persists it for legacy compat, but the SSE
+              // handler doesn't add it to messages). If localStorage has ANY events
+              // post-boundary of THE SAME TYPE-FAMILY we'd insert under, skip the
+              // backend event — localStorage is canonical for what should render.
+              // Only append when the type doesn't exist anywhere in localStorage's
+              // segment AT ALL — meaning localStorage's UI never rendered this kind
+              // of message, so backend probably shouldn't either (cross-device case
+              // is handled by the "if (prev.length === 0)" early-return above).
+              const typeExistsAnywhere = merged.some(m => m.type === backendMsg.type);
+              if (!typeExistsAnywhere) {
+                // Truly novel type — but localStorage rendered without it, so skip.
+                // (Was: merged.push(backendMsg) — caused pre_build_ack to render after build_summary.)
+                continue;
+              }
+              // Type exists but findIndex returned -1 — shouldn't happen given match
+              // logic above, but be safe and skip rather than misorder.
+              continue;
             }
           }
           // BEO-790 diagnostic: capture merge result.
