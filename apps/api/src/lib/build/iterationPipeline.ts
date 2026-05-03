@@ -394,6 +394,9 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
   const iterTokens = iterResult.outputTokens ?? 0;
   let iterCreditsUsed = 0;
   let iterCostUsd: number | null = null;
+  const iterDurationMs = Date.now() - buildStartTime;
+  let buildSummaryContent = iterResult.summary;
+  let buildSummaryFilesChanged: string[] = [];
 
   if (iterResult.files.length > 0) {
     throwIfBuildAborted();
@@ -427,8 +430,8 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
           console.error("[generate] iteration credit deduction failed (non-fatal):", deductErr instanceof Error ? deductErr.message : String(deductErr));
         }
       }
-      const iterDurationMs = Date.now() - buildStartTime;
-      iterationHistoryReply = summaryResult.message;
+      buildSummaryContent = summaryResult.message;
+      buildSummaryFilesChanged = changedPaths;
       await appendEventToDb(db, buildId, {
         type: "build_summary",
         id: nextId(),
@@ -439,16 +442,30 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
         durationMs: iterDurationMs,
         creditsUsed: iterCreditsUsed,
       } as unknown as BuilderV3StatusEvent);
-      await appendSessionEventToDb(db, buildId, {
-        type: "build_summary",
-        content: summaryResult.message,
-        filesChanged: changedPaths,
-        durationMs: iterDurationMs,
-        creditsUsed: iterCreditsUsed,
-      });
-    } catch {
-      // non-fatal
+    } catch (summaryErr) {
+      console.warn(
+        "[generate] iteration build_summary event persistence failed (non-fatal):",
+        summaryErr instanceof Error ? summaryErr.message : String(summaryErr),
+      );
     }
+  } else {
+    buildSummaryContent = iterResult.summary;
+    buildSummaryFilesChanged = [];
+  }
+  iterationHistoryReply = buildSummaryContent;
+  try {
+    await appendSessionEventToDb(db, buildId, {
+      type: "build_summary",
+      content: buildSummaryContent,
+      filesChanged: buildSummaryFilesChanged,
+      durationMs: iterDurationMs,
+      creditsUsed: iterCreditsUsed,
+    });
+  } catch (err) {
+    console.warn(
+      "[generate] iteration build_summary persistence failed (non-fatal):",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 
   const iterDoneEvent: BuilderV3DoneEvent = {
