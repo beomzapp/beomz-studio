@@ -125,6 +125,8 @@ All defined in `apps/api/src/config.ts`. Read via `apiConfig.FLAG === "true"`.
 | [BEO-783](https://linear.app/beomz/issue/BEO-783/) | S5-3 Engine: route iterations through the engine path | C | 5 | Claude direct | **Reverted** | `7530d07` shipped → real test ran 30 turns, 0 files changed, ~$4 wasted spend; reverted at `4db3548`; integration deferred to BEO-785 |
 | [BEO-784](https://linear.app/beomz/issue/BEO-784/) | S5-hotfix2 Engine: diagnostic log of iteration engine eligibility | A | 5 | Claude direct | **Reverted** | `6854133` shipped → confirmed engine path was firing on iterations; reverted alongside BEO-783 at `4db3548` |
 | [BEO-785](https://linear.app/beomz/issue/BEO-785/) | S5-followup Engine: integrate iteration paths properly (path remapping + prompt tuning) | D | 5 | (parked) | Backlog | Not started — likely path-prefix mismatch (`apps/web/src/app/generated/<templateId>/<basename>` vs engine basenames). Investigation steps in ticket. |
+| [BEO-786](https://linear.app/beomz/issue/BEO-786/) | S6-discovery Chat panel deep analysis (Codex + Cursor + Claude) | N/A | 6 | All three | Done | 3 reports synthesized; revised Sprint 6 queue approved by Omar (BEO-787-792) |
+| [BEO-787](https://linear.app/beomz/issue/BEO-787/) | S6-1 Chat: persistence completeness (merge backend + persist implementSuggestion + nextSteps + replay chat_response + timestamps) | B | 6 | Cursor Sonnet 4.6 | Done | `f96c649` web build clean ✅ pushed; Vercel auto-deploy; visual verification pending |
 
 (more tickets append here as they ship)
 
