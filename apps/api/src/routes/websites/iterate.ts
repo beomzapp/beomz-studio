@@ -16,11 +16,27 @@ import { z } from "zod";
 
 import { apiConfig } from "../../config.js";
 import {
+  calcCreditCostHaiku,
   calcIterationCreditCost,
   isAdminEmail,
 } from "../../lib/credits.js";
+import {
+  buildStructuredChatSystemPrompt,
+  parseStructuredChatResponse,
+  type StructuredChatResponse,
+} from "../../lib/chatPrompts.js";
 import { getModelForBuilder } from "../../lib/modelConfig.js";
+import {
+  buildConversationMessages,
+  readProjectChatHistory,
+} from "../../lib/projectChat.js";
 import { saveProjectVersion, studioFilesToVersionFiles } from "../../lib/projectVersions.js";
+import {
+  classifyIterationIntentWithUsage,
+  type IterationIntentClassification,
+  type IterationIntentUsage,
+} from "../../lib/build/classifyIterationIntent.js";
+import { loadUrlContext } from "../../lib/webFetch.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
 import type { OrgContext } from "../../types.js";
@@ -249,6 +265,155 @@ async function appendSessionEventToDb(
       error instanceof Error ? error.message : String(error),
     );
   }
+}
+
+type IterationIntentGateResult =
+  | {
+      handled: false;
+      classification: IterationIntentClassification;
+      usage: IterationIntentUsage;
+      classifierCreditsUsed: number;
+    }
+  | {
+      handled: true;
+      classification: IterationIntentClassification;
+      usage: IterationIntentUsage;
+      classifierCreditsUsed: number;
+      response: StructuredChatResponse;
+    };
+
+function getIterationIntentPilotOrgIds(): string[] {
+  return apiConfig.ITERATION_INTENT_PILOT_ORG_IDS
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
+export function isIterationIntentClassifierEnabledForOrg(orgId: string): boolean {
+  return apiConfig.ENABLE_ITERATION_INTENT_CLASSIFIER === "true"
+    && getIterationIntentPilotOrgIds().includes(orgId);
+}
+
+function findLastAssistantMessage(chatHistory: unknown): string | undefined {
+  return [...readProjectChatHistory(chatHistory)]
+    .reverse()
+    .find((entry) => entry.role === "assistant")
+    ?.content;
+}
+
+async function generateIterationConversationalAnswer(input: {
+  chatHistory: unknown;
+  chatSummary: unknown;
+  currentMessage: string;
+  existingFiles: readonly StudioFile[];
+  projectName: string;
+}): Promise<StructuredChatResponse> {
+  const apiKey = apiConfig.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return {
+      message: "Share the next website change or question, and I'll map the fastest path.",
+      readyToImplement: false,
+      implementPlan: null,
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create(
+      {
+        model: await getModelForBuilder("chat"),
+        max_tokens: 600,
+        system: buildStructuredChatSystemPrompt({
+          projectName: input.projectName,
+          chatSummary: typeof input.chatSummary === "string" ? input.chatSummary : null,
+          existingFiles: input.existingFiles,
+          chatHistory: readProjectChatHistory(input.chatHistory),
+          websiteContext: await loadUrlContext(input.currentMessage),
+        }),
+        messages: buildConversationMessages(readProjectChatHistory(input.chatHistory), input.currentMessage),
+      },
+      { signal: controller.signal },
+    );
+
+    const rawText = response.content
+      .filter((block): block is Anthropic.Messages.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+
+    return parseStructuredChatResponse(rawText);
+  } catch {
+    return {
+      message: "Share the next website change or question, and I'll map the fastest path.",
+      readyToImplement: false,
+      implementPlan: null,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function runIterationIntentGate(input: {
+  buildId: string;
+  existingFiles: readonly StudioFile[];
+  orgId: string;
+  project: {
+    name: string | null;
+    chat_history?: unknown;
+    chat_summary?: unknown;
+  };
+  prompt: string;
+  userEmail: string | null;
+}): Promise<IterationIntentGateResult | null> {
+  if (!isIterationIntentClassifierEnabledForOrg(input.orgId)) {
+    return null;
+  }
+
+  const { result, usage } = await classifyIterationIntentWithUsage({
+    prompt: input.prompt,
+    lastAssistantMessage: findLastAssistantMessage(input.project.chat_history),
+    projectName: input.project.name?.trim() || "Untitled website",
+  });
+  const classifierCreditsUsed = !isAdminEmail(input.userEmail)
+    ? calcCreditCostHaiku(usage.inputTokens, usage.outputTokens)
+    : 0;
+  const skippedPipeline = result.kind === "question" && result.confidence >= 0.7;
+
+  console.log(
+    "[telemetry] iteration intent",
+    JSON.stringify({
+      buildId: input.buildId,
+      kind: result.kind,
+      confidence: result.confidence,
+      promptLength: input.prompt.length,
+      skippedPipeline,
+    }),
+  );
+
+  if (!skippedPipeline) {
+    return {
+      handled: false,
+      classification: result,
+      usage,
+      classifierCreditsUsed,
+    };
+  }
+
+  return {
+    handled: true,
+    classification: result,
+    usage,
+    classifierCreditsUsed,
+    response: await generateIterationConversationalAnswer({
+      chatHistory: input.project.chat_history,
+      chatSummary: input.project.chat_summary,
+      currentMessage: input.prompt,
+      existingFiles: input.existingFiles,
+      projectName: input.project.name?.trim() || "Untitled website",
+    }),
+  };
 }
 
 function isAllowedWebsitePath(path: string): boolean {
@@ -955,7 +1120,7 @@ websitesIterateRoute.post(
 
       const writeEvent = async (
         eventName: string,
-        payload: WebsiteIterationAckEvent | WebsiteFilesEvent | BuilderV3DoneEvent,
+        payload: WebsiteIterationAckEvent | WebsiteFilesEvent | BuilderV3Event,
         extraPatch?: Partial<Parameters<StudioDbClient["updateGeneration"]>[1]>,
       ) => {
         await appendEventToDb(orgContext.db, buildId, payload, extraPatch);
@@ -978,6 +1143,100 @@ websitesIterateRoute.post(
 
       try {
         throwIfAborted(abortController.signal);
+
+        const intentGate = await runIterationIntentGate({
+          buildId,
+          existingFiles,
+          orgId: orgContext.org.id,
+          project,
+          prompt,
+          userEmail: orgContext.user.email,
+        });
+
+        if (intentGate?.handled) {
+          let creditsUsed = intentGate.classifierCreditsUsed;
+          if (creditsUsed > 0) {
+            try {
+              const deduction = await orgContext.db.applyOrgUsageDeduction(
+                orgContext.org.id,
+                creditsUsed,
+                buildId,
+                "Iteration intent classifier",
+              );
+              creditsUsed = deduction.deducted;
+            } catch (error) {
+              console.error(
+                "[websites/iterate] classifier credit deduction failed (non-fatal):",
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+          }
+
+          await appendSessionEventToDb(orgContext.db, buildId, { type: "user", content: prompt });
+
+          const conversationalEvent = {
+            type: "conversational_response" as const,
+            id: String(nextEventId++),
+            timestamp: ts(),
+            operation: WEBSITE_OPERATION,
+            message: intentGate.response.message,
+            readyToImplement: intentGate.response.readyToImplement,
+            implementPlan: intentGate.response.implementPlan ?? undefined,
+            plan: intentGate.response.implementPlan ?? undefined,
+          };
+
+          await writeEvent("conversational_response", conversationalEvent as unknown as BuilderV3Event);
+          await appendSessionEventToDb(orgContext.db, buildId, {
+            type: "chat_response",
+            content: intentGate.response.message,
+            ...(intentGate.response.implementPlan ? { implementPlan: intentGate.response.implementPlan } : {}),
+          });
+
+          const completedAt = ts();
+          const doneEvent: BuilderV3DoneEvent = {
+            type: "done",
+            id: String(nextEventId++),
+            timestamp: completedAt,
+            operation: WEBSITE_OPERATION,
+            code: "conversational",
+            message: intentGate.response.message,
+            buildId,
+            projectId,
+            fallbackUsed: false,
+            fallbackReason: null,
+            conversational: true,
+            payload: activeSection ? { activeSection } : undefined,
+          };
+
+          await writeEvent("done", doneEvent, {
+            completed_at: completedAt,
+            status: "completed",
+            summary: "Question answered — no build started.",
+          });
+
+          const completedRow = await orgContext.db.findGenerationById(buildId).catch(() => null);
+          const completedMetadata = typeof completedRow?.metadata === "object" && completedRow.metadata !== null
+            ? (completedRow.metadata as Record<string, unknown>)
+            : initialMetadata;
+
+          await orgContext.db.updateGeneration(buildId, {
+            metadata: {
+              ...completedMetadata,
+              creditsUsed,
+              inputTokens: intentGate.usage.inputTokens,
+              outputTokens: intentGate.usage.outputTokens,
+              resultSource: "chat_response",
+              iterationIntent: intentGate.classification,
+            },
+          }).catch(() => undefined);
+
+          await orgContext.db.updateProject(projectId, {
+            status: "ready",
+            updated_at: completedAt,
+          }).catch(() => undefined);
+
+          return;
+        }
 
         const ackEvent: WebsiteIterationAckEvent = {
           type: "iteration_ack",

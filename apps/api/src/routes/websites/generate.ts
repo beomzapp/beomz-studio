@@ -37,6 +37,7 @@ import {
   isImageChangeRequested,
   mergeStudioFiles,
   restoreLockedImagesAfterMerge,
+  runIterationIntentGate,
   SECTION_FILE_PATHS,
   type WebsiteSectionKey,
 } from "./iterate.js";
@@ -1691,6 +1692,102 @@ websitesGenerateRoute.post(
 
       try {
         throwIfAborted(abortController.signal);
+
+        if (isIteration) {
+          const intentGate = await runIterationIntentGate({
+            buildId,
+            existingFiles,
+            orgId: orgContext.org.id,
+            project,
+            prompt: modelPrompt,
+            userEmail: orgContext.user.email,
+          });
+
+          if (intentGate?.handled) {
+            let creditsUsed = intentGate.classifierCreditsUsed;
+            if (creditsUsed > 0) {
+              try {
+                const deduction = await orgContext.db.applyOrgUsageDeduction(
+                  orgContext.org.id,
+                  creditsUsed,
+                  buildId,
+                  "Iteration intent classifier",
+                );
+                creditsUsed = deduction.deducted;
+              } catch (error) {
+                console.error(
+                  "[websites/generate] classifier credit deduction failed (non-fatal):",
+                  error instanceof Error ? error.message : String(error),
+                );
+              }
+            }
+
+            await appendSessionEventToDb(orgContext.db, buildId, { type: "user", content: prompt });
+
+            const conversationalEvent = {
+              type: "conversational_response" as const,
+              id: String(nextEventId++),
+              timestamp: ts(),
+              operation,
+              message: intentGate.response.message,
+              readyToImplement: intentGate.response.readyToImplement,
+              implementPlan: intentGate.response.implementPlan ?? undefined,
+              plan: intentGate.response.implementPlan ?? undefined,
+            };
+
+            await writeEvent("conversational_response", conversationalEvent as unknown as BuilderV3Event);
+            await appendSessionEventToDb(orgContext.db, buildId, {
+              type: "chat_response",
+              content: intentGate.response.message,
+              ...(intentGate.response.implementPlan ? { implementPlan: intentGate.response.implementPlan } : {}),
+            });
+
+            const completedAt = ts();
+            const doneEvent: BuilderV3DoneEvent = {
+              type: "done",
+              id: String(nextEventId++),
+              timestamp: completedAt,
+              operation,
+              code: "conversational",
+              message: intentGate.response.message,
+              buildId,
+              projectId,
+              fallbackUsed: false,
+              fallbackReason: null,
+              conversational: true,
+              payload: activeSection ? { activeSection } : undefined,
+            };
+
+            await writeEvent("done", doneEvent, {
+              completed_at: completedAt,
+              status: "completed",
+              summary: "Question answered — no build started.",
+            });
+
+            const completedRow = await orgContext.db.findGenerationById(buildId).catch(() => null);
+            const completedMetadata = typeof completedRow?.metadata === "object" && completedRow.metadata !== null
+              ? (completedRow.metadata as Record<string, unknown>)
+              : initialMetadata;
+
+            await orgContext.db.updateGeneration(buildId, {
+              metadata: {
+                ...completedMetadata,
+                creditsUsed,
+                inputTokens: intentGate.usage.inputTokens,
+                outputTokens: intentGate.usage.outputTokens,
+                resultSource: "chat_response",
+                iterationIntent: intentGate.classification,
+              },
+            }).catch(() => undefined);
+
+            await orgContext.db.updateProject(projectId, {
+              status: "ready",
+              updated_at: completedAt,
+            }).catch(() => undefined);
+
+            return;
+          }
+        }
 
         if (!isAdminEmail(orgContext.user.email)) {
           let totalAvailable = 0;
