@@ -559,6 +559,23 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         return;
       }
       if (!Array.isArray(parsed) || parsed.length === 0) return;
+      // BEO-790 diagnostic: capture exactly what localStorage restored.
+      try {
+        console.log("[chat-diag] localStorage restore:", {
+          pid,
+          rawLength: saved.length,
+          messagesCount: parsed.length,
+          messageTypes: parsed.map(m => m.type),
+          messageSnippets: parsed.map(m => {
+            const anyMsg = m as unknown as Record<string, unknown>;
+            const content = typeof anyMsg.content === "string" ? anyMsg.content : "";
+            return { type: m.type, contentTail: content.slice(-60) };
+          }),
+          storedImpl,
+          buildingUi: sessionStorage.getItem(`beomz:buildingUi:${pid}`),
+          buildStartedAt: sessionStorage.getItem(`beomz:buildStartedAt:${pid}`),
+        });
+      } catch { /* logging never blocks restore */ }
       setMessages(prev => (prev.length > 0 ? prev : parsed));
       if (storedImpl?.summary) {
         setImplementSuggestion(storedImpl);
@@ -581,6 +598,19 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
     void getLatestBuildForProject(pid)
       .then(status => {
         if (!status) return;
+        // BEO-790 diagnostic: backend response shape.
+        try {
+          console.log("[chat-diag] backend latestBuild:", {
+            pid,
+            buildStatus: status.build.status,
+            sessionEventsCount: status.build.sessionEvents?.length ?? 0,
+            sessionEventTypes: status.build.sessionEvents?.map((e: { type: string }) => e.type) ?? [],
+            sessionEventSnippets: status.build.sessionEvents?.map((e: { type: string; content?: string }) => ({
+              type: e.type,
+              contentTail: typeof e.content === "string" ? e.content.slice(-60) : "(no content)",
+            })) ?? [],
+          });
+        } catch { /* logging never blocks */ }
         if (status.build.status !== "completed" && status.build.status !== "failed") return;
         const events = status.build.sessionEvents;
         if (!events?.length) return;
@@ -639,6 +669,28 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               merged.push(backendMsg);
             }
           }
+          // BEO-790 diagnostic: capture merge result.
+          try {
+            const finalMerged = [...preBoundary, ...merged];
+            console.log("[chat-diag] merge result:", {
+              pid,
+              boundaryIdx,
+              prevLength: prev.length,
+              prevTypes: prev.map(m => m.type),
+              backendMsgCount: backendMsgs.length,
+              backendMsgTypes: backendMsgs.map(m => m.type),
+              postBoundaryStartLen: prev.slice(boundaryIdx).length,
+              mergedFinalLen: merged.length,
+              mergedFinalTypes: merged.map(m => m.type),
+              finalMessagesLen: finalMerged.length,
+              finalMessagesTypes: finalMerged.map(m => m.type),
+              finalMessagesSnippets: finalMerged.map(m => {
+                const anyMsg = m as unknown as Record<string, unknown>;
+                const content = typeof anyMsg.content === "string" ? anyMsg.content : "";
+                return { type: m.type, contentTail: content.slice(-60) };
+              }),
+            });
+          } catch { /* logging never blocks */ }
           return [...preBoundary, ...merged];
         });
       })
