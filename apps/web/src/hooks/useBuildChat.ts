@@ -588,17 +588,11 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
         if (!backendMsgs.length) return;
         setMessages(prev => {
           if (prev.length === 0) return backendMsgs;
-          // Identify the boundary: find the first user-type message in backend events.
-          // That content identifies where the latest build starts in localStorage.
+          // BEO-788: Find first user message in backend → identifies the latest-build segment.
           const firstBackendUser = backendMsgs.find(m => m.type === "user") as
             | Extract<ChatMessage, { type: "user" }>
             | undefined;
-          if (!firstBackendUser) {
-            // No user event in backend — cannot identify a boundary; keep localStorage.
-            return prev;
-          }
-          // Search backwards in localStorage for the matching user message (last occurrence
-          // is correct when the same prompt appears in multiple iterations).
+          if (!firstBackendUser) return prev;
           let boundaryIdx = -1;
           for (let i = prev.length - 1; i >= 0; i--) {
             const m = prev[i];
@@ -607,14 +601,45 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
               break;
             }
           }
-          if (boundaryIdx === -1) {
-            // Boundary not found in the cached window — keep localStorage; the
-            // backend belongs to a build that has scrolled past the 20-message cap.
-            return prev;
+          if (boundaryIdx === -1) return prev;
+          // BEO-788 additive merge: never DROP a localStorage event. Walk backend
+          // events and for each, either (a) overlay missing fields onto a matching
+          // localStorage event, or (b) append it if no equivalent exists locally.
+          // This preserves chat_response with implementPlan + nextSteps that
+          // localStorage captured from live SSE — backend often has fewer events
+          // (conversational + build live in separate generation rows; latestBuild
+          // returns only the build row).
+          const preBoundary = prev.slice(0, boundaryIdx);
+          const merged: ChatMessage[] = prev.slice(boundaryIdx);
+          for (const backendMsg of backendMsgs) {
+            const matchIdx = merged.findIndex(m => {
+              if (m.type !== backendMsg.type) return false;
+              if (backendMsg.type === "user") {
+                return m.type === "user" && m.content === backendMsg.content;
+              }
+              return true; // for non-user types, match first occurrence in segment
+            });
+            if (matchIdx >= 0) {
+              // Overlay: only fill fields that are missing/null/empty in localStorage.
+              // Never overwrite values localStorage already has (it's authoritative
+              // for live SSE state like nextSteps that arrives separately).
+              const existing = merged[matchIdx] as unknown as Record<string, unknown>;
+              const incoming = backendMsg as unknown as Record<string, unknown>;
+              const enriched: Record<string, unknown> = { ...existing };
+              for (const [key, val] of Object.entries(incoming)) {
+                if (val == null) continue;
+                const cur = existing[key];
+                if (cur == null || (Array.isArray(cur) && cur.length === 0)) {
+                  enriched[key] = val;
+                }
+              }
+              merged[matchIdx] = enriched as unknown as ChatMessage;
+            } else {
+              // No equivalent in localStorage — append (cross-device / cleared-storage case).
+              merged.push(backendMsg);
+            }
           }
-          // Keep pre-boundary history from localStorage; replace latest build segment
-          // with backend's authoritative view (includes nextSteps, implementPlan, etc.).
-          return [...prev.slice(0, boundaryIdx), ...backendMsgs];
+          return [...preBoundary, ...merged];
         });
       })
       .catch(() => {});

@@ -918,6 +918,11 @@ export async function runBuildPipeline(args: BuildPipelineArgs): Promise<TokenUs
         filesChanged: changedPaths,
         durationMs: finalDurationMs,
         creditsUsed,
+        // BEO-789: persist nextSteps suggestions on the build_summary so that
+        // post-refresh / cross-device replay can render the real chips instead
+        // of falling back to NEXT_STEPS_FALLBACK after 8s. The next_steps event
+        // emitted below goes only to builderTrace, never session_events.
+        nextSteps: nextSteps.payload?.suggestions,
       });
       if (nextSteps.payload) {
         const nextStepsEvent: BuilderV3NextStepsEvent = {
