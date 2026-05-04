@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
+import { apiConfig } from "../../config.js";
 import type { OrgContext } from "../../types.js";
 import {
   buildInitialBuildOutput,
@@ -9,6 +10,11 @@ import {
   mapProjectRowToProject,
   readBuildTraceMetadata,
 } from "./shared.js";
+
+function isChatV2PilotOrg(orgId: string): boolean {
+  const ids = apiConfig.CHAT_PANEL_V2_PILOT_ORG_IDS.split(",").map((s) => s.trim()).filter(Boolean);
+  return ids.includes(orgId);
+}
 
 /**
  * GET /projects/:projectId/latest-build
@@ -46,6 +52,7 @@ buildsLatestRoute.get("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     project: mapProjectRowToProject(projectRow),
     result: buildInitialBuildOutput(generationRow),
     trace,
+    features: { chatV2: isChatV2PilotOrg(orgContext.org.id) },
   });
 });
 
