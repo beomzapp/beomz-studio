@@ -20,6 +20,27 @@ const {
 
 const INLINE_SUPABASE_RULE = "Continue the same inline createClient() pattern already present in the existing project files.";
 const BYO_SUPABASE_RULE = "This project uses the user's own Supabase database.";
+const ITERATION_STRICT_SCOPE_RULE_BLOCK = [
+  "SCOPE PRESERVATION (HIGHEST PRIORITY):",
+  "",
+  "You are editing an existing app. The user's message is a CHANGE REQUEST, not a redesign request, unless their words explicitly include design/visual/branding terms (\"redesign\", \"new look\", \"rebrand\", \"change theme\", \"different colors\", \"rename app to X\", \"use a new design\", etc.).",
+  "",
+  "Make the SMALLEST change that satisfies the user's request. Preserve everything else byte-for-byte:",
+  "- Do NOT change the app name.",
+  "- Do NOT change the typography (font families, font weights, font sizes — keep the existing scale).",
+  "- Do NOT change the color palette (background, foreground, accent, semantic colors).",
+  "- Do NOT change the design personality / theme / aesthetic.",
+  "- Do NOT rename, restructure, or replace the sidebar, header, or navigation patterns.",
+  "- Do NOT replace sample / placeholder data with different sample data.",
+  "- Do NOT refactor unrelated files. Only touch files necessary for the requested change.",
+  "- Do NOT add features the user did not ask for (\"while I'm at it\" additions are forbidden).",
+  "",
+  "If the user asks for \"an edit button\", add an edit button. Nothing else changes. The visual result should be the existing app PLUS the requested element, indistinguishable from the original everywhere else.",
+  "",
+  "If you genuinely need to touch a file to implement the request, change ONLY the lines required. Read every file you intend to touch first; preserve every existing class, prop, import, and JSX node not directly involved in the change.",
+  "",
+  "This rule overrides any prior instruction to \"improve\" or \"polish\" or \"enhance\" the design.",
+].join("\n");
 
 test("iteration system prompt injects the inline Supabase rule when db_wired=true", () => {
   const prompt = buildIterationSystemPrompt(undefined, undefined, true);
@@ -184,6 +205,39 @@ test("iteration system prompt forbids whole-site rebuilds unless the user explic
   assert.match(prompt, /CRITICAL: NEVER regenerate or redesign the entire site\./);
   assert.match(prompt, /Only rebuild from scratch if the user explicitly says 'rebuild', 'redesign', 'start over', 'make it completely different', or 'try a new design'\./);
   assert.match(prompt, /ALL other requests — even vague ones — are precise iterations on the existing design\./);
+});
+
+test("iteration system prompt omits the scope preservation block when strict scope is disabled", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, false, null, null, false, undefined, undefined, false);
+
+  assert.equal(prompt.includes("SCOPE PRESERVATION (HIGHEST PRIORITY):"), false);
+});
+
+test("iteration system prompt starts with the scope preservation block when strict scope is enabled", () => {
+  const prompt = buildIterationSystemPrompt(undefined, undefined, false, null, null, false, undefined, undefined, true);
+
+  assert.equal(prompt.startsWith(ITERATION_STRICT_SCOPE_RULE_BLOCK), true);
+});
+
+test("iteration system prompt keeps existing guidance after the scope preservation block", () => {
+  const prompt = buildIterationSystemPrompt(
+    'CREATE TABLE public.tasks (id uuid primary key);',
+    "Keep the existing hero image.",
+    false,
+    null,
+    null,
+    false,
+    undefined,
+    "DB CONTEXT BLOCK",
+    true,
+  );
+
+  assert.equal(prompt.startsWith(ITERATION_STRICT_SCOPE_RULE_BLOCK), true);
+  assert.match(prompt, /DATABASE SCHEMA \(current live schema for this project\):/);
+  assert.match(prompt, /IMAGE CONTEXT:/);
+  assert.match(prompt, /DB CONTEXT BLOCK/);
+  assert.match(prompt, /CLARIFYING QUESTIONS RULE:/);
+  assert.ok(prompt.indexOf("DATABASE SCHEMA (current live schema for this project):") > prompt.indexOf("This rule overrides any prior instruction to \"improve\" or \"polish\" or \"enhance\" the design."));
 });
 
 test("iteration system prompt appends explicit public URL embedding instructions for attached images", () => {

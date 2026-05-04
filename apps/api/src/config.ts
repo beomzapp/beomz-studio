@@ -90,6 +90,8 @@ const envSchema = z.object({
   BATCH_STREAMING_DELTAS: z.string().optional().default("false"),
   IMPLEMENTBAR_QUIET_PERIOD_MS: z.string().optional().default("0"),
   USE_TRANSACTIONAL_MIGRATIONS: z.string().optional().default("false"),
+  ITERATION_STRICT_SCOPE: z.string().optional().default("false"),
+  ITERATION_STRICT_SCOPE_PILOT_ORG_IDS: z.string().optional().default(""),
   STALE_BUILD_WATCHDOG_MODE: z.enum(["off", "dry-run", "on"]).optional().default("off"),
 });
 

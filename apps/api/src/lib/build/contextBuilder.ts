@@ -47,6 +47,28 @@ const BYO_SUPABASE_SYSTEM_PROMPT_BLOCK = [
 
 const ITERATION_STRICT_REBUILD_RULE = "CRITICAL: NEVER regenerate or redesign the entire site. You are making surgical changes only. Only rebuild from scratch if the user explicitly says 'rebuild', 'redesign', 'start over', 'make it completely different', or 'try a new design'. ALL other requests — even vague ones — are precise iterations on the existing design.";
 
+const ITERATION_STRICT_SCOPE_RULE_BLOCK = [
+  "SCOPE PRESERVATION (HIGHEST PRIORITY):",
+  "",
+  "You are editing an existing app. The user's message is a CHANGE REQUEST, not a redesign request, unless their words explicitly include design/visual/branding terms (\"redesign\", \"new look\", \"rebrand\", \"change theme\", \"different colors\", \"rename app to X\", \"use a new design\", etc.).",
+  "",
+  "Make the SMALLEST change that satisfies the user's request. Preserve everything else byte-for-byte:",
+  "- Do NOT change the app name.",
+  "- Do NOT change the typography (font families, font weights, font sizes — keep the existing scale).",
+  "- Do NOT change the color palette (background, foreground, accent, semantic colors).",
+  "- Do NOT change the design personality / theme / aesthetic.",
+  "- Do NOT rename, restructure, or replace the sidebar, header, or navigation patterns.",
+  "- Do NOT replace sample / placeholder data with different sample data.",
+  "- Do NOT refactor unrelated files. Only touch files necessary for the requested change.",
+  "- Do NOT add features the user did not ask for (\"while I'm at it\" additions are forbidden).",
+  "",
+  "If the user asks for \"an edit button\", add an edit button. Nothing else changes. The visual result should be the existing app PLUS the requested element, indistinguishable from the original everywhere else.",
+  "",
+  "If you genuinely need to touch a file to implement the request, change ONLY the lines required. Read every file you intend to touch first; preserve every existing class, prop, import, and JSX node not directly involved in the change.",
+  "",
+  "This rule overrides any prior instruction to \"improve\" or \"polish\" or \"enhance\" the design.",
+].join("\n");
+
 const BYO_SUPABASE_MIGRATIONS_CRITICAL_BLOCK = [
   "CRITICAL — Supabase schema migrations:",
   "You MUST include ALL database schema changes in the migrations array.",
@@ -1212,6 +1234,7 @@ function buildIterationSystemPrompt(
   hasByoSupabaseConfig = false,
   imageEmbeddingInstructionBlock?: string,
   dbContextBlock?: string,
+  enforceStrictScope = false,
 ): string {
   const isPostgresWired = hasWiredSupabaseClient && (dbProvider === "neon" || dbProvider === "postgres");
   const hasNeonAuth = dbProvider === "neon"
@@ -1308,6 +1331,7 @@ function buildIterationSystemPrompt(
         "NEVER use './supabase-js', '../supabase-js', or 'supabase-js' — these will crash the app.",
       ];
   return [
+    ...(enforceStrictScope ? [ITERATION_STRICT_SCOPE_RULE_BLOCK, ""] : []),
     "You are making a surgical edit to an existing React app.",
     ITERATION_STRICT_REBUILD_RULE,
     imageBlock,

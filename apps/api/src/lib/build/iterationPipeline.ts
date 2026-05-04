@@ -260,6 +260,7 @@ export async function runIterationPipeline(args: IterationPipelineArgs): Promise
       prompt,
       model,
       projectId,
+      orgId,
       existingFiles,
       { buildId, isIteration: true },
       iterSchemaSummary,

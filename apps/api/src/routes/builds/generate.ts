@@ -2777,6 +2777,7 @@ async function callModelIterate(
   prompt: string,
   model: string,
   projectId: string,
+  orgId: string,
   existingFiles: readonly StudioFile[],
   instrumentation?: { buildId: string; isIteration: boolean },
   schemaSummary?: string,
@@ -2817,6 +2818,14 @@ async function callModelIterate(
     }
   }
 
+  const enforceStrictScope =
+    apiConfig.ITERATION_STRICT_SCOPE === "true"
+    && apiConfig.ITERATION_STRICT_SCOPE_PILOT_ORG_IDS
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .includes(orgId);
+
   const systemPrompt = contextBuilder.buildIterationSystemPrompt(
     schemaSummary,
     imageContextBlock,
@@ -2826,6 +2835,7 @@ async function callModelIterate(
     hasByoSupabaseConfig,
     imageEmbeddingInstructionBlock,
     dbContextBlock,
+    enforceStrictScope,
   );
   const selection = contextBuilder.buildIterationSelection(prompt, existingFiles, resolvedImageBlock);
   console.log("[generate] existing files fetched:", existingFiles?.map((f) => f.path));
