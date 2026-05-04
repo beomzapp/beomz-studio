@@ -138,6 +138,16 @@ body {
   animation: typewriter-blink 500ms step-end infinite;
 }
 
+/* BEO-812: Chat message streaming cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.blinking-cursor {
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+}
+
 /* BEO-454: Preview iframe fade-in on first reveal */
 @keyframes fadeInPreview {
   from { opacity: 0; }
@@ -155,7 +165,8 @@ body {
   .checklist-orb-active,
   .build-shimmer-text,
   .live-status-shimmer,
-  .typewriter-cursor {
+  .typewriter-cursor,
+  .blinking-cursor {
     animation: none !important;
   }
 

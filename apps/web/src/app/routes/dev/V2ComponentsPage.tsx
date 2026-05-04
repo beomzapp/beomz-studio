@@ -11,9 +11,9 @@ import {
   EXAMPLE_TURN_COMPLETE,
   EXAMPLE_TURN_STARTED,
 } from "@beomz-studio/contracts";
-import { ChatPanelV2, InlineConfirmation } from "../../../components/builder/v2";
+import { ChatPanelV2, InlineConfirmation, TextMessage, BuildSummary, InlineError } from "../../../components/builder/v2";
 import { LiveStatusPill } from "../../../components/builder/LiveStatusPill";
-import { chatV2Reducer, initialChatState } from "../../../hooks/useBuildChatV2";
+import { chatV2Reducer, initialChatState, type Message } from "../../../hooks/useBuildChatV2";
 
 interface CardConfig {
   label: string;
@@ -276,6 +276,7 @@ export function V2ComponentsPage() {
         <a href="#shimmer">Shimmer variants</a>
         <a href="#use-build-chat-v2">useBuildChatV2</a>
         <a href="#chat-panel-v2">ChatPanelV2</a>
+        <a href="#message-types">Message types</a>
       </nav>
 
       <div className="mx-auto max-w-xl">
@@ -389,7 +390,7 @@ export function V2ComponentsPage() {
         </section>
 
         {/* ── Shimmer variants ── */}
-        <section id="shimmer" className="mt-14 pb-20">
+        <section id="shimmer" className="mt-14">
           <h2 className="mb-6 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
             Shimmer animation variants
           </h2>
@@ -461,6 +462,91 @@ export function V2ComponentsPage() {
               >
                 Working…
               </span>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Message types ── BEO-812 */}
+        <section id="message-types" className="mt-14 pb-20">
+          <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
+            Message types
+          </h2>
+          <p className="mb-6 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">
+            BEO-812 · TextMessage, BuildSummary, InlineError — 8 sample states
+          </p>
+          <div className="flex flex-col gap-5">
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                TextMessage — user bubble short
+              </p>
+              <TextMessage
+                message={{ id: "m1", turnId: "t1", role: "user", type: "text", content: "Make the hero section taller", streaming: false, createdAt: 0 } as Message}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                TextMessage — user bubble long
+              </p>
+              <TextMessage
+                message={{ id: "m2", turnId: "t1", role: "user", type: "text", content: "Can you redesign the pricing section? I want three tiers: Starter, Pro, and Enterprise. Make it look modern with a highlighted middle card. The card should have a gradient border.", streaming: false, createdAt: 0 } as Message}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                TextMessage — assistant (not streaming)
+              </p>
+              <TextMessage
+                message={{ id: "m3", turnId: "t1", role: "assistant", type: "text", content: "I'll increase the hero section height from h-96 to h-[480px] and adjust the inner padding to match.", streaming: false, createdAt: 0 } as Message}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                TextMessage — assistant streaming (blinking cursor)
+              </p>
+              <TextMessage
+                message={{ id: "m4", turnId: "t1", role: "assistant", type: "text", content: "I'll redesign the pricing section with three tiers", streaming: true, createdAt: 0 } as Message}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                BuildSummary — with files + nextSteps
+              </p>
+              <BuildSummary
+                message={{ id: "m5", turnId: "t1", role: "assistant", type: "build_summary", content: "", streaming: false, filesChanged: ["src/App.tsx", "src/styles.css"], durationMs: 42000, creditsUsed: 3, nextSteps: [{ label: "Add dark mode", prompt: "add dark mode" }, { label: "Improve mobile layout", prompt: "improve mobile layout" }], createdAt: 0 } as Message}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                BuildSummary — streaming / empty (shimmer)
+              </p>
+              <BuildSummary
+                message={{ id: "m6", turnId: "t2", role: "assistant", type: "build_summary", content: "", streaming: true, filesChanged: [], creditsUsed: 0, createdAt: 0 } as Message}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                InlineError — not retryable
+              </p>
+              <InlineError
+                message={{ id: "m7", turnId: "t2", role: "assistant", type: "error", content: "Build failed: could not resolve import './missing-module'", retryable: false, streaming: false, createdAt: 0 } as Message}
+                onRetry={() => console.log("retry clicked")}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+                InlineError — retryable (shows Retry button)
+              </p>
+              <InlineError
+                message={{ id: "m8", turnId: "t2", role: "assistant", type: "error", content: "Connection lost — your changes were not saved.", retryable: true, streaming: false, createdAt: 0 } as Message}
+                onRetry={() => console.log("retry clicked")}
+              />
             </div>
           </div>
         </section>
