@@ -110,12 +110,25 @@ const SupportPage = lazy(() =>
   import("./app/routes/marketing/SupportPage").then(m => ({ default: m.SupportPage })),
 );
 
-// DEV-only: /dev/v2-components — excluded from production bundles via dead-code
-// elimination when Vite replaces import.meta.env.DEV with false at build time.
+// BEO-805: /dev/v2-components is gated at runtime. In DEV it always opens.
+// In production it opens when localStorage "beomz:devMode" === "true" (set in
+// the browser console, then refresh). The lazy import stays in the bundle so
+// the component is available without a separate chunk request after the flag
+// is set — intentional, matches the BEO-794 inspector pattern.
+const isDevPreviewEnabled = (): boolean => {
+  if (import.meta.env.DEV) return true;
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem("beomz:devMode") === "true";
+  } catch {
+    return false;
+  }
+};
+
 const devV2ComponentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dev/v2-components",
-  component: import.meta.env.DEV
+  component: isDevPreviewEnabled()
     ? withSuspense(
         lazy(() =>
           import("./app/routes/dev/V2ComponentsPage").then((m) => ({
