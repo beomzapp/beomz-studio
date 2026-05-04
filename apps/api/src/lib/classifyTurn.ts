@@ -11,7 +11,7 @@ const CLASSIFY_TURN_SYSTEM_PROMPT = [
   "{\"kind\":\"question\"|\"iteration\"|\"redesign\"|\"initial_build\",\"confidence\":0.0-1.0,\"reason\":\"...\"}",
   "",
   "Rules:",
-  "- \"question\": user asks for info, clarification, or explanation. No build needed.",
+  "- \"question\": user asks for info, clarification, explanation, OR sends a greeting / conversational / ambiguous short message. Default to this when intent to build is unclear. No build needed.",
   "- \"initial_build\": no existing files (hasExistingFiles=false), or user explicitly requests a brand new app.",
   "- \"redesign\": existing app + user wants major visual overhaul (\"redesign\", \"new look\", \"completely different style\").",
   "- \"iteration\": existing app + user requests a specific change, addition, or fix.",
