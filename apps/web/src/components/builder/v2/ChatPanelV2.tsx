@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useBuildChatV2, type Message } from "../../../hooks/useBuildChatV2";
 import { LiveStatusPill } from "../LiveStatusPill";
 import { InlineConfirmation } from "./InlineConfirmation";
+import { ChatStateInspectorV2 } from "../../dev/ChatStateInspectorV2";
 
 // ─── TextMessage ────────────────────────────────────────────────────────────
 
@@ -147,31 +148,34 @@ export function ChatPanelV2({ projectId }: { projectId: string }) {
   const { state, sendMessage, implementPlan, retry } = useBuildChatV2(projectId);
 
   return (
-    <div className="flex h-full flex-col">
-      <MessageList messages={state.messages} retry={retry} />
+    <>
+      <div className="flex h-full flex-col">
+        <MessageList messages={state.messages} retry={retry} />
 
-      {(ACTIVE_PHASES as readonly string[]).includes(state.phase) && (
-        <div className="px-4 py-1">
-          <LiveStatusPill currentAction={state.currentAction?.label ?? null} />
-        </div>
-      )}
+        {(ACTIVE_PHASES as readonly string[]).includes(state.phase) && (
+          <div className="px-4 py-1">
+            <LiveStatusPill currentAction={state.currentAction?.label ?? null} />
+          </div>
+        )}
 
-      {state.phase === "awaiting_implement" && state.pendingPlan && (
-        <div className="px-4 py-2">
-          <InlineConfirmation
-            summary={state.pendingPlan.summary}
-            cta={state.pendingPlan.cta}
-            confidence={0.9}
-            onImplement={() => implementPlan(state.pendingPlan!.cta.planId)}
-            onCancel={() => {}}
-          />
-        </div>
-      )}
+        {state.phase === "awaiting_implement" && state.pendingPlan && (
+          <div className="px-4 py-2">
+            <InlineConfirmation
+              summary={state.pendingPlan.summary}
+              cta={state.pendingPlan.cta}
+              confidence={0.9}
+              onImplement={() => implementPlan(state.pendingPlan!.cta.planId)}
+              onCancel={() => {}}
+            />
+          </div>
+        )}
 
-      <Composer
-        disabled={(COMPOSER_DISABLED_PHASES as readonly string[]).includes(state.phase)}
-        onSubmit={(prompt) => { void sendMessage(prompt); }}
-      />
-    </div>
+        <Composer
+          disabled={(COMPOSER_DISABLED_PHASES as readonly string[]).includes(state.phase)}
+          onSubmit={(prompt) => { void sendMessage(prompt); }}
+        />
+      </div>
+      <ChatStateInspectorV2 projectId={projectId} state={state} />
+    </>
   );
 }

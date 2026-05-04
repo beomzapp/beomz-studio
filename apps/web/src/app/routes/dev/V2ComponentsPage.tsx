@@ -14,6 +14,8 @@ import {
 import { ChatPanelV2, InlineConfirmation, TextMessage, BuildSummary, InlineError } from "../../../components/builder/v2";
 import { LiveStatusPill } from "../../../components/builder/LiveStatusPill";
 import { chatV2Reducer, initialChatState, type Message } from "../../../hooks/useBuildChatV2";
+import { ChatStateInspectorV2 } from "../../../components/dev/ChatStateInspectorV2";
+import type { ChatState } from "../../../hooks/useBuildChatV2";
 
 interface CardConfig {
   label: string;
@@ -74,6 +76,36 @@ const PILL_STATES: { label: string; currentAction: string | null }[] = [
       "Writing apps/web/src/components/builder/v2/InlineConfirmationCountdownTimerWrapper.tsx",
   },
 ];
+
+// ─── BEO-813: Chat inspector v2 fake state ───────────────────────────────────
+
+const fakeInspectorState: ChatState = {
+  turnId: "abc12345-0000-0000-0000-000000000000",
+  phase: "building",
+  messages: [
+    {
+      id: "m1",
+      turnId: "t1",
+      role: "user",
+      type: "text",
+      content: "Make the hero section taller",
+      streaming: false,
+      createdAt: Date.now() - 10000,
+    },
+    {
+      id: "m2",
+      turnId: "t1",
+      role: "assistant",
+      type: "text",
+      content: "I'll increase the hero section height from h-96 to h-[480px] and adjust the inner padding.",
+      streaming: true,
+      createdAt: Date.now() - 5000,
+    },
+  ],
+  currentAction: { type: "tool_action", label: "Editing src/App.tsx" } as any,
+  pendingPlan: null,
+  error: null,
+};
 
 // ─── BEO-808: Reducer state inspector ────────────────────────────────────────
 
@@ -277,6 +309,7 @@ export function V2ComponentsPage() {
         <a href="#use-build-chat-v2">useBuildChatV2</a>
         <a href="#chat-panel-v2">ChatPanelV2</a>
         <a href="#message-types">Message types</a>
+        <a href="#chat-state-inspector-v2">Chat inspector v2</a>
       </nav>
 
       <div className="mx-auto max-w-xl">
@@ -467,7 +500,7 @@ export function V2ComponentsPage() {
         </section>
 
         {/* ── Message types ── BEO-812 */}
-        <section id="message-types" className="mt-14 pb-20">
+        <section id="message-types" className="mt-14">
           <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
             Message types
           </h2>
@@ -548,6 +581,26 @@ export function V2ComponentsPage() {
                 onRetry={() => console.log("retry clicked")}
               />
             </div>
+          </div>
+        </section>
+
+        {/* ── ChatStateInspectorV2 ── BEO-813 */}
+        <section id="chat-state-inspector-v2" className="space-y-4 pb-32 mt-14">
+          <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
+            Chat inspector v2
+          </h2>
+          <p className="mb-4 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">
+            BEO-813 · phase: building · 2 msgs · inspector is position:fixed — floats over page in real use
+          </p>
+          <div className="relative h-[380px] border border-zinc-200 rounded-lg overflow-hidden bg-zinc-50">
+            <span className="absolute top-2 left-3 text-[11px] text-zinc-400 font-mono z-10">
+              Inspector preview — force-opened, fake state · renders fixed over page
+            </span>
+            <ChatStateInspectorV2
+              projectId="dev-preview-001"
+              state={fakeInspectorState}
+              forceOpen
+            />
           </div>
         </section>
       </div>
