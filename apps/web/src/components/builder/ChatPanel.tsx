@@ -6,9 +6,9 @@
  *   Responsibilities:
  *     - Layout: scroll region, suggestion-chip strip, ImplementBar zone,
  *       input bar, image attach.
- *     - Map each message in `messages` to the right component via
- *       ChatMessageView. Filters out in-flight `building` messages while
- *       isBuilding so BuildProgressCard.Shimmer takes over cleanly.
+     *     - Map each message in `messages` to the right component via
+     *       ChatMessageView. Filters out in-flight `building` messages while
+     *       isBuilding so LiveStatusPill takes over cleanly.
  *     - Capture the message-id snapshot on mount in `initialMsgIdsRef` so
  *       only messages added AFTER mount get TypewriterText animation. Hard
  *       refresh shows everything instantly.
@@ -25,7 +25,6 @@ import { cn } from "../../lib/cn";
 import { uploadImage } from "../../lib/api";
 import { BAvatar } from "./Avatars";
 import { ChatMessageView } from "./ChatMessage";
-import { BuildProgressCard } from "./BuildProgressCard";
 import { LiveStatusPill } from "./LiveStatusPill";
 import { ImplementBar } from "./ImplementBar";
 
@@ -121,7 +120,6 @@ export function ChatPanel({
   projectId,
   onImplementPlan,
   isAnalysingImage,
-  isIterationBuild,
   currentAction,
   userFirstName,
   userAvatarUrl,
@@ -361,7 +359,7 @@ export function ChatPanel({
 
   const hasMessages = messages.length > 0;
   // While a build is in progress, suppress in-flight `building` messages —
-  // BuildProgressCard.Shimmer renders below the message list instead.
+  // LiveStatusPill renders below the message list instead.
   const visibleMessages = isBuilding
     ? messages.filter(m => m.type !== "building")
     : messages;
@@ -416,14 +414,11 @@ export function ChatPanel({
             ))}
 
             {/* In-flight build indicator: analysing-image card while we wait for
-                image_intent; live single-line pill for iterations (BEO-798);
-                4-step shimmer for initial builds. */}
+                image_intent; live single-line pill for all builds (BEO-800). */}
             {isBuilding && isAnalysingImage ? (
               <AnalysingImageCard />
             ) : showShimmer ? (
-              isIterationBuild
-                ? <LiveStatusPill currentAction={currentAction} />
-                : <BuildProgressCard.Shimmer />
+              <LiveStatusPill currentAction={currentAction} />
             ) : null}
           </div>
         )}
