@@ -110,6 +110,22 @@ const SupportPage = lazy(() =>
   import("./app/routes/marketing/SupportPage").then(m => ({ default: m.SupportPage })),
 );
 
+// DEV-only: /dev/v2-components — excluded from production bundles via dead-code
+// elimination when Vite replaces import.meta.env.DEV with false at build time.
+const devV2ComponentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dev/v2-components",
+  component: import.meta.env.DEV
+    ? withSuspense(
+        lazy(() =>
+          import("./app/routes/dev/V2ComponentsPage").then((m) => ({
+            default: m.V2ComponentsPage,
+          })),
+        ),
+      )
+    : () => null,
+});
+
 /**
  * BEO-580: while a lazy chunk loads, show a transparent placeholder. The
  * inline app shell in index.html is still on screen for the very first
@@ -372,6 +388,7 @@ const versionPreviewRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
+  devV2ComponentsRoute,
   landingRoute,
   planRoute,
   pricingRoute,
