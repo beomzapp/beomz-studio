@@ -342,7 +342,7 @@ export function useBuildChatV2(projectId: string) {
 
       let response: Response;
       try {
-        response = await fetch(`${getApiBaseUrl()}/api/builds/v2/message`, {
+        response = await fetch(`${getApiBaseUrl()}/builds/v2/message`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
