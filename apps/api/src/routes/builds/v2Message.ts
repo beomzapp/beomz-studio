@@ -10,6 +10,7 @@ import { apiConfig } from "../../config.js";
 import { classifyTurn } from "../../lib/classifyTurn.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
+import { anthropic } from "../plan/shared.js";
 import type { OrgContext } from "../../types.js";
 import { filterBlockedGeneratedFiles } from "./generate.js";
 
@@ -70,6 +71,7 @@ buildsV2MessageRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
 
     const turnId = crypto.randomUUID();
     const messageId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
 
     console.log("[v2/message] turn started", { projectId, turnId, kind: result.kind });
     console.log("[telemetry] turn classified", {
@@ -92,7 +94,34 @@ buildsV2MessageRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
       },
     });
     emit(res, { type: "state", phase: "classifying" });
-    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    if (result.kind === "question") {
+      emit(res, { type: "state", phase: "thinking" });
+      const stream = anthropic.messages.stream({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 400,
+        system: "You are Beomz, a friendly AI coding assistant. Answer the user's question about their web app concisely. If they describe a change they want, explain what you would do briefly — don't implement it yet.",
+        messages: [{ role: "user", content: prompt }],
+      });
+      stream.on("error", () => {});
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          emit(res, { type: "text_delta", messageId: assistantMessageId, delta: event.delta.text });
+        }
+      }
+      await stream.finalMessage();
+    } else if (result.kind === "iteration" || result.kind === "redesign") {
+      emit(res, { type: "state", phase: "thinking" });
+      emit(res, { type: "state", phase: "building" });
+      // TODO P2.5: delegate to exported callModelIterate helper in generate.ts
+      emit(res, { type: "text_delta", messageId: assistantMessageId, delta: "On it — applying your changes." });
+    } else {
+      // initial_build
+      emit(res, { type: "state", phase: "thinking" });
+      emit(res, { type: "state", phase: "planning" });
+      // TODO P2.5: delegate to runBuildInBackground in generate.ts
+    }
+
     emit(res, { type: "state", phase: "done" });
     emit(res, { type: "turn_complete", turnId });
     res.end();
