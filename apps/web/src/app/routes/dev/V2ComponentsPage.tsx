@@ -416,7 +416,7 @@ export function V2ComponentsPage() {
             BEO-810 · Phase 3.2 — shell component wiring useBuildChatV2
           </p>
           <div className="h-[480px] rounded-xl border border-zinc-200 overflow-hidden">
-            <ChatPanelV2 projectId="dev-preview-001" />
+            <ChatPanelV2 projectId="dev-preview-001" userAvatarUrl={undefined} userInitials="OA" />
           </div>
           <p className="mt-2 text-[12px] text-zinc-500">
             Composer sends to POST /api/builds/v2/message — works when USE_CHAT_PANEL_V2=true on API.
@@ -515,6 +515,8 @@ export function V2ComponentsPage() {
               </p>
               <TextMessage
                 message={{ id: "m1", turnId: "t1", role: "user", type: "text", content: "Make the hero section taller", streaming: false, createdAt: 0 } as Message}
+                userAvatarUrl={undefined}
+                userInitials="OA"
               />
             </div>
 
@@ -524,6 +526,8 @@ export function V2ComponentsPage() {
               </p>
               <TextMessage
                 message={{ id: "m2", turnId: "t1", role: "user", type: "text", content: "Can you redesign the pricing section? I want three tiers: Starter, Pro, and Enterprise. Make it look modern with a highlighted middle card. The card should have a gradient border.", streaming: false, createdAt: 0 } as Message}
+                userAvatarUrl={undefined}
+                userInitials="OA"
               />
             </div>
 
@@ -533,6 +537,8 @@ export function V2ComponentsPage() {
               </p>
               <TextMessage
                 message={{ id: "m3", turnId: "t1", role: "assistant", type: "text", content: "I'll increase the hero section height from h-96 to h-[480px] and adjust the inner padding to match.", streaming: false, createdAt: 0 } as Message}
+                userAvatarUrl={undefined}
+                userInitials="OA"
               />
             </div>
 
@@ -542,6 +548,8 @@ export function V2ComponentsPage() {
               </p>
               <TextMessage
                 message={{ id: "m4", turnId: "t1", role: "assistant", type: "text", content: "I'll redesign the pricing section with three tiers", streaming: true, createdAt: 0 } as Message}
+                userAvatarUrl={undefined}
+                userInitials="OA"
               />
             </div>
 
@@ -637,7 +645,7 @@ if (status.features?.chatV2) setChatV2Enabled(true);
               Live sample — ChatPanelV2 (projectId="dev-preview-001")
             </p>
             <div className="h-[480px] rounded-xl border border-zinc-200 overflow-hidden">
-              <ChatPanelV2 projectId="dev-preview-001" />
+              <ChatPanelV2 projectId="dev-preview-001" userAvatarUrl={undefined} userInitials="OA" />
             </div>
           </section>
         )}

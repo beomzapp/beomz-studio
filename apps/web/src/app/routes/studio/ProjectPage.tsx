@@ -1175,7 +1175,11 @@ export function ProjectPage() {
           <div className="h-full" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
             {chatV2Enabled
               ? (
-                <ChatPanelV2 projectId={projectId ?? ""} />
+                <ChatPanelV2
+                  projectId={projectId ?? ""}
+                  userAvatarUrl={chatUserData.userAvatarUrl}
+                  userInitials={chatUserData.userInitials}
+                />
               )
               : (
                 <ChatPanel

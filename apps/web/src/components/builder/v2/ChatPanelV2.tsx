@@ -13,21 +13,34 @@ import { useBuildChatV2, type Message } from "../../../hooks/useBuildChatV2";
 import { LiveStatusPill } from "../LiveStatusPill";
 import { InlineConfirmation } from "./InlineConfirmation";
 import { ChatStateInspectorV2 } from "../../dev/ChatStateInspectorV2";
+import { UserAvatar } from "../Avatars";
 
 // ─── TextMessage ────────────────────────────────────────────────────────────
 
-export function TextMessage({ message }: { message: Message }) {
+export function TextMessage({
+  message,
+  userAvatarUrl,
+  userInitials,
+}: {
+  message: Message;
+  userAvatarUrl?: string;
+  userInitials?: string;
+}) {
   const isUser = message.role === "user";
+  if (isUser) {
+    return (
+      <div className="flex items-end justify-end gap-2">
+        <div className="max-w-[70%] min-w-0 rounded-tl-2xl rounded-tr-2xl rounded-bl-2xl rounded-br-[4px] border border-[rgba(255,104,0,0.25)] bg-[rgba(255,104,0,0.18)] px-3.5 py-2 text-[14px] leading-[1.55] tracking-[-0.01em] text-[#1a1a1a] break-words whitespace-pre-wrap">
+          {message.content}
+          {message.streaming && <span className="blinking-cursor">|</span>}
+        </div>
+        <UserAvatar avatarUrl={userAvatarUrl} initials={userInitials} />
+      </div>
+    );
+  }
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={
-          isUser
-            ? "max-w-[75%] rounded-xl bg-zinc-100 px-3 py-2 text-[14px] leading-[1.55] tracking-[-0.01em] whitespace-pre-wrap"
-            : "max-w-[85%] text-[14px] leading-[1.55] tracking-[-0.01em] whitespace-pre-wrap"
-        }
-      >
-        {!isUser && <span className="font-medium">B: </span>}
+    <div className="flex items-start gap-2">
+      <div className="max-w-[85%] text-[14px] leading-[1.55] tracking-[-0.01em] text-[#374151] whitespace-pre-wrap">
         {message.content}
         {message.streaming && <span className="blinking-cursor">|</span>}
       </div>
@@ -90,13 +103,23 @@ export function InlineError({ message, onRetry }: { message: Message; onRetry: (
 
 // ─── MessageList ──────────────────────────────────────────────────────────────
 
-function MessageList({ messages, retry }: { messages: Message[]; retry: () => void }) {
+function MessageList({
+  messages,
+  retry,
+  userAvatarUrl,
+  userInitials,
+}: {
+  messages: Message[];
+  retry: () => void;
+  userAvatarUrl?: string;
+  userInitials?: string;
+}) {
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       {messages.map((m) => {
         if (m.type === "build_summary") return <BuildSummary key={m.id} message={m} />;
         if (m.type === "error") return <InlineError key={m.id} message={m} onRetry={retry} />;
-        return <TextMessage key={m.id} message={m} />;
+        return <TextMessage key={m.id} message={m} userAvatarUrl={userAvatarUrl} userInitials={userInitials} />;
       })}
     </div>
   );
@@ -107,33 +130,33 @@ function MessageList({ messages, retry }: { messages: Message[]; retry: () => vo
 function Composer({ disabled, onSubmit }: { disabled: boolean; onSubmit: (p: string) => void }) {
   const [value, setValue] = useState("");
   return (
-    <div className="border-t border-zinc-200 px-4 py-3">
-      <div className="flex gap-2">
-        <input
-          className="flex-1 rounded-md border border-zinc-200 px-3 py-2 text-[14px] leading-[1.55] tracking-[-0.01em] outline-none focus:border-zinc-400 disabled:opacity-50"
-          disabled={disabled}
-          placeholder={disabled ? "Building…" : "Message…"}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && value.trim()) {
-              onSubmit(value.trim());
-              setValue("");
-            }
-          }}
-        />
-        <button
-          disabled={disabled || !value.trim()}
-          className="rounded-md bg-zinc-900 px-3 py-2 text-[11px] font-medium text-white disabled:opacity-40"
-          onClick={() => {
-            if (value.trim()) {
-              onSubmit(value.trim());
-              setValue("");
-            }
-          }}
-        >
-          Send
-        </button>
+    <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
+      <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
+        <div className="px-3 pt-2 pb-1">
+          <textarea
+            className="max-h-[120px] w-full resize-none bg-transparent text-[14px] text-[#1a1a1a] outline-none placeholder:text-[#9ca3af] leading-[1.55]"
+            disabled={disabled}
+            placeholder={disabled ? "Building…" : "Message…"}
+            rows={1}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && value.trim()) {
+                onSubmit(value.trim());
+                setValue("");
+              }
+            }}
+          />
+        </div>
+        <div className="flex items-center justify-end px-2 pb-1.5">
+          <button
+            disabled={disabled || !value.trim()}
+            className="rounded-lg bg-[#F97316] p-1.5 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
+            onClick={() => { if (value.trim()) { onSubmit(value.trim()); setValue(""); } }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -144,13 +167,13 @@ function Composer({ disabled, onSubmit }: { disabled: boolean; onSubmit: (p: str
 const ACTIVE_PHASES = ["classifying", "thinking", "planning", "building", "persisting", "summarizing"] as const;
 const COMPOSER_DISABLED_PHASES = ["building", "persisting"] as const;
 
-export function ChatPanelV2({ projectId }: { projectId: string }) {
+export function ChatPanelV2({ projectId, userAvatarUrl, userInitials }: { projectId: string; userAvatarUrl?: string; userInitials?: string }) {
   const { state, sendMessage, implementPlan, retry } = useBuildChatV2(projectId);
 
   return (
     <>
-      <div className="flex h-full flex-col">
-        <MessageList messages={state.messages} retry={retry} />
+      <div className="flex h-full flex-col bg-[#faf9f6]">
+        <MessageList messages={state.messages} retry={retry} userAvatarUrl={userAvatarUrl} userInitials={userInitials} />
 
         {(ACTIVE_PHASES as readonly string[]).includes(state.phase) && (
           <div className="px-4 py-1">
