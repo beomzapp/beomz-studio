@@ -7,8 +7,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import { apiConfig } from "../../config.js";
+import { classifyTurn } from "../../lib/classifyTurn.js";
 import { loadOrgContext } from "../../middleware/loadOrgContext.js";
 import { verifyPlatformJwt } from "../../middleware/verifyPlatformJwt.js";
+import type { OrgContext } from "../../types.js";
+import { filterBlockedGeneratedFiles } from "./generate.js";
 
 type Response = ServerResponse;
 
@@ -43,7 +46,21 @@ buildsV2MessageRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     return c.json({ error: "Streaming unavailable." }, 500);
   }
 
-  const { projectId } = parsedBody.data;
+  const orgContext = c.get("orgContext") as OrgContext;
+  const { projectId, prompt } = parsedBody.data;
+
+  const projectRow = await orgContext.db.findProjectById(projectId);
+  if (!projectRow || projectRow.org_id !== orgContext.org.id) {
+    return c.json({ error: "Project not found." }, 404);
+  }
+
+  const latestGeneration = await orgContext.db.findLatestGenerationByProjectId(projectRow.id);
+  const existingFiles = latestGeneration?.files
+    ? filterBlockedGeneratedFiles([...latestGeneration.files])
+    : [];
+  const hasExistingFiles = existingFiles.length > 0;
+  const fileCount = existingFiles.length;
+  const result = await classifyTurn({ prompt, hasExistingFiles, fileCount });
 
   try {
     res.setHeader("Content-Type", "text/event-stream");
@@ -54,17 +71,24 @@ buildsV2MessageRoute.post("/", verifyPlatformJwt, loadOrgContext, async (c) => {
     const turnId = crypto.randomUUID();
     const messageId = crypto.randomUUID();
 
-    console.log("[v2/message] turn started", { projectId, turnId, kind: "stub" });
+    console.log("[v2/message] turn started", { projectId, turnId, kind: result.kind });
+    console.log("[telemetry] turn classified", {
+      projectId,
+      turnId,
+      kind: result.kind,
+      confidence: result.confidence,
+      reason: result.reason,
+    });
 
     emit(res, {
       type: "turn_started",
       turnId,
       userMessageId: messageId,
-      kind: "initial_build",
+      kind: result.kind,
       projectContext: {
-        isFirstBuild: true,
-        hasExistingFiles: false,
-        fileCount: 0,
+        isFirstBuild: !hasExistingFiles,
+        hasExistingFiles,
+        fileCount,
       },
     });
     emit(res, { type: "state", phase: "classifying" });
