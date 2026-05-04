@@ -58,6 +58,7 @@ export interface BuildStatusResponse {
     warnings: readonly string[];
   } | null;
   trace: BuilderV3TraceMetadata;
+  features?: { chatV2?: boolean };
 }
 
 export interface StartBuildResponse {

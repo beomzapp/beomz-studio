@@ -310,6 +310,7 @@ export function V2ComponentsPage() {
         <a href="#chat-panel-v2">ChatPanelV2</a>
         <a href="#message-types">Message types</a>
         <a href="#chat-state-inspector-v2">Chat inspector v2</a>
+        <a href="#phase4-wiring">Phase 4 wiring</a>
       </nav>
 
       <div className="mx-auto max-w-xl">
@@ -585,7 +586,7 @@ export function V2ComponentsPage() {
         </section>
 
         {/* ── ChatStateInspectorV2 ── BEO-813 */}
-        <section id="chat-state-inspector-v2" className="space-y-4 pb-32 mt-14">
+        <section id="chat-state-inspector-v2" className="space-y-4 mt-14">
           <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
             Chat inspector v2
           </h2>
@@ -603,7 +604,54 @@ export function V2ComponentsPage() {
             />
           </div>
         </section>
+        {/* ── Phase 4 — Live wiring (chatV2Enabled flag) ── BEO-815 */}
+        {isDevPreviewEnabled() && (
+          <section id="phase4-wiring" className="mt-14 pb-32">
+            <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
+              Phase 4 — Live wiring (chatV2Enabled flag)
+            </h2>
+            <p className="mb-2 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">
+              BEO-815 · <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">chatV2Enabled</code> is set to{" "}
+              <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">true</code> in{" "}
+              <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">ProjectPage</code> when the hydration
+              response includes{" "}
+              <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">status.features.chatV2 === true</code>.
+              When set, <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">&lt;ChatPanelV2&gt;</code> is
+              mounted in place of v1 <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[11px]">&lt;ChatPanel&gt;</code>.
+              No visual change for orgs not in the pilot.
+            </p>
+            <div className="mb-6 rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3">
+              <pre className="font-mono text-[11px] leading-[1.6] text-zinc-700 whitespace-pre-wrap">{`// BuildStatusResponse (api.ts)
+features?: { chatV2?: boolean };
+
+// ProjectPage.tsx hydration
+if (status.features?.chatV2) setChatV2Enabled(true);
+
+// ProjectPage.tsx render
+{chatV2Enabled
+  ? <ChatPanelV2 projectId={projectId ?? ""} />
+  : <ChatPanel ...v1props />
+}`}</pre>
+            </div>
+            <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+              Live sample — ChatPanelV2 (projectId="dev-preview-001")
+            </p>
+            <div className="h-[480px] rounded-xl border border-zinc-200 overflow-hidden">
+              <ChatPanelV2 projectId="dev-preview-001" />
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
+}
+
+function isDevPreviewEnabled(): boolean {
+  if (import.meta.env.DEV) return true;
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem("beomz:devMode") === "true";
+  } catch {
+    return false;
+  }
 }

@@ -20,6 +20,7 @@ import {
   PublishModal,
   type ActiveView,
 } from "../../../components/builder";
+import { ChatPanelV2 } from "../../../components/builder/v2/ChatPanelV2";
 import { HistoryPanel, PreviewPane, VersionHistoryPanel } from "../../../components/studio";
 import {
   getBuildStatus,
@@ -231,6 +232,7 @@ export function ProjectPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [chatPanelWidth, setChatPanelWidth] = useState(380);
+  const [chatV2Enabled, setChatV2Enabled] = useState(false);
   const [historyPanelWidth, setHistoryPanelWidth] = useState(220);
   const VERSION_HISTORY_WIDTH = 300;
 
@@ -694,6 +696,7 @@ export function ProjectPage() {
       setProjectName(status.project.name);
       setProjectIcon(status.project.icon ?? null);
       setProjectId(status.project.id);
+      if (status.features?.chatV2) setChatV2Enabled(true);
 
       const isActive =
         status.build.status === "queued" || status.build.status === "running";
@@ -1170,33 +1173,40 @@ export function ProjectPage() {
           style={{ width: showChat ? chatPanelWidth : 0 }}
         >
           <div className="h-full" style={{ width: chatPanelWidth, minWidth: chatPanelWidth }}>
-            <ChatPanel
-              messages={messages}
-              isBuilding={isBuilding}
-              projectId={projectId}
-              onSendMessage={handleSendMessage}
-              onStopStreaming={handleStopStreaming}
-              onForceStop={handleForceStop}
-              isStopPending={isStopPending}
-              onRetry={handleRetry}
-              onReportIssue={reportIssue}
-              width={chatPanelWidth}
-              suggestionChips={suggestionChips}
-              onDismissChips={() => setSuggestionChips([])}
-              creditsBalance={credits?.balance}
-              chatModeActive={chatModeActive}
-              onToggleChatMode={toggleChatMode}
-              implementSuggestion={implementSuggestion}
-              onImplement={() => { void implementWithPlan(implementSuggestion?.summary ?? ""); }}
-              onDismissImplement={dismissImplementSuggestion}
-              onImplementPlan={(plan, imageUrl) => { void implementWithPlan(plan, imageUrl); }}
-              isAnalysingImage={isAnalysingImage}
-              isIterationBuild={isIterationBuild}
-              currentAction={currentAction}
-              userFirstName={chatUserData.userFirstName}
-              userAvatarUrl={chatUserData.userAvatarUrl}
-              userInitials={chatUserData.userInitials}
-            />
+            {chatV2Enabled
+              ? (
+                <ChatPanelV2 projectId={projectId ?? ""} />
+              )
+              : (
+                <ChatPanel
+                  messages={messages}
+                  isBuilding={isBuilding}
+                  projectId={projectId}
+                  onSendMessage={handleSendMessage}
+                  onStopStreaming={handleStopStreaming}
+                  onForceStop={handleForceStop}
+                  isStopPending={isStopPending}
+                  onRetry={handleRetry}
+                  onReportIssue={reportIssue}
+                  width={chatPanelWidth}
+                  suggestionChips={suggestionChips}
+                  onDismissChips={() => setSuggestionChips([])}
+                  creditsBalance={credits?.balance}
+                  chatModeActive={chatModeActive}
+                  onToggleChatMode={toggleChatMode}
+                  implementSuggestion={implementSuggestion}
+                  onImplement={() => { void implementWithPlan(implementSuggestion?.summary ?? ""); }}
+                  onDismissImplement={dismissImplementSuggestion}
+                  onImplementPlan={(plan, imageUrl) => { void implementWithPlan(plan, imageUrl); }}
+                  isAnalysingImage={isAnalysingImage}
+                  isIterationBuild={isIterationBuild}
+                  currentAction={currentAction}
+                  userFirstName={chatUserData.userFirstName}
+                  userAvatarUrl={chatUserData.userAvatarUrl}
+                  userInitials={chatUserData.userInitials}
+                />
+              )
+            }
           </div>
         </div>
         {/* Chat / main divider — resize when open; collapse/expand control on the line */}
