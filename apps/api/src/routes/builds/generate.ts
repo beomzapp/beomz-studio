@@ -3727,7 +3727,9 @@ async function _runBuildInBackground(
   let activeCurrentPhase = 1;
   let activePhasesTotal = 0;
 
-  if (!input.isIteration) {
+  const hasExistingFiles = input.existingFiles.length > 0;
+
+  if (!input.isIteration && !hasExistingFiles) {
     if (input.phaseOverride) {
       // Continuing an existing phased project
       activePhasesData = input.phaseOverride.phases;
