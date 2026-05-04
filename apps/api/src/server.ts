@@ -198,6 +198,7 @@ app.route("/builds/start", buildsStartRoute);
 app.route("/builds/upload-image", buildsUploadImageRoute);
 app.route("/builds/summary", buildsSummaryRoute);
 app.route("/builds/chat", buildsChatRoute);
+app.route("/builds/v2/message", (await import("./routes/builds/v2Message.js")).default);
 app.route("/builds/summarise-chat", buildsSummariseChatRoute);
 app.route("/builds/:id/events", buildsEventsRoute);
 app.route("/builds/:id/cancel", buildsCancelRoute);
