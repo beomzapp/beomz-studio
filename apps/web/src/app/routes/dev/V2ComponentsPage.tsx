@@ -11,7 +11,7 @@ import {
   EXAMPLE_TURN_COMPLETE,
   EXAMPLE_TURN_STARTED,
 } from "@beomz-studio/contracts";
-import { InlineConfirmation } from "../../../components/builder/v2";
+import { ChatPanelV2, InlineConfirmation } from "../../../components/builder/v2";
 import { LiveStatusPill } from "../../../components/builder/LiveStatusPill";
 import { chatV2Reducer, initialChatState } from "../../../hooks/useBuildChatV2";
 
@@ -275,6 +275,7 @@ export function V2ComponentsPage() {
         <a href="#phase-indicator">Phase indicator</a>
         <a href="#shimmer">Shimmer variants</a>
         <a href="#use-build-chat-v2">useBuildChatV2</a>
+        <a href="#chat-panel-v2">ChatPanelV2</a>
       </nav>
 
       <div className="mx-auto max-w-xl">
@@ -370,6 +371,22 @@ export function V2ComponentsPage() {
 
         {/* ── useBuildChatV2 — reducer state inspector ── BEO-808 */}
         <ReducerInspector />
+
+        {/* ── ChatPanelV2 — shell ── BEO-810 */}
+        <section id="chat-panel-v2" className="mt-14">
+          <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
+            ChatPanelV2 — shell
+          </h2>
+          <p className="mb-4 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">
+            BEO-810 · Phase 3.2 — shell component wiring useBuildChatV2
+          </p>
+          <div className="h-[480px] rounded-xl border border-zinc-200 overflow-hidden">
+            <ChatPanelV2 projectId="dev-preview-001" />
+          </div>
+          <p className="mt-2 text-[12px] text-zinc-500">
+            Composer sends to POST /api/builds/v2/message — works when USE_CHAT_PANEL_V2=true on API.
+          </p>
+        </section>
 
         {/* ── Shimmer variants ── */}
         <section id="shimmer" className="mt-14 pb-20">
