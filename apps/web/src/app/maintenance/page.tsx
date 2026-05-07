@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 declare const process: {
   env?: {
@@ -8,6 +8,7 @@ declare const process: {
 
 import { useEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import BeomzLogo from "../../assets/beomz-logo.svg?react";
 
 const ACCESS_CODE = process.env?.NEXT_PUBLIC_MAINTENANCE_CODE || "240625";
 
@@ -112,19 +113,11 @@ export function MaintenancePage() {
       <div style={styles.bgGlow} />
       <div style={styles.card}>
         <div style={styles.mainView}>
-          <div style={styles.logo}>
-            <div style={styles.logoIcon}>B</div>
-            <span style={styles.logoText}>Beomz</span>
+          <div style={styles.logoRow}>
+            <BeomzLogo style={styles.logo} />
           </div>
 
-          <div style={styles.statusPill}>
-            <span style={styles.statusDot} />
-            Under Maintenance
-          </div>
-
-          <h1 style={styles.heading}>
-            We&apos;re making <span style={styles.headingAccent}>improvements</span>
-          </h1>
+          <h1 style={styles.heading}>We&apos;re making improvements</h1>
           <p style={styles.subheading}>
             Beomz Studio is temporarily offline while we roll out new features. We&apos;ll be back shortly.
           </p>
@@ -193,7 +186,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     padding: "24px",
-    background: "#0a0a0a",
+  background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%)",
     color: "#fff",
     fontFamily: '"Inter Tight", system-ui, sans-serif',
     WebkitFontSmoothing: "antialiased",
@@ -203,7 +196,7 @@ const styles: Record<string, CSSProperties> = {
   bgGlow: {
     position: "fixed",
     inset: 0,
-    background: "radial-gradient(ellipse 70% 50% at 50% 0%, rgba(249,115,22,0.07) 0%, transparent 60%)",
+    background: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(249,115,22,0.08) 0%, transparent 60%)",
     pointerEvents: "none",
   },
   card: {
@@ -211,7 +204,7 @@ const styles: Record<string, CSSProperties> = {
     maxWidth: "420px",
     background: "rgba(255,255,255,0.04)",
     border: "1px solid rgba(255,255,255,0.08)",
-    borderRadius: "16px",
+    borderRadius: "12px",
     padding: "40px 36px",
     textAlign: "center",
     position: "relative",
@@ -220,62 +213,24 @@ const styles: Record<string, CSSProperties> = {
   mainView: {
     display: "block",
   },
-  logo: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "10px",
-    marginBottom: "32px",
-  },
-  logoIcon: {
-    width: "36px",
-    height: "36px",
-    background: "#F97316",
-    borderRadius: "8px",
+  logoRow: {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "18px",
-    fontWeight: 700,
-    color: "#fff",
-    letterSpacing: "-0.02em",
-  },
-  logoText: {
-    fontSize: "20px",
-    fontWeight: 600,
-    letterSpacing: "-0.02em",
-    color: "#fff",
-  },
-  statusPill: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "7px",
-    background: "rgba(249,115,22,0.12)",
-    border: "1px solid rgba(249,115,22,0.25)",
-    borderRadius: "999px",
-    padding: "5px 12px",
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#F97316",
-    letterSpacing: "0.04em",
-    textTransform: "uppercase",
     marginBottom: "28px",
   },
-  statusDot: {
-    width: "6px",
-    height: "6px",
-    borderRadius: "50%",
-    background: "#F97316",
+  logo: {
+    width: "28px",
+    height: "31px",
+    color: "#fff",
   },
   heading: {
-    fontSize: "26px",
+    fontSize: "27px",
     fontWeight: 500,
     letterSpacing: "-0.025em",
     lineHeight: 1.2,
     marginBottom: "12px",
     color: "#fff",
-  },
-  headingAccent: {
-    color: "#F97316",
   },
   subheading: {
     fontSize: "14px",
