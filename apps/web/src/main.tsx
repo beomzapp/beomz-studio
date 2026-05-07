@@ -60,7 +60,7 @@ declare global {
   }
 }
 
-window.__VITE_MAINTENANCE_MODE__ = import.meta.env.VITE_MAINTENANCE_MODE === "true";
+window.__VITE_MAINTENANCE_MODE__ = true;
 
 if (_isPublishedSubdomain && !window.location.pathname.startsWith("/p/")) {
   const _slug = _hostname.replace(".beomz.ai", "");
