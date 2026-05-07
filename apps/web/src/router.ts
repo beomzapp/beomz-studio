@@ -16,6 +16,7 @@ import {
 import { supabase } from "./lib/supabase";
 import { RootLayout } from "./components/layout/RootLayout";
 import { LandingPage } from "./app/routes/marketing/LandingPage";
+import { MaintenancePage } from "./app/maintenance/page";
 
 // Eager imports above are kept in the main bundle. Everything below is
 // lazy-loaded so it falls into its own chunk.
@@ -167,6 +168,12 @@ const landingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: LandingPage,
+});
+
+const maintenanceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/maintenance",
+  component: MaintenancePage,
 });
 
 const planRoute = createRoute({
@@ -403,6 +410,7 @@ const versionPreviewRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   devV2ComponentsRoute,
   landingRoute,
+  maintenanceRoute,
   planRoute,
   pricingRoute,
   signupRedirectRoute,
