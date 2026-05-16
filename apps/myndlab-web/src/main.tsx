@@ -14,13 +14,11 @@ function hideAppShell() {
   window.setTimeout(() => shell.remove(), 250);
 }
 
-// Subdomain redirect: slug.beomz.ai → /p/slug
-// Must run before the router renders so TanStack picks up the /p/:slug route.
-const _hostname = window.location.hostname;
-const _isPublishedSubdomain =
-  _hostname.endsWith(".beomz.ai") &&
-  _hostname !== "beomz.ai" &&
-  _hostname !== "www.beomz.ai";
+// NOTE: The Beomz subdomain redirect (slug.beomz.ai → /p/slug) that ships in
+// apps/web is intentionally removed here. Myndlab playground doesn't host
+// published apps — it's its own studio served at myndlab-dev.beomz.ai. The
+// redirect would otherwise bounce visitors to /p/myndlab-dev → WebContainer
+// route → SharedArrayBuffer check → "Browser not supported" dead-end.
 
 function hasMaintenanceAccess() {
   try {
@@ -62,16 +60,11 @@ declare global {
 
 window.__VITE_MAINTENANCE_MODE__ = true;
 
-if (_isPublishedSubdomain && !window.location.pathname.startsWith("/p/")) {
-  const _slug = _hostname.replace(".beomz.ai", "");
-  window.location.replace("/p/" + _slug);
-} else {
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <AppGate />
-    </StrictMode>,
-  );
-  // Wait one frame so the first React paint has committed before fading the
-  // shell — prevents a flash of unstyled / empty content.
-  requestAnimationFrame(() => requestAnimationFrame(hideAppShell));
-}
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <AppGate />
+  </StrictMode>,
+);
+// Wait one frame so the first React paint has committed before fading the
+// shell — prevents a flash of unstyled / empty content.
+requestAnimationFrame(() => requestAnimationFrame(hideAppShell));
