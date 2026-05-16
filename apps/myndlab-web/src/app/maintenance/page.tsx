@@ -7,7 +7,7 @@ declare const process: {
 };
 
 import { useEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent } from "react";
-import BeomzLogo from "../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../assets/myndlab-logo.svg?react";
 
 const ACCESS_CODE = process.env?.NEXT_PUBLIC_MAINTENANCE_CODE || "544054";
 
@@ -117,12 +117,12 @@ export function MaintenancePage() {
       <div style={styles.card}>
         <div style={{ ...styles.mainView, ...(success ? styles.mainViewHidden : null) }}>
           <div style={styles.logoRow}>
-            <BeomzLogo style={styles.logo} />
+            <MyndlabLogo style={styles.logoWordmark} />
           </div>
 
-          <h1 style={styles.heading}>We&apos;re making improvements</h1>
+          <h1 style={styles.heading}>Myndlab is being prepared</h1>
           <p style={styles.subheading}>
-            Beomz Studio is temporarily offline while we roll out new features. We&apos;ll be back shortly.
+            This Myndlab playground is being prepared. We&apos;ll be back shortly.
           </p>
 
           <div style={styles.divider} />
@@ -165,13 +165,13 @@ export function MaintenancePage() {
             Continue →
           </button>
 
-          <div style={styles.footer}>BEOMZ · STUDIO V2 · 2026</div>
+          <div style={styles.footer}>MYNDLAB · 2026</div>
         </div>
 
         <div style={{ ...styles.successView, ...(success ? styles.successViewVisible : null) }}>
           <div style={styles.logo}>
-            <div style={styles.logoIcon}>B</div>
-            <span style={styles.logoText}>Beomz</span>
+            <div style={styles.logoIcon}>M</div>
+            <span style={styles.logoText}>Myndlab</span>
           </div>
           <div style={styles.successIcon}>✓</div>
           <h2 style={styles.successHeading}>Access granted</h2>
@@ -189,7 +189,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     padding: "24px",
-  background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%)",
+    background: "#131313",
     color: "#fff",
     fontFamily: '"Inter Tight", system-ui, sans-serif',
     WebkitFontSmoothing: "antialiased",
@@ -199,7 +199,7 @@ const styles: Record<string, CSSProperties> = {
   bgGlow: {
     position: "fixed",
     inset: 0,
-    background: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(249,115,22,0.08) 0%, transparent 60%)",
+    background: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0,213,216,0.10) 0%, transparent 60%)",
     pointerEvents: "none",
   },
   card: {
@@ -225,9 +225,9 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "center",
     marginBottom: "28px",
   },
-  logo: {
-    width: "28px",
-    height: "31px",
+  logoWordmark: {
+    width: "140px",
+    height: "auto",
     color: "#fff",
   },
   heading: {
@@ -281,7 +281,7 @@ const styles: Record<string, CSSProperties> = {
     caretColor: "transparent",
   },
   codeInputFilled: {
-    borderColor: "rgba(249,115,22,0.4)",
+    borderColor: "rgba(0,213,216,0.5)",
   },
   codeInputError: {
     borderColor: "rgba(239,68,68,0.7)",
@@ -300,8 +300,8 @@ const styles: Record<string, CSSProperties> = {
   button: {
     width: "100%",
     height: "48px",
-    background: "#F97316",
-    color: "#fff",
+    background: "#00D5D8",
+    color: "#131313",
     border: "none",
     borderRadius: "8px",
     fontSize: "15px",
