@@ -10,7 +10,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type CSSProperties, t
 import { useNavigate } from "@tanstack/react-router";
 import BeomzLogo from "../../assets/beomz-logo.svg?react";
 
-const ACCESS_CODE = process.env?.NEXT_PUBLIC_MAINTENANCE_CODE || "240625";
+const ACCESS_CODE = process.env?.NEXT_PUBLIC_MAINTENANCE_CODE || "544054";
 
 export function MaintenancePage() {
   const navigate = useNavigate();
