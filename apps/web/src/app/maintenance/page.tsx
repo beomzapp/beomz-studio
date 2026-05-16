@@ -7,13 +7,11 @@ declare const process: {
 };
 
 import { useEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import BeomzLogo from "../../assets/beomz-logo.svg?react";
 
 const ACCESS_CODE = process.env?.NEXT_PUBLIC_MAINTENANCE_CODE || "544054";
 
 export function MaintenancePage() {
-  const navigate = useNavigate();
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
