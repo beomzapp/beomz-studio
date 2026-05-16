@@ -1,10 +1,10 @@
 <svg width="1733" height="1887" viewBox="0 0 1733 1887" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="url(#paint0_linear_2048_3)"/>
-<path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="url(#paint1_linear_2048_3)"/>
+<path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="currentColor"/>
+<path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="currentColor"/>
 <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="currentColor"/>
 <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="currentColor"/>
-<path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="url(#paint2_linear_2048_3)"/>
-<path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="url(#paint3_linear_2048_3)"/>
+<path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="currentColor"/>
+<path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="currentColor"/>
 <defs>
 <linearGradient id="paint0_linear_2048_3" x1="1061.77" y1="884.738" x2="912.92" y2="-69.135" gradientUnits="userSpaceOnUse">
 <stop offset="0.2924" stop-color="#9198A9"/>
