@@ -62,33 +62,52 @@
         align-items: center;
         justify-content: center;
       }
-      #app-shell .app-shell-spinner {
+      #app-shell .app-shell-ring {
         position: absolute;
-        inset: 6px;
-        border: 2px solid transparent;
-        border-top-color: #00D5D8;
-        border-radius: 9999px;
-        animation: app-shell-spin 1s linear infinite;
+        inset: 0;
+        border-radius: 50%;
+        background: conic-gradient(from 0deg,
+          #00D5D8 0deg,
+          #FF2FB3 120deg,
+          #FFF500 240deg,
+          #00D5D8 360deg);
+        -webkit-mask: radial-gradient(circle, transparent 27px, #000 28px, #000 30px, transparent 31px);
+        mask: radial-gradient(circle, transparent 27px, #000 28px, #000 30px, transparent 31px);
+        animation: app-shell-spin 1.5s linear infinite;
       }
-      #app-shell .app-shell-letter {
-        font-weight: 700;
-        font-size: 22px;
-        color: #00D5D8;
-        line-height: 1;
+      #app-shell .app-shell-prism {
+        position: relative;
+        width: 26px;
+        height: 26px;
+        z-index: 2;
+      }
+      #app-shell .app-shell-prism svg {
+        display: block;
+        width: 100%;
+        height: 100%;
       }
       @keyframes app-shell-spin {
         to { transform: rotate(360deg); }
       }
       @media (prefers-reduced-motion: reduce) {
-        #app-shell .app-shell-spinner { animation: none; }
+        #app-shell .app-shell-ring { animation: none; }
       }
     </style>
   </head>
   <body>
     <div id="app-shell" aria-hidden="true">
       <div class="app-shell-mark">
-        <div class="app-shell-spinner"></div>
-        <span class="app-shell-letter">M</span>
+        <div class="app-shell-ring"></div>
+        <div class="app-shell-prism">
+          <svg viewBox="0 0 1733 1887" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="#fff"/>
+            <path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="#fff"/>
+            <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="#cfd2db"/>
+            <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="#cfd2db"/>
+            <path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="#fff"/>
+            <path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="#fff"/>
+          </svg>
+        </div>
       </div>
     </div>
     <div id="root"></div>
