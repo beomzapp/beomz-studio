@@ -370,7 +370,7 @@ export function LandingPage() {
             className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
             style={{
               background:
-                "radial-gradient(circle, var(--color-orange) 0%, var(--color-purple) 60%, transparent 100%)",
+                "radial-gradient(circle, #00D5D8 0%, #FF2FB3 65%, #FFF500 95%, transparent 100%)",
               transform: `scale(${sphereScale})`,
             }}
           />
