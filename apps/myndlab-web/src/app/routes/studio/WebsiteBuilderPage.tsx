@@ -23,7 +23,7 @@ import {
 import { cn } from "../../../lib/cn";
 import { useWebContainerPreview } from "../../../hooks/useWebContainerPreview";
 import { useWebsiteBuilder } from "../../../hooks/useWebsiteBuilder";
-import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import MyndlabPrism from "../../../assets/myndlab-prism.svg?react";
 import { isWebContainerSupported } from "../../../lib/webcontainer";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { PublishModal } from "../../../components/builder";
@@ -243,7 +243,7 @@ function FloatingCommandBar({
   );
 
   const borderStyle = hasSectionSelected
-    ? "border-[#F97316]"
+    ? "border-[#00D5D8]"
     : "border-[#dddddd]";
   const borderWidth = hasSectionSelected ? "border" : "border-[0.5px]";
 
@@ -259,7 +259,7 @@ function FloatingCommandBar({
                 e.preventDefault();
                 handleSuggestion(s);
               }}
-              className="rounded-full border border-[#e5e5e5] bg-white/90 backdrop-blur px-3 py-1.5 text-[12px] text-[#374151] hover:border-[#F97316]/50 hover:bg-orange-50 transition-all shadow-sm"
+              className="rounded-full border border-[#e5e5e5] bg-white/90 backdrop-blur px-3 py-1.5 text-[12px] text-[#374151] hover:border-[#00D5D8]/50 hover:bg-orange-50 transition-all shadow-sm"
             >
               {s}
             </button>
@@ -292,7 +292,7 @@ function FloatingCommandBar({
           <MousePointer2
             size={14}
             className={pickMode && !hasSectionSelected ? "animate-pulse" : undefined}
-            style={{ color: hasSectionSelected || pickMode ? "#F97316" : "#9ca3af" }}
+            style={{ color: hasSectionSelected || pickMode ? "#00D5D8" : "#9ca3af" }}
           />
         </button>
 
@@ -300,17 +300,17 @@ function FloatingCommandBar({
         <div className="h-4 w-px flex-shrink-0 bg-[#e5e5e5]" />
 
         {/* Spark icon */}
-        <span className="text-[#F97316] flex-shrink-0 text-[18px] select-none">✦</span>
+        <span className="text-[#00D5D8] flex-shrink-0 text-[18px] select-none">✦</span>
 
         {/* Section pill */}
         {hasSectionSelected && (
-          <div className="flex items-center gap-1 rounded-full bg-[#FFF7ED] border border-[#F97316]/30 px-2.5 py-1 flex-shrink-0">
-            <span className="text-[12px] font-medium text-[#F97316] capitalize">
+          <div className="flex items-center gap-1 rounded-full bg-[#FFF7ED] border border-[#00D5D8]/30 px-2.5 py-1 flex-shrink-0">
+            <span className="text-[12px] font-medium text-[#00D5D8] capitalize">
               {activeSection} section
             </span>
             <button
               onClick={onDeselect}
-              className="text-[#F97316]/60 hover:text-[#F97316] ml-0.5"
+              className="text-[#00D5D8]/60 hover:text-[#00D5D8] ml-0.5"
             >
               <X size={11} />
             </button>
@@ -347,7 +347,7 @@ function FloatingCommandBar({
           className={cn(
             "flex-shrink-0 rounded-full p-1.5 transition-colors",
             text.trim() && !isGenerating
-              ? "bg-[#F97316] text-white hover:bg-[#EA580C]"
+              ? "bg-[#00D5D8] text-white hover:bg-[#00BCC0]"
               : "bg-[#f3f4f6] text-[#9ca3af] cursor-not-allowed",
           )}
         >
@@ -395,7 +395,7 @@ function HistoryDrawer({ open, onClose, history }: HistoryDrawerProps) {
             className={cn(
               "rounded-xl px-3 py-2 text-[13px]",
               entry.role === "user"
-                ? "bg-[#F97316]/10 text-[#1a1a1a] ml-8"
+                ? "bg-[#00D5D8]/10 text-[#1a1a1a] ml-8"
                 : "bg-[#f3f4f6] text-[#374151] mr-8",
             )}
           >
@@ -430,9 +430,9 @@ function PagesPanel({ open, onClose, onAddPage }: PagesPanelProps) {
         </button>
       </div>
       <div className="px-4 py-3 space-y-1">
-        <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-[#F97316]/10">
-          <span className="text-[13px] font-medium text-[#F97316]">Home</span>
-          <ChevronRight size={14} className="text-[#F97316]" />
+        <div className="flex items-center justify-between rounded-lg px-3 py-2 bg-[#00D5D8]/10">
+          <span className="text-[13px] font-medium text-[#00D5D8]">Home</span>
+          <ChevronRight size={14} className="text-[#00D5D8]" />
         </div>
       </div>
       <button
@@ -440,7 +440,7 @@ function PagesPanel({ open, onClose, onAddPage }: PagesPanelProps) {
           const page = prompt("Page name (e.g. About):");
           if (page?.trim()) onAddPage(page.trim());
         }}
-        className="mx-4 mt-2 w-[calc(100%-2rem)] rounded-lg border border-dashed border-[#e5e5e5] py-2 text-[12px] text-[#9ca3af] hover:border-[#F97316]/40 hover:text-[#F97316] transition-colors"
+        className="mx-4 mt-2 w-[calc(100%-2rem)] rounded-lg border border-dashed border-[#e5e5e5] py-2 text-[12px] text-[#9ca3af] hover:border-[#00D5D8]/40 hover:text-[#00D5D8] transition-colors"
       >
         + Add page
       </button>
@@ -493,7 +493,7 @@ function SEOPanel({ open, onClose, files, onSave }: SEOPanelProps) {
             onChange={(e) => setTitle(e.target.value)}
             maxLength={60}
             placeholder="Page title for search engines"
-            className="w-full rounded-xl border border-[#e5e5e5] px-3 py-2 text-[13px] text-[#1a1a1a] outline-none focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10 transition-colors"
+            className="w-full rounded-xl border border-[#e5e5e5] px-3 py-2 text-[13px] text-[#1a1a1a] outline-none focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10 transition-colors"
           />
           <p className="text-[11px] text-[#9ca3af] mt-1">{title.length}/60</p>
         </div>
@@ -504,13 +504,13 @@ function SEOPanel({ open, onClose, files, onSave }: SEOPanelProps) {
             onChange={(e) => setDescription(e.target.value.slice(0, 160))}
             rows={4}
             placeholder="Brief description for search results"
-            className="w-full resize-none rounded-xl border border-[#e5e5e5] px-3 py-2 text-[13px] text-[#1a1a1a] outline-none focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10 transition-colors"
+            className="w-full resize-none rounded-xl border border-[#e5e5e5] px-3 py-2 text-[13px] text-[#1a1a1a] outline-none focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10 transition-colors"
           />
           <p className="text-[11px] text-[#9ca3af] mt-1">{description.length}/160</p>
         </div>
         <button
           onClick={() => onSave(title, description)}
-          className="w-full rounded-xl bg-[#F97316] py-2.5 text-[13px] font-semibold text-white hover:bg-[#EA580C] transition-colors"
+          className="w-full rounded-xl bg-[#00D5D8] py-2.5 text-[13px] font-semibold text-white hover:bg-[#00BCC0] transition-colors"
         >
           Save SEO
         </button>
@@ -529,9 +529,9 @@ function PreviewOverlay({ message }: PreviewOverlayProps) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#faf9f6] z-10">
       <div className="relative mb-6 flex h-16 w-16 items-center justify-center">
-        <span className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/20" />
-        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316]">
-          <BeomzLogo className="h-7 w-7 text-white" />
+        <span className="absolute inset-0 animate-ping rounded-full bg-[#00D5D8]/20" />
+        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#00D5D8]">
+          <MyndlabPrism className="h-7 w-7 text-white" />
         </span>
       </div>
       <p className="max-w-[480px] text-center text-[14px] font-medium text-[#1a1a1a]">
@@ -601,7 +601,7 @@ function WebsiteTopBar({
         </button>
 
         {/* Logo — dark, matching ProjectPage TopBar style */}
-        <BeomzLogo className="h-5 w-5 flex-shrink-0 text-[#1a1a1a]" />
+        <MyndlabPrism className="h-5 w-5 flex-shrink-0 text-[#1a1a1a]" />
 
         <span className="select-none text-[14px] text-[#e5e5e5]">·</span>
 

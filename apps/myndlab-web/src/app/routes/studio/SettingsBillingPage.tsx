@@ -79,7 +79,7 @@ export function SettingsBillingPage() {
                 </div>
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                    isFree ? "bg-[#f3f4f6] text-[#6b7280]" : "bg-[#F97316]/10 text-[#F97316]"
+                    isFree ? "bg-[#f3f4f6] text-[#6b7280]" : "bg-[#00D5D8]/10 text-[#00D5D8]"
                   }`}
                 >
                   {isFree ? "Free" : "Active"}
@@ -91,7 +91,7 @@ export function SettingsBillingPage() {
                   <button
                     type="button"
                     onClick={openPricingModal}
-                    className="flex items-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C]"
+                    className="flex items-center gap-2 rounded-xl bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0]"
                   >
                     <ArrowUpRight size={14} />
                     Upgrade plan
@@ -101,7 +101,7 @@ export function SettingsBillingPage() {
                   type="button"
                   onClick={() => void handleOpenPortal()}
                   disabled={openingPortal}
-                  className="flex items-center gap-2 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#F97316]/30 hover:bg-[#faf9f6] disabled:opacity-50"
+                  className="flex items-center gap-2 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#00D5D8]/30 hover:bg-[#faf9f6] disabled:opacity-50"
                 >
                   <ExternalLink size={14} />
                   {openingPortal ? "Opening…" : "Open Stripe Portal"}
@@ -127,7 +127,7 @@ export function SettingsBillingPage() {
             <>
               <div className="mb-3 flex items-end justify-between">
                 <div>
-                  <span className="text-2xl font-bold text-[#F97316]">{balance}</span>
+                  <span className="text-2xl font-bold text-[#00D5D8]">{balance}</span>
                   <span className="ml-1 text-sm text-[#9ca3af]">/ {planCredits} cr</span>
                 </div>
                 <p className="text-xs text-[#9ca3af]">{planCredits - balance} used</p>
@@ -135,7 +135,7 @@ export function SettingsBillingPage() {
 
               <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-[#f0eeeb]">
                 <div
-                  className="h-full rounded-full bg-[#F97316] transition-all duration-500"
+                  className="h-full rounded-full bg-[#00D5D8] transition-all duration-500"
                   style={{ width: `${creditsPct}%` }}
                 />
               </div>
@@ -149,9 +149,9 @@ export function SettingsBillingPage() {
               <button
                 type="button"
                 onClick={openPricingModal}
-                className="flex items-center gap-2 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#F97316]/30 hover:bg-[#faf9f6]"
+                className="flex items-center gap-2 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#00D5D8]/30 hover:bg-[#faf9f6]"
               >
-                <Zap size={14} className="text-[#F97316]" />
+                <Zap size={14} className="text-[#00D5D8]" />
                 Buy credits
               </button>
             </>

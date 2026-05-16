@@ -83,7 +83,7 @@ export function ProfilePage() {
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316] text-lg font-bold text-white">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#00D5D8] text-lg font-bold text-white">
                 {initials || "U"}
               </div>
             )}
@@ -127,14 +127,14 @@ export function ProfilePage() {
               onClick={() => handleSelect("random")}
               className={`rounded-xl border p-3 text-left transition-all ${
                 selectedId === "random"
-                  ? "border-[#F97316] bg-[#fff7ed]"
+                  ? "border-[#00D5D8] bg-[#fff7ed]"
                   : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#d1d5db]"
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-[#1a1a1a]">Random</span>
                 {selectedId === "random" && (
-                  <span className="text-xs text-[#F97316]">&#10003;</span>
+                  <span className="text-xs text-[#00D5D8]">&#10003;</span>
                 )}
               </div>
               <p className="mt-0.5 text-xs text-[#9ca3af]">Different personality each session</p>
@@ -149,14 +149,14 @@ export function ProfilePage() {
                   onClick={() => handleSelect(id)}
                   className={`rounded-xl border p-3 text-left transition-all ${
                     isSelected
-                      ? "border-[#F97316] bg-[#fff7ed]"
+                      ? "border-[#00D5D8] bg-[#fff7ed]"
                       : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#d1d5db]"
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-[#1a1a1a]">{label.name}</span>
                     {isSelected && (
-                      <span className="text-xs text-[#F97316]">&#10003;</span>
+                      <span className="text-xs text-[#00D5D8]">&#10003;</span>
                     )}
                   </div>
                   <p className="mt-0.5 text-xs text-[#9ca3af]">{label.tagline}</p>
@@ -180,7 +180,7 @@ export function ProfilePage() {
             </div>
             <div className="rounded-xl border border-[#f0eeeb] bg-[#faf9f6] p-4">
               <p className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af]">Credits left</p>
-              <p className="mt-1 text-lg font-bold text-[#F97316]">{Math.round(balance)}</p>
+              <p className="mt-1 text-lg font-bold text-[#00D5D8]">{Math.round(balance)}</p>
             </div>
             <div className="rounded-xl border border-[#f0eeeb] bg-[#faf9f6] p-4">
               <p className="text-[11px] font-medium uppercase tracking-wider text-[#9ca3af]">Monthly</p>
@@ -197,7 +197,7 @@ export function ProfilePage() {
           <button
             type="button"
             onClick={openPricingModal}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
           >
             <Zap size={14} />
             Upgrade plan

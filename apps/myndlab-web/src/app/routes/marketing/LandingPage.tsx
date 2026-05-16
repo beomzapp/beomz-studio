@@ -13,7 +13,7 @@ import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { AuthModal } from "../../../components/auth/AuthModal";
 import { usePricingModal } from "../../../contexts/PricingModalContext";
-import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
 import { enhancePrompt } from "../../../lib/api";
 
 const MAX_ATTACHMENTS = 3;
@@ -322,7 +322,7 @@ export function LandingPage() {
       <div className="relative h-screen">
         {/* Top nav */}
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
-          <BeomzLogo className="h-6 w-auto text-white" />
+          <MyndlabLogo className="h-6 w-auto text-white" />
           <div className="flex items-center gap-6">
             {!session && (
               <button

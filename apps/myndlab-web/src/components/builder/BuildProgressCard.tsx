@@ -44,7 +44,7 @@ function ChecklistGlyph({ status }: { status: ChatChecklistStatus }) {
     case "active":
       return (
         <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
-          <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+          <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#00D5D8]" />
         </span>
       );
     case "done":
@@ -136,7 +136,7 @@ function Shimmer({ isIteration = false }: ShimmerProps) {
             <ul className="space-y-0">
               <li className="flex min-h-[40px] items-center gap-3">
                 <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center">
-                  <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+                  <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#00D5D8]" />
                 </span>
                 <span className="build-shimmer-text text-[15px] font-medium">Editing your app...</span>
               </li>
@@ -170,7 +170,7 @@ function Shimmer({ isIteration = false }: ShimmerProps) {
                     {isDone ? (
                       <span className="text-[15px] text-emerald-600/70">✓</span>
                     ) : isActive ? (
-                      <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#F97316]" />
+                      <span className="checklist-orb-active h-5 w-5 rounded-full bg-[#00D5D8]" />
                     ) : (
                       <span className="h-3 w-3 rounded-full border-[1.5px] border-zinc-300" />
                     )}

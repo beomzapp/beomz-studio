@@ -35,7 +35,7 @@ export function ContinuationCard({
         "mt-6 rounded-2xl border p-6 transition-all duration-500",
         light
           ? "border-[#e8580a]/15 bg-white shadow-sm"
-          : "border-orange/20 bg-[#060612] shadow-[0_0_30px_-10px_rgba(249,115,22,0.15)]",
+          : "border-orange/20 bg-[#060612] shadow-[0_0_30px_-10px_rgba(0, 213, 216, 0.15)]",
         mounted
           ? "translate-y-0 opacity-100"
           : "translate-y-4 opacity-0"

@@ -23,7 +23,7 @@ import { getApiBaseUrl, handleUnauthorizedResponse } from "../../../lib/api";
 import { useAuth } from "../../../lib/useAuth";
 import { GlobalNav } from "../../../components/layout/GlobalNav";
 import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
-import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -421,7 +421,7 @@ export function PlanItScreen({ prompt, onBack }: PlanItScreenProps) {
           >
             <ArrowLeft size={18} />
           </button>
-          <BeomzLogo className="h-5 w-auto text-[#1a1a1a]" />
+          <MyndlabLogo className="h-5 w-auto text-[#1a1a1a]" />
         </div>
 
         <GlobalNav />

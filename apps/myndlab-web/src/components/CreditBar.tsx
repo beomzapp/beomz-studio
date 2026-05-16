@@ -26,7 +26,7 @@ const SEGMENT_COLOURS = {
   used: "bg-zinc-300",
   monthly: "bg-blue-500",
   rollover: "bg-purple-500",
-  topup: "bg-[#F97316]",
+  topup: "bg-[#00D5D8]",
 } as const;
 
 const TOOLTIP_BASE =

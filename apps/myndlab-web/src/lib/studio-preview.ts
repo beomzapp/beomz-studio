@@ -604,8 +604,8 @@ function __createMissingValue(path, exportName) {
       "div",
       {
         style: {
-          border: "1px solid rgba(249,115,22,0.28)",
-          background: "rgba(249,115,22,0.08)",
+          border: "1px solid rgba(0, 213, 216, 0.28)",
+          background: "rgba(0, 213, 216, 0.08)",
           color: "rgba(255,255,255,0.92)",
           borderRadius: "20px",
           padding: "16px",

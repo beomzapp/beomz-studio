@@ -38,7 +38,7 @@ function AnalysingImageCard() {
       <BAvatar />
       <div className="min-w-0 flex-1">
         <div className="inline-flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white/80 px-3 py-2">
-          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#00D5D8] border-t-transparent" />
           <span className="text-sm text-[#6b7280]">Analysing image…</span>
         </div>
       </div>
@@ -467,8 +467,8 @@ export function ChatPanel({
       <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
         {chatModeActive && (
           <div className="mb-1.5 flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#F97316]/10 px-2 py-0.5 text-xs font-medium text-[#F97316]">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#F97316]" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#00D5D8]/10 px-2 py-0.5 text-xs font-medium text-[#00D5D8]">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#00D5D8]" />
               Chat mode
             </span>
             <span className="text-xs text-[#9ca3af]">— thinking it through, no build yet</span>
@@ -479,8 +479,8 @@ export function ChatPanel({
 
         <div
           className={cn(
-            "rounded-xl border bg-white focus-within:border-[#F97316]/50",
-            chatModeActive ? "border-[#F97316]/30" : "border-[#e5e5e5]",
+            "rounded-xl border bg-white focus-within:border-[#00D5D8]/50",
+            chatModeActive ? "border-[#00D5D8]/30" : "border-[#e5e5e5]",
           )}
         >
           {pendingImagePreview && (
@@ -551,7 +551,7 @@ export function ChatPanel({
                   className={cn(
                     "rounded p-1.5 transition-colors",
                     chatModeActive
-                      ? "bg-[#F97316]/10 text-[#F97316]"
+                      ? "bg-[#00D5D8]/10 text-[#00D5D8]"
                       : "text-[#9ca3af] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#6b7280]",
                   )}
                 >
@@ -609,7 +609,7 @@ export function ChatPanel({
               <button
                 onClick={handleSend}
                 disabled={sendDisabled}
-                className="rounded-lg bg-[#F97316] p-1.5 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
+                className="rounded-lg bg-[#00D5D8] p-1.5 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
                 title={outOfCredits ? "Out of credits — upgrade to continue" : "Send"}
               >
                 <Send size={14} />

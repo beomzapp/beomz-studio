@@ -88,7 +88,7 @@ export function SettingsIntegrationsPage() {
                     ? "border-red-200 text-red-500 hover:bg-red-50"
                     : integration.badge
                       ? "cursor-not-allowed border-[#e5e5e5] text-[#9ca3af] opacity-60"
-                      : "border-[#F97316]/30 text-[#F97316] hover:bg-[#FFF3EC]"
+                      : "border-[#00D5D8]/30 text-[#00D5D8] hover:bg-[#FFF3EC]"
                 }`}
               >
                 {integration.connected ? "Disconnect" : "Connect"}

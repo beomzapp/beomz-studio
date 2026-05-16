@@ -977,7 +977,7 @@ export function ProjectPage() {
   const ResizeHandle = ({ target }: { target: "history" | "chat" }) => (
     <div
       onMouseDown={e => startResize(target, e)}
-      className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[#F97316]/20 active:bg-[#F97316]/30"
+      className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[#00D5D8]/20 active:bg-[#00D5D8]/30"
       title="Drag to resize"
     />
   );
@@ -1044,7 +1044,7 @@ export function ProjectPage() {
                       className={cn(
                         "flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs transition-colors",
                         selectedFile === f.path
-                          ? "border-r-2 border-[#F97316] bg-white font-medium text-[#1a1a1a]"
+                          ? "border-r-2 border-[#00D5D8] bg-white font-medium text-[#1a1a1a]"
                           : "text-[#6b7280] hover:bg-white/60 hover:text-[#1a1a1a]",
                       )}
                     >
@@ -1220,7 +1220,7 @@ export function ProjectPage() {
             className={cn(
               "absolute inset-y-0 left-0 w-full bg-transparent transition-colors",
               showChat &&
-                "cursor-col-resize hover:bg-[#F97316]/20 active:bg-[#F97316]/30",
+                "cursor-col-resize hover:bg-[#00D5D8]/20 active:bg-[#00D5D8]/30",
             )}
             title={showChat ? "Drag to resize" : undefined}
           />

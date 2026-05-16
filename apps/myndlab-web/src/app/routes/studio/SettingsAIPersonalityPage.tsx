@@ -47,14 +47,14 @@ export function SettingsAIPersonalityPage() {
               onClick={() => handleSelect("random")}
               className={`rounded-xl border p-3.5 text-left transition-all ${
                 selectedId === "random"
-                  ? "border-[#F97316] bg-[#F97316]/5"
-                  : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#F97316]/40"
+                  ? "border-[#00D5D8] bg-[#00D5D8]/5"
+                  : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#00D5D8]/40"
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-[#1a1a1a]">Random</span>
                 {selectedId === "random" && (
-                  <span className="text-xs text-[#F97316]">&#10003;</span>
+                  <span className="text-xs text-[#00D5D8]">&#10003;</span>
                 )}
               </div>
               <p className="mt-0.5 text-xs text-[#9ca3af]">Different personality each session</p>
@@ -70,14 +70,14 @@ export function SettingsAIPersonalityPage() {
                   onClick={() => handleSelect(id)}
                   className={`rounded-xl border p-3.5 text-left transition-all ${
                     isSelected
-                      ? "border-[#F97316] bg-[#F97316]/5"
-                      : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#F97316]/40"
+                      ? "border-[#00D5D8] bg-[#00D5D8]/5"
+                      : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#00D5D8]/40"
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-[#1a1a1a]">{label.name}</span>
                     {isSelected && (
-                      <span className="text-xs text-[#F97316]">&#10003;</span>
+                      <span className="text-xs text-[#00D5D8]">&#10003;</span>
                     )}
                   </div>
                   <p className="mt-0.5 text-xs text-[#9ca3af]">{label.tagline}</p>

@@ -69,9 +69,9 @@ export function SettingsWorkspaceKnowledgePage() {
                 onChange={(e) => {
                   if (e.target.value.length <= MAX_CHARS) setKnowledge(e.target.value);
                 }}
-                placeholder="Always use TypeScript. Use Tailwind for styling. My brand color is #F97316."
+                placeholder="Always use TypeScript. Use Tailwind for styling. My brand color is #00D5D8."
                 rows={6}
-                className="mb-1 w-full resize-none rounded-xl border border-[#e5e5e5] bg-white px-4 py-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#9ca3af] focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                className="mb-1 w-full resize-none rounded-xl border border-[#e5e5e5] bg-white px-4 py-3 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#9ca3af] focus:border-[#00D5D8] focus:ring-2 focus:ring-[#00D5D8]/20"
               />
 
               <div className="mb-4 flex items-center justify-between">
@@ -81,7 +81,7 @@ export function SettingsWorkspaceKnowledgePage() {
                 <p
                   className={`text-xs ${
                     knowledge.length >= MAX_CHARS
-                      ? "font-medium text-[#F97316]"
+                      ? "font-medium text-[#00D5D8]"
                       : "text-[#9ca3af]"
                   }`}
                 >
@@ -107,7 +107,7 @@ export function SettingsWorkspaceKnowledgePage() {
                 type="button"
                 onClick={() => void handleSave()}
                 disabled={saving}
-                className="rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-60"
+                className="rounded-xl bg-[#00D5D8] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-60"
               >
                 {saving ? "Saving…" : "Save rules"}
               </button>

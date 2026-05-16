@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { X, Loader2, Eye, EyeOff, Mail, ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import BeomzLogo from "../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../assets/myndlab-logo.svg?react";
 
 interface AuthModalProps {
   open: boolean;
@@ -174,7 +174,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
           </button>
 
           <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF7ED]">
-            <Mail size={22} className="text-[#F97316]" />
+            <Mail size={22} className="text-[#00D5D8]" />
           </div>
 
           <h2 className="mb-1 text-lg font-semibold text-[#1a1a1a]">Check your email</h2>
@@ -197,7 +197,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
 
           <button
             onClick={() => { setScreen("main"); setMode("signin"); setError(null); }}
-            className="text-sm text-[#F97316] hover:underline"
+            className="text-sm text-[#00D5D8] hover:underline"
           >
             Back to sign in
           </button>
@@ -221,7 +221,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
             <X size={16} />
           </button>
 
-          <BeomzLogo className="mx-auto mb-6 block h-7 w-auto text-[#1a1a1a]" />
+          <MyndlabLogo className="mx-auto mb-6 block h-7 w-auto text-[#1a1a1a]" />
 
           {forgotSubmitted ? (
             <div className="text-center">
@@ -229,7 +229,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
               <p className="mb-6 text-sm text-[#6b7280]">If that email exists, a reset link has been sent.</p>
               <button
                 onClick={() => { setScreen("main"); setMode("signin"); setForgotSubmitted(false); setError(null); }}
-                className="text-sm text-[#F97316] hover:underline"
+                className="text-sm text-[#00D5D8] hover:underline"
               >
                 Back to sign in
               </button>
@@ -249,7 +249,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
                   placeholder="Email"
                   autoComplete="email"
                   autoFocus
-                  className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                  className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
                 />
 
                 {error && <p className="text-xs text-red-500">{error}</p>}
@@ -257,7 +257,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
                 <button
                   type="submit"
                   disabled={loading || !email}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
                 >
                   {loading && <Loader2 size={14} className="animate-spin" />}
                   Send reset link
@@ -266,7 +266,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
 
               <button
                 onClick={() => { setScreen("main"); setError(null); }}
-                className="mt-4 flex w-full items-center justify-center gap-1 text-sm text-[#9ca3af] hover:text-[#F97316]"
+                className="mt-4 flex w-full items-center justify-center gap-1 text-sm text-[#9ca3af] hover:text-[#00D5D8]"
               >
                 <ArrowLeft size={13} />
                 Back to sign in
@@ -296,7 +296,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
         </button>
 
         {/* Beomz logo */}
-        <BeomzLogo className="mx-auto mb-6 block h-7 w-auto text-[#1a1a1a]" />
+        <MyndlabLogo className="mx-auto mb-6 block h-7 w-auto text-[#1a1a1a]" />
 
         <h2 className="mb-1 text-center text-lg font-semibold text-[#1a1a1a]">
           {mode === "signin" ? "Sign in to Beomz" : "Create your account"}
@@ -339,7 +339,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
               autoComplete="email"
-              className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+              className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
             />
             <div className="relative">
               <input
@@ -348,7 +348,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password (min. 8 characters)"
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
               />
               <button
                 type="button"
@@ -366,7 +366,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm password"
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
               />
               <button
                 type="button"
@@ -383,7 +383,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
             <button
               type="submit"
               disabled={loading || !email || !password || !confirmPassword}
-              className="w-full rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+              className="w-full rounded-lg bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
             >
               {loading ? "Please wait…" : "Create account"}
             </button>
@@ -396,7 +396,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
               autoComplete="email"
-              className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+              className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
             />
             <div className="relative">
               <input
@@ -405,7 +405,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
                 autoComplete="current-password"
-                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
               />
               <button
                 type="button"
@@ -421,7 +421,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
               <button
                 type="button"
                 onClick={() => { setScreen("forgot-password"); setError(null); }}
-                className="text-xs text-[#9ca3af] hover:text-[#F97316]"
+                className="text-xs text-[#9ca3af] hover:text-[#00D5D8]"
               >
                 Forgot password?
               </button>
@@ -432,7 +432,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
             <button
               type="submit"
               disabled={loading || !email || !password}
-              className="w-full rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+              className="w-full rounded-lg bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
             >
               {loading ? "Please wait…" : "Sign in"}
             </button>
@@ -441,7 +441,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
 
         <p className="mt-4 text-center text-xs text-[#9ca3af]">
           {mode === "signin" ? "Don't have an account? " : "Already have an account? "}
-          <button onClick={switchMode} className="text-[#F97316] hover:underline">
+          <button onClick={switchMode} className="text-[#00D5D8] hover:underline">
             {mode === "signin" ? "Sign up" : "Sign in"}
           </button>
         </p>

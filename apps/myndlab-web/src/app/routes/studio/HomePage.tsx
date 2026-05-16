@@ -190,7 +190,7 @@ function CreditsCard() {
         <button
           onClick={openPricingModal}
           className="text-[12px] font-medium transition-colors hover:opacity-80"
-          style={{ color: "#F97316" }}
+          style={{ color: "#00D5D8" }}
         >
           Top up →
         </button>
@@ -556,7 +556,7 @@ export function HomePage() {
         <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-[#9ca3af]">Apps</span>
-            <FolderOpen size={16} className="text-[#F97316]" />
+            <FolderOpen size={16} className="text-[#00D5D8]" />
           </div>
           <p className="mt-2 text-2xl font-bold text-[#1a1a1a]">{projects.length}</p>
         </div>
@@ -579,7 +579,7 @@ export function HomePage() {
             <span className="text-xs font-medium text-[#9ca3af]">Credits</span>
             <Star size={16} className="text-amber-500" />
           </div>
-          <p className="mt-2 text-2xl font-bold" style={{ color: "#F97316" }}>{creditsBalance}</p>
+          <p className="mt-2 text-2xl font-bold" style={{ color: "#00D5D8" }}>{creditsBalance}</p>
         </div>
       </div>
 
@@ -604,7 +604,7 @@ export function HomePage() {
             {/* Loading */}
             {loading && (
               <div className="flex items-center justify-center py-12">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#e5e7eb] border-t-[#F97316]" />
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#e5e7eb] border-t-[#00D5D8]" />
               </div>
             )}
 
@@ -644,7 +644,7 @@ export function HomePage() {
                               if (e.key === "Escape") setRenamingId(null);
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            className="flex-1 truncate rounded border border-[#F97316]/50 px-1.5 py-0.5 text-sm font-medium text-[#1a1a1a] outline-none"
+                            className="flex-1 truncate rounded border border-[#00D5D8]/50 px-1.5 py-0.5 text-sm font-medium text-[#1a1a1a] outline-none"
                           />
                         ) : (
                           <span className="truncate text-[14px] font-medium text-[#1a1a1a]">
@@ -700,7 +700,7 @@ export function HomePage() {
             {!loading && (
               <div
                 className={cn(
-                  "mx-4 mb-4 flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-[#d1d5db] px-3 py-3 transition-colors hover:border-[#F97316]/40 hover:bg-orange-50/30",
+                  "mx-4 mb-4 flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-[#d1d5db] px-3 py-3 transition-colors hover:border-[#00D5D8]/40 hover:bg-orange-50/30",
                   projects.length > 0 && "mt-2",
                 )}
                 onClick={() => canCreateMore && navigate({ to: "/studio/project/$id", params: { id: "new" } })}

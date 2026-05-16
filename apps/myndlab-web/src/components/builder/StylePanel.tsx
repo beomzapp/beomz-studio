@@ -68,7 +68,7 @@ const TEXT_COLOR_SWATCHES: { value: string; bg: string; label: string }[] = [
   { value: "text-gray-900", bg: "#111827", label: "gray-900" },
   { value: "text-gray-500", bg: "#6b7280", label: "gray-500" },
   { value: "text-orange-500", bg: "#f97316", label: "orange-500" },
-  { value: "text-[#F97316]", bg: "#F97316", label: "#F97316" },
+  { value: "text-[#00D5D8]", bg: "#00D5D8", label: "#00D5D8" },
 ];
 
 const BG_COLOR_SWATCHES: { value: string; bg: string; label: string }[] = [
@@ -77,7 +77,7 @@ const BG_COLOR_SWATCHES: { value: string; bg: string; label: string }[] = [
   { value: "bg-gray-900", bg: "#111827", label: "gray-900" },
   { value: "bg-gray-500", bg: "#6b7280", label: "gray-500" },
   { value: "bg-orange-500", bg: "#f97316", label: "orange-500" },
-  { value: "bg-[#F97316]", bg: "#F97316", label: "#F97316" },
+  { value: "bg-[#00D5D8]", bg: "#00D5D8", label: "#00D5D8" },
 ];
 
 // ─── Token helpers ───────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ function Select({
     <select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
-      className="w-full rounded-md border-[0.5px] border-[#e5e5e5] bg-white px-2.5 py-1.5 text-[12px] text-[#1a1a1a] outline-none transition-colors hover:border-[#F97316]/40 focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+      className="w-full rounded-md border-[0.5px] border-[#e5e5e5] bg-white px-2.5 py-1.5 text-[12px] text-[#1a1a1a] outline-none transition-colors hover:border-[#00D5D8]/40 focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
     >
       <option value="">{placeholder}</option>
       {options.map((o) => (
@@ -223,7 +223,7 @@ function Swatch({
       className={cn(
         "h-6 w-6 rounded-full border-[0.5px] transition-all",
         selected
-          ? "border-[#F97316] ring-2 ring-[#F97316]/30"
+          ? "border-[#00D5D8] ring-2 ring-[#00D5D8]/30"
           : "border-[#e5e5e5] hover:border-[#9ca3af]",
       )}
       style={{ background: bg }}
@@ -298,7 +298,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#e5e5e5]">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-semibold text-[#1a1a1a]">Style panel</span>
-          <span className="rounded-full bg-[#FFF7ED] border border-[#F97316]/30 px-2 py-0.5 text-[11px] font-medium text-[#F97316]">
+          <span className="rounded-full bg-[#FFF7ED] border border-[#00D5D8]/30 px-2 py-0.5 text-[11px] font-medium text-[#00D5D8]">
             {element.tagName}
           </span>
         </div>
@@ -320,7 +320,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
             className={cn(
               "flex-1 px-2 py-2 text-[11px] font-medium uppercase tracking-wide transition-colors",
               tab === t
-                ? "text-[#F97316] border-b-2 border-[#F97316] -mb-[0.5px]"
+                ? "text-[#00D5D8] border-b-2 border-[#00D5D8] -mb-[0.5px]"
                 : "text-[#9ca3af] hover:text-[#374151]",
             )}
           >
@@ -340,7 +340,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
                   value={textContent}
                   onChange={(e) => setTextContent(e.target.value)}
                   rows={3}
-                  className="w-full resize-none rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 text-[12px] text-[#1a1a1a] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                  className="w-full resize-none rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 text-[12px] text-[#1a1a1a] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
                 />
               </div>
             )}
@@ -377,7 +377,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
                     className={cn(
                       "flex-1 flex items-center justify-center rounded-md border-[0.5px] py-1.5 transition-colors",
                       textAlign === value
-                        ? "border-[#F97316] bg-[#FFF7ED] text-[#F97316]"
+                        ? "border-[#00D5D8] bg-[#FFF7ED] text-[#00D5D8]"
                         : "border-[#e5e5e5] text-[#6b7280] hover:border-[#9ca3af]",
                     )}
                   >
@@ -411,7 +411,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
                 value={textColorHex}
                 onChange={(e) => setTextColorHex(e.target.value)}
                 placeholder="#hex"
-                className="w-full rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 font-mono text-[11px] text-[#1a1a1a] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                className="w-full rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 font-mono text-[11px] text-[#1a1a1a] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
               />
             </div>
             <div className="space-y-1.5">
@@ -434,7 +434,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
                 value={bgColorHex}
                 onChange={(e) => setBgColorHex(e.target.value)}
                 placeholder="#hex"
-                className="w-full rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 font-mono text-[11px] text-[#1a1a1a] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                className="w-full rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 font-mono text-[11px] text-[#1a1a1a] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
               />
             </div>
           </>
@@ -471,7 +471,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
               onChange={(e) => setAdvanced(e.target.value)}
               rows={8}
               spellCheck={false}
-              className="w-full resize-none rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 font-mono text-[11px] text-[#1a1a1a] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+              className="w-full resize-none rounded-md border-[0.5px] border-[#e5e5e5] px-2.5 py-1.5 font-mono text-[11px] text-[#1a1a1a] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
             />
             <p className="text-[11px] text-[#9ca3af]">
               Edits here override all other tabs on Apply.
@@ -484,7 +484,7 @@ export function StylePanel({ element, onApply, onClose }: StylePanelProps) {
       <div className="border-t border-[#e5e5e5] p-3">
         <button
           onClick={handleApply}
-          className="w-full rounded-xl bg-[#F97316] py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#EA580C]"
+          className="w-full rounded-xl bg-[#00D5D8] py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#00BCC0]"
         >
           Apply
         </button>

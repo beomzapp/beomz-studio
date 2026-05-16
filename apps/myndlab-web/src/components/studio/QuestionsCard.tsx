@@ -150,7 +150,7 @@ export function QuestionsCard({
             </button>
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+              className="flex items-center gap-2 rounded-xl bg-[#00D5D8] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
             >
               <Send size={14} />
               Submit
@@ -195,7 +195,7 @@ export function QuestionsCard({
                 className={cn(
                   "flex w-full items-start gap-3 rounded-lg border px-3 py-2 text-left transition-all",
                   isSelected
-                    ? "border-[#F97316]/40 bg-[rgba(249,115,22,0.06)]"
+                    ? "border-[#00D5D8]/40 bg-[rgba(0, 213, 216, 0.06)]"
                     : "border-[#e5e7eb] bg-white hover:border-[rgba(0,0,0,0.15)] hover:bg-[rgba(0,0,0,0.01)]",
                 )}
               >
@@ -206,12 +206,12 @@ export function QuestionsCard({
                       className={cn(
                         "flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors",
                         isSelected
-                          ? "border-[#F97316]"
+                          ? "border-[#00D5D8]"
                           : "border-[#d1d5db]",
                       )}
                     >
                       {isSelected && (
-                        <div className="h-2 w-2 rounded-full bg-[#F97316]" />
+                        <div className="h-2 w-2 rounded-full bg-[#00D5D8]" />
                       )}
                     </div>
                   ) : (
@@ -219,7 +219,7 @@ export function QuestionsCard({
                       className={cn(
                         "flex h-4 w-4 items-center justify-center rounded border-2 transition-colors",
                         isSelected
-                          ? "border-[#F97316] bg-[#F97316]"
+                          ? "border-[#00D5D8] bg-[#00D5D8]"
                           : "border-[#d1d5db]",
                       )}
                     >
@@ -259,7 +259,7 @@ export function QuestionsCard({
             className={cn(
               "flex items-start gap-3 rounded-lg border px-3 py-2 transition-all",
               (otherText[current.id] ?? "").trim()
-                ? "border-[#F97316]/40 bg-[rgba(249,115,22,0.06)]"
+                ? "border-[#00D5D8]/40 bg-[rgba(0, 213, 216, 0.06)]"
                 : "border-[#e5e7eb]",
             )}
           >
@@ -319,7 +319,7 @@ export function QuestionsCard({
             </button>
             <button
               onClick={goNext}
-              className="flex items-center gap-1 rounded-lg bg-[#F97316] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+              className="flex items-center gap-1 rounded-lg bg-[#00D5D8] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10]"
             >
               {isLast ? "Review" : "Next"}
               <ChevronRight size={14} />

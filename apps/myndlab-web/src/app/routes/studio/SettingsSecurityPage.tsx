@@ -99,7 +99,7 @@ export function SettingsSecurityPage() {
               <p className="text-sm font-medium text-[#1a1a1a]">Current session</p>
               <p className="text-xs text-[#6b7280]">{browserLabel} · This device</p>
             </div>
-            <span className="rounded-full bg-[#F97316]/10 px-2.5 py-0.5 text-xs font-medium text-[#F97316]">
+            <span className="rounded-full bg-[#00D5D8]/10 px-2.5 py-0.5 text-xs font-medium text-[#00D5D8]">
               Current
             </span>
           </div>
@@ -135,7 +135,7 @@ export function SettingsSecurityPage() {
               To delete your account, please contact our support team at{" "}
               <a
                 href="mailto:support@beomz.com?subject=Delete%20my%20account"
-                className="font-medium text-[#F97316] underline-offset-2 hover:underline"
+                className="font-medium text-[#00D5D8] underline-offset-2 hover:underline"
               >
                 support@beomz.com
               </a>

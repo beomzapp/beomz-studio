@@ -79,7 +79,7 @@ function ConfirmDialog({ versionNumber, onConfirm, onCancel, loading }: ConfirmD
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg bg-[#F97316] px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[#EA580C] disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg bg-[#00D5D8] px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-60"
           >
             {loading && <Loader2 size={11} className="animate-spin" />}
             Restore
@@ -277,13 +277,13 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
                       <span
                         className={cn(
                           "text-[12px] font-semibold",
-                          isCurrent ? "text-[#F97316]" : "text-[#9ca3af]",
+                          isCurrent ? "text-[#00D5D8]" : "text-[#9ca3af]",
                         )}
                       >
                         v{version.version_number}
                       </span>
                       {isCurrent && (
-                        <span className="rounded-full bg-[#FFF7ED] px-1.5 py-0.5 text-[10px] font-medium text-[#F97316]">
+                        <span className="rounded-full bg-[#FFF7ED] px-1.5 py-0.5 text-[10px] font-medium text-[#00D5D8]">
                           current
                         </span>
                       )}
@@ -318,7 +318,7 @@ export function VersionHistoryPanel({ projectId, onRestoreSuccess, refreshKey = 
                       </button>
                       <button
                         onClick={() => setConfirmVersion(version)}
-                        className="flex items-center gap-1 rounded-md bg-[#F97316] px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-[#EA580C]"
+                        className="flex items-center gap-1 rounded-md bg-[#00D5D8] px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-[#00BCC0]"
                       >
                         <RotateCcw size={11} />
                         Restore

@@ -15,7 +15,7 @@ export function SignupRedirectPage() {
 
   return (
     <div className="flex h-screen items-center justify-center bg-[#faf9f6]">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#00D5D8] border-t-transparent" />
     </div>
   );
 }

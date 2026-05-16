@@ -56,12 +56,12 @@ export function SettingsLayout() {
                       className={cn(
                         "relative flex items-center rounded-lg px-3 py-1.5 text-sm transition-colors",
                         active
-                          ? "bg-[#FFF3EC] font-medium text-[#F97316]"
+                          ? "bg-[#FFF3EC] font-medium text-[#00D5D8]"
                           : "text-[#374151] hover:bg-[#f3f4f6] hover:text-[#1a1a1a]",
                       )}
                     >
                       {active && (
-                        <span className="absolute right-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-l-sm bg-[#F97316]" />
+                        <span className="absolute right-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-l-sm bg-[#00D5D8]" />
                       )}
                       {item.label}
                     </Link>

@@ -145,7 +145,7 @@ function ProgressPhases({ filled }: { filled: number }) {
           key={i}
           className={cn(
             "h-1.5 rounded-full transition-all duration-300",
-            i < filled ? "w-6 bg-[#F97316]" : "w-2 bg-[#d1d5db]",
+            i < filled ? "w-6 bg-[#00D5D8]" : "w-2 bg-[#d1d5db]",
           )}
         />
       ))}
@@ -210,9 +210,9 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#faf9f6]">
         <div className="relative mb-8 flex h-20 w-20 items-center justify-center">
-          <span className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/20" />
-          <span className="absolute inset-2 animate-ping rounded-full bg-[#F97316]/15" />
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316] text-2xl text-white">
+          <span className="absolute inset-0 animate-ping rounded-full bg-[#00D5D8]/20" />
+          <span className="absolute inset-2 animate-ping rounded-full bg-[#00D5D8]/15" />
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#00D5D8] text-2xl text-white">
             ✦
           </span>
         </div>
@@ -246,14 +246,14 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
               className={cn(
                 "group flex flex-col items-center justify-center gap-3 rounded-2xl border bg-white px-4 py-8 text-center transition-all duration-150 active:scale-[0.97]",
                 isSelected
-                  ? "border-[#F97316] bg-orange-50/40 shadow-sm"
-                  : "border-[#e5e5e5] hover:border-[#F97316]/40 hover:bg-orange-50/40 hover:shadow-sm",
+                  ? "border-[#00D5D8] bg-orange-50/40 shadow-sm"
+                  : "border-[#e5e5e5] hover:border-[#00D5D8]/40 hover:bg-orange-50/40 hover:shadow-sm",
               )}
             >
               <span
                 className={cn(
                   "transition-colors",
-                  isSelected ? "text-[#F97316]" : "text-[#6b7280] group-hover:text-[#F97316]",
+                  isSelected ? "text-[#00D5D8]" : "text-[#6b7280] group-hover:text-[#00D5D8]",
                 )}
               >
                 {icon}
@@ -267,7 +267,7 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
       {/* Confirmation badge — appears above bottom row when type selected */}
       <div className="mt-5 flex h-7 w-full max-w-2xl items-center">
         {selectedType && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1 text-[12px] font-semibold text-[#EA580C]">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1 text-[12px] font-semibold text-[#00BCC0]">
             ✓ {selectedLabel} selected
           </span>
         )}
@@ -286,14 +286,14 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
           className={cn(
             "flex items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-white px-4 py-6 text-center transition-all duration-150",
             selectedType
-              ? "cursor-pointer border-[#F97316] hover:bg-orange-50/30 hover:shadow-sm active:scale-[0.99]"
+              ? "cursor-pointer border-[#00D5D8] hover:bg-orange-50/30 hover:shadow-sm active:scale-[0.99]"
               : "cursor-not-allowed border-[#d1d5db] opacity-50",
           )}
         >
           <span
             className={cn(
               "text-[20px] transition-transform duration-150",
-              selectedType ? "text-[#F97316]" : "text-[#9ca3af]",
+              selectedType ? "text-[#00D5D8]" : "text-[#9ca3af]",
             )}
           >
             ✦
@@ -307,8 +307,8 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
           className={cn(
             "flex items-center justify-center gap-2 rounded-2xl px-4 py-6 text-[14px] font-semibold text-white transition-all duration-150",
             selectedType
-              ? "bg-[#F97316] hover:bg-[#EA580C] active:scale-[0.99]"
-              : "cursor-not-allowed bg-[#F97316] opacity-40",
+              ? "bg-[#00D5D8] hover:bg-[#00BCC0] active:scale-[0.99]"
+              : "cursor-not-allowed bg-[#00D5D8] opacity-40",
           )}
         >
           Continue
@@ -320,7 +320,7 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
       {!showDirectInput ? (
         <button
           onClick={() => setShowDirectInput(true)}
-          className="mt-6 flex items-center gap-1 text-[13px] text-[#9ca3af] transition-colors hover:text-[#F97316]"
+          className="mt-6 flex items-center gap-1 text-[13px] text-[#9ca3af] transition-colors hover:text-[#00D5D8]"
         >
           or describe your site directly
           <ChevronRight size={14} />
@@ -335,12 +335,12 @@ function Step1({ onSelect, onDescribeDirect, onSurprise }: Step1Props) {
               if (e.key === "Enter" && directText.trim()) onDescribeDirect(directText.trim());
             }}
             placeholder="e.g. A modern portfolio for a UX designer..."
-            className="w-full rounded-xl border border-[#e5e5e5] bg-white px-4 py-3 text-[14px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+            className="w-full rounded-xl border border-[#e5e5e5] bg-white px-4 py-3 text-[14px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
           />
           <button
             onClick={() => directText.trim() && onDescribeDirect(directText.trim())}
             disabled={!directText.trim()}
-            className="self-end rounded-xl bg-[#F97316] px-5 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-40"
+            className="self-end rounded-xl bg-[#00D5D8] px-5 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-40"
           >
             Generate →
           </button>
@@ -418,7 +418,7 @@ function Step2({ siteType: _siteType, onComplete, onBack }: Step2Props) {
         <h2 className="mb-8 min-h-[2em] text-[22px] font-semibold leading-snug text-[#1a1a1a]">
           {typedQuestion}
           {typedQuestion.length < currentQuestion.length && (
-            <span className="animate-pulse text-[#F97316]">|</span>
+            <span className="animate-pulse text-[#00D5D8]">|</span>
           )}
         </h2>
 
@@ -430,7 +430,7 @@ function Step2({ siteType: _siteType, onComplete, onBack }: Step2Props) {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleAdvance()}
             placeholder="e.g. Bloom Studio"
-            className="w-full rounded-xl border border-[#e5e5e5] bg-white px-4 py-3.5 text-[15px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+            className="w-full rounded-xl border border-[#e5e5e5] bg-white px-4 py-3.5 text-[15px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
           />
         )}
 
@@ -448,7 +448,7 @@ function Step2({ siteType: _siteType, onComplete, onBack }: Step2Props) {
             }}
             placeholder="e.g. We help brands grow through strategic content and social media"
             rows={3}
-            className="w-full resize-none rounded-xl border border-[#e5e5e5] bg-white px-4 py-3.5 text-[15px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+            className="w-full resize-none rounded-xl border border-[#e5e5e5] bg-white px-4 py-3.5 text-[15px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
           />
         )}
 
@@ -463,8 +463,8 @@ function Step2({ siteType: _siteType, onComplete, onBack }: Step2Props) {
                   className={cn(
                     "rounded-full border px-5 py-2 text-[14px] font-medium transition-all duration-150",
                     vibe === v
-                      ? "border-[#F97316] bg-[#F97316] text-white shadow-sm"
-                      : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#1a1a1a]",
+                      ? "border-[#00D5D8] bg-[#00D5D8] text-white shadow-sm"
+                      : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#1a1a1a]",
                   )}
                 >
                   {v}
@@ -478,7 +478,7 @@ function Step2({ siteType: _siteType, onComplete, onBack }: Step2Props) {
                 onChange={(e) => setCustomVibeText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAdvance()}
                 placeholder="Describe your vibe e.g. dark and moody, high-end fashion..."
-                className="w-full rounded-xl border border-[#e5e5e5] bg-white px-4 py-3 text-[14px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                className="w-full rounded-xl border border-[#e5e5e5] bg-white px-4 py-3 text-[14px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
               />
             )}
           </div>
@@ -496,7 +496,7 @@ function Step2({ siteType: _siteType, onComplete, onBack }: Step2Props) {
           <button
             onClick={handleAdvance}
             disabled={!canAdvance}
-            className="rounded-xl bg-[#F97316] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-40"
+            className="rounded-xl bg-[#00D5D8] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-40"
           >
             Continue
           </button>
@@ -577,7 +577,7 @@ function Step3({ onComplete, onBack }: Step3Props) {
         <h2 className="mb-2 min-h-[2em] text-[22px] font-semibold leading-snug text-[#1a1a1a]">
           {typedQuestion}
           {typedQuestion.length < "Pick a color theme:".length && (
-            <span className="animate-pulse text-[#F97316]">|</span>
+            <span className="animate-pulse text-[#00D5D8]">|</span>
           )}
         </h2>
         <p className="mb-8 text-[13px] text-[#9ca3af]">
@@ -600,14 +600,14 @@ function Step3({ onComplete, onBack }: Step3Props) {
                 className={cn(
                   "relative flex items-center gap-2 rounded-full border px-4 py-2 text-[14px] font-medium transition-all duration-150",
                   isSelected
-                    ? "border-[#F97316] bg-white shadow-sm"
+                    ? "border-[#00D5D8] bg-white shadow-sm"
                     : disabled
                     ? "cursor-not-allowed border-[#e5e5e5] bg-white opacity-35"
-                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#1a1a1a]",
+                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#1a1a1a]",
                 )}
               >
                 {isSelected && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#F97316] text-[9px] font-bold text-white ring-1 ring-white">
+                  <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#00D5D8] text-[9px] font-bold text-white ring-1 ring-white">
                     {orderBadge}
                   </span>
                 )}
@@ -635,14 +635,14 @@ function Step3({ onComplete, onBack }: Step3Props) {
                 className={cn(
                   "relative flex items-center gap-2 rounded-full border px-4 py-2 text-[14px] font-medium transition-all duration-150",
                   isSelected
-                    ? "border-[#F97316] bg-white shadow-sm text-[#1a1a1a]"
+                    ? "border-[#00D5D8] bg-white shadow-sm text-[#1a1a1a]"
                     : disabled
                     ? "cursor-not-allowed border-[#e5e5e5] bg-white opacity-35"
-                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#1a1a1a]",
+                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#1a1a1a]",
                 )}
               >
                 {isSelected && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#F97316] text-[9px] font-bold text-white ring-1 ring-white">
+                  <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#00D5D8] text-[9px] font-bold text-white ring-1 ring-white">
                     {orderBadge}
                   </span>
                 )}
@@ -674,7 +674,7 @@ function Step3({ onComplete, onBack }: Step3Props) {
               onKeyDown={(e) => e.key === "Enter" && handleAdvance()}
               placeholder="#1a1a1a"
               maxLength={7}
-              className="w-40 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-[14px] font-mono text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+              className="w-40 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-[14px] font-mono text-[#1a1a1a] placeholder-[#9ca3af] outline-none transition-colors focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
             />
           </div>
         )}
@@ -698,7 +698,7 @@ function Step3({ onComplete, onBack }: Step3Props) {
             <button
               onClick={handleAdvance}
               disabled={!canAdvance}
-              className="rounded-xl bg-[#F97316] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-40"
+              className="rounded-xl bg-[#00D5D8] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-40"
             >
               Continue
             </button>
@@ -740,7 +740,7 @@ function Step4({ onComplete, onBack }: Step4Props) {
         <h2 className="mb-2 min-h-[2em] text-[22px] font-semibold leading-snug text-[#1a1a1a]">
           {typedQuestion}
           {typedQuestion.length < "Which pages do you need?".length && (
-            <span className="animate-pulse text-[#F97316]">|</span>
+            <span className="animate-pulse text-[#00D5D8]">|</span>
           )}
         </h2>
         <p className="mb-8 text-[13px] text-[#9ca3af]">Select all that apply</p>
@@ -756,8 +756,8 @@ function Step4({ onComplete, onBack }: Step4Props) {
                 className={cn(
                   "flex items-center gap-2 rounded-full border px-4 py-2 text-[14px] font-medium transition-all duration-150",
                   isSelected
-                    ? "border-[#F97316] bg-[#F97316] text-white shadow-sm"
-                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#1a1a1a]",
+                    ? "border-[#00D5D8] bg-[#00D5D8] text-white shadow-sm"
+                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#1a1a1a]",
                   isLocked && "cursor-default",
                 )}
               >
@@ -796,7 +796,7 @@ function Step4({ onComplete, onBack }: Step4Props) {
             </button>
             <button
               onClick={handleAdvance}
-              className="rounded-xl bg-[#F97316] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#EA580C]"
+              className="rounded-xl bg-[#00D5D8] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#00BCC0]"
             >
               Continue
             </button>
@@ -841,7 +841,7 @@ function Step5({ onComplete, onBack }: Step5Props) {
         <h2 className="mb-2 min-h-[2em] text-[22px] font-semibold leading-snug text-[#1a1a1a]">
           {typedQuestion}
           {typedQuestion.length < "What sections on your homepage?".length && (
-            <span className="animate-pulse text-[#F97316]">|</span>
+            <span className="animate-pulse text-[#00D5D8]">|</span>
           )}
         </h2>
         <p className="mb-8 text-[13px] text-[#9ca3af]">Pick at least 2 sections</p>
@@ -857,8 +857,8 @@ function Step5({ onComplete, onBack }: Step5Props) {
                 className={cn(
                   "flex items-center gap-2 rounded-full border px-4 py-2 text-[14px] font-medium transition-all duration-150",
                   isSelected
-                    ? "border-[#F97316] bg-[#F97316] text-white shadow-sm"
-                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#1a1a1a]",
+                    ? "border-[#00D5D8] bg-[#00D5D8] text-white shadow-sm"
+                    : "border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#1a1a1a]",
                   isLocked && "cursor-default",
                 )}
               >
@@ -898,7 +898,7 @@ function Step5({ onComplete, onBack }: Step5Props) {
             <button
               onClick={handleAdvance}
               disabled={!canAdvance}
-              className="rounded-xl bg-[#F97316] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-40"
+              className="rounded-xl bg-[#00D5D8] px-6 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-40"
             >
               Generate →
             </button>
@@ -953,9 +953,9 @@ function Step6({ siteType, name, description, vibeValue, colors, pages, sections
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#faf9f6]">
       <div className="relative mb-8 flex h-20 w-20 items-center justify-center">
-        <span className="absolute inset-0 animate-ping rounded-full bg-[#F97316]/20" />
-        <span className="absolute inset-2 animate-ping rounded-full bg-[#F97316]/15" />
-        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316]">
+        <span className="absolute inset-0 animate-ping rounded-full bg-[#00D5D8]/20" />
+        <span className="absolute inset-2 animate-ping rounded-full bg-[#00D5D8]/15" />
+        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#00D5D8]">
           <Globe size={28} className="text-white" />
         </span>
       </div>

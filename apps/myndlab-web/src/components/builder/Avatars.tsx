@@ -13,7 +13,7 @@ import { useState } from "react";
 export function BAvatar() {
   return (
     <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-zinc-900">
-      <span className="text-[9px] font-bold leading-none text-[#F97316]">B</span>
+      <span className="text-[9px] font-bold leading-none text-[#00D5D8]">B</span>
     </div>
   );
 }
@@ -37,7 +37,7 @@ export function UserAvatar({ avatarUrl, initials }: UserAvatarProps) {
     );
   }
   return (
-    <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#F97316] text-[8px] font-bold text-white">
+    <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#00D5D8] text-[8px] font-bold text-white">
       {initials || "U"}
     </div>
   );

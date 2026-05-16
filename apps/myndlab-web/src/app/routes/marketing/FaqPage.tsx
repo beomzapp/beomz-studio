@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import { Search, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../../../lib/cn";
-import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
 
 // ── Data ────────────────────────────────────────────────────────
 
@@ -228,7 +228,7 @@ export function FaqPage() {
       <header className="sticky top-0 z-10 border-b border-[#e5e5e5] bg-white/90 px-6 py-3 backdrop-blur-sm">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <BeomzLogo className="h-6 w-auto text-[#1a1a1a]" />
+            <MyndlabLogo className="h-6 w-auto text-[#1a1a1a]" />
           </Link>
           <Link
             to="/"
@@ -266,7 +266,7 @@ export function FaqPage() {
               placeholder="Search questions…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border border-[#e5e5e5] bg-white py-2.5 pl-9 pr-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#9ca3af] focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20 transition-all"
+              className="w-full rounded-xl border border-[#e5e5e5] bg-white py-2.5 pl-9 pr-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#9ca3af] focus:border-[#00D5D8] focus:ring-2 focus:ring-[#00D5D8]/20 transition-all"
             />
           </div>
 
@@ -279,8 +279,8 @@ export function FaqPage() {
                 className={cn(
                   "rounded-full px-3.5 py-1 text-xs font-medium transition-all",
                   activeCategory === cat
-                    ? "bg-[#F97316] text-white shadow-sm"
-                    : "border border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#F97316]/40 hover:text-[#F97316]"
+                    ? "bg-[#00D5D8] text-white shadow-sm"
+                    : "border border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#00D5D8]"
                 )}
               >
                 {cat}
@@ -297,7 +297,7 @@ export function FaqPage() {
             <p className="text-[#9ca3af]">No results for "{search}".</p>
             <button
               onClick={() => { setSearch(""); setActiveCategory("All"); }}
-              className="mt-3 text-sm text-[#F97316] hover:underline"
+              className="mt-3 text-sm text-[#00D5D8] hover:underline"
             >
               Clear filters
             </button>
@@ -308,7 +308,7 @@ export function FaqPage() {
               <section key={category}>
                 {/* Category label */}
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="text-xs font-semibold uppercase tracking-widest text-[#F97316]">
+                  <span className="text-xs font-semibold uppercase tracking-widest text-[#00D5D8]">
                     {category}
                   </span>
                   <div className="h-px flex-1 bg-[#e5e5e5]" />
@@ -331,7 +331,7 @@ export function FaqPage() {
                           <span
                             className={cn(
                               "text-sm font-medium leading-snug transition-colors",
-                              isOpen ? "text-[#F97316]" : "text-[#1a1a1a]"
+                              isOpen ? "text-[#00D5D8]" : "text-[#1a1a1a]"
                             )}
                           >
                             {item.question}
@@ -370,7 +370,7 @@ export function FaqPage() {
             We're here to help.{" "}
             <a
               href="mailto:support@beomz.com"
-              className="font-medium text-[#F97316] underline-offset-2 hover:underline"
+              className="font-medium text-[#00D5D8] underline-offset-2 hover:underline"
             >
               Contact support
             </a>

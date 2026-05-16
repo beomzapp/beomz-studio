@@ -426,7 +426,7 @@ function ExportZipCard({
           </p>
           <button
             onClick={() => { onCloseModal(); openPricingModal(); }}
-            className="mt-3 text-xs font-semibold text-[#F97316] hover:underline"
+            className="mt-3 text-xs font-semibold text-[#00D5D8] hover:underline"
           >
             Upgrade to unlock →
           </button>
@@ -492,7 +492,7 @@ function ByoHostingCard({
           </p>
           <button
             onClick={() => { onCloseModal(); openPricingModal(); }}
-            className="mt-3 text-xs font-semibold text-[#F97316] hover:underline"
+            className="mt-3 text-xs font-semibold text-[#00D5D8] hover:underline"
           >
             Upgrade to unlock →
           </button>
@@ -760,7 +760,7 @@ function CustomDomainsSection({ projectId, plan, customDomain, domainStatus, onC
           <p className="mt-0.5 text-xs text-[#6b7280]">Connect your own domain to this app</p>
         </div>
         {!isPaid && (
-          <span className="flex flex-none items-center gap-1 rounded-full bg-[#F97316]/10 px-2 py-0.5 text-[10px] font-semibold text-[#F97316]">
+          <span className="flex flex-none items-center gap-1 rounded-full bg-[#00D5D8]/10 px-2 py-0.5 text-[10px] font-semibold text-[#00D5D8]">
             <Lock size={10} /> Locked
           </span>
         )}
@@ -772,7 +772,7 @@ function CustomDomainsSection({ projectId, plan, customDomain, domainStatus, onC
             Available on Starter and above.{" "}
             <button
               onClick={handleUpgrade}
-              className="font-semibold text-[#F97316] hover:underline"
+              className="font-semibold text-[#00D5D8] hover:underline"
             >
               Upgrade →
             </button>
@@ -795,7 +795,7 @@ function CustomDomainsSection({ projectId, plan, customDomain, domainStatus, onC
               href={`https://${customDomain}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-[#F97316] hover:underline"
+              className="inline-flex items-center gap-1 font-medium text-[#00D5D8] hover:underline"
             >
               Visit <ExternalLink size={11} />
             </a>
@@ -852,12 +852,12 @@ function CustomDomainsSection({ projectId, plan, customDomain, domainStatus, onC
                       }
                     }}
                     placeholder="yourdomain.com"
-                    className="min-w-0 flex-1 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] px-3 py-2 text-sm text-[#1a1a1a] outline-none placeholder:text-[#d1d5db] focus:border-[#F97316] focus:ring-1 focus:ring-[#F97316]/20"
+                    className="min-w-0 flex-1 rounded-lg border border-[#e5e5e5] bg-[#faf9f6] px-3 py-2 text-sm text-[#1a1a1a] outline-none placeholder:text-[#d1d5db] focus:border-[#00D5D8] focus:ring-1 focus:ring-[#00D5D8]/20"
                   />
                   <button
                     onClick={() => void handleAdd()}
                     disabled={adding || sanitizeDomainInput(addInput).length === 0}
-                    className="flex flex-none items-center gap-1.5 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex flex-none items-center gap-1.5 rounded-lg bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {adding ? <Loader size={12} className="animate-spin" /> : null}
                     Add
@@ -880,7 +880,7 @@ function CustomDomainsSection({ projectId, plan, customDomain, domainStatus, onC
             ) : (
               <button
                 onClick={() => setShowAddInput(true)}
-                className="flex items-center gap-1.5 text-xs font-medium text-[#F97316] transition-colors hover:text-[#ea6c0e]"
+                className="flex items-center gap-1.5 text-xs font-medium text-[#00D5D8] transition-colors hover:text-[#ea6c0e]"
               >
                 <Plus size={12} /> Add another domain
               </button>
@@ -1011,7 +1011,7 @@ function DomainRow({
             href={`https://${domain.domain}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 font-medium text-[#F97316] hover:underline"
+            className="inline-flex items-center gap-1 font-medium text-[#00D5D8] hover:underline"
           >
             Visit <ExternalLink size={11} />
           </a>

@@ -62,7 +62,7 @@ export function TypewriterText({ text, speed, onDone }: TypewriterTextProps) {
   return (
     <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#374151] break-words">
       {stripMarkdown(displayed)}
-      <span className="typewriter-cursor ml-0.5 inline-block align-middle text-[#F97316]">|</span>
+      <span className="typewriter-cursor ml-0.5 inline-block align-middle text-[#00D5D8]">|</span>
     </p>
   );
 }

@@ -1025,7 +1025,7 @@ export function DatabasePanel({
   const usedMb = dbUsage?.used_mb ?? 0;
   const limitMb = dbUsage?.limits.storage_mb ?? 500;
   const fillPct = limitMb > 0 ? Math.min((usedMb / limitMb) * 100, 100) : 0;
-  const barColorClass = fillPct > 90 ? "bg-red-500" : fillPct > 80 ? "bg-amber-500" : "bg-[#F97316]";
+  const barColorClass = fillPct > 90 ? "bg-red-500" : fillPct > 80 ? "bg-amber-500" : "bg-[#00D5D8]";
 
   const INNER_TAB_ITEMS: { key: PanelTab; icon: typeof Table2; label: string; managedOnly?: boolean }[] = [
     { key: "schema", icon: Layers, label: "Schema" },
@@ -1106,12 +1106,12 @@ export function DatabasePanel({
       <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-10">
         <div className="grid w-full max-w-3xl grid-cols-1 gap-4 md:grid-cols-2">
           {/* ── Card 1: Beomz database (orange accent) ── */}
-          <div className="flex flex-col rounded-2xl border-2 border-[#F97316]/70 bg-white p-6 shadow-sm">
+          <div className="flex flex-col rounded-2xl border-2 border-[#00D5D8]/70 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-start justify-between">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#F97316]/10">
-                <Database size={22} className="text-[#F97316]" />
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#00D5D8]/10">
+                <Database size={22} className="text-[#00D5D8]" />
               </div>
-              <span className="rounded-full bg-[#F97316]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#F97316]">
+              <span className="rounded-full bg-[#00D5D8]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#00D5D8]">
                 Included in plan
               </span>
             </div>
@@ -1123,7 +1123,7 @@ export function DatabasePanel({
               type="button"
               onClick={() => void handleEnable()}
               disabled={enabling || !projectId}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#00D5D8] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
             >
               {enabling ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
               {enabling ? "Provisioning…" : "Add database"}
@@ -1267,9 +1267,9 @@ export function DatabasePanel({
                   {creatingProjectPolling ? (
                     <div className="flex flex-col items-center justify-center py-8 text-center">
                       <div className="relative mb-5 flex h-14 w-14 items-center justify-center">
-                        <span className="checklist-orb-active h-12 w-12 rounded-full bg-[#F97316]" />
+                        <span className="checklist-orb-active h-12 w-12 rounded-full bg-[#00D5D8]" />
                       </div>
-                      <p className="text-sm font-semibold text-[#F97316]">
+                      <p className="text-sm font-semibold text-[#00D5D8]">
                         Creating your Supabase project…
                       </p>
                       <p className="mt-1 text-xs text-[#9ca3af]">~30s</p>
@@ -1290,7 +1290,7 @@ export function DatabasePanel({
                               setCreatingProjectError(null);
                             }}
                             placeholder="my-project"
-                            className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                            className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
                           />
                         </div>
 
@@ -1300,7 +1300,7 @@ export function DatabasePanel({
                           <select
                             value={createProjRegion}
                             onChange={(e) => setCreateProjRegion(e.target.value)}
-                            className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                            className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
                           >
                             {SUPABASE_REGIONS.map((r) => (
                               <option key={r.value} value={r.value}>
@@ -1328,7 +1328,7 @@ export function DatabasePanel({
                             <select
                               value={createProjOrgId}
                               onChange={(e) => setCreateProjOrgId(e.target.value)}
-                              className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                              className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
                             >
                               {supabaseOrgs.map((org) => (
                                 <option key={org.id} value={org.id}>
@@ -1351,7 +1351,7 @@ export function DatabasePanel({
                         type="button"
                         onClick={() => void handleCreateSupabaseProject()}
                         disabled={!createProjName.trim() || creatingProject || orgsLoading}
-                        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#00D5D8] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {creatingProject ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                         {creatingProject ? "Creating…" : "Create project"}
@@ -1411,8 +1411,8 @@ export function DatabasePanel({
                           className={cn(
                             "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
                             selectedOauthRef === project.ref
-                              ? "border-[#F97316]/60 bg-[#F97316]/5 ring-2 ring-[#F97316]/10"
-                              : "border-[#e5e7eb] bg-white hover:border-[#F97316]/40 hover:bg-[#F97316]/5",
+                              ? "border-[#00D5D8]/60 bg-[#00D5D8]/5 ring-2 ring-[#00D5D8]/10"
+                              : "border-[#e5e7eb] bg-white hover:border-[#00D5D8]/40 hover:bg-[#00D5D8]/5",
                           )}
                         >
                           <div className="min-w-0">
@@ -1424,7 +1424,7 @@ export function DatabasePanel({
                             </p>
                           </div>
                           {selectedOauthRef === project.ref && (
-                            <Check size={15} className="ml-3 flex-shrink-0 text-[#F97316]" />
+                            <Check size={15} className="ml-3 flex-shrink-0 text-[#00D5D8]" />
                           )}
                         </button>
                       ))}
@@ -1437,7 +1437,7 @@ export function DatabasePanel({
                       <button
                         type="button"
                         onClick={() => void handleShowCreateProjectForm()}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#e5e7eb] bg-[#faf9f6] px-4 py-2.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#F97316]/40 hover:text-[#F97316]"
+                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#e5e7eb] bg-[#faf9f6] px-4 py-2.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#00D5D8]/40 hover:text-[#00D5D8]"
                       >
                         <Plus size={13} />
                         Create new project
@@ -1456,7 +1456,7 @@ export function DatabasePanel({
                     type="button"
                     onClick={() => void handleConnectOAuth()}
                     disabled={!selectedOauthRef || oauthConnecting}
-                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#00D5D8] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {oauthConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                     {oauthConnecting ? "Connecting…" : "Connect this project"}
@@ -1498,7 +1498,7 @@ export function DatabasePanel({
                 href="https://supabase.com/dashboard"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-[#F97316] transition-colors hover:text-[#ea6c10]"
+                className="text-xs text-[#00D5D8] transition-colors hover:text-[#ea6c10]"
               >
                 Where to find these? →
               </a>
@@ -1515,7 +1515,7 @@ export function DatabasePanel({
                 setByoConnectError(null);
               }}
               placeholder="https://xxxx.supabase.co"
-              className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+              className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
             />
             <p className="text-xs text-[#9ca3af]">Found in Project → Settings → API</p>
           </div>
@@ -1531,7 +1531,7 @@ export function DatabasePanel({
                   setByoConnectError(null);
                 }}
                 placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
               />
               <button
                 type="button"
@@ -1557,7 +1557,7 @@ export function DatabasePanel({
             type="button"
             onClick={() => void handleConnectSupabase()}
             disabled={!supabaseUrl.trim() || !supabaseAnonKey.trim() || byoConnecting}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00D5D8] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {byoConnecting ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
             {byoConnecting ? "Connecting…" : "Connect Supabase →"}
@@ -1592,7 +1592,7 @@ export function DatabasePanel({
                       setUpgradeError(null);
                     }}
                     placeholder="https://xxxx.supabase.co"
-                    className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                    className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white px-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1606,7 +1606,7 @@ export function DatabasePanel({
                         setUpgradeError(null);
                       }}
                       placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#F97316]/60 focus:ring-2 focus:ring-[#F97316]/10"
+                      className="h-11 w-full rounded-xl border border-[#e5e7eb] bg-white py-2.5 pl-4 pr-20 text-sm text-[#1a1a1a] outline-none placeholder:text-[#c4c9d4] focus:border-[#00D5D8]/60 focus:ring-2 focus:ring-[#00D5D8]/10"
                     />
                     <button
                       type="button"
@@ -1658,9 +1658,9 @@ export function DatabasePanel({
           {(upgradePhase === "migrating" || upgradePhase === "rewiring") && (
             <div className="flex flex-col items-center justify-center py-6 text-center">
               <div className="relative mb-6 flex h-14 w-14 items-center justify-center">
-                <span className="checklist-orb-active h-12 w-12 rounded-full bg-[#F97316]" />
+                <span className="checklist-orb-active h-12 w-12 rounded-full bg-[#00D5D8]" />
               </div>
-              <p className="text-base font-semibold text-[#F97316]">
+              <p className="text-base font-semibold text-[#00D5D8]">
                 {upgradePhase === "migrating"
                   ? "Migrating your data to Supabase…"
                   : "Rewiring your app…"}
@@ -1798,7 +1798,7 @@ export function DatabasePanel({
           <select
             value={dataTable}
             onChange={(e) => setDataTable(e.target.value)}
-            className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#F97316]/50"
+            className="h-9 rounded-lg border border-[#e5e7eb] bg-white px-3 text-sm outline-none focus:border-[#00D5D8]/50"
           >
             <option value="">Select a table...</option>
             {schemaTables.map((t) => (
@@ -1813,7 +1813,7 @@ export function DatabasePanel({
               setShowAddRowModal(true);
             }}
             disabled={!dataTable}
-            className="flex h-9 items-center gap-1.5 rounded-lg bg-[#F97316] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-[#00D5D8] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
           >
             <Plus size={12} />
             Add row
@@ -1893,7 +1893,7 @@ export function DatabasePanel({
                             <input
                               autoFocus
                               defaultValue={value == null ? "" : String(value)}
-                              className="h-7 w-full rounded border border-[#e5e7eb] px-2 text-xs outline-none focus:border-[#F97316]/50"
+                              className="h-7 w-full rounded border border-[#e5e7eb] px-2 text-xs outline-none focus:border-[#00D5D8]/50"
                               onBlur={(e) => {
                                 setEditingCell(null);
                                 if (e.target.value !== (value == null ? "" : String(value))) {
@@ -2096,7 +2096,7 @@ export function DatabasePanel({
                     <button
                       key={addon.price_id}
                       onClick={() => void handleStorageAddon(addon.price_id!)}
-                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#F97316]/50 hover:bg-[#F97316]/5 hover:text-[#F97316]"
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 text-[11px] font-medium text-[#374151] transition-colors hover:border-[#00D5D8]/50 hover:bg-[#00D5D8]/5 hover:text-[#00D5D8]"
                     >
                       <span className="font-semibold">{addon.label}</span>
                       <span className="text-[#9ca3af]">${addon.price_usd}</span>
@@ -2129,14 +2129,14 @@ export function DatabasePanel({
                 <input
                   value={newRow[c.name] ?? ""}
                   onChange={(e) => setNewRow((prev) => ({ ...prev, [c.name]: e.target.value }))}
-                  className="h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#F97316]/50"
+                  className="h-9 w-full rounded-lg border border-[#e5e7eb] px-3 text-sm outline-none focus:border-[#00D5D8]/50"
                 />
               </div>
             ))}
           </div>
           <button
             onClick={() => void handleInsertRow()}
-            className="mt-5 w-full rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+            className="mt-5 w-full rounded-xl bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
           >
             Insert row
           </button>
@@ -2194,7 +2194,7 @@ export function DatabasePanel({
                 "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors",
                 setupSqlCopied
                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-[#e5e7eb] bg-white text-[#1a1a1a] hover:border-[#F97316]/50 hover:text-[#F97316]",
+                  : "border-[#e5e7eb] bg-white text-[#1a1a1a] hover:border-[#00D5D8]/50 hover:text-[#00D5D8]",
               )}
             >
               {setupSqlCopied ? <Check size={12} /> : <Copy size={12} />}
@@ -2204,7 +2204,7 @@ export function DatabasePanel({
               href={sqlEditorUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#1a1a1a] transition-colors hover:border-[#F97316]/50 hover:text-[#F97316]"
+              className="flex items-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-semibold text-[#1a1a1a] transition-colors hover:border-[#00D5D8]/50 hover:text-[#00D5D8]"
             >
               Open Supabase SQL editor
               <ArrowRight size={12} />
@@ -2249,7 +2249,7 @@ function ConnectedHeader({
         <span
           className={cn(
             "rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-            kind === "managed" ? "bg-[#F97316]/10 text-[#F97316]" : "bg-emerald-50 text-emerald-700",
+            kind === "managed" ? "bg-[#00D5D8]/10 text-[#00D5D8]" : "bg-emerald-50 text-emerald-700",
           )}
         >
           {kind === "managed" ? "Managed" : "BYO"}
@@ -2260,7 +2260,7 @@ function ConnectedHeader({
         <button
           type="button"
           onClick={onUpgradeClick}
-          className="flex items-center gap-1 text-xs font-medium text-[#6b7280] transition-colors hover:text-[#F97316]"
+          className="flex items-center gap-1 text-xs font-medium text-[#6b7280] transition-colors hover:text-[#00D5D8]"
         >
           Upgrade to BYO
           <ArrowRight size={12} />

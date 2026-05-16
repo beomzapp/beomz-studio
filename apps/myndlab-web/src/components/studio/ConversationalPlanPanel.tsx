@@ -125,7 +125,7 @@ export function ConversationalPlanPanel({
             <button
               type="button"
               onClick={onApprove}
-              className="rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6a0c]"
+              className="rounded-xl bg-[#00D5D8] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6a0c]"
             >
               Build this plan
             </button>

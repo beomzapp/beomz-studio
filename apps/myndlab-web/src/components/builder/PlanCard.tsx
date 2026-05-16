@@ -51,7 +51,7 @@ export function PlanCard({
                 key={i}
                 className="flex items-start gap-3 rounded-lg border border-[rgba(0,0,0,0.05)] bg-[rgba(0,0,0,0.01)] px-3 py-2"
               >
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#F97316]/10 text-[10px] font-bold text-[#F97316]">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#00D5D8]/10 text-[10px] font-bold text-[#00D5D8]">
                   {i + 1}
                 </span>
                 <div>
@@ -71,7 +71,7 @@ export function PlanCard({
             <button
               onClick={onBuild}
               disabled={isBuilding}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-60"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#00D5D8] px-5 py-2.5 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-60"
             >
               {isBuilding ? (
                 <Loader2 size={14} className="animate-spin" />

@@ -53,7 +53,7 @@ function WebsiteCard({ project, onClick }: { project: WebsiteProject; onClick: (
   return (
     <button
       onClick={onClick}
-      className="group flex flex-col rounded-xl border border-[#e5e5e5] bg-white text-left transition-all duration-150 hover:border-[#F97316]/40 hover:shadow-md active:scale-[0.99]"
+      className="group flex flex-col rounded-xl border border-[#e5e5e5] bg-white text-left transition-all duration-150 hover:border-[#00D5D8]/40 hover:shadow-md active:scale-[0.99]"
     >
       {/* Thumbnail */}
       <div className="relative h-36 w-full overflow-hidden rounded-t-xl bg-[#f3f4f6]">
@@ -73,13 +73,13 @@ function WebsiteCard({ project, onClick }: { project: WebsiteProject; onClick: (
         )}
         {/* Globe badge */}
         <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white/90 shadow-sm">
-          <Globe size={12} className="text-[#F97316]" />
+          <Globe size={12} className="text-[#00D5D8]" />
         </div>
       </div>
 
       {/* Info */}
       <div className="flex flex-col gap-1 px-3.5 py-3">
-        <span className="truncate text-[14px] font-semibold text-[#1a1a1a] group-hover:text-[#F97316] transition-colors">
+        <span className="truncate text-[14px] font-semibold text-[#1a1a1a] group-hover:text-[#00D5D8] transition-colors">
           {project.name || "Untitled Website"}
         </span>
         <div className="flex items-center gap-1 text-[11px] text-[#9ca3af]">
@@ -130,7 +130,7 @@ export function WebsitesPage() {
     return (
       <div className="flex min-h-full flex-col items-center justify-center bg-[#faf9f6] p-6">
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[#e5e5e5] bg-white">
-          <Globe size={28} className="text-[#F97316]" />
+          <Globe size={28} className="text-[#00D5D8]" />
         </div>
         <h1 className="mt-5 text-2xl font-semibold text-[#1a1a1a]">Websites</h1>
         <p className="mt-2 text-sm text-[#6b7280]">
@@ -138,7 +138,7 @@ export function WebsitesPage() {
         </p>
         <Link
           to="/studio/websites/new"
-          className="mt-6 flex items-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C]"
+          className="mt-6 flex items-center gap-2 rounded-xl bg-[#00D5D8] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0]"
         >
           <Plus size={16} />
           New website
@@ -161,7 +161,7 @@ export function WebsitesPage() {
         <Link
           to="/studio/websites/new"
           className={cn(
-            "flex items-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C]",
+            "flex items-center gap-2 rounded-xl bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0]",
           )}
         >
           <Plus size={16} />

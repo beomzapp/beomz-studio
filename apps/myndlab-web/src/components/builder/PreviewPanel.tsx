@@ -62,7 +62,7 @@ export function PreviewPanel({
               className={cn(
                 "flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors",
                 viewMode === mode
-                  ? "bg-[#F97316]/10 text-[#F97316]"
+                  ? "bg-[#00D5D8]/10 text-[#00D5D8]"
                   : "text-[#6b7280] hover:bg-[rgba(0,0,0,0.04)] hover:text-[#1a1a1a]",
               )}
             >
@@ -85,7 +85,7 @@ export function PreviewPanel({
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <Loader2 size={24} className="mx-auto animate-spin text-[#F97316]" />
+              <Loader2 size={24} className="mx-auto animate-spin text-[#00D5D8]" />
               <p className="mt-3 text-sm text-[#9ca3af]">Loading preview...</p>
             </div>
           </div>

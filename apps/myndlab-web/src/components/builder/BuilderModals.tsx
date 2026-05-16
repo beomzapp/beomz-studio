@@ -52,7 +52,7 @@ export function BuilderModals({
 
             <button
               onClick={onCloseShareModal}
-              className="mt-6 w-full rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+              className="mt-6 w-full rounded-xl bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
             >
               Got it
             </button>
@@ -73,8 +73,8 @@ export function BuilderModals({
               </button>
             )}
 
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#F97316]/10">
-              <Zap size={24} className="text-[#F97316]" />
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#00D5D8]/10">
+              <Zap size={24} className="text-[#00D5D8]" />
             </div>
 
             {isHardBlock ? (
@@ -101,7 +101,7 @@ export function BuilderModals({
             <div className="mt-6 flex flex-col gap-2">
               <button
                 onClick={handleBuyCredits}
-                className="flex w-full items-center justify-center rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
+                className="flex w-full items-center justify-center rounded-xl bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10]"
               >
                 Buy credits
               </button>

@@ -92,14 +92,14 @@ export function SettingsReferralsPage() {
                 <input
                   readOnly
                   value={displayLink}
-                  className="flex-1 rounded-xl border border-[#e5e5e5] bg-[#faf9f6] px-3 py-2 font-mono text-sm text-[#374151] outline-none select-all focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20 transition-all"
+                  className="flex-1 rounded-xl border border-[#e5e5e5] bg-[#faf9f6] px-3 py-2 font-mono text-sm text-[#374151] outline-none select-all focus:border-[#00D5D8] focus:ring-2 focus:ring-[#00D5D8]/20 transition-all"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
                 <button
                   type="button"
                   onClick={handleCopy}
                   disabled={!referralLink && fetchError}
-                  className="flex items-center gap-1.5 rounded-xl bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-xl bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-50"
                 >
                   {copied ? (
                     <>
@@ -133,7 +133,7 @@ export function SettingsReferralsPage() {
           {/* Signups */}
           <div className="rounded-2xl border border-[#e5e5e5] bg-white p-5">
             <div className="mb-3 flex items-center gap-2">
-              <Users size={16} className="text-[#F97316]" />
+              <Users size={16} className="text-[#00D5D8]" />
               <p className="text-xs font-medium uppercase tracking-wider text-[#9ca3af]">
                 Signup Bonus
               </p>
@@ -154,7 +154,7 @@ export function SettingsReferralsPage() {
                 <div className="mt-2.5">
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#f0eeeb]">
                     <div
-                      className="h-full rounded-full bg-[#F97316] transition-all duration-500"
+                      className="h-full rounded-full bg-[#00D5D8] transition-all duration-500"
                       style={{ width: `${signupPct}%` }}
                     />
                   </div>
@@ -171,7 +171,7 @@ export function SettingsReferralsPage() {
           {/* Upgrade referrals */}
           <div className="rounded-2xl border border-[#e5e5e5] bg-white p-5">
             <div className="mb-3 flex items-center gap-2">
-              <TrendingUp size={16} className="text-[#F97316]" />
+              <TrendingUp size={16} className="text-[#00D5D8]" />
               <p className="text-xs font-medium uppercase tracking-wider text-[#9ca3af]">
                 Upgrade Bonus
               </p>
@@ -191,7 +191,7 @@ export function SettingsReferralsPage() {
           {/* Credits earned */}
           <div className="rounded-2xl border border-[#e5e5e5] bg-white p-5">
             <div className="mb-3 flex items-center gap-2">
-              <Zap size={16} className="text-[#F97316]" />
+              <Zap size={16} className="text-[#00D5D8]" />
               <p className="text-xs font-medium uppercase tracking-wider text-[#9ca3af]">
                 Credits earned
               </p>
@@ -200,7 +200,7 @@ export function SettingsReferralsPage() {
               <div className="h-6 w-20 animate-pulse rounded bg-[#f0eeeb]" />
             ) : (
               <>
-                <p className="text-2xl font-bold text-[#F97316]">{creditsEarned} cr</p>
+                <p className="text-2xl font-bold text-[#00D5D8]">{creditsEarned} cr</p>
                 <p className="mt-1 text-[11px] text-[#9ca3af]">Total from referrals</p>
               </>
             )}
@@ -209,7 +209,7 @@ export function SettingsReferralsPage() {
 
         {/* All 3 signup rewards used — callout */}
         {!isLoading && signupRewardsExhausted && (
-          <div className="mb-6 rounded-2xl border border-[#F97316]/20 bg-[#fff7ed] px-5 py-4">
+          <div className="mb-6 rounded-2xl border border-[#00D5D8]/20 bg-[#fff7ed] px-5 py-4">
             <p className="text-sm font-semibold text-[#c2410c]">
               You've earned all 3 signup rewards 🎉
             </p>
@@ -232,7 +232,7 @@ export function SettingsReferralsPage() {
           <div className="space-y-4">
             {/* Step 1 */}
             <div className="flex items-start gap-4">
-              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#F97316]/10 text-sm font-bold text-[#F97316]">
+              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#00D5D8]/10 text-sm font-bold text-[#00D5D8]">
                 1
               </div>
               <div>
@@ -249,13 +249,13 @@ export function SettingsReferralsPage() {
 
             {/* Step 2 */}
             <div className="flex items-start gap-4">
-              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#F97316]/10 text-sm font-bold text-[#F97316]">
+              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#00D5D8]/10 text-sm font-bold text-[#00D5D8]">
                 2
               </div>
               <div>
                 <p className="text-sm font-medium text-[#1a1a1a]">
                   Friend signs up → you earn{" "}
-                  <span className="font-semibold text-[#F97316]">
+                  <span className="font-semibold text-[#00D5D8]">
                     {SIGNUP_REWARD_CR} credits
                   </span>
                 </p>
@@ -272,13 +272,13 @@ export function SettingsReferralsPage() {
 
             {/* Step 3 */}
             <div className="flex items-start gap-4">
-              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#F97316]/10 text-sm font-bold text-[#F97316]">
+              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#00D5D8]/10 text-sm font-bold text-[#00D5D8]">
                 3
               </div>
               <div>
                 <p className="text-sm font-medium text-[#1a1a1a]">
                   Friend upgrades → you earn{" "}
-                  <span className="font-semibold text-[#F97316]">
+                  <span className="font-semibold text-[#00D5D8]">
                     {UPGRADE_REWARD_CR} credits
                   </span>
                 </p>

@@ -218,7 +218,7 @@ export function HistoryPanel({
                     className={cn(
                       "group relative rounded-xl border px-3 py-2.5 transition-all",
                       isActive
-                        ? "border-[#F97316]/30 bg-[rgba(249,115,22,0.06)]"
+                        ? "border-[#00D5D8]/30 bg-[rgba(0, 213, 216, 0.06)]"
                         : "border-[rgba(0,0,0,0.06)] bg-white hover:border-[rgba(0,0,0,0.12)] hover:shadow-sm",
                     )}
                   >
@@ -227,7 +227,7 @@ export function HistoryPanel({
                       <div
                         className={cn(
                           "h-1.5 w-1.5 rounded-full",
-                          isActive ? "bg-[#F97316]" : "bg-[rgba(0,0,0,0.15)]",
+                          isActive ? "bg-[#00D5D8]" : "bg-[rgba(0,0,0,0.15)]",
                         )}
                       />
                     </div>
@@ -238,7 +238,7 @@ export function HistoryPanel({
                         className={cn(
                           "text-xs font-semibold",
                           isActive
-                            ? "text-[#F97316]"
+                            ? "text-[#00D5D8]"
                             : "text-[rgba(0,0,0,0.5)]",
                         )}
                       >
@@ -298,7 +298,7 @@ export function HistoryPanel({
                       <button
                         onClick={() => handleFork(cp)}
                         disabled={isForking}
-                        className="flex items-center gap-1 rounded-lg border border-[rgba(0,0,0,0.08)] bg-white px-2 py-1 text-[10px] font-medium text-[rgba(0,0,0,0.5)] transition-colors hover:border-[#F97316]/30 hover:text-[#F97316] disabled:opacity-30"
+                        className="flex items-center gap-1 rounded-lg border border-[rgba(0,0,0,0.08)] bg-white px-2 py-1 text-[10px] font-medium text-[rgba(0,0,0,0.5)] transition-colors hover:border-[#00D5D8]/30 hover:text-[#00D5D8] disabled:opacity-30"
                       >
                         {isForking ? (
                           <Loader2 size={10} className="animate-spin" />

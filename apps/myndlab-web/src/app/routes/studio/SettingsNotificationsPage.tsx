@@ -114,7 +114,7 @@ export function SettingsNotificationsPage() {
                 aria-checked={prefs[item.key]}
                 onClick={() => toggle(item.key)}
                 className={`relative h-5 w-9 flex-none rounded-full transition-colors ${
-                  prefs[item.key] ? "bg-[#F97316]" : "bg-[#d1d5db]"
+                  prefs[item.key] ? "bg-[#00D5D8]" : "bg-[#d1d5db]"
                 }`}
               >
                 <span
@@ -131,7 +131,7 @@ export function SettingsNotificationsPage() {
           <button
             type="button"
             onClick={handleSave}
-            className="rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C]"
+            className="rounded-xl bg-[#00D5D8] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0]"
           >
             Save preferences
           </button>

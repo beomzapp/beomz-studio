@@ -13,11 +13,11 @@ interface ImplementBarProps {
 
 export function ImplementBar({ summary, onImplement, onDismiss }: ImplementBarProps) {
   return (
-    <div className="relative mx-3 mb-2 rounded-xl border border-[#F97316]/30 bg-[#F97316]/5 px-3 py-2.5">
+    <div className="relative mx-3 mb-2 rounded-xl border border-[#00D5D8]/30 bg-[#00D5D8]/5 px-3 py-2.5">
       {/* Dismiss button */}
       <button
         onClick={onDismiss}
-        className="absolute right-2 top-2 rounded p-0.5 text-[#F97316]/60 transition-colors hover:bg-[#F97316]/10 hover:text-[#F97316]"
+        className="absolute right-2 top-2 rounded p-0.5 text-[#00D5D8]/60 transition-colors hover:bg-[#00D5D8]/10 hover:text-[#00D5D8]"
         title="Dismiss"
       >
         <X size={13} />
@@ -31,7 +31,7 @@ export function ImplementBar({ summary, onImplement, onDismiss }: ImplementBarPr
       {/* Implement button */}
       <button
         onClick={onImplement}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] active:scale-[0.98]"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] active:scale-[0.98]"
       >
         🚀 Implement this
       </button>

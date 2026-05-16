@@ -192,7 +192,7 @@ export function TopBar({
             className="flex items-center gap-1.5 max-w-[220px] truncate text-sm font-semibold text-[#1a1a1a] transition-colors hover:text-[#6b7280]"
           >
             {projectIcon && (
-              <span className="flex-none text-[#F97316]">
+              <span className="flex-none text-[#00D5D8]">
                 <ProjectIconRenderer name={projectIcon} size={14} />
               </span>
             )}
@@ -202,7 +202,7 @@ export function TopBar({
 
         {/* Phase progress pill */}
         {phaseMode && phasesTotal > 0 && (
-          <span className="ml-1.5 flex-none rounded-full bg-[#fff7ed] px-2 py-0.5 text-[10px] font-medium text-[#F97316]">
+          <span className="ml-1.5 flex-none rounded-full bg-[#fff7ed] px-2 py-0.5 text-[10px] font-medium text-[#00D5D8]">
             {currentPhase >= phasesTotal
               ? "\u2713 All phases complete"
               : `Phase ${currentPhase} of ${phasesTotal}`}
@@ -246,7 +246,7 @@ export function TopBar({
           className={cn(
             "rounded-md p-1.5 transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]",
             versionHistoryOpen
-              ? "bg-[#f3f4f6] text-[#F97316]"
+              ? "bg-[#f3f4f6] text-[#00D5D8]"
               : "text-[#6b7280]",
           )}
           aria-label="Version history"
@@ -306,7 +306,7 @@ export function TopBar({
                   setShowExportGate(false);
                   openPricingModal();
                 }}
-                className="mt-3 flex w-full items-center justify-center rounded-lg bg-[#F97316] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+                className="mt-3 flex w-full items-center justify-center rounded-lg bg-[#00D5D8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
               >
                 Upgrade
               </button>

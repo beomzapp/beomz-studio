@@ -213,7 +213,7 @@ export function PricingModal() {
                     isCurrent
                       ? "border-zinc-300 bg-zinc-50"
                       : plan.popular
-                        ? "border-[#F97316] bg-orange-50"
+                        ? "border-[#00D5D8] bg-orange-50"
                         : "border-zinc-200 bg-white hover:border-zinc-300",
                   )}
                 >
@@ -223,7 +223,7 @@ export function PricingModal() {
                       Your plan
                     </div>
                   ) : plan.popular ? (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#F97316] px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-[#00D5D8] px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                       Most Popular
                     </div>
                   ) : null}
@@ -254,7 +254,7 @@ export function PricingModal() {
                   <ul className="mb-6 flex-1 space-y-2">
                     {plan.features.map((f) => (
                       <li key={f} className="flex items-start gap-2 text-xs text-zinc-600">
-                        <Check size={12} className="mt-0.5 flex-none text-[#F97316]" />
+                        <Check size={12} className="mt-0.5 flex-none text-[#00D5D8]" />
                         <span>{f}</span>
                       </li>
                     ))}
@@ -269,7 +269,7 @@ export function PricingModal() {
                       isCurrent
                         ? "bg-zinc-100 text-zinc-400"
                         : plan.popular
-                          ? "bg-[#F97316] text-white hover:bg-[#ea6c0e] disabled:opacity-60"
+                          ? "bg-[#00D5D8] text-white hover:bg-[#ea6c0e] disabled:opacity-60"
                           : plan.id === "business"
                             ? "border border-zinc-300 text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
                             : "bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-60",
@@ -357,7 +357,7 @@ function TopupSection({ onError }: { onError: (msg: string | null) => void }) {
   return (
     <div className="mt-8 border-t border-zinc-200 pt-8">
       <div className="mb-4 flex items-center gap-2">
-        <Zap size={14} className="text-[#F97316]" />
+        <Zap size={14} className="text-[#00D5D8]" />
         <span className="text-sm font-semibold text-zinc-900">Need more credits?</span>
         <span className="text-xs text-zinc-400">One-time top-ups — never expire</span>
       </div>
@@ -376,7 +376,7 @@ function TopupSection({ onError }: { onError: (msg: string | null) => void }) {
               disabled={loadingId !== null}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                "border border-[#F97316]/60 text-[#F97316] hover:bg-orange-50",
+                "border border-[#00D5D8]/60 text-[#00D5D8] hover:bg-orange-50",
               )}
             >
               {loadingId === pack.id ? (

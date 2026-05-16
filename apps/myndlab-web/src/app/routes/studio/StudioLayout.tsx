@@ -23,7 +23,7 @@ import {
   type ModuleKey,
   type ModulesFlags,
 } from "../../../lib/featureFlags";
-import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
 
 /**
  * Fetch /api/me without triggering signOutAndRedirectToLogin on 401.
@@ -173,7 +173,7 @@ export function StudioLayout() {
       >
         <div className="flex h-14 items-center justify-between border-b border-[#e5e5e5] px-4">
           <Link to="/" className="flex items-center gap-2">
-            <BeomzLogo className="h-6 w-auto text-[#1a1a1a]" />
+            <MyndlabLogo className="h-6 w-auto text-[#1a1a1a]" />
           </Link>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -213,7 +213,7 @@ export function StudioLayout() {
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                   active
-                    ? "bg-[#F97316]/10 text-[#F97316]"
+                    ? "bg-[#00D5D8]/10 text-[#00D5D8]"
                     : "text-[#6b7280] hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
                 )}
               >
@@ -236,7 +236,7 @@ export function StudioLayout() {
             >
               <Menu size={20} />
             </button>
-            <BeomzLogo className="ml-3 h-5 w-auto text-[#F97316]" />
+            <MyndlabLogo className="ml-3 h-5 w-auto text-[#00D5D8]" />
           </div>
           <GlobalNav />
         </header>

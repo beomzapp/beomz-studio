@@ -28,8 +28,8 @@ export function QuestionCard({
               onClick={() => onSelect(option.label)}
               className={
                 isSelected
-                  ? "w-full rounded-2xl border border-[#F97316] bg-[rgba(249,115,22,0.12)] px-4 py-3 text-left text-white transition-colors"
-                  : "w-full rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.02)] px-4 py-3 text-left text-white/88 transition-colors hover:border-[rgba(249,115,22,0.45)] hover:bg-[rgba(249,115,22,0.06)]"
+                  ? "w-full rounded-2xl border border-[#00D5D8] bg-[rgba(0, 213, 216, 0.12)] px-4 py-3 text-left text-white transition-colors"
+                  : "w-full rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.02)] px-4 py-3 text-left text-white/88 transition-colors hover:border-[rgba(0, 213, 216, 0.45)] hover:bg-[rgba(0, 213, 216, 0.06)]"
               }
             >
               <span className="block text-sm font-medium">{option.label}</span>

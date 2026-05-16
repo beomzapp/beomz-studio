@@ -18,7 +18,7 @@ export function StreamingBubble({
       }
     >
       <div className="mb-2 flex items-center gap-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#F97316]/15 text-xs font-bold text-[#F97316]">
+        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#00D5D8]/15 text-xs font-bold text-[#00D5D8]">
           B
         </div>
         <span className={light ? "text-xs font-semibold uppercase tracking-[0.2em] text-[rgba(0,0,0,0.35)]" : "text-xs font-semibold uppercase tracking-[0.2em] text-white/35"}>
@@ -27,7 +27,7 @@ export function StreamingBubble({
       </div>
       <p className={light ? "whitespace-pre-wrap text-sm leading-7 text-[#1a1a1a]" : "whitespace-pre-wrap text-sm leading-7 text-white/85"}>
         {text}
-        {!done && <span className="ml-0.5 inline-block text-[#F97316] [animation:blink_1s_steps(1)_infinite]">|</span>}
+        {!done && <span className="ml-0.5 inline-block text-[#00D5D8] [animation:blink_1s_steps(1)_infinite]">|</span>}
       </p>
     </div>
   );

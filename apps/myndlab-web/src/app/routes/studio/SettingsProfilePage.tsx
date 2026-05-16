@@ -182,7 +182,7 @@ export function SettingsProfilePage() {
   if (isLoading) {
     return (
       <div className="flex min-h-full items-center justify-center bg-[#faf9f6]">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#00D5D8] border-t-transparent" />
       </div>
     );
   }
@@ -228,7 +228,7 @@ export function SettingsProfilePage() {
                     <p className="text-sm text-[#374151]">{planLabel}</p>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        isFree ? "bg-[#fff7ed] text-[#F97316]" : "bg-[#f0fdf4] text-[#16a34a]"
+                        isFree ? "bg-[#fff7ed] text-[#00D5D8]" : "bg-[#f0fdf4] text-[#16a34a]"
                       }`}
                     >
                       {planLabel}
@@ -239,7 +239,7 @@ export function SettingsProfilePage() {
                   <button
                     type="button"
                     onClick={openPricingModal}
-                    className="text-xs font-medium text-[#F97316] underline-offset-2 hover:underline"
+                    className="text-xs font-medium text-[#00D5D8] underline-offset-2 hover:underline"
                   >
                     Upgrade
                   </button>
@@ -251,7 +251,7 @@ export function SettingsProfilePage() {
               <div className="flex flex-1 items-center justify-between">
                 <div>
                   <p className="text-[11px] text-[#9ca3af]">Credits balance</p>
-                  <p className="text-sm font-semibold text-[#F97316]">{profile?.credits ?? 0} credits</p>
+                  <p className="text-sm font-semibold text-[#00D5D8]">{profile?.credits ?? 0} credits</p>
                 </div>
                 <button
                   type="button"
@@ -279,10 +279,10 @@ export function SettingsProfilePage() {
                 <img
                   src={avatarPreview}
                   alt="Avatar"
-                  className="h-16 w-16 rounded-full object-cover ring-2 ring-[#F97316]/20"
+                  className="h-16 w-16 rounded-full object-cover ring-2 ring-[#00D5D8]/20"
                 />
               ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F97316] text-lg font-bold text-white">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#00D5D8] text-lg font-bold text-white">
                   {getInitials()}
                 </div>
               )}
@@ -319,14 +319,14 @@ export function SettingsProfilePage() {
           {/* Full name */}
           <div className="mb-4">
             <label className="mb-1 block text-xs font-medium text-[#374151]">
-              Full name <span className="text-[#F97316]">*</span>
+              Full name <span className="text-[#00D5D8]">*</span>
             </label>
             <input
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="Your full name"
-              className={`w-full rounded-lg border px-3 py-2 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#9ca3af] focus:ring-1 focus:ring-[#F97316] ${errors.fullName ? "border-red-400 bg-red-50" : "border-[#e5e5e5] bg-white focus:border-[#F97316]"}`}
+              className={`w-full rounded-lg border px-3 py-2 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#9ca3af] focus:ring-1 focus:ring-[#00D5D8] ${errors.fullName ? "border-red-400 bg-red-50" : "border-[#e5e5e5] bg-white focus:border-[#00D5D8]"}`}
             />
             {errors.fullName && (
               <p className="mt-1 text-xs text-red-500">{errors.fullName}</p>
@@ -336,14 +336,14 @@ export function SettingsProfilePage() {
           {/* Display name */}
           <div className="mb-4">
             <label className="mb-1 block text-xs font-medium text-[#374151]">
-              Display name <span className="text-[#F97316]">*</span>
+              Display name <span className="text-[#00D5D8]">*</span>
             </label>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="e.g. omar-builds"
-              className={`w-full rounded-lg border px-3 py-2 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#9ca3af] focus:ring-1 focus:ring-[#F97316] ${errors.displayName ? "border-red-400 bg-red-50" : "border-[#e5e5e5] bg-white focus:border-[#F97316]"}`}
+              className={`w-full rounded-lg border px-3 py-2 text-sm text-[#1a1a1a] outline-none transition-colors placeholder:text-[#9ca3af] focus:ring-1 focus:ring-[#00D5D8] ${errors.displayName ? "border-red-400 bg-red-50" : "border-[#e5e5e5] bg-white focus:border-[#00D5D8]"}`}
             />
             {errors.displayName ? (
               <p className="mt-1 text-xs text-red-500">{errors.displayName}</p>
@@ -360,7 +360,7 @@ export function SettingsProfilePage() {
             <select
               value={buildingFor}
               onChange={(e) => setBuildingFor(e.target.value)}
-              className="w-full rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm text-[#1a1a1a] outline-none focus:border-[#F97316] focus:ring-1 focus:ring-[#F97316]"
+              className="w-full rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm text-[#1a1a1a] outline-none focus:border-[#00D5D8] focus:ring-1 focus:ring-[#00D5D8]"
             >
               <option value="">Select…</option>
               {BUILDING_FOR_OPTIONS.map((o) => (
@@ -377,7 +377,7 @@ export function SettingsProfilePage() {
             <select
               value={referralSource}
               onChange={(e) => setReferralSource(e.target.value)}
-              className="w-full rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm text-[#1a1a1a] outline-none focus:border-[#F97316] focus:ring-1 focus:ring-[#F97316]"
+              className="w-full rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm text-[#1a1a1a] outline-none focus:border-[#00D5D8] focus:ring-1 focus:ring-[#00D5D8]"
             >
               <option value="">Select…</option>
               {REFERRAL_OPTIONS.map((o) => (
@@ -404,7 +404,7 @@ export function SettingsProfilePage() {
             type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#EA580C] disabled:opacity-60"
+            className="rounded-xl bg-[#00D5D8] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#00BCC0] disabled:opacity-60"
           >
             {isSaving ? "Saving…" : "Save profile"}
           </button>
@@ -441,7 +441,7 @@ export function SettingsProfilePage() {
               To delete your account, please contact our support team at{" "}
               <a
                 href="mailto:support@beomz.com?subject=Delete%20my%20account"
-                className="font-medium text-[#F97316] underline-offset-2 hover:underline"
+                className="font-medium text-[#00D5D8] underline-offset-2 hover:underline"
               >
                 support@beomz.com
               </a>

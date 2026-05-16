@@ -131,7 +131,7 @@ function Composer({ disabled, onSubmit }: { disabled: boolean; onSubmit: (p: str
   const [value, setValue] = useState("");
   return (
     <div className="flex-shrink-0 border-t border-[#e5e5e5] px-3 py-2">
-      <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#F97316]/50">
+      <div className="rounded-xl border border-[#e5e5e5] bg-white focus-within:border-[#00D5D8]/50">
         <div className="px-3 pt-2 pb-1">
           <textarea
             className="max-h-[120px] w-full resize-none bg-transparent text-[14px] text-[#1a1a1a] outline-none placeholder:text-[#9ca3af] leading-[1.55]"
@@ -151,7 +151,7 @@ function Composer({ disabled, onSubmit }: { disabled: boolean; onSubmit: (p: str
         <div className="flex items-center justify-end px-2 pb-1.5">
           <button
             disabled={disabled || !value.trim()}
-            className="rounded-lg bg-[#F97316] p-1.5 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
+            className="rounded-lg bg-[#00D5D8] p-1.5 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
             onClick={() => { if (value.trim()) { onSubmit(value.trim()); setValue(""); } }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>

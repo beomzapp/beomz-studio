@@ -116,7 +116,7 @@ export function GlobalNav({ variant = "dark" }: GlobalNavProps) {
               onError={() => setAvatarError(true)}
             />
           ) : (
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F97316] text-xs font-bold text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#00D5D8] text-xs font-bold text-white">
               {initials || "U"}
             </div>
           )}
@@ -186,14 +186,14 @@ function PlanBadge({ plan, isLight, onUpgrade }: PlanBadgeProps) {
   if (isLight) return null;
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${isFree ? "bg-[#fff7ed] text-[#F97316]" : "bg-[#f3f4f6] text-[#6b7280]"}`}>
+      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${isFree ? "bg-[#fff7ed] text-[#00D5D8]" : "bg-[#f3f4f6] text-[#6b7280]"}`}>
         {label}
       </span>
       {isFree && (
         <button
           type="button"
           onClick={onUpgrade}
-          className="text-[11px] font-medium text-[#F97316] underline-offset-2 hover:underline"
+          className="text-[11px] font-medium text-[#00D5D8] underline-offset-2 hover:underline"
         >
           Upgrade
         </button>
@@ -327,7 +327,7 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
           )}
           {topup > 0 && (
             <div className="flex items-center gap-2">
-              <span className="h-2 w-2 flex-none rounded-full bg-[#F97316]" />
+              <span className="h-2 w-2 flex-none rounded-full bg-[#00D5D8]" />
               <span className="flex-1 text-zinc-500">Top-up <span className="text-zinc-400">(never expire)</span></span>
               <span className="tabular-nums text-zinc-700">{topup}</span>
             </div>
@@ -341,7 +341,7 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onUpgrade(); }}
-          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#F97316] px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#00D5D8] px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
         >
           <Zap size={11} />
           Upgrade plan

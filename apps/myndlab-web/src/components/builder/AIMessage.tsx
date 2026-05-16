@@ -45,7 +45,7 @@ export function AIChatResponse({ message, isNewMessage }: ChatResponseProps) {
           <>
             <MarkdownText text={message.content} />
             {message.streaming && (
-              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#F97316] align-middle" />
+              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#00D5D8] align-middle" />
             )}
           </>
         )}
@@ -127,7 +127,7 @@ export function AIError({ message, onRetry, onReportIssue }: ErrorProps) {
           {onRetry && (
             <button
               onClick={onRetry}
-              className="rounded-lg bg-[#F97316] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#ea6c10]"
+              className="rounded-lg bg-[#00D5D8] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#ea6c10]"
             >
               Retry
             </button>
@@ -195,7 +195,7 @@ export function AIImageIntent({ message, onConfirm }: ImageIntentProps) {
           {primaryLabel ? (
             <button
               onClick={() => handlePrimary(primaryLabel)}
-              className="w-full rounded-lg bg-[#F97316] px-3 py-2 text-left text-sm font-medium text-white transition-colors hover:bg-[#ea6c10]"
+              className="w-full rounded-lg bg-[#00D5D8] px-3 py-2 text-left text-sm font-medium text-white transition-colors hover:bg-[#ea6c10]"
             >
               {primaryLabel}
             </button>
@@ -211,12 +211,12 @@ export function AIImageIntent({ message, onConfirm }: ImageIntentProps) {
                   }
                 }}
                 placeholder="What would you like me to do with this image?"
-                className="min-w-0 flex-1 rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#F97316]/50"
+                className="min-w-0 flex-1 rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#00D5D8]/50"
               />
               <button
                 onClick={() => generalInput.trim() && handlePrimary(generalInput.trim())}
                 disabled={!generalInput.trim()}
-                className="rounded-lg bg-[#F97316] p-2 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
+                className="rounded-lg bg-[#00D5D8] p-2 text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-40"
               >
                 <Send size={14} />
               </button>

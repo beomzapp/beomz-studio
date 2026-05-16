@@ -85,7 +85,7 @@ export function VersionPreviewPage() {
         </div>
         <button
           onClick={() => window.close()}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-[#F97316] transition-colors hover:bg-white/10"
+          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-[#00D5D8] transition-colors hover:bg-white/10"
         >
           <X size={13} />
           Close tab
@@ -97,7 +97,7 @@ export function VersionPreviewPage() {
         {loading && (
           <div className="flex h-full items-center justify-center">
             <div className="flex flex-col items-center gap-3">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#F97316] border-t-transparent" />
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#00D5D8] border-t-transparent" />
               <span className="text-sm text-white/50">Loading preview…</span>
             </div>
           </div>

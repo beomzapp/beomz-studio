@@ -119,7 +119,7 @@ function JsonBlock({ data }: { data: unknown }) {
       {isLong && (
         <button
           onClick={() => setExpanded(v => !v)}
-          className="text-[10px] text-[#F97316] hover:underline"
+          className="text-[10px] text-[#00D5D8] hover:underline"
         >
           {expanded ? "collapse" : `show all (${text.length} chars)`}
         </button>
@@ -303,7 +303,7 @@ function BackendSection({ pid }: { pid: string | null }) {
         <button
           onClick={() => { void refetch(); }}
           disabled={loading || !pid}
-          className="rounded px-2 py-0.5 text-[10px] font-medium bg-[#F97316]/20 text-[#F97316] border border-[#F97316]/30 hover:bg-[#F97316]/30 disabled:opacity-40 transition-colors"
+          className="rounded px-2 py-0.5 text-[10px] font-medium bg-[#00D5D8]/20 text-[#00D5D8] border border-[#00D5D8]/30 hover:bg-[#00D5D8]/30 disabled:opacity-40 transition-colors"
         >
           {loading ? "loading…" : "↻ Refetch"}
         </button>
@@ -449,7 +449,7 @@ function InspectorInner() {
       <button
         onClick={toggleOpen}
         title="Open chat state inspector (Cmd+Shift+K)"
-        className="fixed bottom-3 right-3 z-[9998] flex h-6 w-6 items-center justify-center rounded-full bg-[#F97316] text-[10px] font-bold text-white shadow-lg hover:bg-[#ea6b15] transition-colors"
+        className="fixed bottom-3 right-3 z-[9998] flex h-6 w-6 items-center justify-center rounded-full bg-[#00D5D8] text-[10px] font-bold text-white shadow-lg hover:bg-[#ea6b15] transition-colors"
         aria-label="Open chat state inspector"
       >
         🔍
@@ -464,13 +464,13 @@ function InspectorInner() {
     >
       {/* Resize handle on left edge */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[#F97316]/30 transition-colors z-10"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[#00D5D8]/30 transition-colors z-10"
         onMouseDown={startResize}
       />
 
       {/* Header bar */}
       <div className="flex items-center gap-2 px-3 py-2 bg-[#1a1a1a] border-b border-[#2a2a2a] select-none">
-        <span className="text-[11px] font-bold text-[#F97316] tracking-wide">
+        <span className="text-[11px] font-bold text-[#00D5D8] tracking-wide">
           DEV · CHAT STATE
         </span>
         {pid && (

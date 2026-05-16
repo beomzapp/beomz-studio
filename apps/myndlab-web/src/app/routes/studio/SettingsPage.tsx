@@ -130,7 +130,7 @@ export function SettingsPage() {
                     className="h-14 w-14 rounded-full border border-[#e5e5e5] object-cover"
                   />
                 ) : (
-                  <div className="flex h-14 w-14 flex-none items-center justify-center rounded-full bg-[#F97316]/10 text-lg font-bold text-[#F97316]">
+                  <div className="flex h-14 w-14 flex-none items-center justify-center rounded-full bg-[#00D5D8]/10 text-lg font-bold text-[#00D5D8]">
                     {profile ? getInitials(profile) : "?"}
                   </div>
                 )}
@@ -139,7 +139,7 @@ export function SettingsPage() {
                     {profile?.display_name ?? profile?.full_name ?? "—"}
                   </p>
                   <p className="text-sm text-[#6b7280]">{profile?.email ?? "—"}</p>
-                  <span className="mt-1.5 inline-block rounded-full bg-[#F97316]/10 px-2.5 py-0.5 text-xs font-semibold text-[#F97316]">
+                  <span className="mt-1.5 inline-block rounded-full bg-[#00D5D8]/10 px-2.5 py-0.5 text-xs font-semibold text-[#00D5D8]">
                     {planMeta.label}
                   </span>
                 </div>
@@ -191,14 +191,14 @@ export function SettingsPage() {
               onClick={() => handleSelect("random")}
               className={`rounded-xl border p-3.5 text-left transition-all ${
                 selectedId === "random"
-                  ? "border-[#F97316] bg-[#F97316]/5"
-                  : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#F97316]/40"
+                  ? "border-[#00D5D8] bg-[#00D5D8]/5"
+                  : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#00D5D8]/40"
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-[#1a1a1a]">Random</span>
                 {selectedId === "random" && (
-                  <span className="text-xs text-[#F97316]">&#10003;</span>
+                  <span className="text-xs text-[#00D5D8]">&#10003;</span>
                 )}
               </div>
               <p className="mt-0.5 text-xs text-[#9ca3af]">Different personality each session</p>
@@ -215,14 +215,14 @@ export function SettingsPage() {
                   onClick={() => handleSelect(id)}
                   className={`rounded-xl border p-3.5 text-left transition-all ${
                     isSelected
-                      ? "border-[#F97316] bg-[#F97316]/5"
-                      : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#F97316]/40"
+                      ? "border-[#00D5D8] bg-[#00D5D8]/5"
+                      : "border-[#e5e5e5] bg-[#faf9f6] hover:border-[#00D5D8]/40"
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-[#1a1a1a]">{label.name}</span>
                     {isSelected && (
-                      <span className="text-xs text-[#F97316]">&#10003;</span>
+                      <span className="text-xs text-[#00D5D8]">&#10003;</span>
                     )}
                   </div>
                   <p className="mt-0.5 text-xs text-[#9ca3af]">{label.tagline}</p>
@@ -263,7 +263,7 @@ export function SettingsPage() {
                   className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     isFree
                       ? "bg-[#f3f4f6] text-[#6b7280]"
-                      : "bg-[#F97316]/10 text-[#F97316]"
+                      : "bg-[#00D5D8]/10 text-[#00D5D8]"
                   }`}
                 >
                   {isFree ? "Free" : "Active"}
@@ -273,9 +273,9 @@ export function SettingsPage() {
               <div className="flex items-center justify-between rounded-xl border border-[#e5e5e5] bg-[#faf9f6] px-4 py-3">
                 <div>
                   <p className="text-xs font-medium text-[#9ca3af]">Credits balance</p>
-                  <p className="mt-0.5 text-sm font-semibold text-[#F97316]">{balance} cr</p>
+                  <p className="mt-0.5 text-sm font-semibold text-[#00D5D8]">{balance} cr</p>
                 </div>
-                <Zap size={16} className="text-[#F97316]" />
+                <Zap size={16} className="text-[#00D5D8]" />
               </div>
 
               {isFree && (
@@ -289,7 +289,7 @@ export function SettingsPage() {
           <button
             onClick={() => void handleOpenPortal()}
             disabled={openingPortal}
-            className="flex items-center gap-2 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#F97316]/30 hover:bg-[#faf9f6] disabled:opacity-50"
+            className="flex items-center gap-2 rounded-xl border border-[#e5e5e5] bg-white px-4 py-2.5 text-sm font-medium text-[#374151] transition-colors hover:border-[#00D5D8]/30 hover:bg-[#faf9f6] disabled:opacity-50"
           >
             <ExternalLink size={14} />
             {openingPortal ? "Opening…" : "Open Stripe Portal"}

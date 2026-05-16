@@ -131,7 +131,7 @@ export function InlineConfirmation({
                 <button
                   type="button"
                   onClick={handleImplementNow}
-                  className="text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#F97316] transition-colors hover:text-[#ea6c10]"
+                  className="text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#00D5D8] transition-colors hover:text-[#ea6c10]"
                 >
                   → Implement now
                 </button>
@@ -153,7 +153,7 @@ export function InlineConfirmation({
             <button
               type="button"
               onClick={onImplement}
-              className="text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#F97316] transition-colors hover:text-[#ea6c10]"
+              className="text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#00D5D8] transition-colors hover:text-[#ea6c10]"
             >
               → {cta.label}
             </button>

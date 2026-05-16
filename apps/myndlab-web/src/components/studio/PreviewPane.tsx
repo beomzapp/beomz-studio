@@ -526,8 +526,8 @@ export function PreviewPane({
           <div className="absolute inset-0 flex items-center justify-center bg-white">
             <div className="flex flex-col items-center gap-4">
               <div className="relative flex h-16 w-16 items-center justify-center">
-                <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
-                <span className="text-xl font-bold text-[#F97316]">B</span>
+                <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#00D5D8]" />
+                <span className="text-xl font-bold text-[#00D5D8]">B</span>
               </div>
               <div className="text-center">
                 <p className="text-sm text-[#9ca3af]">
@@ -556,7 +556,7 @@ export function PreviewPane({
                 {onRetry && (
                   <button
                     onClick={onRetry}
-                    className="rounded-lg bg-[#F97316] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#EA580C]"
+                    className="rounded-lg bg-[#00D5D8] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#00BCC0]"
                   >
                     Retry
                   </button>
@@ -647,8 +647,8 @@ export function PreviewPane({
                     style={{ borderRadius: "inherit" }}
                   >
                     <div className="relative flex h-14 w-14 items-center justify-center">
-                      <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
-                      <span className="text-lg font-bold text-[#F97316]">B</span>
+                      <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#00D5D8]" />
+                      <span className="text-lg font-bold text-[#00D5D8]">B</span>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-[#9ca3af]">
@@ -662,8 +662,8 @@ export function PreviewPane({
             ) : showLoadingOverlay ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 bg-white">
                 <div className="relative flex h-14 w-14 items-center justify-center">
-                  <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#F97316]" />
-                  <span className="text-lg font-bold text-[#F97316]">B</span>
+                  <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-t-[#00D5D8]" />
+                  <span className="text-lg font-bold text-[#00D5D8]">B</span>
                 </div>
                 <div className="text-center">
                   <p className="text-sm text-[#9ca3af]">Starting preview…</p>
@@ -694,7 +694,7 @@ export function PreviewPane({
       {/* BEO-454: 2px orange progress bar at very top of preview panel */}
       {showProgressBar && (
         <div
-          className="absolute left-0 top-0 z-30 h-[2px] bg-[#F97316]"
+          className="absolute left-0 top-0 z-30 h-[2px] bg-[#00D5D8]"
           style={{
             width: `${progressPct}%`,
             transition: "width 0.6s ease-out",

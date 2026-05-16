@@ -24,7 +24,7 @@ export function PhaseIndicator({ current, total, summary }: PhaseIndicatorProps)
       {/* Progress bar */}
       <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[#e5e5e5]">
         <div
-          className="h-full rounded-full bg-[#F97316] transition-all duration-500"
+          className="h-full rounded-full bg-[#00D5D8] transition-all duration-500"
           style={{ width: `${progress}%` }}
         />
       </div>

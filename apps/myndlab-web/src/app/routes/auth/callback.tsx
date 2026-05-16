@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { supabase } from "../../../lib/supabase";
 import { Loader2, Eye, EyeOff } from "lucide-react";
-import BeomzLogo from "../../../assets/beomz-logo.svg?react";
+import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
 
 type Screen = "loading" | "reset-password" | "success";
 
@@ -89,7 +89,7 @@ export function AuthCallback() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#faf9f6] p-4">
         <div className="w-full max-w-sm rounded-2xl border border-[#e5e5e5] bg-white p-10 shadow-sm">
-          <BeomzLogo className="mx-auto mb-8 block h-7 w-auto text-[#1a1a1a]" />
+          <MyndlabLogo className="mx-auto mb-8 block h-7 w-auto text-[#1a1a1a]" />
           <h2 className="mb-1 text-center text-lg font-semibold text-[#1a1a1a]">Set new password</h2>
           <p className="mb-6 text-center text-sm text-[#9ca3af]">
             Choose a strong password for your account.
@@ -104,7 +104,7 @@ export function AuthCallback() {
                 placeholder="New password (min. 8 characters)"
                 autoComplete="new-password"
                 autoFocus
-                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
               />
               <button
                 type="button"
@@ -122,7 +122,7 @@ export function AuthCallback() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm new password"
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#F97316]"
+                className="w-full rounded-lg border border-[#e2e2e2] bg-white px-3 py-2.5 pr-10 text-sm text-[#1a1a1a] placeholder-[#1a1a1a]/30 outline-none focus:border-[#00D5D8]"
               />
               <button
                 type="button"
@@ -139,7 +139,7 @@ export function AuthCallback() {
             <button
               type="submit"
               disabled={updating || !password || !confirmPassword}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#00D5D8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c10] disabled:opacity-50"
             >
               {updating && <Loader2 size={14} className="animate-spin" />}
               Update password

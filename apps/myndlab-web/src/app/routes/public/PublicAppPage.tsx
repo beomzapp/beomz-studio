@@ -21,7 +21,7 @@ const BADGE = (
     rel="noopener noreferrer"
     className="fixed bottom-3 right-3 z-50 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-[#6b7280] shadow-sm backdrop-blur-sm transition-colors hover:text-[#1a1a1a]"
   >
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-[#F97316]">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-[#00D5D8]">
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
       <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -198,7 +198,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
         <div className="flex flex-col items-center gap-5">
           {/* Beomz logo */}
           <div className="flex items-center gap-2">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" className="text-[#F97316]">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" className="text-[#00D5D8]">
               <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
               <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -212,9 +212,9 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
 
           {/* Spinner */}
           <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-[#F97316]" />
-            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_0.2s_infinite] rounded-full bg-[#F97316]" />
-            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_0.4s_infinite] rounded-full bg-[#F97316]" />
+            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-[#00D5D8]" />
+            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_0.2s_infinite] rounded-full bg-[#00D5D8]" />
+            <div className="h-2 w-2 animate-[pulse_1.4s_ease-in-out_0.4s_infinite] rounded-full bg-[#00D5D8]" />
           </div>
 
           {/* Status text */}
@@ -243,7 +243,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
           </p>
           <a
             href="https://beomz.ai"
-            className="mt-3 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+            className="mt-3 rounded-lg bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
           >
             Go to Beomz
           </a>
@@ -276,7 +276,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
           <p className="text-sm text-[#6b7280]">{errorMessage || "Failed to load app"}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-3 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+            className="mt-3 rounded-lg bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
           >
             Retry
           </button>

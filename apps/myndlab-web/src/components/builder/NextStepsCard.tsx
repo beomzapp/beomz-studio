@@ -45,7 +45,7 @@ export function NextStepsCard({ chips, summaryAnchoredAt, onSelectPrompt }: Next
           <button
             key={`${c.label}-${i}`}
             type="button"
-            className="rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-left text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#374151] transition-colors hover:border-[#F97316]/40 hover:bg-[#faf9f6]"
+            className="rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-left text-[11px] font-medium leading-[1.4] tracking-[-0.005em] text-[#374151] transition-colors hover:border-[#00D5D8]/40 hover:bg-[#faf9f6]"
             onClick={() => onSelectPrompt(c.prompt)}
           >
             → {c.label}
