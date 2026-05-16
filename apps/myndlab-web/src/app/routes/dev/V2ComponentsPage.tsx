@@ -5,7 +5,9 @@
  * Accessible at /dev/v2-components in development builds, or in production
  * when localStorage "beomz:devMode" === "true" (BEO-805 gate).
  */
-import { useReducer, useState } from "react";
+import { useReducer, useState, useEffect, useRef } from "react";
+import { ListChecks, Sparkles, Paperclip, Mic, SlidersHorizontal, Palette, Loader2 } from "lucide-react";
+import { cn } from "../../../lib/cn";
 import {
   EXAMPLE_BUILD_COMPLETE,
   EXAMPLE_TURN_COMPLETE,
@@ -285,6 +287,234 @@ function ReducerInspector() {
   );
 }
 
+// ─── BEO-823: Landing toolbar glass pill ─────────────────────────────────────
+
+const GLASS_PILL = "flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all hover:bg-white/[0.08] hover:border-white/20";
+
+function DarkStage({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn("rounded-xl bg-[#131313] p-6 flex items-start", className)}>
+      {children}
+    </div>
+  );
+}
+
+function OptionsPopover({ architecture, setArchitecture }: { architecture: "single" | "multi"; setArchitecture: (v: "single" | "multi") => void }) {
+  return (
+    <div className="mt-2 w-[380px] rounded-2xl border border-white/10 bg-[#0a0a0a]/90 p-5 shadow-2xl backdrop-blur-xl">
+      <div>
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">Architecture</p>
+        <div className="flex flex-col gap-2">
+          <button
+            onMouseDown={(e) => { e.preventDefault(); setArchitecture("single"); }}
+            className={cn("rounded-xl border p-3 text-left transition-all", architecture === "single" ? "border-[#00D5D8]/40 bg-[#00D5D8]/10" : "border-white/10 bg-white/5")}
+          >
+            <p className="text-sm font-medium text-white/90">Single Architecture</p>
+            <p className="mt-0.5 text-xs text-white/50">Next.js + Supabase · Vercel-deployable</p>
+          </button>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3 opacity-50">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-white/90">Multi Architecture</p>
+              <span className="rounded-full bg-[#00D5D8]/20 px-2 py-0.5 text-[10px] font-medium text-[#00D5D8]">Pro</span>
+            </div>
+            <p className="mt-0.5 text-xs text-white/50">Custom stacks · Python, Go, Rust &amp; more</p>
+            <a href="#" className="mt-1.5 inline-block text-xs text-[#00D5D8] underline">Upgrade to Pro to unlock</a>
+          </div>
+        </div>
+      </div>
+      <div className="mt-5">
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">Technology Stack</p>
+        <div className="flex gap-2">
+          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">Next.js <span className="text-white/30">(required)</span></div>
+          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">Supabase <span className="text-white/30">(built-in)</span></div>
+        </div>
+      </div>
+      <div className="mt-5">
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">Design DNA</p>
+        <button onMouseDown={(e) => e.preventDefault()} className="flex items-center justify-center rounded-lg border border-white/10 bg-white/5 p-3 transition-all hover:bg-white/[0.08]">
+          <Palette size={20} className="text-[#00D5D8]" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LandingToolbarSection() {
+  const [arch, setArch] = useState<"single" | "multi">("single");
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (optionsRef.current?.contains(e.target as Node) || triggerRef.current?.contains(e.target as Node)) return;
+      setOptionsOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [optionsOpen]);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setOptionsOpen(false); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [optionsOpen]);
+
+  return (
+    <section id="landing-toolbar" className="mt-14 pb-8">
+      <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
+        Landing toolbar — glassmorphic
+      </h2>
+      <p className="mb-6 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">
+        BEO-823 · 6 sample states · Plan / Enhance / Paperclip / Voice (Pro-gated) / Options popover
+      </p>
+
+      <div className="flex flex-col gap-6">
+        {/* State 1 — Voice button idle */}
+        <div>
+          <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+            1 · Voice button — idle
+          </p>
+          <DarkStage>
+            <div className="relative group">
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                aria-label="Voice chat (Pro feature)"
+                className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all text-white/30 cursor-not-allowed"
+              >
+                <Mic size={14} />
+              </button>
+            </div>
+          </DarkStage>
+        </div>
+
+        {/* State 2 — Voice button hover (tooltip forced visible) */}
+        <div>
+          <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+            2 · Voice button — hover (tooltip visible)
+          </p>
+          <DarkStage className="pt-12">
+            <div className="relative">
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                aria-label="Voice chat (Pro feature)"
+                className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all text-white/30 cursor-not-allowed"
+              >
+                <Mic size={14} />
+              </button>
+              <div className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-xs text-white shadow-xl backdrop-blur-md pointer-events-none">
+                Voice chat is available on Pro and above
+              </div>
+            </div>
+          </DarkStage>
+        </div>
+
+        {/* State 3 — Options button closed */}
+        <div>
+          <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+            3 · Options button — closed
+          </p>
+          <DarkStage>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              className={cn(GLASS_PILL, "text-white/60")}
+            >
+              <SlidersHorizontal size={14} />
+              Options · Next.js / Supabase
+            </button>
+          </DarkStage>
+        </div>
+
+        {/* State 4 — Options button open (popover, single selected) */}
+        <div>
+          <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+            4 · Options button — open (single architecture selected)
+          </p>
+          <DarkStage className="flex-col">
+            <button
+              ref={triggerRef}
+              onMouseDown={(e) => { e.preventDefault(); setOptionsOpen(o => !o); }}
+              className={cn(GLASS_PILL, "bg-white/[0.08] border-white/20 text-white/80")}
+            >
+              <SlidersHorizontal size={14} />
+              Options · Next.js / Supabase
+            </button>
+            <div ref={optionsRef}>
+              <OptionsPopover architecture={arch} setArchitecture={setArch} />
+            </div>
+          </DarkStage>
+        </div>
+
+        {/* State 5 — Popover Multi architecture row highlighted */}
+        <div>
+          <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+            5 · Options popover — Multi architecture disabled state
+          </p>
+          <DarkStage>
+            <div className="w-[380px] rounded-2xl border border-white/10 bg-[#0a0a0a]/90 p-5 shadow-2xl backdrop-blur-xl">
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">Architecture</p>
+              <div className="flex flex-col gap-2">
+                <button className="rounded-xl border border-white/10 bg-white/5 p-3 text-left">
+                  <p className="text-sm font-medium text-white/90">Single Architecture</p>
+                  <p className="mt-0.5 text-xs text-white/50">Next.js + Supabase · Vercel-deployable</p>
+                </button>
+                <div className="rounded-xl border border-white/20 bg-white/[0.07] p-3 ring-1 ring-white/10">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-white/90">Multi Architecture</p>
+                    <span className="rounded-full bg-[#00D5D8]/20 px-2 py-0.5 text-[10px] font-medium text-[#00D5D8]">Pro</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-white/50">Custom stacks · Python, Go, Rust &amp; more</p>
+                  <a href="#" className="mt-1.5 inline-block text-xs text-[#00D5D8] underline">Upgrade to Pro to unlock</a>
+                  <p className="mt-1 text-[10px] text-white/30">Disabled — not available on current plan</p>
+                </div>
+              </div>
+            </div>
+          </DarkStage>
+        </div>
+
+        {/* State 6 — Full toolbar, all 5 buttons */}
+        <div>
+          <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[-0.005em] text-zinc-400">
+            6 · Full toolbar — all 5 buttons
+          </p>
+          <DarkStage>
+            <div className="flex items-center gap-3">
+              <button onMouseDown={(e) => e.preventDefault()} className={cn(GLASS_PILL, "text-white/40")}>
+                <ListChecks size={14} />
+                Plan
+              </button>
+              <button onMouseDown={(e) => e.preventDefault()} className={cn(GLASS_PILL, "text-white/40")}>
+                <Sparkles size={14} />
+                Enhance
+              </button>
+              <button onMouseDown={(e) => e.preventDefault()} className={cn(GLASS_PILL, "text-white/40")}>
+                <Paperclip size={14} />
+              </button>
+              <div className="relative group">
+                <button onMouseDown={(e) => e.preventDefault()} className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all text-white/30 cursor-not-allowed">
+                  <Mic size={14} />
+                </button>
+                <div className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-xs text-white opacity-0 shadow-xl backdrop-blur-md transition-opacity group-hover:opacity-100 pointer-events-none">
+                  Voice chat is available on Pro and above
+                </div>
+              </div>
+              <button onMouseDown={(e) => e.preventDefault()} className={cn(GLASS_PILL, "text-white/60")}>
+                <SlidersHorizontal size={14} />
+                Options · Next.js / Supabase
+              </button>
+            </div>
+          </DarkStage>
+        </div>
+      </div>
+
+      {/* Note: Loader2 imported for completeness but not shown in static states */}
+      <span className="hidden"><Loader2 size={14} /></span>
+    </section>
+  );
+}
+
 export function V2ComponentsPage() {
   const [globalReset, setGlobalReset] = useState(0);
   const [cardKeys, setCardKeys] = useState([0, 0, 0, 0]);
@@ -311,6 +541,7 @@ export function V2ComponentsPage() {
         <a href="#message-types">Message types</a>
         <a href="#chat-state-inspector-v2">Chat inspector v2</a>
         <a href="#phase4-wiring">Phase 4 wiring</a>
+        <a href="#landing-toolbar">Landing toolbar</a>
       </nav>
 
       <div className="mx-auto max-w-xl">
@@ -612,6 +843,9 @@ export function V2ComponentsPage() {
             />
           </div>
         </section>
+        {/* ── Landing toolbar — BEO-823 ── */}
+        <LandingToolbarSection />
+
         {/* ── Phase 4 — Live wiring (chatV2Enabled flag) ── BEO-815 */}
         {isDevPreviewEnabled() && (
           <section id="phase4-wiring" className="mt-14 pb-32">

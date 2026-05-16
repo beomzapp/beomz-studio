@@ -6,6 +6,9 @@ import {
   Loader2,
   Paperclip,
   X,
+  Mic,
+  SlidersHorizontal,
+  Palette,
 } from "lucide-react";
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
@@ -106,10 +109,14 @@ export function LandingPage() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [architecture, setArchitecture] = useState<"single" | "multi">("single");
 
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingPromptRef = useRef<string | null>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const optionsTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Pick 3 random suggestions from the pool on each page mount
   const SUGGESTIONS = useMemo(() => {
@@ -317,6 +324,28 @@ export function LandingPage() {
     editableRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        optionsRef.current?.contains(e.target as Node) ||
+        optionsTriggerRef.current?.contains(e.target as Node)
+      ) return;
+      setOptionsOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [optionsOpen]);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOptionsOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [optionsOpen]);
+
   return (
     <div className="h-screen bg-bg">
       <div className="relative h-screen">
@@ -419,7 +448,7 @@ export function LandingPage() {
           {/* Typing toolbar */}
           <div
             className={cn(
-              "relative z-10 mt-4 flex items-center gap-4 transition-opacity duration-200",
+              "relative z-10 mt-4 flex items-center gap-3 transition-opacity duration-200",
               hasText ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           >
@@ -428,10 +457,10 @@ export function LandingPage() {
               onMouseDown={(e) => { e.preventDefault(); setPlanMode(!planMode); }}
               title="Review the build plan before generating"
               className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                "flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all hover:bg-white/[0.08] hover:border-white/20",
                 planMode
-                  ? "border-orange/50 bg-orange/10 text-orange"
-                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
+                  ? "border-[#00D5D8]/40 bg-[#00D5D8]/15 text-[#00D5D8]"
+                  : "text-white/40",
               )}
             >
               <ListChecks size={14} />
@@ -444,10 +473,10 @@ export function LandingPage() {
               title="Enhance prompt with AI"
               disabled={enhancing}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                "flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all hover:bg-white/[0.08] hover:border-white/20",
                 enhanceError
-                  ? "border-red-500 text-red-400"
-                  : "border-border text-white/40 hover:border-purple/50 hover:text-purple",
+                  ? "border-red-500/40 text-red-400"
+                  : "text-white/40",
               )}
             >
               {enhancing ? (
@@ -463,10 +492,10 @@ export function LandingPage() {
               onMouseDown={(e) => { e.preventDefault(); if (attachedFiles.length < MAX_ATTACHMENTS) fileInputRef.current?.click(); }}
               disabled={attachedFiles.length >= MAX_ATTACHMENTS}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all",
+                "flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all hover:bg-white/[0.08] hover:border-white/20",
                 attachedFiles.length >= MAX_ATTACHMENTS
-                  ? "border-border text-white/20 cursor-not-allowed"
-                  : "border-border text-white/40 hover:border-white/20 hover:text-white/60",
+                  ? "text-white/20 cursor-not-allowed"
+                  : "text-white/40",
               )}
             >
               <Paperclip size={14} />
@@ -478,6 +507,104 @@ export function LandingPage() {
               onChange={handleFileChange}
               className="hidden"
             />
+
+            {/* Voice chat — Pro-gated */}
+            <div className="relative group">
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                aria-label="Voice chat (Pro feature)"
+                className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all text-white/30 cursor-not-allowed"
+              >
+                <Mic size={14} />
+              </button>
+              <div className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-xs text-white opacity-0 shadow-xl backdrop-blur-md transition-opacity group-hover:opacity-100 pointer-events-none">
+                Voice chat is available on Pro and above
+              </div>
+            </div>
+
+            {/* Options popover */}
+            <div className="relative">
+              <button
+                ref={optionsTriggerRef}
+                onMouseDown={(e) => { e.preventDefault(); setOptionsOpen(o => !o); }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-md px-3 py-1 text-xs font-medium shadow-[0_2px_12px_rgba(0,0,0,0.25)] transition-all hover:bg-white/[0.08] hover:border-white/20",
+                  optionsOpen
+                    ? "bg-white/[0.08] border-white/20 text-white/80"
+                    : "text-white/60",
+                )}
+              >
+                <SlidersHorizontal size={14} />
+                Options · Next.js / Supabase
+              </button>
+
+              {optionsOpen && (
+                <div
+                  ref={optionsRef}
+                  className="absolute left-0 top-full z-50 mt-2 w-[380px] rounded-2xl border border-white/10 bg-[#0a0a0a]/90 p-5 shadow-2xl backdrop-blur-xl"
+                >
+                  {/* Architecture */}
+                  <div>
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">
+                      Architecture
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onMouseDown={(e) => { e.preventDefault(); setArchitecture("single"); }}
+                        className={cn(
+                          "rounded-xl border p-3 text-left transition-all",
+                          architecture === "single"
+                            ? "border-[#00D5D8]/40 bg-[#00D5D8]/10"
+                            : "border-white/10 bg-white/5",
+                        )}
+                      >
+                        <p className="text-sm font-medium text-white/90">Single Architecture</p>
+                        <p className="mt-0.5 text-xs text-white/50">Next.js + Supabase · Vercel-deployable</p>
+                      </button>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-3 opacity-50">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-white/90">Multi Architecture</p>
+                          <span className="rounded-full bg-[#00D5D8]/20 px-2 py-0.5 text-[10px] font-medium text-[#00D5D8]">Pro</span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-white/50">Custom stacks · Python, Go, Rust &amp; more</p>
+                        <a href="#" className="mt-1.5 inline-block text-xs text-[#00D5D8] underline">
+                          Upgrade to Pro to unlock
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Technology Stack */}
+                  <div className="mt-5">
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">
+                      Technology Stack
+                    </p>
+                    <div className="flex gap-2">
+                      <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+                        Next.js <span className="text-white/30">(required)</span>
+                      </div>
+                      <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+                        Supabase <span className="text-white/30">(built-in)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Design DNA */}
+                  <div className="mt-5">
+                    <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/40">
+                      Design DNA
+                    </p>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      className="flex items-center justify-center rounded-lg border border-white/10 bg-white/5 p-3 transition-all hover:bg-white/[0.08]"
+                    >
+                      <Palette size={20} className="text-[#00D5D8]" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Suggestion strip */}
