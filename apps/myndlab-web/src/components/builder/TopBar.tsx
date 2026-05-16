@@ -1,0 +1,371 @@
+/**
+ * TopBar — V2 builder top bar.
+ * White bg, center tab switcher (Preview | Code | Database | Integrations),
+ * editable project name, publish states, plan badge.
+ */
+import type React from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import {
+  ChevronLeft,
+  RefreshCw,
+  ExternalLink,
+  Globe,
+  Loader,
+  Smartphone,
+  Code2,
+  Database,
+  Link2,
+  BarChart2,
+  BookOpen,
+  Briefcase,
+  CheckSquare,
+  Clock,
+  Download,
+  ListChecks,
+  ShoppingCart,
+  Sparkles,
+  Table,
+  Users,
+  Wrench,
+} from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { cn } from "../../lib/cn";
+import { GlobalNav } from "../layout/GlobalNav";
+import { displayProjectName } from "../../lib/displayProjectName";
+import { usePricingModal } from "../../contexts/PricingModalContext";
+
+export type ActiveView = "preview" | "code" | "database" | "integrations";
+
+const PROJECT_ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  BarChart2,
+  BookOpen,
+  Briefcase,
+  CheckSquare,
+  Globe,
+  ListChecks,
+  Smartphone,
+  ShoppingCart,
+  Sparkles,
+  Table,
+  Users,
+  Wrench,
+};
+
+function ProjectIconRenderer({ name, size = 14 }: { name: string; size?: number }) {
+  const Icon = PROJECT_ICON_MAP[name] ?? Sparkles;
+  return <Icon size={size} />;
+}
+
+interface TopBarProps {
+  projectName: string;
+  projectIcon?: string | null;
+  onProjectNameChange?: (name: string) => void;
+  onRefreshPreview?: () => void;
+  activeView: ActiveView;
+  onActiveViewChange: (view: ActiveView) => void;
+  isPublished?: boolean;
+  hasUnpublishedChanges?: boolean;
+  isPublishing?: boolean;
+  onPublish?: () => void;
+  onExportZip?: () => void;
+  isExporting?: boolean;
+  beomzAppUrl?: string | null;
+  /** BEO-570: local flag — true when preview is ahead of live Vercel (iteration after publish) */
+  hasUnsyncedChanges?: boolean;
+  phaseMode?: boolean;
+  currentPhase?: number;
+  phasesTotal?: number;
+  plan?: string;
+  versionHistoryOpen?: boolean;
+  onToggleVersionHistory?: () => void;
+}
+
+function toast(msg: string) {
+  const el = document.createElement("div");
+  el.textContent = msg;
+  el.className =
+    "fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] rounded-lg bg-[#1a1a1a] px-4 py-2 text-sm text-white shadow-lg animate-[fadeIn_200ms_ease-out]";
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = "0";
+    el.style.transition = "opacity 200ms";
+    setTimeout(() => el.remove(), 200);
+  }, 2000);
+}
+
+const VIEW_TABS: { key: ActiveView; icon: typeof Smartphone; label: string }[] = [
+  { key: "preview", icon: Smartphone, label: "Preview" },
+  { key: "code", icon: Code2, label: "Code" },
+  { key: "database", icon: Database, label: "Database" },
+  { key: "integrations", icon: Link2, label: "Integrations" },
+];
+
+export function TopBar({
+  projectName,
+  projectIcon,
+  onProjectNameChange,
+  onRefreshPreview,
+  activeView,
+  onActiveViewChange,
+  isPublished = false,
+  hasUnpublishedChanges = false,
+  isPublishing = false,
+  onPublish,
+  onExportZip,
+  isExporting = false,
+  beomzAppUrl,
+  hasUnsyncedChanges = false,
+  phaseMode = false,
+  currentPhase = 0,
+  phasesTotal = 0,
+  plan = "free",
+  versionHistoryOpen = false,
+  onToggleVersionHistory,
+}: TopBarProps) {
+  const navigate = useNavigate();
+  const { openPricingModal } = usePricingModal();
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(projectName);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [showExportGate, setShowExportGate] = useState(false);
+  const exportGateRef = useRef<HTMLDivElement>(null);
+
+  const EXPORT_GATED_PLANS = new Set(["free", "pro_starter"]);
+  const isExportGated = EXPORT_GATED_PLANS.has(plan);
+
+  useEffect(() => {
+    if (!showExportGate) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportGateRef.current && !exportGateRef.current.contains(e.target as Node)) {
+        setShowExportGate(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showExportGate]);
+
+  const handleNameSubmit = useCallback(() => {
+    setEditingName(false);
+    if (nameInput.trim() && nameInput !== projectName) {
+      onProjectNameChange?.(nameInput.trim());
+    } else {
+      setNameInput(projectName);
+    }
+  }, [nameInput, projectName, onProjectNameChange]);
+
+  return (
+    <header className="relative z-[60] flex h-12 flex-none shrink-0 items-center justify-between border-b border-[#e5e5e5] bg-white px-3">
+      {/* Left group */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <button
+          onClick={() => navigate({ to: "/studio/home" })}
+          className="flex flex-none items-center gap-1 rounded-md px-2 py-1.5 text-[#9ca3af] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+          aria-label="Back to dashboard"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+
+        {/* Project name — editable */}
+        {editingName ? (
+          <input
+            ref={nameInputRef}
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            onBlur={handleNameSubmit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleNameSubmit();
+              if (e.key === "Escape") {
+                setNameInput(projectName);
+                setEditingName(false);
+              }
+            }}
+            className="min-w-0 max-w-[200px] border-b border-[#1a1a1a] bg-transparent text-sm font-semibold text-[#1a1a1a] outline-none"
+            autoFocus
+          />
+        ) : (
+          <button
+            onClick={() => {
+              setEditingName(true);
+              setNameInput(projectName);
+              setTimeout(() => nameInputRef.current?.select(), 0);
+            }}
+            className="flex items-center gap-1.5 max-w-[220px] truncate text-sm font-semibold text-[#1a1a1a] transition-colors hover:text-[#6b7280]"
+          >
+            {projectIcon && (
+              <span className="flex-none text-[#F97316]">
+                <ProjectIconRenderer name={projectIcon} size={14} />
+              </span>
+            )}
+            <span className="truncate">{displayProjectName(projectName)}</span>
+          </button>
+        )}
+
+        {/* Phase progress pill */}
+        {phaseMode && phasesTotal > 0 && (
+          <span className="ml-1.5 flex-none rounded-full bg-[#fff7ed] px-2 py-0.5 text-[10px] font-medium text-[#F97316]">
+            {currentPhase >= phasesTotal
+              ? "\u2713 All phases complete"
+              : `Phase ${currentPhase} of ${phasesTotal}`}
+          </span>
+        )}
+      </div>
+
+      {/* Center — tab switcher (absolute centered) */}
+      <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-lg bg-[#f3f4f6] p-0.5">
+        {VIEW_TABS.map(({ key, icon: Icon, label }) => (
+          <button
+            key={key}
+            onClick={() => onActiveViewChange(key)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+              activeView === key
+                ? "bg-white text-[#1a1a1a] shadow-sm"
+                : "text-[#6b7280] hover:text-[#1a1a1a]",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Right group */}
+      <div className="flex flex-1 items-center justify-end gap-1.5">
+        {/* Refresh preview */}
+        <button
+          onClick={onRefreshPreview}
+          className="rounded-md p-1.5 text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]"
+          aria-label="Refresh preview"
+        >
+          <RefreshCw size={16} />
+        </button>
+
+        {/* Version history */}
+        <button
+          onClick={onToggleVersionHistory}
+          className={cn(
+            "rounded-md p-1.5 transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a]",
+            versionHistoryOpen
+              ? "bg-[#f3f4f6] text-[#F97316]"
+              : "text-[#6b7280]",
+          )}
+          aria-label="Version history"
+        >
+          <Clock size={16} />
+        </button>
+
+        {/* Open in new tab */}
+        <button
+          onClick={() => {
+            if (beomzAppUrl) {
+              window.open(beomzAppUrl.startsWith("http") ? beomzAppUrl : `https://${beomzAppUrl}`, "_blank");
+            } else {
+              toast("Publish your app first to open in a new tab");
+            }
+          }}
+          className={cn(
+            "rounded-md p-1.5 transition-colors hover:bg-[#f3f4f6]",
+            beomzAppUrl ? "text-[#6b7280] hover:text-[#1a1a1a]" : "text-[#d1d5db]",
+          )}
+          aria-label="Open in new tab"
+        >
+          <ExternalLink size={16} />
+        </button>
+
+        <div className="h-4 w-px bg-[#e5e5e5]" />
+
+        {/* Export ZIP */}
+        <div ref={exportGateRef} className="relative">
+          <button
+            onClick={() => {
+              if (isExportGated) {
+                setShowExportGate((v) => !v);
+              } else {
+                (onExportZip ?? (() => toast("Coming soon")))();
+              }
+            }}
+            disabled={!isExportGated && isExporting}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:bg-[#f3f4f6] hover:text-[#1a1a1a] disabled:opacity-50",
+              isExportGated && "cursor-not-allowed opacity-50",
+            )}
+            aria-label="Export ZIP"
+          >
+            {isExporting ? <Loader size={14} className="animate-spin" /> : <Download size={14} />}
+            <span className="hidden sm:inline">{isExporting ? "Exporting..." : "Export"}</span>
+          </button>
+
+          {showExportGate && (
+            <div className="absolute right-0 top-full z-[100] mt-1.5 w-64 rounded-xl border border-[#e5e5e5] bg-white p-4 shadow-xl">
+              <p className="text-xs font-semibold text-[#1a1a1a]">Upgrade to export</p>
+              <p className="mt-1 text-xs text-[#6b7280]">
+                Export is available on Pro and Business plans.
+              </p>
+              <button
+                onClick={() => {
+                  setShowExportGate(false);
+                  openPricingModal();
+                }}
+                className="mt-3 flex w-full items-center justify-center rounded-lg bg-[#F97316] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
+              >
+                Upgrade
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* beomz.app pill + BEO-570 unsynced indicator */}
+        {beomzAppUrl && (
+          <div className="flex max-w-[120px] flex-col items-stretch gap-0.5 sm:max-w-none sm:flex-row sm:items-center sm:gap-1">
+            {hasUnsyncedChanges && (
+              <span className="whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 text-center text-[10px] font-medium text-amber-800">
+                Not synced
+              </span>
+            )}
+            <button
+              onClick={() => window.open(beomzAppUrl.startsWith("http") ? beomzAppUrl : `https://${beomzAppUrl}`, "_blank")}
+              className="flex items-center justify-center gap-1 rounded-full bg-[#111] px-2.5 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-[#333]"
+            >
+              <span className="text-[10px]">▲</span>
+              beomz.app
+            </button>
+          </div>
+        )}
+
+        {/* Publish button with states */}
+        {isPublished ? (
+          hasUnpublishedChanges ? (
+            <button
+              onClick={onPublish}
+              disabled={isPublishing}
+              className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+            >
+              {isPublishing ? <Loader size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              Update Live
+            </button>
+          ) : (
+            <button
+              onClick={onPublish}
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+            >
+              <Globe size={12} />
+              Published
+            </button>
+          )
+        ) : (
+          <button
+            onClick={onPublish ?? (() => toast("Coming soon"))}
+            disabled={isPublishing}
+            className="flex items-center gap-1.5 rounded-lg bg-[#1a1a1a] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#333] disabled:cursor-not-allowed disabled:bg-[#e5e5e5] disabled:text-[#9ca3af]"
+          >
+            {isPublishing ? <Loader size={12} className="animate-spin" /> : <Globe size={12} />}
+            {isPublishing ? "Publishing\u2026" : "Publish"}
+          </button>
+        )}
+
+        <div className="h-4 w-px bg-[#e5e5e5]" />
+        <GlobalNav />
+      </div>
+    </header>
+  );
+}

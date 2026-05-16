@@ -1,0 +1,2414 @@
+/**
+ * useBuildChat — BEO-363 / BEO-391 / BEO-392 / BEO-393 / BEO-396 / BEO-495
+ *
+ * Owns all chat state + SSE event handling for the builder.
+ * ProjectPage calls this hook and renders the returned messages.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  BuilderV3ConversationalResponseEvent,
+  BuilderV3Event,
+  ChatChecklistStatus,
+  ChatMessage,
+  StudioFile,
+} from "@beomz-studio/contracts";
+import {
+  getAccessToken,
+  getApiBaseUrl,
+  getBuildStatus,
+  getLatestBuildForProject,
+  handleUnauthorizedResponse,
+  NetworkDisconnectError,
+  type BuildStatusResponse,
+  type StartBuildResponse,
+} from "../lib/api";
+import { useBuilderEngineStream } from "./useBuilderEngineStream";
+import { CHECKLIST_LABELS, PREAMBLE_FALLBACK } from "../lib/buildStatusCopy";
+
+// ─── BEO-396: Chat mode flag ───────────────────────────────────────────────────
+// Set to `true` to use the local mock (Codex backend not yet live).
+// Flip to `false` once /api/builds/chat and /api/builds/summarise-chat are deployed.
+const MOCK_CHAT_MODE = false;
+
+const CHAT_STREAM_BUFFER_BYTES = 256 * 1024; // 256KB — guard against runaway SSE buffers
+const IMPLEMENTBAR_QUIET_PERIOD_MS = 500; // wait this long after the last delta before showing ImplementBar mid-stream
+
+/** Phrases that mean "go build the plan we discussed" (BEO-197 / BEO-202). */
+const BUILD_CONFIRMATIONS = [
+  "build it",
+  "build this",
+  "let's go",
+  "lets go",
+  "do it",
+  "go ahead",
+  "implement this",
+  "implement it",
+  "yes build",
+  "ready",
+  "go for it",
+  "make it",
+  "create it",
+  "just build it",
+];
+
+function isBuildConfirmation(message: string): boolean {
+  const clean = message.trim().toLowerCase();
+  return (
+    BUILD_CONFIRMATIONS.some(phrase => clean.includes(phrase))
+    || clean === "yes"
+    || clean === "yep"
+    || clean === "sure"
+    || clean === "ok"
+    || clean === "okay"
+    || clean === "go"
+  );
+}
+
+/** BEO-495: if the model spells out a plan with this lead-in, show ImplementBar (SSE-agnostic). */
+const PLAN_TRIGGER_PHRASE = "here's what i'll do:";
+
+function shouldShowImplementFromAssistantContent(content: string | undefined): boolean {
+  return Boolean(content?.toLowerCase().includes(PLAN_TRIGGER_PHRASE));
+}
+
+// ─── BEO-496: Iteration preamble detection ────────────────────────────────────
+const ITERATION_PHRASES = ["on it", "got it", "making that", "fixing that", "updating"] as const;
+
+function isIterationPreamble(restatement: string): boolean {
+  const lower = restatement.toLowerCase();
+  return restatement.length < 60 || ITERATION_PHRASES.some(p => lower.includes(p));
+}
+
+type ChatApiMessage = { role: "user" | "assistant"; content: string };
+
+function buildChatThread(messages: ChatMessage[]): ChatApiMessage[] {
+  const result: ChatApiMessage[] = [];
+  for (const m of messages) {
+    if (m.type === "user") result.push({ role: "user", content: m.content });
+    else if (m.type === "chat_response") result.push({ role: "assistant", content: m.content });
+  }
+  return result;
+}
+
+function countUserMessages(messages: ChatMessage[]): number {
+  return messages.filter(m => m.type === "user").length;
+}
+
+// ─── Mock chat responses ───────────────────────────────────────────────────────
+
+const MOCK_EARLY_RESPONSES = [
+  "Got it! What's the main problem this app needs to solve? And who's the primary user?",
+  "Makes sense. What's the single most important action a user should be able to take in this app?",
+  "Good. Any design preferences — minimal and clean, data-heavy, mobile-first?",
+];
+
+const MOCK_IMPLEMENT_SUMMARY_TEMPLATE = (thread: string) =>
+  `Based on our conversation: ${thread.slice(0, 120).trim()}... Build a clean, focused app with the features discussed.`;
+
+async function mockStreamChatResponse(
+  _text: string,
+  messages: ChatMessage[],
+  onDelta: (delta: string) => void,
+  onImplementSuggestion: (summary: string) => void,
+): Promise<void> {
+  const userCount = countUserMessages(messages);
+
+  if (userCount >= 2) {
+    // After 2 exchanges, suggest implementing
+    const thread = buildChatThread(messages)
+      .map(m => m.content)
+      .join(" ");
+    const summary = MOCK_IMPLEMENT_SUMMARY_TEMPLATE(thread);
+    const response = `I think I have enough to build this — want me to go ahead?\n\n${summary.replace("Based on our conversation: ", "I'll ")}`;
+
+    // Stream the response
+    await streamChars(response, onDelta);
+
+    // Then fire implement_suggestion
+    await delay(400);
+    onImplementSuggestion(summary);
+  } else {
+    const reply =
+      MOCK_EARLY_RESPONSES[userCount % MOCK_EARLY_RESPONSES.length] ??
+      "Tell me more about what you have in mind.";
+    await streamChars(reply, onDelta);
+  }
+}
+
+async function mockSummariseChatThread(thread: ChatApiMessage[]): Promise<string> {
+  await delay(600);
+  const userParts = thread.filter(m => m.role === "user").map(m => m.content);
+  return userParts.join(". ").slice(0, 300).trim() || "Build the app we discussed.";
+}
+
+function streamChars(text: string, onDelta: (delta: string) => void): Promise<void> {
+  return new Promise(resolve => {
+    const chars = text.split("");
+    let i = 0;
+    const tick = () => {
+      // Send 2-4 chars at a time for realistic feel
+      const chunk = chars.slice(i, i + 3).join("");
+      if (!chunk) {
+        resolve();
+        return;
+      }
+      onDelta(chunk);
+      i += 3;
+      setTimeout(tick, 18 + Math.random() * 12);
+    };
+    setTimeout(tick, 50);
+  });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ─── BEO-798: Live action label helpers ──────────────────────────────────────
+
+/** Map stage_* event types to user-facing copy for the live status pill. */
+const STAGE_ACTION_LABELS: Readonly<Record<string, string>> = {
+  stage_classifying: "Understanding your request",
+  stage_enriching: "Planning the build",
+  stage_generating: "Writing components",
+  stage_sanitising: "Polishing the code",
+  stage_persisting: "Saving changes",
+  stage_deploying: "Updating preview",
+};
+
+/**
+ * Map a raw tool/status event code + message to a user-facing action string.
+ * Returns null when no meaningful label can be derived.
+ */
+function mapActionToLabel(
+  code: string,
+  message: string,
+  payload?: Record<string, unknown> | null,
+): string | null {
+  const normalized = code.toLowerCase().replace(/[_\-\s]/g, "");
+  const pathFromPayload = typeof payload?.path === "string" ? payload.path : null;
+  const pathMatch = (code + " " + message).match(/path[=:\s]+([^\s,]+)/i);
+  const path = pathFromPayload ?? pathMatch?.[1] ?? null;
+
+  if (/createfile|writefile|newfile|addfile/.test(normalized)) {
+    return path ? `Writing ${path}` : "Writing file";
+  }
+  if (/editfile|updatefile|modifyfile|patchfile|changefile/.test(normalized)) {
+    return path ? `Editing ${path}` : "Editing file";
+  }
+  if (/readfile|getfile|loadfile/.test(normalized)) {
+    return path ? `Reading ${path}` : "Reading file";
+  }
+  if (/migrat/.test(normalized)) return "Running migrations";
+  if (/deploy|preview|serve/.test(normalized)) return "Updating preview";
+  if (/plan|blueprint/.test(normalized)) return "Planning the build";
+  if (/generat|scaffold/.test(normalized)) return "Writing components";
+  if (/validate|lint|verify/.test(normalized)) return "Checking the code";
+  if (/persist|commit/.test(normalized)) return "Saving changes";
+
+  // Fallback: try to derive from the human-readable message
+  const msgLower = message.toLowerCase();
+  if (/\bcreating\b|\bwriting\b|\bgenerating\b/.test(msgLower)) {
+    return path ? `Writing ${path}` : "Writing components";
+  }
+  if (/\bediting\b|\bupdating\b|\bmodifying\b|\bpatching\b/.test(msgLower)) {
+    return path ? `Editing ${path}` : "Editing file";
+  }
+  if (/\breading\b|\bloading\b/.test(msgLower)) {
+    return path ? `Reading ${path}` : "Reading file";
+  }
+
+  if (code.trim()) {
+    console.warn("[LiveStatusPill] unknown action code:", code, "| message:", message);
+    return (code + (message ? ` ${message}` : "")).toLowerCase().trim().slice(0, 60);
+  }
+
+  return null;
+}
+
+/** BEO-393: minimum time a checklist row stays ◌ before advancing to ✓ */
+const CHECKLIST_MIN_DWELL_MS = 2000;
+/** BEO-393: cap artificial checklist drain before showing build_summary */
+const SUMMARY_MAX_CHECKLIST_DRAIN_MS = 6000;
+
+function makeId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function makeInitialChecklist(): { id: string; label: string; status: ChatChecklistStatus }[] {
+  return [
+    { id: "planning", label: CHECKLIST_LABELS.planning, status: "pending" },
+    { id: "writing", label: CHECKLIST_LABELS.writing, status: "pending" },
+    { id: "polishing", label: CHECKLIST_LABELS.polishing, status: "pending" },
+    { id: "deploying", label: CHECKLIST_LABELS.deploying, status: "pending" },
+  ];
+}
+
+function applyStageToChecklist(
+  items: { id: string; label: string; status: ChatChecklistStatus }[],
+  stageType: string,
+): { id: string; label: string; status: ChatChecklistStatus }[] {
+  const activeIdx: Record<string, number> = {
+    stage_classifying: 0,
+    stage_enriching: 0,
+    stage_generating: 1,
+    stage_sanitising: 2,
+    stage_persisting: 2,
+    stage_deploying: 3,
+  };
+  const idx = activeIdx[stageType];
+  if (idx === undefined) return items;
+  return items.map((item, i) => {
+    if (i < idx) return { ...item, status: "done" as const };
+    if (i === idx) return { ...item, status: "active" as const };
+    return { ...item, status: "pending" as const };
+  });
+}
+
+function markDeployingDone(
+  items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
+): { id: string; label: string; status: ChatChecklistStatus }[] | undefined {
+  if (!items) return items;
+  return items.map(i =>
+    i.id === "deploying" ? { ...i, status: "done" as const } : i,
+  );
+}
+
+function markActiveFailed(
+  items: { id: string; label: string; status: ChatChecklistStatus }[] | undefined,
+): { id: string; label: string; status: ChatChecklistStatus }[] | undefined {
+  if (!items) return items;
+  return items.map(i =>
+    i.status === "active" ? { ...i, status: "failed" as const } : i,
+  );
+}
+
+function activeChecklistIndex(items: { status: ChatChecklistStatus }[]): number {
+  return items.findIndex(i => i.status === "active");
+}
+
+function stepChecklistOnceTowardAllDone(
+  items: { id: string; label: string; status: ChatChecklistStatus }[],
+): { id: string; label: string; status: ChatChecklistStatus }[] {
+  const activeIdx = activeChecklistIndex(items);
+  if (activeIdx !== -1) {
+    if (activeIdx < items.length - 1) {
+      return items.map((item, i) => {
+        if (i === activeIdx) return { ...item, status: "done" as const };
+        if (i === activeIdx + 1) return { ...item, status: "active" as const };
+        return item;
+      });
+    }
+    return items.map((item, i) =>
+      i === activeIdx ? { ...item, status: "done" as const } : item,
+    );
+  }
+  const firstPending = items.findIndex(i => i.status === "pending");
+  if (firstPending !== -1) {
+    return items.map((item, i) =>
+      i === firstPending ? { ...item, status: "active" as const } : item,
+    );
+  }
+  return items;
+}
+
+function countNonDone(items: { status: ChatChecklistStatus }[]): number {
+  return items.filter(i => i.status !== "done").length;
+}
+
+type BuildingMsg = Extract<ChatMessage, { type: "building" }>;
+
+function findLiveBuildingIndex(prev: ChatMessage[], preferredId: string | null): number {
+  if (preferredId) {
+    const byId = prev.findIndex(
+      m => m.id === preferredId && m.type === "building" && !(m as BuildingMsg).summary,
+    );
+    if (byId !== -1) return byId;
+  }
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const m = prev[i];
+    if (m.type === "building" && !(m as BuildingMsg).summary) return i;
+  }
+  return -1;
+}
+
+function hasActiveToDoneTransition(
+  visual: { status: ChatChecklistStatus }[],
+  target: { status: ChatChecklistStatus }[],
+): boolean {
+  for (let i = 0; i < visual.length; i++) {
+    if (visual[i]?.status === "active" && target[i]?.status === "done") return true;
+  }
+  return false;
+}
+
+function patchBuildingMessage(
+  prev: ChatMessage[],
+  buildingId: string | null,
+  patch: (m: BuildingMsg) => BuildingMsg,
+): ChatMessage[] {
+  const idx = findLiveBuildingIndex(prev, buildingId);
+  if (idx === -1) return prev;
+  const next = [...prev];
+  next[idx] = patch(next[idx] as BuildingMsg);
+  return next;
+}
+
+// ─── Session-events → ChatMessage mapper (BEO-370) ───────────────────────────
+
+function mapSessionEventsToMessages(
+  events: readonly Record<string, unknown>[],
+): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  for (const ev of events) {
+    const type = ev.type;
+    const content = typeof ev.content === "string" ? ev.content : "";
+    // BEO-787: use epoch-0 as a stable sentinel for missing timestamps instead of
+    // fabricating "now" — the UI can check getTime() === 0 to suppress display.
+    const timestamp = typeof ev.timestamp === "string" ? new Date(ev.timestamp) : new Date(0);
+
+    if (type === "user") {
+      result.push({ id: makeId(), type: "user", content, timestamp });
+    } else if (type === "pre_build_ack") {
+      result.push({ id: makeId(), type: "pre_build_ack", content });
+    } else if (type === "question_answer") {
+      result.push({ id: makeId(), type: "question_answer", content, streaming: false });
+    } else if (type === "clarifying_question") {
+      result.push({ id: makeId(), type: "clarifying_question", content });
+    } else if (type === "build_summary") {
+      const rawNext = ev.nextSteps;
+      let nextSteps: { label: string; prompt: string }[] | undefined;
+      if (Array.isArray(rawNext)) {
+        nextSteps = rawNext
+          .map((row: unknown) => {
+            if (!row || typeof row !== "object") return null;
+            const r = row as Record<string, unknown>;
+            const label = typeof r.label === "string" ? r.label : "";
+            const prompt = typeof r.prompt === "string" ? r.prompt : "";
+            if (!label || !prompt) return null;
+            return { label, prompt };
+          })
+          .filter((x): x is { label: string; prompt: string } => x !== null);
+        if (nextSteps.length === 0) nextSteps = undefined;
+      }
+      result.push({
+        id: makeId(),
+        type: "build_summary",
+        content,
+        filesChanged: Array.isArray(ev.filesChanged) ? ev.filesChanged.map(String) : [],
+        durationMs: typeof ev.durationMs === "number" ? ev.durationMs : undefined,
+        creditsUsed: typeof ev.creditsUsed === "number" ? ev.creditsUsed : undefined,
+        nextSteps,
+      });
+    } else if (type === "chat_response") {
+      // BEO-787 Fix 2: replay plan-response cards with their implementPlan so the
+      // plan card and ⚡ button are restored from session_events after refresh.
+      const implementPlan = typeof ev.implementPlan === "string" ? ev.implementPlan : undefined;
+      result.push({
+        id: makeId(),
+        type: "chat_response",
+        content,
+        streaming: false,
+        implementPlan,
+      });
+    }
+  }
+  return result;
+}
+
+export interface UseBuildChatOptions {
+  onEvent?: (event: BuilderV3Event) => void;
+  onProjectIdResolved?: (projectId: string, projectName: string, projectIcon: string | null) => void;
+  onBuildStatus?: (status: BuildStatusResponse) => void;
+  onBuildStarted?: (response: StartBuildResponse) => void;
+  /** BEO-439: called when credits are insufficient. isHardBlock=true = build blocked before start; false = exhausted mid-session */
+  onOutOfCredits?: (isHardBlock: boolean) => void;
+}
+
+export function useBuildChat(projectId: string, options: UseBuildChatOptions = {}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isBuilding, setIsBuilding] = useState(false);
+  // BEO-462: true while API is analysing an uploaded image (before image_intent SSE)
+  const [isAnalysingImage, setIsAnalysingImage] = useState(false);
+  // BEO-496: true when the current build is detected as an iteration (short preamble)
+  const [isIterationBuild, setIsIterationBuild] = useState(false);
+  // BEO-798: current live tool action shown in the status pill
+  const [currentAction, setCurrentAction] = useState<string | null>(null);
+  const actionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isIterationBuildRef = useRef(false);
+  // BEO-496: mirrors isBuilding so event handlers can guard without stale closures
+  const isBuildInProgressRef = useRef(false);
+
+  // ─── BEO-396: Chat mode ───────────────────────────────────────────────────
+  const [chatModeActive, setChatModeActive] = useState(false);
+  const chatModeRef = useRef(false);
+  const activeChatMsgIdRef = useRef<string | null>(null);
+  const chatAbortRef = useRef<AbortController | null>(null);
+  /** Latest plan for ⚡ Implement from SSE (chat or /builds/start conversational_response). */
+  const pendingImplementPlanRef = useRef<string | null>(null);
+  const implementWithPlanRef = useRef<((plan: string, imageUrl?: string) => Promise<void>) | null>(null);
+  // ─── BEO-746: Dedupe plan UI re-renders ───────────────────────────────────
+  // Tracks plans the user has already implemented or dismissed. Once a plan is
+  // in this set, ANY downstream re-render attempt — trace event replay during
+  // startAndStreamBuild, SSE reconnect, or a `done` event re-emitting
+  // readyToImplement — is silently ignored. Required because the API's stale
+  // /builds/start response after an Implement click can replay a completed
+  // build's `conversational_response` + `done` (no pre_build_ack, no
+  // build_confirmed), which previously re-set both the inline plan card and
+  // the floating ImplementBar.
+  const implementedPlansRef = useRef<Set<string>>(new Set());
+
+  // ─── BEO-398: Sticky implement suggestion zone ────────────────────────────
+  const [implementSuggestion, setImplementSuggestion] = useState<{ summary: string } | null>(null);
+
+  const dismissImplementSuggestion = useCallback(() => {
+    setImplementSuggestion(prev => {
+      if (prev?.summary) {
+        implementedPlansRef.current.add(prev.summary.trim());
+      }
+      return null;
+    });
+  }, []);
+
+  const toggleChatMode = useCallback(() => {
+    setChatModeActive(prev => {
+      const next = !prev;
+      chatModeRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const buildDoneRef = useRef(false);
+  const lastUserPromptRef = useRef("");
+  const activeBuildingMsgIdRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const buildStartedAtRef = useRef<number | null>(null);
+  const existingFilesRef = useRef<readonly StudioFile[]>([]);
+  const resolvedProjectIdRef = useRef(
+    projectId && projectId !== "new" ? projectId : "",
+  );
+  const lastEventBuildIdRef = useRef<string | null>(null);
+
+  const preambleFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stageKickoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checklistDwellRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    activeSince: number | null;
+  }>({ timer: null, activeSince: null });
+  const latestStageChecklistRef = useRef<ReturnType<typeof makeInitialChecklist> | null>(null);
+  const latestStagePhaseRef = useRef<string | undefined>(undefined);
+  const summaryDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // BEO-733: stores a function that immediately finalises the in-flight building
+  // message to build_summary.  Invoked by clearPreambleAndStageTimers when the
+  // drain animation is cancelled mid-flight so the Done card stays in the right
+  // position (before any new-iteration messages) rather than being appended later.
+  const flushSummaryRef = useRef<(() => void) | null>(null);
+  // BEO-399: set true when server-ready fires before prior checklist items finish dwell
+  const serverReadyPendingRef = useRef(false);
+
+  const optionsRef = useRef(options);
+  useEffect(() => {
+    optionsRef.current = options;
+  });
+
+  // BEO-410: keep chatModeRef in sync with chatModeActive state so stale
+  // closures can never route a chat-mode message into the build pipeline.
+  useEffect(() => {
+    chatModeRef.current = chatModeActive;
+  }, [chatModeActive]);
+
+  // BEO-496: keep isBuildInProgressRef in sync so event-handler closures can read it without stale values.
+  useEffect(() => {
+    isBuildInProgressRef.current = isBuilding;
+  }, [isBuilding]);
+
+  const clearPreambleAndStageTimers = useCallback(() => {
+    if (preambleFallbackTimerRef.current) {
+      clearTimeout(preambleFallbackTimerRef.current);
+      preambleFallbackTimerRef.current = null;
+    }
+    if (stageKickoffTimerRef.current) {
+      clearTimeout(stageKickoffTimerRef.current);
+      stageKickoffTimerRef.current = null;
+    }
+    if (checklistDwellRef.current.timer) {
+      clearTimeout(checklistDwellRef.current.timer);
+      checklistDwellRef.current.timer = null;
+    }
+    checklistDwellRef.current.activeSince = null;
+    if (summaryDrainTimerRef.current) {
+      clearTimeout(summaryDrainTimerRef.current);
+      summaryDrainTimerRef.current = null;
+      // BEO-733: drain was in-progress when cancelled — flush immediately so the
+      // Done card is already in the correct position before any new-iteration
+      // messages are appended (user message + plan card).
+      flushSummaryRef.current?.();
+    }
+    flushSummaryRef.current = null;
+    serverReadyPendingRef.current = false;
+  }, []);
+
+  // ─── Persist in-flight building UI (BEO-391) ───────────────────────────────
+  useEffect(() => {
+    const pid = resolvedProjectIdRef.current;
+    if (!pid) return;
+    const bid = activeBuildingMsgIdRef.current;
+    const building = messages.find(m => m.id === bid && m.type === "building") as BuildingMsg | undefined;
+    if (!building || building.summary) {
+      try {
+        sessionStorage.removeItem(`beomz:buildingUi:${pid}`);
+      } catch { /* ignore */ }
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        `beomz:buildingUi:${pid}`,
+        JSON.stringify({
+          buildId: lastEventBuildIdRef.current,
+          lastUserPrompt: lastUserPromptRef.current,
+          building,
+        }),
+      );
+    } catch { /* ignore */ }
+  }, [messages]);
+
+  // ─── BEO-447 / BEO-787: persist chat messages + implementSuggestion to localStorage ───
+  useEffect(() => {
+    const pid = resolvedProjectIdRef.current;
+    if (!pid) return;
+    // Filter out ephemeral / in-flight messages before persisting
+    const persistable = messages.filter(m => {
+      if (m.type === "thinking") return false;
+      if (m.type === "server_restarting") return false;
+      // Only keep building messages that have completed (have a summary)
+      if (m.type === "building") return !!(m as BuildingMsg).summary;
+      // Only keep chat responses that are fully streamed
+      if (m.type === "chat_response")
+        return !(m as Extract<ChatMessage, { type: "chat_response" }>).streaming;
+      return true;
+    });
+    if (persistable.length === 0) return;
+    try {
+      // BEO-787: wrap in an object so implementSuggestion survives refresh.
+      // Old format was a bare ChatMessage[] — restore handles both.
+      localStorage.setItem(
+        `chat:${pid}`,
+        JSON.stringify({ messages: persistable.slice(-20), implementSuggestion }),
+      );
+    } catch { /* quota exceeded — ignore */ }
+  }, [messages, implementSuggestion]);
+
+  // ─── BEO-447 / BEO-787: restore chat + implementSuggestion from localStorage on mount ──
+  useEffect(() => {
+    const pid = projectId !== "new" ? projectId : "";
+    if (!pid) return;
+    try {
+      const saved = localStorage.getItem(`chat:${pid}`);
+      if (!saved) return;
+      // BEO-737 A7: JSON.stringify serialises Date → ISO string. Without a
+      // reviver, restored user messages have timestamp:string instead of
+      // timestamp:Date, so consumers calling .toLocaleTimeString() throw.
+      const raw = JSON.parse(saved, (key, value) =>
+        key === "timestamp" && typeof value === "string" ? new Date(value) : value,
+      ) as unknown;
+      // BEO-787: support both old bare-array format and new wrapped-object format.
+      let parsed: ChatMessage[];
+      let storedImpl: { summary: string } | null = null;
+      if (Array.isArray(raw)) {
+        parsed = raw as ChatMessage[];
+      } else if (raw && typeof raw === "object" && Array.isArray((raw as Record<string, unknown>).messages)) {
+        const wrapper = raw as { messages: ChatMessage[]; implementSuggestion?: { summary: string } | null };
+        parsed = wrapper.messages;
+        storedImpl = wrapper.implementSuggestion ?? null;
+      } else {
+        return;
+      }
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+      // BEO-790 diagnostic: capture exactly what localStorage restored.
+      try {
+        console.log("[chat-diag] localStorage restore:", {
+          pid,
+          rawLength: saved.length,
+          messagesCount: parsed.length,
+          messageTypes: parsed.map(m => m.type),
+          messageSnippets: parsed.map(m => {
+            const anyMsg = m as unknown as Record<string, unknown>;
+            const content = typeof anyMsg.content === "string" ? anyMsg.content : "";
+            return { type: m.type, contentTail: content.slice(-60) };
+          }),
+          storedImpl,
+          buildingUi: sessionStorage.getItem(`beomz:buildingUi:${pid}`),
+          buildStartedAt: sessionStorage.getItem(`beomz:buildStartedAt:${pid}`),
+        });
+      } catch { /* logging never blocks restore */ }
+      setMessages(prev => (prev.length > 0 ? prev : parsed));
+      if (storedImpl?.summary) {
+        setImplementSuggestion(storedImpl);
+      }
+    } catch { /* corrupted data — ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Seed / merge chat history from session_events on mount (BEO-370 / BEO-787) ──
+  // BEO-787: localStorage fast-paints on mount (above). When the backend resolves,
+  // we merge rather than wholesale-replace: find where the latest build's first user
+  // event appears in localStorage, keep everything BEFORE that boundary from
+  // localStorage (older iterations), and replace FROM the boundary with backend's
+  // authoritative session_events (complete build_summary + nextSteps + chat_response).
+  const historySeededRef = useRef(false);
+  useEffect(() => {
+    const pid = resolvedProjectIdRef.current;
+    if (!pid || historySeededRef.current) return;
+    historySeededRef.current = true;
+    void getLatestBuildForProject(pid)
+      .then(status => {
+        if (!status) return;
+        // BEO-790 diagnostic: backend response shape.
+        try {
+          const evs = (status.build.sessionEvents ?? []) as ReadonlyArray<Record<string, unknown>>;
+          console.log("[chat-diag] backend latestBuild:", {
+            pid,
+            buildStatus: status.build.status,
+            sessionEventsCount: evs.length,
+            sessionEventTypes: evs.map(e => e.type),
+            sessionEventSnippets: evs.map(e => ({
+              type: e.type,
+              contentTail: typeof e.content === "string" ? (e.content as string).slice(-60) : "(no content)",
+            })),
+          });
+        } catch { /* logging never blocks */ }
+        if (status.build.status !== "completed" && status.build.status !== "failed") return;
+        const events = status.build.sessionEvents;
+        if (!events?.length) return;
+        const backendMsgs = mapSessionEventsToMessages(events);
+        if (!backendMsgs.length) return;
+        setMessages(prev => {
+          if (prev.length === 0) return backendMsgs;
+          // BEO-788: Find first user message in backend → identifies the latest-build segment.
+          const firstBackendUser = backendMsgs.find(m => m.type === "user") as
+            | Extract<ChatMessage, { type: "user" }>
+            | undefined;
+          if (!firstBackendUser) return prev;
+          let boundaryIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i];
+            if (m.type === "user" && m.content === firstBackendUser.content) {
+              boundaryIdx = i;
+              break;
+            }
+          }
+          if (boundaryIdx === -1) return prev;
+          // BEO-788 additive merge: never DROP a localStorage event. Walk backend
+          // events and for each, either (a) overlay missing fields onto a matching
+          // localStorage event, or (b) append it if no equivalent exists locally.
+          // This preserves chat_response with implementPlan + nextSteps that
+          // localStorage captured from live SSE — backend often has fewer events
+          // (conversational + build live in separate generation rows; latestBuild
+          // returns only the build row).
+          const preBoundary = prev.slice(0, boundaryIdx);
+          const merged: ChatMessage[] = prev.slice(boundaryIdx);
+          for (const backendMsg of backendMsgs) {
+            const matchIdx = merged.findIndex(m => {
+              if (m.type !== backendMsg.type) return false;
+              if (backendMsg.type === "user") {
+                return m.type === "user" && m.content === backendMsg.content;
+              }
+              return true; // for non-user types, match first occurrence in segment
+            });
+            if (matchIdx >= 0) {
+              // Overlay: only fill fields that are missing/null/empty in localStorage.
+              // Never overwrite values localStorage already has (it's authoritative
+              // for live SSE state like nextSteps that arrives separately).
+              const existing = merged[matchIdx] as unknown as Record<string, unknown>;
+              const incoming = backendMsg as unknown as Record<string, unknown>;
+              const enriched: Record<string, unknown> = { ...existing };
+              for (const [key, val] of Object.entries(incoming)) {
+                if (val == null) continue;
+                const cur = existing[key];
+                if (cur == null || (Array.isArray(cur) && cur.length === 0)) {
+                  enriched[key] = val;
+                }
+              }
+              merged[matchIdx] = enriched as unknown as ChatMessage;
+            } else {
+              // BEO-792: backend has an event type localStorage never captured (e.g.
+              // pre_build_ack — backend persists it for legacy compat, but the SSE
+              // handler doesn't add it to messages). If localStorage has ANY events
+              // post-boundary of THE SAME TYPE-FAMILY we'd insert under, skip the
+              // backend event — localStorage is canonical for what should render.
+              // Only append when the type doesn't exist anywhere in localStorage's
+              // segment AT ALL — meaning localStorage's UI never rendered this kind
+              // of message, so backend probably shouldn't either (cross-device case
+              // is handled by the "if (prev.length === 0)" early-return above).
+              const typeExistsAnywhere = merged.some(m => m.type === backendMsg.type);
+              if (!typeExistsAnywhere) {
+                // Truly novel type — but localStorage rendered without it, so skip.
+                // (Was: merged.push(backendMsg) — caused pre_build_ack to render after build_summary.)
+                continue;
+              }
+              // Type exists but findIndex returned -1 — shouldn't happen given match
+              // logic above, but be safe and skip rather than misorder.
+              continue;
+            }
+          }
+          // BEO-790 diagnostic: capture merge result.
+          try {
+            const finalMerged = [...preBoundary, ...merged];
+            console.log("[chat-diag] merge result:", {
+              pid,
+              boundaryIdx,
+              prevLength: prev.length,
+              prevTypes: prev.map(m => m.type),
+              backendMsgCount: backendMsgs.length,
+              backendMsgTypes: backendMsgs.map(m => m.type),
+              postBoundaryStartLen: prev.slice(boundaryIdx).length,
+              mergedFinalLen: merged.length,
+              mergedFinalTypes: merged.map(m => m.type),
+              finalMessagesLen: finalMerged.length,
+              finalMessagesTypes: finalMerged.map(m => m.type),
+              finalMessagesSnippets: finalMerged.map(m => {
+                const anyMsg = m as unknown as Record<string, unknown>;
+                const content = typeof anyMsg.content === "string" ? anyMsg.content : "";
+                return { type: m.type, contentTail: content.slice(-60) };
+              }),
+            });
+          } catch { /* logging never blocks */ }
+          return [...preBoundary, ...merged];
+        });
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const { startAndStreamBuild, subscribeToBuild } = useBuilderEngineStream();
+
+  const notifyPreviewServerReady = useCallback(() => {
+    setMessages(prev =>
+      patchBuildingMessage(prev, activeBuildingMsgIdRef.current, b => {
+        if (b.summary) return b;
+        // BEO-399: defer if any prior checklist item is still active/pending
+        const checklist = b.checklist;
+        const deployingIdx = checklist ? checklist.findIndex(i => i.id === "deploying") : -1;
+        const priorAllDone =
+          deployingIdx <= 0 ||
+          !checklist ||
+          checklist.slice(0, deployingIdx).every(i => i.status === "done");
+        if (!priorAllDone) {
+          serverReadyPendingRef.current = true;
+          return b;
+        }
+        return {
+          ...b,
+          checklist: markDeployingDone(b.checklist),
+          phase: "preview_ready",
+        };
+      }),
+    );
+  }, []);
+
+  const handleEvent = useCallback(
+    (event: BuilderV3Event) => {
+      if ("buildId" in event && typeof event.buildId === "string" && event.buildId) {
+        lastEventBuildIdRef.current = event.buildId;
+      }
+
+      optionsRef.current.onEvent?.(event);
+
+      switch (event.type) {
+        case "intent_detected":
+          break;
+
+        // BEO-464: API confirms this is a real build — NOW start the shimmer.
+        // Removes thinking dots so BuildingShimmer takes over cleanly.
+        // BEO-478: clear the floating ImplementBar — build has started.
+        case "build_confirmed":
+          setIsBuilding(true);
+          setImplementSuggestion(null);
+          setMessages(prev => prev.filter(m => m.type !== "thinking"));
+          break;
+
+        case "insufficient_credits": {
+          // BEO-439: hard block — build was rejected before starting due to insufficient credits
+          setIsBuilding(false);
+          activeBuildingMsgIdRef.current = null;
+          optionsRef.current.onOutOfCredits?.(true);
+          break;
+        }
+
+        case "pre_build_ack": {
+          // BEO-392: record internal state only — NO message pushed to chat.
+          // BuildingShimmer will display (isBuilding && !hasBuildingMessage).
+          // The first real message card is created when stage_preamble arrives.
+          // BEO-464: isBuilding is set only on build_confirmed — avoids preview progress bar
+          // and other "build in flight" UI during conversational / classify-only turns.
+          // BEO-798: reset action label at build start so pill shows "Working…"
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
+          const now = Date.now();
+          buildStartedAtRef.current = now;
+          try {
+            sessionStorage.setItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`, String(now));
+          } catch { /* ignore */ }
+
+          clearPreambleAndStageTimers();
+          checklistDwellRef.current.activeSince = null;
+          latestStageChecklistRef.current = null;
+          latestStagePhaseRef.current = undefined;
+
+          // BEO-496: reset iteration detection at the start of each build
+          isIterationBuildRef.current = false;
+          setIsIterationBuild(false);
+
+          // Pre-allocate ID so stage_preamble can use it without racing
+          const pendingBuildId = makeId();
+          activeBuildingMsgIdRef.current = pendingBuildId;
+
+          // Drop thinking indicator; keep the pre-build conversational message
+          // but strip its implementPlan field so the ⚡ button disappears without
+          // removing the intro text + plan bullets from chat history (BEO-753).
+          setMessages(prev =>
+            prev
+              .filter(m => m.type !== "thinking")
+              .map(m => {
+                if (m.type !== "chat_response" || !m.implementPlan) return m;
+                const { implementPlan: _ip, ...rest } = m;
+                return rest as ChatMessage;
+              }),
+          );
+
+          // Safety net: if stage_preamble never fires in 5s, create the card ourselves
+          preambleFallbackTimerRef.current = setTimeout(() => {
+            preambleFallbackTimerRef.current = null;
+            setMessages(prev => {
+              if (findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current) !== -1) return prev;
+              const id = activeBuildingMsgIdRef.current ?? makeId();
+              activeBuildingMsgIdRef.current = id;
+              const cl = applyStageToChecklist(makeInitialChecklist(), "stage_classifying");
+              checklistDwellRef.current.activeSince = activeChecklistIndex(cl) >= 0 ? Date.now() : null;
+              return [
+                ...prev,
+                {
+                  id,
+                  type: "building" as const,
+                  phase: "classifying",
+                  preamble: {
+                    restatement: PREAMBLE_FALLBACK.restatement,
+                    bullets: [...PREAMBLE_FALLBACK.bullets],
+                  },
+                  preambleIsFallback: true,
+                  checklist: cl,
+                  buildStartedAt: buildStartedAtRef.current ?? undefined,
+                },
+              ];
+            });
+          }, 5_000);
+          break;
+        }
+
+        case "stage_preamble": {
+          if (preambleFallbackTimerRef.current) {
+            clearTimeout(preambleFallbackTimerRef.current);
+            preambleFallbackTimerRef.current = null;
+          }
+          // BEO-462: a real build is starting — no longer just image analysis
+          setIsAnalysingImage(false);
+          // BEO-496: detect iteration mode from the preamble restatement
+          const iterationDetected = isIterationPreamble(event.restatement);
+          if (isIterationBuildRef.current !== iterationDetected) {
+            isIterationBuildRef.current = iterationDetected;
+            setIsIterationBuild(iterationDetected);
+          }
+          if (iterationDetected) {
+            // Suppress any ImplementBar that was showing before the iteration started
+            setImplementSuggestion(null);
+          }
+          setMessages(prev => {
+            const idx = findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current);
+            if (idx !== -1) {
+              // Card already exists (e.g. restored from session or race): patch in-place
+              const next = [...prev];
+              next[idx] = {
+                ...(next[idx] as BuildingMsg),
+                preamble: { restatement: event.restatement, bullets: [...event.bullets] },
+                preambleIsFallback: false,
+              };
+              activeBuildingMsgIdRef.current = (next[idx] as BuildingMsg).id;
+              return next;
+            }
+            // BEO-392: CREATE the one-and-only building message here
+            const id = activeBuildingMsgIdRef.current ?? makeId();
+            activeBuildingMsgIdRef.current = id;
+            console.assert(
+              prev.filter(m => m.type === "building").length === 0,
+              "BEO-392: building message already in state when stage_preamble fires",
+            );
+            return [
+              ...prev.filter(m => m.type !== "thinking"),
+              {
+                id,
+                type: "building" as const,
+                phase: "acknowledged",
+                preamble: { restatement: event.restatement, bullets: [...event.bullets] },
+                preambleIsFallback: false,
+                checklist: makeInitialChecklist(),
+                buildStartedAt: buildStartedAtRef.current ?? undefined,
+              },
+            ];
+          });
+          break;
+        }
+
+        case "conversational_response": {
+          clearPreambleAndStageTimers();
+          setIsAnalysingImage(false);
+          const e: BuilderV3ConversationalResponseEvent = event;
+          console.log("[BEO-conversational] conversational_response received:", {
+            readyToImplement: e.readyToImplement,
+            hasPlan: Boolean(e.plan),
+            hasImplementPlan: Boolean(e.implementPlan),
+            planPreview: (e.plan ?? e.implementPlan ?? "").slice(0, 80),
+            messagePreview: e.message?.slice(0, 80),
+          });
+          const ready =
+            Boolean(e.readyToImplement) && Boolean(e.plan || e.implementPlan);
+          const plan = ready ? String(e.plan ?? e.implementPlan ?? "").trim() : "";
+          console.log("[BEO-conversational] ready:", ready, "plan set:", Boolean(plan));
+          if (plan) {
+            // BEO-746: API may replay this exact event from a completed plan-mode
+            // build's trace after the user already clicked Implement (terminal
+            // events bypass build_confirmed / pre_build_ack, so the normal
+            // cleanup paths never run). Drop it so the plan UI never duplicates.
+            if (implementedPlansRef.current.has(plan)) {
+              console.log("[BEO-746] Skipping conversational_response — plan already implemented");
+              setMessages(prev => prev.filter(m => m.type !== "thinking"));
+              setIsBuilding(false);
+              break;
+            }
+            pendingImplementPlanRef.current = plan;
+            console.log("[BEO-conversational] pendingImplementPlanRef set ✓");
+            // BEO-478: surface plan in the floating ImplementBar so it persists
+            // even when the user sends follow-up messages before clicking Implement.
+            setImplementSuggestion({ summary: plan });
+            setMessages(prev => [
+              ...prev.filter(m => m.type !== "thinking"),
+              {
+                id: makeId(),
+                type: "chat_response",
+                content: e.message,
+                streaming: false,
+                implementPlan: plan,
+              },
+            ]);
+          } else {
+            console.warn("[BEO-conversational] plan is empty — rendering question_answer (no ⚡ button)");
+            setMessages(prev => [
+              ...prev.filter(m => m.type !== "thinking"),
+              { id: makeId(), type: "question_answer", content: e.message, streaming: false },
+            ]);
+          }
+          if (!isBuildInProgressRef.current && shouldShowImplementFromAssistantContent(e.message)) {
+            setImplementSuggestion({ summary: e.message });
+          }
+          setIsBuilding(false);
+          break;
+        }
+
+        case "clarifying_question":
+          clearPreambleAndStageTimers();
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "clarifying_question", content: event.message },
+          ]);
+          if (!isBuildInProgressRef.current && shouldShowImplementFromAssistantContent(event.message)) {
+            setImplementSuggestion({ summary: event.message });
+          }
+          break;
+
+        case "image_intent": {
+          // BEO-182: classification result — show confirmation card in chat
+          // BEO-462: clear analysing state — the card replaces the loading indicator
+          setIsAnalysingImage(false);
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            {
+              id: makeId(),
+              type: "image_intent",
+              intent: event.intent as "logo" | "reference" | "error" | "theme" | "general",
+              description: event.description as string,
+              imageUrl: event.imageUrl as string,
+              ctaText: typeof event.ctaText === "string" ? event.ctaText : undefined,
+            },
+          ]);
+          setIsBuilding(false);
+          break;
+        }
+
+        case "url_research": {
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            {
+              id: makeId(),
+              type: "url_research" as const,
+              domain: event.domain,
+              summary: event.summary,
+              features: event.features,
+            },
+          ]);
+          break;
+        }
+
+        case "tool_use_started":
+        case "tool_use_progress":
+        case "status": {
+          setMessages(prev => {
+            const buildingId = activeBuildingMsgIdRef.current;
+            const phase =
+              event.type === "status"
+                ? (event.phase || event.message)
+                : event.message;
+            const payload = "payload" in event ? (event.payload ?? {}) : {};
+            const filesWritten =
+              typeof payload.filesWritten === "number" ? payload.filesWritten : undefined;
+            const totalFiles =
+              typeof payload.totalFiles === "number" ? payload.totalFiles : undefined;
+            const buildStartedAt = buildStartedAtRef.current ?? undefined;
+
+            const idx = findLiveBuildingIndex(prev, buildingId);
+            if (idx !== -1) {
+              const existing = prev[idx] as BuildingMsg;
+              if (existing.summary) return prev;
+              activeBuildingMsgIdRef.current = existing.id;
+              const next = [...prev];
+              next[idx] = {
+                ...existing,
+                phase: existing.phase ?? phase,
+                filesWritten,
+                totalFiles,
+                buildStartedAt,
+              };
+              return next;
+            }
+
+            const id = makeId();
+            activeBuildingMsgIdRef.current = id;
+            return [
+              ...prev,
+              {
+                id,
+                type: "building",
+                phase,
+                checklist: makeInitialChecklist(),
+                filesWritten,
+                totalFiles,
+                buildStartedAt,
+              },
+            ];
+          });
+          // BEO-798: update live action label (debounced ~150ms to avoid strobing)
+          {
+            const code = event.type === "status" ? event.code : event.code;
+            const msg = "message" in event ? (event.message ?? "") : "";
+            const pl = "payload" in event ? (event.payload ?? null) : null;
+            const label = mapActionToLabel(code, msg, pl as Record<string, unknown> | null);
+            if (label) {
+              if (actionDebounceRef.current) clearTimeout(actionDebounceRef.current);
+              actionDebounceRef.current = setTimeout(() => {
+                actionDebounceRef.current = null;
+                setCurrentAction(label);
+              }, 150);
+            }
+          }
+          break;
+        }
+
+        case "next_steps": {
+          const raw = event.suggestions ?? [];
+          const nextSteps = raw.map(s => ({ label: s.label, prompt: s.prompt }));
+          setMessages(prev => {
+            const bid = activeBuildingMsgIdRef.current;
+            const byActiveId = patchBuildingMessage(prev, bid, b => ({ ...b, nextSteps }));
+            if (byActiveId !== prev) return byActiveId;
+            const liveIdx = prev.findIndex(m => m.type === "building" && (m as BuildingMsg).summary);
+            if (liveIdx !== -1) {
+              const next = [...prev];
+              next[liveIdx] = { ...(next[liveIdx] as BuildingMsg), nextSteps };
+              return next;
+            }
+            return prev.map(m => {
+              if (m.type !== "build_summary") return m;
+              return { ...m, nextSteps };
+            });
+          });
+          break;
+        }
+
+        case "build_summary": {
+          clearPreambleAndStageTimers();
+          // BEO-798: clear action label on build completion
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
+          try {
+            sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+            sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+          } catch { /* ignore */ }
+          buildStartedAtRef.current = null;
+
+          const bid = activeBuildingMsgIdRef.current;
+          latestStageChecklistRef.current = null;
+          latestStagePhaseRef.current = undefined;
+
+          const pushOrphanSummary = (prev: ChatMessage[]): ChatMessage[] => [
+            ...prev.filter(m => m.type !== "building"),
+            {
+              id: makeId(),
+              type: "build_summary",
+              content: event.message,
+              filesChanged: event.filesChanged,
+              durationMs: event.durationMs,
+              creditsUsed: event.creditsUsed,
+            },
+          ];
+
+          // BEO-459: convert in-flight building message → build_summary on completion.
+          // After this point type:"building" = always in-flight, type:"build_summary" = always done.
+          // BEO-787 Fix 3: copy nextSteps from the building message so chips survive
+          // the finalise transition and are not stripped on the way to localStorage.
+          const finalizeBuilding = (prev: ChatMessage[], idx: number): ChatMessage[] => {
+            const next = [...prev];
+            const existing = next[idx] as BuildingMsg;
+            next[idx] = {
+              id: existing.id,
+              type: "build_summary" as const,
+              content: event.message,
+              filesChanged: event.filesChanged,
+              durationMs: event.durationMs,
+              creditsUsed: event.creditsUsed,
+              nextSteps: existing.nextSteps,
+            };
+            return next;
+          };
+
+          // BEO-733: register an immediate-flush function so that if the user sends
+          // an iteration request while the checklist drain animation is still running,
+          // clearPreambleAndStageTimers() can call this to instantly convert the
+          // building card to build_summary before any iteration messages are appended.
+          // The function self-disables on first call and guards against duplicates.
+          const capturedBid = bid;
+          flushSummaryRef.current = () => {
+            flushSummaryRef.current = null;
+            setMessages(prev => {
+              if (prev.some(m => m.type === "build_summary")) return prev;
+              const j = findLiveBuildingIndex(prev, capturedBid);
+              if (j === -1) return pushOrphanSummary(prev);
+              return finalizeBuilding(prev, j);
+            });
+          };
+
+          const drainStartedAt = Date.now();
+
+          const runDrainStep = () => {
+            summaryDrainTimerRef.current = null;
+            setMessages(prev => {
+              const j = findLiveBuildingIndex(prev, activeBuildingMsgIdRef.current);
+              if (j === -1) return pushOrphanSummary(prev);
+              const b = prev[j] as BuildingMsg;
+              if (b.summary) return prev;
+              const checklist = b.checklist ?? makeInitialChecklist();
+              if (checklist.every(i => i.status === "done")) {
+                flushSummaryRef.current = null;
+                return finalizeBuilding(prev, j);
+              }
+              const stepped = stepChecklistOnceTowardAllDone(checklist);
+              const next = [...prev];
+              next[j] = { ...b, checklist: stepped };
+              if (stepped.every(i => i.status === "done")) {
+                flushSummaryRef.current = null;
+                return finalizeBuilding(next, j);
+              }
+              const elapsed = Date.now() - drainStartedAt;
+              const budget = SUMMARY_MAX_CHECKLIST_DRAIN_MS - elapsed;
+              const remaining = countNonDone(stepped);
+              const delay = Math.min(
+                CHECKLIST_MIN_DWELL_MS,
+                Math.max(16, remaining > 0 ? budget / remaining : 16),
+              );
+              summaryDrainTimerRef.current = setTimeout(runDrainStep, delay);
+              return next;
+            });
+          };
+
+          setMessages(prev => {
+            // BEO-737 A2: dedup guard — if a build_summary already exists in
+            // the message list (e.g. the `done` handler's getBuildStatus
+            // post-fetch already rendered one before the real `build_summary`
+            // SSE event landed, or SSE reconnected and replayed past a
+            // previously-emitted summary), do not append a second one.
+            if (prev.some(m => m.type === "build_summary")) {
+              flushSummaryRef.current = null;
+              if (summaryDrainTimerRef.current) {
+                clearTimeout(summaryDrainTimerRef.current);
+                summaryDrainTimerRef.current = null;
+              }
+              return prev;
+            }
+            if (!bid) {
+              flushSummaryRef.current = null;
+              return pushOrphanSummary(prev);
+            }
+            const idx = findLiveBuildingIndex(prev, bid);
+            if (idx === -1) {
+              flushSummaryRef.current = null;
+              return pushOrphanSummary(prev);
+            }
+
+            const existing = prev[idx] as BuildingMsg;
+            const cl = existing.checklist ?? makeInitialChecklist();
+            if (cl.every(i => i.status === "done")) {
+              flushSummaryRef.current = null;
+              return finalizeBuilding(prev, idx);
+            }
+
+            const stepped = stepChecklistOnceTowardAllDone(cl);
+            const first = [...prev];
+            first[idx] = { ...existing, checklist: stepped };
+            if (stepped.every(i => i.status === "done")) {
+              flushSummaryRef.current = null;
+              return finalizeBuilding(first, idx);
+            }
+            const elapsed = Date.now() - drainStartedAt;
+            const budget = SUMMARY_MAX_CHECKLIST_DRAIN_MS - elapsed;
+            const remaining = countNonDone(stepped);
+            const delay = Math.min(
+              CHECKLIST_MIN_DWELL_MS,
+              Math.max(16, remaining > 0 ? budget / remaining : 16),
+            );
+            summaryDrainTimerRef.current = setTimeout(runDrainStep, delay);
+            return first;
+          });
+          break;
+        }
+
+        case "done":
+          // BEO-798: clear action label when build finishes
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
+          if (event.fallbackUsed) {
+            buildDoneRef.current = false;
+            clearPreambleAndStageTimers();
+            setIsAnalysingImage(false);
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+              sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            const frozenAtFallback = Date.now();
+            const frozenBuildIdFallback = activeBuildingMsgIdRef.current;
+            setMessages(prev => {
+              const mapped = frozenBuildIdFallback
+                ? patchBuildingMessage(prev, frozenBuildIdFallback, b => ({
+                    ...b,
+                    checklist: markActiveFailed(b.checklist),
+                    buildFrozenAt: frozenAtFallback,
+                  }))
+                : prev;
+              return [
+                ...mapped.filter(m => m.type !== "thinking"),
+                {
+                  id: makeId(),
+                  type: "error",
+                  content:
+                    "The build didn't generate any files — this sometimes happens with complex prompts. Your credits have not been charged.",
+                },
+              ];
+            });
+          } else {
+            buildDoneRef.current = true;
+            clearPreambleAndStageTimers();
+            setIsAnalysingImage(false);
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            buildStartedAtRef.current = null;
+            // BEO-492: high-confidence direct plan path — done event carries readyToImplement
+            // signal without a preceding conversational_response. Wire the ImplementBar here
+            // so it appears even when clarifying questions are bypassed entirely.
+            // BEO-496: skip ImplementBar for iteration builds — they are surgical edits, not new plans.
+            // BEO-746: also skip if this exact plan was already implemented — guards
+            // against done re-emission via stale trace replay or SSE reconnect.
+            if (!isIterationBuildRef.current && event.readyToImplement && (event.plan || event.implementPlan)) {
+              const plan = String(event.plan ?? event.implementPlan ?? "").trim();
+              if (plan && !implementedPlansRef.current.has(plan)) {
+                pendingImplementPlanRef.current = plan;
+                setImplementSuggestion({ summary: plan });
+              }
+            }
+            if (!event.conversational) {
+              void getBuildStatus(event.buildId)
+                .then(status => {
+                  existingFilesRef.current = status.result?.files ?? [];
+                  optionsRef.current.onBuildStatus?.(status);
+                  const se = status.build.sessionEvents;
+                  if (Array.isArray(se)) {
+                    const summaryEv = se.find(e => e.type === "build_summary");
+                    if (summaryEv) {
+                      setMessages(prev => {
+                        if (prev.some(m => m.type === "build_summary")) return prev;
+                        if (prev.some(m => m.type === "building" && (m as BuildingMsg).summary))
+                          return prev;
+                        const liveBuildingIdx = prev.findIndex(
+                          m => m.type === "building" && !(m as BuildingMsg).summary,
+                        );
+                        if (liveBuildingIdx !== -1) {
+                          const next = [...prev];
+                          const existing = next[liveBuildingIdx] as BuildingMsg;
+                          // BEO-459: normalise to build_summary (same as build_summary SSE path)
+                          next[liveBuildingIdx] = {
+                            id: existing.id,
+                            type: "build_summary" as const,
+                            content:
+                              typeof summaryEv.content === "string" ? summaryEv.content : "",
+                            filesChanged: Array.isArray(summaryEv.filesChanged)
+                              ? summaryEv.filesChanged.map(String)
+                              : [],
+                            durationMs:
+                              typeof summaryEv.durationMs === "number"
+                                ? summaryEv.durationMs
+                                : undefined,
+                            creditsUsed:
+                              typeof summaryEv.creditsUsed === "number"
+                                ? summaryEv.creditsUsed
+                                : undefined,
+                          };
+                          return next;
+                        }
+                        return [
+                          ...prev.filter(m => m.type !== "building"),
+                          {
+                            id: makeId(),
+                            type: "build_summary" as const,
+                            content: typeof summaryEv.content === "string" ? summaryEv.content : "",
+                            filesChanged: Array.isArray(summaryEv.filesChanged)
+                              ? summaryEv.filesChanged.map(String)
+                              : [],
+                            durationMs:
+                              typeof summaryEv.durationMs === "number" ? summaryEv.durationMs : undefined,
+                            creditsUsed:
+                              typeof summaryEv.creditsUsed === "number"
+                                ? summaryEv.creditsUsed
+                                : undefined,
+                          },
+                        ];
+                      });
+                    }
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+          setIsBuilding(false);
+          activeBuildingMsgIdRef.current = null;
+          break;
+
+        case "error":
+          clearPreambleAndStageTimers();
+          // BEO-798: clear action label on error
+          if (actionDebounceRef.current) {
+            clearTimeout(actionDebounceRef.current);
+            actionDebounceRef.current = null;
+          }
+          setCurrentAction(null);
+          setIsAnalysingImage(false);
+          if (event.code === "server_restarting") {
+            buildDoneRef.current = false;
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+              sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            const frozenAtRestart = Date.now();
+            const frozenBuildIdRestart = activeBuildingMsgIdRef.current;
+            setMessages(prev => {
+              const mapped = frozenBuildIdRestart
+                ? patchBuildingMessage(prev, frozenBuildIdRestart, b => ({
+                    ...b,
+                    checklist: markActiveFailed(b.checklist),
+                    buildFrozenAt: frozenAtRestart,
+                  }))
+                : prev;
+              if (mapped.some(m => m.type === "server_restarting")) return mapped;
+              return [...mapped, { id: makeId(), type: "server_restarting" }];
+            });
+          } else {
+            try {
+              sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+              sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+            } catch { /* ignore */ }
+            const frozenAtErr = Date.now();
+            const frozenBuildIdErr = activeBuildingMsgIdRef.current;
+            setMessages(prev => {
+              const mapped = frozenBuildIdErr
+                ? patchBuildingMessage(prev, frozenBuildIdErr, b => ({
+                    ...b,
+                    checklist: markActiveFailed(b.checklist),
+                    buildFrozenAt: frozenAtErr,
+                  }))
+                : prev;
+              return [...mapped, { id: makeId(), type: "error", content: event.message, code: event.code }];
+            });
+          }
+          setIsBuilding(false);
+          activeBuildingMsgIdRef.current = null;
+          // BEO-439: soft block — build completed but credits exhausted
+          if (event.code === "credits_exhausted") {
+            optionsRef.current.onOutOfCredits?.(false);
+          }
+          break;
+
+        case "stage_classifying":
+        case "stage_enriching":
+        case "stage_generating":
+        case "stage_sanitising":
+        case "stage_persisting":
+        case "stage_deploying": {
+          if (stageKickoffTimerRef.current) {
+            clearTimeout(stageKickoffTimerRef.current);
+            stageKickoffTimerRef.current = null;
+          }
+          const buildStartedAt = buildStartedAtRef.current ?? undefined;
+          const phase = event.stage;
+          setMessages(prev => {
+            const buildingId = activeBuildingMsgIdRef.current;
+            const idx = findLiveBuildingIndex(prev, buildingId);
+            if (idx !== -1) {
+              activeBuildingMsgIdRef.current = (prev[idx] as BuildingMsg).id;
+              const existing = prev[idx] as BuildingMsg;
+              if (existing.summary) return prev;
+
+              const visual = existing.checklist ?? makeInitialChecklist();
+              const target = applyStageToChecklist(visual, event.type);
+              latestStageChecklistRef.current = target;
+              latestStagePhaseRef.current = phase;
+
+              const needDwell =
+                hasActiveToDoneTransition(visual, target) &&
+                checklistDwellRef.current.activeSince != null &&
+                Date.now() - checklistDwellRef.current.activeSince < CHECKLIST_MIN_DWELL_MS;
+
+              if (needDwell) {
+                const wait =
+                  CHECKLIST_MIN_DWELL_MS -
+                  (Date.now() - (checklistDwellRef.current.activeSince as number));
+                if (checklistDwellRef.current.timer) {
+                  clearTimeout(checklistDwellRef.current.timer);
+                  checklistDwellRef.current.timer = null;
+                }
+                checklistDwellRef.current.timer = setTimeout(() => {
+                  checklistDwellRef.current.timer = null;
+                  setMessages(p2 => {
+                    const j = findLiveBuildingIndex(p2, activeBuildingMsgIdRef.current);
+                    if (j === -1) return p2;
+                    const ex = p2[j] as BuildingMsg;
+                    if (ex.summary) return p2;
+                    const latest =
+                      latestStageChecklistRef.current ??
+                      ex.checklist ??
+                      makeInitialChecklist();
+                    const ph = latestStagePhaseRef.current ?? ex.phase;
+                    const next = [...p2];
+                    const oldA = activeChecklistIndex(ex.checklist ?? makeInitialChecklist());
+                    const newA = activeChecklistIndex(latest);
+                    if (oldA !== newA || (oldA === -1 && newA !== -1)) {
+                      checklistDwellRef.current.activeSince = newA >= 0 ? Date.now() : null;
+                    }
+                    next[j] = {
+                      ...ex,
+                      checklist: latest,
+                      phase: ph,
+                      buildStartedAt: buildStartedAtRef.current ?? ex.buildStartedAt,
+                    };
+                    // BEO-399: if server-ready was deferred, flush it now that prior items drained
+                    if (serverReadyPendingRef.current) {
+                      const depIdx = latest.findIndex(i => i.id === "deploying");
+                      const priorDone =
+                        depIdx <= 0 || latest.slice(0, depIdx).every(i => i.status === "done");
+                      if (priorDone) {
+                        serverReadyPendingRef.current = false;
+                        next[j] = {
+                          ...(next[j] as BuildingMsg),
+                          checklist: markDeployingDone(latest),
+                          phase: "preview_ready",
+                        };
+                      }
+                    }
+                    return next;
+                  });
+                }, wait);
+
+                const next = [...prev];
+                next[idx] = {
+                  ...existing,
+                  phase,
+                  buildStartedAt,
+                  checklist: visual,
+                };
+                return next;
+              }
+
+              if (checklistDwellRef.current.timer) {
+                clearTimeout(checklistDwellRef.current.timer);
+                checklistDwellRef.current.timer = null;
+              }
+
+              const next = [...prev];
+              const oldA = activeChecklistIndex(visual);
+              const newA = activeChecklistIndex(target);
+              if (oldA !== newA || (oldA === -1 && newA !== -1)) {
+                checklistDwellRef.current.activeSince = newA >= 0 ? Date.now() : null;
+              }
+              next[idx] = {
+                ...existing,
+                phase,
+                checklist: target,
+                buildStartedAt,
+              };
+              return next;
+            }
+
+            const id = makeId();
+            activeBuildingMsgIdRef.current = id;
+            const initialTarget = applyStageToChecklist(makeInitialChecklist(), event.type);
+            checklistDwellRef.current.activeSince =
+              activeChecklistIndex(initialTarget) >= 0 ? Date.now() : null;
+            latestStageChecklistRef.current = initialTarget;
+            latestStagePhaseRef.current = phase;
+            console.assert(
+              prev.filter(m => m.type === "building").length === 0,
+              `BEO-392: creating 2nd building msg on ${event.type}`,
+            );
+            return [
+              ...prev,
+              {
+                id,
+                type: "building",
+                phase,
+                checklist: initialTarget,
+                buildStartedAt,
+              },
+            ];
+          });
+          // BEO-798: update live action label for pipeline stage
+          {
+            const stageLabel = STAGE_ACTION_LABELS[event.type] ?? null;
+            if (stageLabel) {
+              if (actionDebounceRef.current) clearTimeout(actionDebounceRef.current);
+              actionDebounceRef.current = setTimeout(() => {
+                actionDebounceRef.current = null;
+                setCurrentAction(stageLabel);
+              }, 150);
+            }
+          }
+          break;
+        }
+
+        default:
+          break;
+      }
+    },
+    [clearPreambleAndStageTimers],
+  );
+
+  // ─── BEO-396: Chat mode — send a conversational message ──────────────────
+
+  const sendChatMessage = useCallback(
+    (text: string, imageUrl?: string) => {
+      chatAbortRef.current?.abort();
+      const controller = new AbortController();
+      chatAbortRef.current = controller;
+
+      const thinkingId = `thinking-chat-${makeId()}`;
+      setMessages(prev => [
+        ...prev,
+        { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date() },
+        { id: thinkingId, type: "thinking" },
+      ]);
+
+      const respond = async () => {
+        if (MOCK_CHAT_MODE) {
+          // Capture messages snapshot *before* this new message for thread building
+          const snapshot = await new Promise<ChatMessage[]>(resolve => {
+            setMessages(prev => {
+              resolve(prev);
+              return prev;
+            });
+          });
+
+          const chatMsgId = makeId();
+          activeChatMsgIdRef.current = chatMsgId;
+
+          // Replace thinking with empty streaming chat_response
+          setMessages(prev => [
+            ...prev.filter(m => m.id !== thinkingId),
+            { id: chatMsgId, type: "chat_response", content: "", streaming: true },
+          ]);
+
+          await mockStreamChatResponse(
+            text,
+            snapshot,
+            delta => {
+              if (controller.signal.aborted) return;
+              setMessages(prev => {
+                let phraseSummary: string | null = null;
+                const next = prev.map(m => {
+                  if (m.id === chatMsgId && m.type === "chat_response") {
+                    const nextContent = m.content + delta;
+                    if (shouldShowImplementFromAssistantContent(nextContent)) {
+                      phraseSummary = nextContent;
+                    }
+                    return { ...m, content: nextContent };
+                  }
+                  return m;
+                });
+                if (phraseSummary) {
+                  queueMicrotask(() => {
+                    setImplementSuggestion({ summary: phraseSummary! });
+                  });
+                }
+                return next;
+              });
+            },
+            summary => {
+              if (controller.signal.aborted) return;
+              // Finalize the streaming message + show sticky implement zone
+              setMessages(prev => {
+                const next = prev.map(m =>
+                  m.id === chatMsgId && m.type === "chat_response"
+                    ? { ...m, streaming: false }
+                    : m,
+                );
+                const final = next.find(
+                  m => m.id === chatMsgId && m.type === "chat_response",
+                ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
+                queueMicrotask(() => {
+                  if (shouldShowImplementFromAssistantContent(final?.content)) {
+                    setImplementSuggestion({ summary: final!.content });
+                  } else {
+                    setImplementSuggestion({ summary });
+                  }
+                });
+                return next;
+              });
+              activeChatMsgIdRef.current = null;
+            },
+          );
+
+          if (!controller.signal.aborted) {
+            setMessages(prev => {
+              const next = prev.map(m =>
+                m.id === chatMsgId && m.type === "chat_response"
+                  ? { ...m, streaming: false }
+                  : m,
+              );
+              const final = next.find(
+                m => m.id === chatMsgId && m.type === "chat_response",
+              ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
+              if (final && shouldShowImplementFromAssistantContent(final.content)) {
+                queueMicrotask(() => {
+                  setImplementSuggestion({ summary: final.content });
+                });
+              }
+              return next;
+            });
+            activeChatMsgIdRef.current = null;
+          }
+        } else {
+          // Real API path — active once Codex ships /api/builds/chat
+          let implementBarTimer: ReturnType<typeof setTimeout> | null = null;
+          try {
+            const accessToken = await getAccessToken();
+            const url = `${getApiBaseUrl()}/builds/chat`;
+            const thread = buildChatThread(
+              await new Promise<ChatMessage[]>(resolve => {
+                setMessages(prev => { resolve(prev); return prev; });
+              }),
+            );
+            const resp = await fetch(url, {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${accessToken}`,
+                "content-type": "application/json",
+                accept: "text/event-stream",
+              },
+              body: JSON.stringify({
+                messages: [...thread, { role: "user", content: text }],
+                projectId: resolvedProjectIdRef.current || undefined,
+                imageUrl: imageUrl || undefined,
+              }),
+              signal: controller.signal,
+            });
+
+            if (!resp.ok) {
+              await handleUnauthorizedResponse(resp);
+            }
+
+            if (!resp.ok || !resp.body) {
+              throw new Error(`Chat request failed with ${resp.status}`);
+            }
+
+            const chatMsgId = makeId();
+            activeChatMsgIdRef.current = chatMsgId;
+            setMessages(prev => [
+              ...prev.filter(m => m.id !== thinkingId),
+              { id: chatMsgId, type: "chat_response", content: "", streaming: true },
+            ]);
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            let dataLines: string[] = [];
+
+            const flush = () => {
+              if (!dataLines.length) return;
+              const payload = dataLines.join("\n");
+              dataLines = [];
+              try {
+                const ev = JSON.parse(payload) as {
+                  type: string;
+                  delta?: string;
+                  summary?: string;
+                  plan?: string;
+                  readyToImplement?: boolean;
+                  implementPlan?: string;
+                };
+                if (ev.type === "chat_response" && ev.delta) {
+                  let phraseSummary: string | null = null;
+                  setMessages(prev => prev.map(m => {
+                    if (m.id === chatMsgId && m.type === "chat_response") {
+                      const nextContent = m.content + ev.delta!;
+                      if (shouldShowImplementFromAssistantContent(nextContent)) {
+                        phraseSummary = nextContent;
+                      }
+                      return { ...m, content: nextContent };
+                    }
+                    return m;
+                  }));
+                  if (phraseSummary) {
+                    if (implementBarTimer) clearTimeout(implementBarTimer);
+                    const summary = phraseSummary;
+                    implementBarTimer = setTimeout(() => {
+                      implementBarTimer = null;
+                      setImplementSuggestion({ summary });
+                    }, IMPLEMENTBAR_QUIET_PERIOD_MS);
+                  }
+                } else if (ev.type === "implement_suggestion" && ev.summary) {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === chatMsgId && m.type === "chat_response"
+                        ? { ...m, streaming: false }
+                        : m,
+                    ),
+                  );
+                  setImplementSuggestion({ summary: ev.summary! });
+                  activeChatMsgIdRef.current = null;
+                } else if (
+                  ev.type === "ready_to_implement" ||
+                  (ev.readyToImplement && (ev.plan || ev.implementPlan))
+                ) {
+                  const plan = ev.plan ?? ev.implementPlan ?? "";
+                  if (plan) {
+                    pendingImplementPlanRef.current = plan;
+                    // BEO-492: surface plan in the floating ImplementBar for chat mode too
+                    setImplementSuggestion({ summary: plan });
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === chatMsgId && m.type === "chat_response"
+                          ? { ...m, streaming: false, implementPlan: plan }
+                          : m,
+                      ),
+                    );
+                    activeChatMsgIdRef.current = null;
+                  }
+                }
+                // Also handle readyToImplement as a field on any event (e.g. done)
+                if (ev.readyToImplement && (ev.plan || ev.implementPlan) && ev.type !== "ready_to_implement") {
+                  const plan = ev.plan ?? ev.implementPlan ?? "";
+                  if (plan) {
+                    pendingImplementPlanRef.current = plan;
+                    // BEO-492: ensure ImplementBar appears on any readyToImplement signal
+                    setImplementSuggestion({ summary: plan });
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === chatMsgId && m.type === "chat_response"
+                          ? { ...m, implementPlan: plan }
+                          : m,
+                      ),
+                    );
+                  }
+                }
+              } catch (parseError) {
+                console.warn("[chat-stream] parse error", {
+                  prefix: payload.slice(0, 200),
+                  error: parseError instanceof Error ? parseError.message : String(parseError),
+                });
+              }
+            };
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) { flush(); break; }
+              buf += decoder.decode(value, { stream: true });
+              if (buf.length > CHAT_STREAM_BUFFER_BYTES) {
+                console.error("[chat-stream] buffer overflow, aborting", { length: buf.length });
+                try { reader.cancel(); } catch {}
+                throw new Error("Chat stream buffer exceeded limit. Connection may be unhealthy.");
+              }
+              while (true) {
+                const nl = buf.indexOf("\n");
+                if (nl === -1) break;
+                const line = buf.slice(0, nl).replace(/\r$/, "");
+                buf = buf.slice(nl + 1);
+                if (!line) { flush(); continue; }
+                if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+              }
+            }
+
+            if (implementBarTimer) {
+              clearTimeout(implementBarTimer);
+              implementBarTimer = null;
+            }
+
+            let finalSummary: string | null = null;
+            setMessages(prev => {
+              const next = prev.map(m =>
+                m.id === chatMsgId && m.type === "chat_response"
+                  ? { ...m, streaming: false }
+                  : m,
+              );
+              const final = next.find(
+                m => m.id === chatMsgId && m.type === "chat_response",
+              ) as Extract<ChatMessage, { type: "chat_response" }> | undefined;
+              if (final && shouldShowImplementFromAssistantContent(final.content)) {
+                finalSummary = final.content;
+              }
+              return next;
+            });
+            if (finalSummary) {
+              setImplementSuggestion({ summary: finalSummary });
+            }
+            activeChatMsgIdRef.current = null;
+          } catch (err) {
+            if (implementBarTimer) {
+              clearTimeout(implementBarTimer);
+              implementBarTimer = null;
+            }
+            if (controller.signal.aborted) return;
+            const content = err instanceof Error ? err.message : "Chat failed. Try again.";
+            setMessages(prev => [
+              ...prev.filter(m => m.id !== thinkingId),
+              { id: makeId(), type: "error", content },
+            ]);
+          }
+        }
+      };
+
+      void respond().catch(err => {
+        if (controller.signal.aborted) return;
+        setMessages(prev => [
+          ...prev.filter(m => m.id !== thinkingId),
+          { id: makeId(), type: "error", content: err instanceof Error ? err.message : "Chat failed." },
+        ]);
+      });
+    },
+    [],
+  );
+
+  // ─── BEO-396: "Implement this" — summarise thread + trigger build ──────────
+
+  const implementCard = useCallback(async () => {
+    // BEO-398: clear sticky zone immediately
+    setImplementSuggestion(null);
+
+    let prompt: string;
+
+    if (MOCK_CHAT_MODE) {
+      const snapshot = await new Promise<ChatMessage[]>(resolve => {
+        setMessages(prev => { resolve(prev); return prev; });
+      });
+      const thread = buildChatThread(snapshot);
+      prompt = await mockSummariseChatThread(thread);
+    } else {
+      try {
+        const snapshot = await new Promise<ChatMessage[]>(resolve => {
+          setMessages(prev => { resolve(prev); return prev; });
+        });
+        const thread = buildChatThread(snapshot);
+        const accessToken = await getAccessToken();
+        const resp = await fetch(`${getApiBaseUrl()}/builds/summarise-chat`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ messages: thread }),
+        });
+        if (!resp.ok) {
+          await handleUnauthorizedResponse(resp);
+          throw new Error(`Summarise failed with ${resp.status}`);
+        }
+        const data = await resp.json() as { prompt: string };
+        prompt = data.prompt;
+      } catch (err) {
+        prompt = "Build the app we discussed.";
+        console.error("[BEO-396] summarise-chat failed:", err);
+      }
+    }
+
+    // Deactivate chat mode, then trigger the normal build flow
+    setChatModeActive(false);
+    chatModeRef.current = false;
+
+    // sendMessageInternal fires the build pipeline — called via sendMessage below
+    // We use a slight delay to let the state update settle
+    await delay(50);
+    sendMessageInternalRef.current?.(prompt);
+  }, []);
+
+  // ─── BEO-460/461/462: Implement a specific plan (⚡ button on chat_response or image_intent CTA) ───
+  const implementWithPlan = useCallback(async (plan: string, imageUrl?: string) => {
+    // BEO-746: Lock this exact plan from re-rendering its UI before any new
+    // SSE arrives. Must run BEFORE clearing pendingImplementPlanRef and BEFORE
+    // sendMessageInternalRef so trace replay during startAndStreamBuild sees
+    // the plan in the set and short-circuits the conversational_response /
+    // done re-render paths.
+    const trimmedPlan = plan.trim();
+    if (trimmedPlan) implementedPlansRef.current.add(trimmedPlan);
+    pendingImplementPlanRef.current = null;
+    setImplementSuggestion(null);
+    setChatModeActive(false);
+    chatModeRef.current = false;
+    // BEO-746: pre_build_ack normally strips the inline plan card, but if the
+    // API replays a stale "completed" build (terminal events only), pre_build_ack
+    // never fires. Strip the implementPlan field immediately (hides the ⚡ button)
+    // but keep the message text in history so it survives build completion and
+    // hard refresh (BEO-753).
+    setMessages(prev =>
+      prev.map(m => {
+        if (m.type !== "chat_response" || !m.implementPlan) return m;
+        const { implementPlan: _ip, ...rest } = m;
+        return rest as ChatMessage;
+      }),
+    );
+    await delay(50);
+    // Pass plan as implementPlan so the API's hasExplicitImplementSignal() bypasses detectIntent.
+    // BEO-752 Bug 2: pass a short visible bubble label ("✅ Implement this") so the chat
+    // doesn't show a duplicate of the original prompt — the original user prompt was
+    // already pushed when the conversation started.
+    sendMessageInternalRef.current?.(plan, imageUrl, plan, "✅ Implement this");
+  }, []);
+
+  useEffect(() => {
+    implementWithPlanRef.current = implementWithPlan;
+  }, [implementWithPlan]);
+
+  // Ref that points to the raw build sender (set after sendMessage is defined)
+  // Third arg `implementPlan` is forwarded to the API body to bypass detectIntent.
+  // BEO-752 Bug 2: fourth arg `displayContent` overrides the chat-bubble text so the
+  // Implement click can show "✅ Implement this" while still POSTing the full plan.
+  const sendMessageInternalRef = useRef<((text: string, imageUrl?: string, implementPlan?: string, displayContent?: string) => void) | null>(null);
+
+  const sendMessage = useCallback(
+    (text: string, imageUrl?: string, isSystem?: boolean, buildMeta?: { withDatabase?: boolean; withAuth?: boolean }) => {
+      if (!isSystem && isBuildConfirmation(text)) {
+        const plan = pendingImplementPlanRef.current;
+        if (plan && implementWithPlanRef.current) {
+          void implementWithPlanRef.current(plan, imageUrl);
+          return;
+        }
+      }
+
+      // BEO-410: hard double-guard — if either ref OR state says chat mode,
+      // always route to chat. Prevents stale-closure fallthrough to build.
+      if (chatModeRef.current || chatModeActive) {
+        sendChatMessage(text, imageUrl);
+        return;
+      }
+
+      // BEO-410: dev assert — build must never fire while chat mode is active
+      console.assert(
+        !(isBuilding && chatModeActive),
+        "BEO-410: Build fired while chat mode active",
+      );
+
+      // BEO-737 A3: abort any orphan chat SSE stream before opening a build
+      // path. Without this, toggling chat mode mid-stream and then sending a
+      // build message leaves the chat stream's reader/decoder/buffer alive
+      // until the API closes the socket — leaking TCP connections under
+      // rapid toggling.
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      lastUserPromptRef.current = text;
+      buildDoneRef.current = false;
+      activeBuildingMsgIdRef.current = null;
+      buildStartedAtRef.current = null;
+      try {
+        sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+      } catch { /* ignore */ }
+
+      clearPreambleAndStageTimers();
+
+      // BEO-464: do NOT set isBuilding here — wait for build_confirmed SSE.
+      // Only show thinking dots until the API confirms this is a real build.
+      // BEO-462: if an image is attached, flag that we're analysing it until
+      // image_intent or a real build stage fires and clears this flag.
+      if (imageUrl) setIsAnalysingImage(true);
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.type !== "server_restarting");
+        // BEO-589 Bug 3: skip duplicate user message if identical content sent within 5s
+        const lastUserMsg = filtered.slice().reverse().find(m => m.type === "user") as Extract<ChatMessage, { type: "user" }> | undefined;
+        if (lastUserMsg && lastUserMsg.content === text) {
+          const ts = lastUserMsg.timestamp instanceof Date
+            ? lastUserMsg.timestamp.getTime()
+            : (lastUserMsg.timestamp ? new Date(String(lastUserMsg.timestamp)).getTime() : NaN);
+          if (!isNaN(ts) && Date.now() - ts < 5_000) {
+            return [...filtered, { id: `thinking-${makeId()}`, type: "thinking" }];
+          }
+        }
+        return [
+          ...filtered,
+          { id: makeId(), type: "user", content: text, imageUrl: imageUrl || undefined, timestamp: new Date(), isSystem: isSystem || undefined },
+          { id: `thinking-${makeId()}`, type: "thinking" },
+        ];
+      });
+
+      const buildBody = {
+        prompt: text,
+        projectId: resolvedProjectIdRef.current || undefined,
+        model: "claude-sonnet-4-6",
+        existingFiles:
+          existingFilesRef.current.length > 0
+            ? existingFilesRef.current
+            : undefined,
+        ...(imageUrl ? { imageUrl } : {}),
+        // BEO-705: DB/Auth setup flags from pre-build setup card
+        ...(buildMeta?.withDatabase !== undefined ? { withDatabase: buildMeta.withDatabase } : {}),
+        ...(buildMeta?.withAuth !== undefined ? { withAuth: buildMeta.withAuth } : {}),
+      };
+      console.log("[BEO-705] /builds/start payload:", {
+        withDatabase: buildBody.withDatabase,
+        withAuth: buildBody.withAuth,
+        prompt: buildBody.prompt?.slice(0, 60),
+      });
+      void startAndStreamBuild({
+        body: buildBody,
+        signal: controller.signal,
+        onBuildStarted: response => {
+          resolvedProjectIdRef.current = response.project.id;
+          lastEventBuildIdRef.current = response.build.id;
+          optionsRef.current.onProjectIdResolved?.(
+            response.project.id,
+            response.project.name,
+            response.project.icon ?? null,
+          );
+          optionsRef.current.onBuildStarted?.(response);
+        },
+        onBuildStatus: status => {
+          optionsRef.current.onBuildStatus?.(status);
+        },
+        onEvent: handleEvent,
+      }).catch(err => {
+        if (controller.signal.aborted) return;
+        if (err instanceof NetworkDisconnectError) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.type !== "thinking");
+            if (filtered.some(m => m.type === "server_restarting")) return filtered;
+            return [...filtered, { id: makeId(), type: "server_restarting" }];
+          });
+        } else {
+          const content = err instanceof Error ? err.message : "Failed to start build.";
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "error", content },
+          ]);
+        }
+        setIsBuilding(false);
+        buildDoneRef.current = false;
+      });
+    },
+    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers, sendChatMessage, chatModeActive],
+  );
+
+  // BEO-396: expose the raw build sender to implementCard
+  useEffect(() => {
+    sendMessageInternalRef.current = (text: string, imageUrl?: string, implementPlan?: string, displayContent?: string) => {
+      // Call without going through chatModeRef check — directly triggers build flow
+      // BEO-737 A3: abort orphan chat SSE before opening a build path.
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      lastUserPromptRef.current = text;
+      buildDoneRef.current = false;
+      activeBuildingMsgIdRef.current = null;
+      buildStartedAtRef.current = null;
+      try {
+        sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+      } catch { /* ignore */ }
+      clearPreambleAndStageTimers();
+      // BEO-464: isBuilding is set by build_confirmed SSE, not here
+      // BEO-752 Bug 2: when displayContent is provided (Implement click), use it
+      // as the visible bubble text instead of the full plan/prompt. The original
+      // prompt was already pushed in the conversational turn.
+      setMessages(prev => [
+        ...prev.filter(m => m.type !== "server_restarting"),
+        { id: makeId(), type: "user", content: displayContent ?? text, imageUrl: imageUrl || undefined, timestamp: new Date() },
+        { id: `thinking-${makeId()}`, type: "thinking" },
+      ]);
+      void startAndStreamBuild({
+        body: {
+          prompt: text,
+          projectId: resolvedProjectIdRef.current || undefined,
+          model: "claude-sonnet-4-6",
+          existingFiles:
+            existingFilesRef.current.length > 0 ? existingFilesRef.current : undefined,
+          ...(imageUrl ? { imageUrl } : {}),
+          ...(implementPlan ? { implementPlan } : {}),
+        },
+        signal: controller.signal,
+        onBuildStarted: response => {
+          resolvedProjectIdRef.current = response.project.id;
+          lastEventBuildIdRef.current = response.build.id;
+          optionsRef.current.onProjectIdResolved?.(
+            response.project.id,
+            response.project.name,
+            response.project.icon ?? null,
+          );
+          optionsRef.current.onBuildStarted?.(response);
+        },
+        onBuildStatus: status => { optionsRef.current.onBuildStatus?.(status); },
+        onEvent: handleEvent,
+      }).catch(err => {
+        if (controller.signal.aborted) return;
+        if (err instanceof NetworkDisconnectError) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.type !== "thinking");
+            if (filtered.some(m => m.type === "server_restarting")) return filtered;
+            return [...filtered, { id: makeId(), type: "server_restarting" }];
+          });
+        } else {
+          const content = err instanceof Error ? err.message : "Failed to start build.";
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "error", content },
+          ]);
+        }
+        setIsBuilding(false);
+        buildDoneRef.current = false;
+      });
+    };
+  }, [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers]);
+
+  // ─── BEO-589: Silent retry — restart the last build without pushing a new user message ───
+
+  const startBuildSilently = useCallback(
+    (prompt: string) => {
+      // BEO-737 A3: abort orphan chat SSE before opening a build path.
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      buildDoneRef.current = false;
+      activeBuildingMsgIdRef.current = null;
+      buildStartedAtRef.current = null;
+      try {
+        sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+        sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+      } catch { /* ignore */ }
+      clearPreambleAndStageTimers();
+      // Clear error/restarting cards and add thinking dots — no user message pushed
+      setMessages(prev => [
+        ...prev.filter(m => m.type !== "error" && m.type !== "server_restarting" && m.type !== "thinking"),
+        { id: `thinking-${makeId()}`, type: "thinking" },
+      ]);
+      void startAndStreamBuild({
+        body: {
+          prompt,
+          projectId: resolvedProjectIdRef.current || undefined,
+          model: "claude-sonnet-4-6",
+          existingFiles:
+            existingFilesRef.current.length > 0 ? existingFilesRef.current : undefined,
+        },
+        signal: controller.signal,
+        onBuildStarted: response => {
+          resolvedProjectIdRef.current = response.project.id;
+          lastEventBuildIdRef.current = response.build.id;
+          optionsRef.current.onProjectIdResolved?.(
+            response.project.id,
+            response.project.name,
+            response.project.icon ?? null,
+          );
+          optionsRef.current.onBuildStarted?.(response);
+        },
+        onBuildStatus: status => { optionsRef.current.onBuildStatus?.(status); },
+        onEvent: handleEvent,
+      }).catch(err => {
+        if (controller.signal.aborted) return;
+        if (err instanceof NetworkDisconnectError) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => m.type !== "thinking");
+            if (filtered.some(m => m.type === "server_restarting")) return filtered;
+            return [...filtered, { id: makeId(), type: "server_restarting" }];
+          });
+        } else {
+          const content = err instanceof Error ? err.message : "Failed to start build.";
+          setMessages(prev => [
+            ...prev.filter(m => m.type !== "thinking"),
+            { id: makeId(), type: "error", content },
+          ]);
+        }
+        setIsBuilding(false);
+        buildDoneRef.current = false;
+      });
+    },
+    [startAndStreamBuild, handleEvent, clearPreambleAndStageTimers],
+  );
+
+  // ─── BEO-587: Stop build — abort immediately and return to idle ──────────
+
+  const stopBuild = useCallback(() => {
+    abortRef.current?.abort();
+    chatAbortRef.current?.abort();
+    clearPreambleAndStageTimers();
+    setIsBuilding(false);
+    setIsAnalysingImage(false);
+    isBuildInProgressRef.current = false;
+    buildDoneRef.current = false;
+    activeBuildingMsgIdRef.current = null;
+    // Remove the in-flight building card and thinking dots so UI returns to idle
+    setMessages(prev =>
+      prev.filter(m => {
+        if (m.type === "thinking") return false;
+        // Drop the live (unsummarised) building card — it was never completed
+        if (m.type === "building" && !(m as BuildingMsg).summary) return false;
+        return true;
+      }),
+    );
+    try {
+      sessionStorage.removeItem(`beomz:buildStartedAt:${resolvedProjectIdRef.current}`);
+      sessionStorage.removeItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+    } catch { /* ignore */ }
+  }, [clearPreambleAndStageTimers]);
+
+  const retryLastBuild = useCallback(() => {
+    const prompt = lastUserPromptRef.current;
+    if (!prompt) return;
+    startBuildSilently(prompt);
+  }, [startBuildSilently]);
+
+  // ─── BEO-589: Report issue — mailto with project + prompt context ────────────
+
+  const handleReportIssue = useCallback(() => {
+    const subject = encodeURIComponent("Beomz Build Issue");
+    const body = encodeURIComponent(
+      `Project: ${resolvedProjectIdRef.current || "unknown"}\nPrompt: ${lastUserPromptRef.current}\nError: build failed`,
+    );
+    window.open(`mailto:hello@beomz.com?subject=${subject}&body=${body}`);
+  }, []);
+
+  const subscribeToExistingBuild = useCallback(
+    async (buildId: string, lastEventId: string | null, signal: AbortSignal) => {
+      buildDoneRef.current = false;
+      setIsBuilding(true);
+      lastEventBuildIdRef.current = buildId;
+
+      try {
+        const ssKey = `beomz:buildStartedAt:${resolvedProjectIdRef.current}`;
+        const stored = sessionStorage.getItem(ssKey);
+        if (stored) {
+          buildStartedAtRef.current = parseInt(stored, 10);
+        }
+      } catch { /* ignore */ }
+
+      try {
+        const raw = sessionStorage.getItem(`beomz:buildingUi:${resolvedProjectIdRef.current}`);
+        if (raw) {
+          const snap = JSON.parse(raw) as {
+            buildId?: string;
+            lastUserPrompt?: string;
+            building?: BuildingMsg;
+          };
+          const restored = snap.building;
+          if (
+            snap.buildId === buildId &&
+            restored?.type === "building" &&
+            !restored.summary
+          ) {
+            activeBuildingMsgIdRef.current = restored.id;
+            setMessages(prev => {
+              if (prev.length > 0) return prev;
+              const prompt = snap.lastUserPrompt ?? "";
+              return [
+                { id: makeId(), type: "user", content: prompt, timestamp: new Date() },
+                restored,
+              ];
+            });
+          }
+        }
+      } catch { /* ignore */ }
+
+      await subscribeToBuild({
+        buildId,
+        lastEventId,
+        onEvent: handleEvent,
+        onBuildStatus: status => {
+          optionsRef.current.onBuildStatus?.(status);
+        },
+        signal,
+      });
+      if (!signal.aborted) {
+        setIsBuilding(false);
+      }
+    },
+    [subscribeToBuild, handleEvent],
+  );
+
+  return {
+    messages,
+    isBuilding,
+    isAnalysingImage,
+    isIterationBuild,
+    // BEO-798: current live tool action for the status pill
+    currentAction,
+    sendMessage,
+    retryLastBuild,
+    // BEO-587: immediate abort + idle
+    stopBuild,
+    // BEO-589: report issue via mailto
+    reportIssue: handleReportIssue,
+    buildDoneRef,
+    subscribeToExistingBuild,
+    notifyPreviewServerReady,
+    // BEO-396: Chat mode
+    chatModeActive,
+    toggleChatMode,
+    implementCard,
+    implementWithPlan,
+    // BEO-398: Sticky implement zone
+    implementSuggestion,
+    dismissImplementSuggestion,
+  };
+}

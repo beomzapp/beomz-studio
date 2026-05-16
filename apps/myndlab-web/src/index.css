@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", sans-serif;
+  --color-bg: #060612;
+  --color-bg-card: #0d0d1f;
+  --color-bg-sidebar: #0a0a1a;
+  --color-orange: #F97316;
+  --color-purple: #a855f7;
+  --color-border: #1e1e3a;
+  --color-cream: #faf9f6;
+  --color-cream-text: #1a1a1a;
+  --color-cream-accent: #e8580a;
+  --color-success: #22c55e;
+  --color-surface-highlight: rgba(249, 115, 22, 0.08);
+  --color-thinking: rgba(249, 115, 22, 0.5);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: white;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Beomz animation system (BEO-134) --- */
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes checkmark-pop {
+  0% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes spin-ring {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.streaming-shimmer {
+  background: linear-gradient(
+    90deg,
+    currentColor 0%,
+    var(--color-surface-highlight) 50%,
+    currentColor 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* BEO-316: Thinking/status label shimmer — orange glow sweeps across muted text */
+@keyframes thinking-shimmer {
+  to { background-position: 200% center; }
+}
+.thinking-shimmer {
+  background: linear-gradient(90deg, #71717a 0%, #f97316 40%, #71717a 80%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-shimmer 2s linear infinite;
+}
+
+/* BEO-393: Active checklist item — solid orange orb with radiating pulse */
+@keyframes orb-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(249,115,22,0.5); }
+  50%  { box-shadow: 0 0 0 10px rgba(249,115,22,0); }
+  100% { box-shadow: 0 0 0 0 rgba(249,115,22,0); }
+}
+
+.checklist-orb-active {
+  animation: orb-pulse 1.5s ease-in-out infinite;
+}
+
+/* BEO-455: Revised first-build shimmer — right→left, transparent ghost highlight, 2.5s */
+@keyframes build-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+.build-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    rgba(0,0,0,0.7) 0%,
+    rgba(0,0,0,0.15) 40%,
+    rgba(0,0,0,0.15) 60%,
+    rgba(0,0,0,0.7) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: build-shimmer 2.5s linear infinite;
+}
+
+/* BEO-798: Live status pill shimmer — left-to-right, muted grey, low contrast, 2s */
+@keyframes live-status-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.live-status-shimmer {
+  background: linear-gradient(
+    90deg,
+    #6b7280 20%,
+    #9ca3af 50%,
+    #6b7280 80%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: live-status-shimmer 2s linear infinite;
+}
+
+/* BEO-719: Typewriter blinking cursor */
+@keyframes typewriter-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.typewriter-cursor {
+  animation: typewriter-blink 500ms step-end infinite;
+}
+
+/* BEO-812: Chat message streaming cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.blinking-cursor {
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+}
+
+/* BEO-454: Preview iframe fade-in on first reveal */
+@keyframes fadeInPreview {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.preview-fade-in {
+  animation: fadeInPreview 0.3s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streaming-shimmer,
+  .thinking-shimmer,
+  .plan-step-icon-spin,
+  .plan-step-icon-pop,
+  .checklist-orb-active,
+  .build-shimmer-text,
+  .live-status-shimmer,
+  .typewriter-cursor,
+  .blinking-cursor {
+    animation: none !important;
+  }
+
+  .streaming-shimmer,
+  .thinking-shimmer,
+  .build-shimmer-text,
+  .live-status-shimmer {
+    -webkit-text-fill-color: unset;
+    background: none;
+    color: #6b7280;
+  }
+}
