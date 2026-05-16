@@ -97,8 +97,13 @@ export function MaintenancePage() {
     if (entered === ACCESS_CODE) {
       setSuccess(true);
       document.cookie = "beomz_access=1; path=/; max-age=86400";
+      try {
+        window.localStorage.setItem("beomz_access", "1");
+      } catch {
+        // ignore — cookie alone is enough for the gate
+      }
       window.setTimeout(() => {
-        void navigate({ to: "/" });
+        window.location.assign("/");
       }, 250);
       return;
     }
@@ -112,7 +117,7 @@ export function MaintenancePage() {
     <div style={styles.page}>
       <div style={styles.bgGlow} />
       <div style={styles.card}>
-        <div style={styles.mainView}>
+        <div style={{ ...styles.mainView, ...(success ? styles.mainViewHidden : null) }}>
           <div style={styles.logoRow}>
             <BeomzLogo style={styles.logo} />
           </div>
@@ -212,6 +217,9 @@ const styles: Record<string, CSSProperties> = {
   },
   mainView: {
     display: "block",
+  },
+  mainViewHidden: {
+    display: "none",
   },
   logoRow: {
     display: "flex",
