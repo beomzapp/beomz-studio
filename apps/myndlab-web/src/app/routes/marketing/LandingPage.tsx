@@ -448,7 +448,8 @@ export function LandingPage() {
           {/* Typing toolbar */}
           <div
             className={cn(
-              "relative z-10 mt-4 flex items-center gap-3 transition-opacity duration-200",
+              "relative mt-4 flex items-center gap-3 transition-opacity duration-200",
+              optionsOpen ? "z-[60]" : "z-10",
               hasText ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           >
@@ -541,7 +542,7 @@ export function LandingPage() {
               {optionsOpen && (
                 <div
                   ref={optionsRef}
-                  className="absolute left-0 top-full z-50 mt-2 w-[380px] rounded-2xl border border-white/10 bg-[#0a0a0a]/90 p-5 shadow-2xl backdrop-blur-xl"
+                  className="absolute right-0 bottom-full z-[60] mb-2 w-[380px] rounded-2xl border border-white/10 bg-[#0a0a0a]/90 p-5 shadow-2xl backdrop-blur-xl"
                 >
                   {/* Architecture */}
                   <div>
