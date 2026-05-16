@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Myndlab — App Shell Animation Samples</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --cyan: #00D5D8;
+      --magenta: #FF2FB3;
+      --yellow: #FFF500;
+      --violet: #7C3AED;
+      --charcoal: #131313;
+    }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--charcoal);
+      color: #fff;
+      font-family: "Inter Tight", "DM Sans", system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 48px 24px;
+      box-sizing: border-box;
+    }
+    h1 { font-weight: 600; font-size: 22px; letter-spacing: -0.02em; margin: 0 0 8px; }
+    p.lede { color: rgba(255,255,255,0.5); font-size: 14px; margin: 0 0 40px; max-width: 720px; line-height: 1.55; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      max-width: 880px;
+      margin: 0 auto;
+    }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 32px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+    .stage {
+      width: 96px;
+      height: 96px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .label {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.45);
+    }
+    .name {
+      font-size: 16px;
+      font-weight: 500;
+      color: #fff;
+      margin-top: -8px;
+    }
+    .blurb {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      text-align: center;
+      max-width: 240px;
+      line-height: 1.5;
+    }
+
+    /* ============================================
+       PRISM — white-ish 2-tone, inline SVG class
+       ============================================ */
+    .prism {
+      width: 40px;
+      height: 40px;
+      position: relative;
+      z-index: 2;
+    }
+    .prism svg { display: block; width: 100%; height: 100%; }
+
+    /* ============================================
+       VARIANT A — Refraction pulse (brand-book)
+       Tri-color conic ring + vertical color beam
+       sweeping across the prism every 3s
+       ============================================ */
+    .v-a .ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg,
+        var(--cyan) 0deg,
+        var(--magenta) 120deg,
+        var(--yellow) 240deg,
+        var(--cyan) 360deg);
+      mask: radial-gradient(circle, transparent 38px, #000 39px, #000 46px, transparent 47px);
+      -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px, #000 46px, transparent 47px);
+      animation: spin 2s linear infinite;
+    }
+    .v-a .beam {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 80px;
+      border-radius: 3px;
+      mix-blend-mode: screen;
+      filter: blur(2px);
+      animation: beam-sweep 3s ease-in-out infinite, beam-color 9s linear infinite;
+    }
+    @keyframes beam-sweep {
+      0%   { transform: translate(0, -50%); opacity: 0; }
+      15%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { transform: translate(96px, -50%); opacity: 0; }
+    }
+    @keyframes beam-color {
+      0%, 33%   { background: var(--cyan); box-shadow: 0 0 16px var(--cyan); }
+      34%, 66%  { background: var(--magenta); box-shadow: 0 0 16px var(--magenta); }
+      67%, 100% { background: var(--yellow); box-shadow: 0 0 16px var(--yellow); }
+    }
+
+    /* ============================================
+       VARIANT B — Just the conic ring
+       ============================================ */
+    .v-b .ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg,
+        var(--cyan) 0deg,
+        var(--magenta) 120deg,
+        var(--yellow) 240deg,
+        var(--cyan) 360deg);
+      mask: radial-gradient(circle, transparent 38px, #000 39px, #000 46px, transparent 47px);
+      -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px, #000 46px, transparent 47px);
+      animation: spin 1.5s linear infinite;
+    }
+
+    /* ============================================
+       VARIANT C — Counter-rotate
+       Prism rotates one way, ring the other
+       ============================================ */
+    .v-c .ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg,
+        var(--cyan) 0deg,
+        var(--magenta) 120deg,
+        var(--yellow) 240deg,
+        var(--cyan) 360deg);
+      mask: radial-gradient(circle, transparent 38px, #000 39px, #000 46px, transparent 47px);
+      -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px, #000 46px, transparent 47px);
+      animation: spin 2s linear infinite reverse;
+    }
+    .v-c .prism { animation: spin 4s linear infinite; }
+
+    /* ============================================
+       VARIANT D — Orbiting color dots
+       ============================================ */
+    .v-d .orbit {
+      position: absolute;
+      inset: 0;
+      animation: spin 3s linear infinite;
+    }
+    .v-d .orbit-2 { animation-duration: 4.5s; animation-direction: reverse; }
+    .v-d .orbit-3 { animation-duration: 6s; }
+    .v-d .dot {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      transform-origin: 0 0;
+    }
+    .v-d .dot-cyan    { background: var(--cyan);    box-shadow: 0 0 10px var(--cyan);    transform: translate(40px, -4px); }
+    .v-d .dot-magenta { background: var(--magenta); box-shadow: 0 0 10px var(--magenta); transform: rotate(120deg) translate(40px, -4px); }
+    .v-d .dot-yellow  { background: var(--yellow);  box-shadow: 0 0 10px var(--yellow);  transform: rotate(240deg) translate(40px, -4px); }
+    .v-d .orbit-2 .dot-cyan    { transform: translate(30px, -4px); }
+    .v-d .orbit-2 .dot-magenta { transform: rotate(120deg) translate(30px, -4px); }
+    .v-d .orbit-2 .dot-yellow  { transform: rotate(240deg) translate(30px, -4px); }
+    .v-d .orbit-3 .dot-cyan    { transform: translate(45px, -4px); }
+    .v-d .orbit-3 .dot-magenta { transform: rotate(180deg) translate(45px, -4px); }
+
+    /* ============================================
+       Shared
+       ============================================ */
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ring, .orbit, .prism { animation: none !important; }
+      .beam { animation: none !important; opacity: 0; }
+    }
+
+    .winner {
+      max-width: 880px;
+      margin: 48px auto 0;
+      padding: 16px 20px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,213,216,0.3);
+      background: rgba(0,213,216,0.06);
+      font-size: 13px;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.55;
+    }
+    .winner strong { color: var(--cyan); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <h1 style="max-width:880px;margin:0 auto 8px;">Myndlab app-shell animation — pick one</h1>
+  <p class="lede" style="max-width:880px;margin:0 auto 40px;">
+    Pre-React loading shell. Renders for ~150–300 ms on every cold load. Currently a flat white prism. All four samples below use the brand palette (Aqua Cyan, Hot Magenta, Neon Yellow). Pure CSS, no JS, runs on the GPU compositor — &lt; 1 KB added to the inline shell.
+  </p>
+
+  <div class="grid">
+
+    <!-- VARIANT A -->
+    <div class="card v-a">
+      <div class="stage">
+        <div class="ring"></div>
+        <div class="beam"></div>
+        <div class="prism">
+          <svg viewBox="0 0 1733 1887" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="#fff"/>
+            <path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="#fff"/>
+            <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="#cfd2db"/>
+            <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="#cfd2db"/>
+            <path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="#fff"/>
+            <path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="#fff"/>
+          </svg>
+        </div>
+      </div>
+      <div class="label">Variant A</div>
+      <div class="name">Refraction pulse</div>
+      <div class="blurb">Tri-color ring orbits the prism. A vertical color beam (cyan → magenta → yellow) sweeps across the prism every 3s. Matches brand book §2.4.</div>
+    </div>
+
+    <!-- VARIANT B -->
+    <div class="card v-b">
+      <div class="stage">
+        <div class="ring"></div>
+        <div class="prism">
+          <svg viewBox="0 0 1733 1887" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="#fff"/>
+            <path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="#fff"/>
+            <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="#cfd2db"/>
+            <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="#cfd2db"/>
+            <path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="#fff"/>
+            <path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="#fff"/>
+          </svg>
+        </div>
+      </div>
+      <div class="label">Variant B</div>
+      <div class="name">Conic ring only</div>
+      <div class="blurb">Static prism. Tri-color conic ring orbits at 1.5s. Simplest, cleanest. No beam, no spinning prism.</div>
+    </div>
+
+    <!-- VARIANT C -->
+    <div class="card v-c">
+      <div class="stage">
+        <div class="ring"></div>
+        <div class="prism">
+          <svg viewBox="0 0 1733 1887" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="#fff"/>
+            <path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="#fff"/>
+            <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="#cfd2db"/>
+            <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="#cfd2db"/>
+            <path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="#fff"/>
+            <path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="#fff"/>
+          </svg>
+        </div>
+      </div>
+      <div class="label">Variant C</div>
+      <div class="name">Counter-rotate</div>
+      <div class="blurb">Prism rotates 360° in 4s. Tri-color ring spins the opposite way in 2s. Architectural, no refraction.</div>
+    </div>
+
+    <!-- VARIANT D -->
+    <div class="card v-d">
+      <div class="stage">
+        <div class="orbit"><div class="dot dot-cyan"></div><div class="dot dot-magenta"></div><div class="dot dot-yellow"></div></div>
+        <div class="orbit orbit-2"><div class="dot dot-cyan"></div><div class="dot dot-magenta"></div><div class="dot dot-yellow"></div></div>
+        <div class="orbit orbit-3"><div class="dot dot-cyan"></div><div class="dot dot-magenta"></div></div>
+        <div class="prism">
+          <svg viewBox="0 0 1733 1887" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="#fff"/>
+            <path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="#fff"/>
+            <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="#cfd2db"/>
+            <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="#cfd2db"/>
+            <path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="#fff"/>
+            <path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="#fff"/>
+          </svg>
+        </div>
+      </div>
+      <div class="label">Variant D</div>
+      <div class="name">Orbiting dots</div>
+      <div class="blurb">Three rings of cyan/magenta/yellow dots orbit the prism at different radii and speeds. More playful, less premium.</div>
+    </div>
+
+  </div>
+
+  <div class="winner">
+    My pick: <strong>Variant A — Refraction pulse.</strong> Matches the brand book's "vertical beams refracted through prism geometry" language verbatim. Calm but alive — reads as "thinking" without being frantic. The other three are fine fallbacks if A feels too busy at small size.
+  </div>
+</body>
+</html>
