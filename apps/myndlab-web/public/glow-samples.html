@@ -2,14 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Myndlab — Hero Glow Samples</title>
+  <title>Myndlab — Hero Glow Sample (cyan/magenta/yellow)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     :root {
       --cyan:    #00D5D8;
       --magenta: #FF2FB3;
       --yellow:  #FFF500;
-      --violet:  #7C3AED;
       --charcoal:#131313;
     }
     html, body { margin:0; padding:0; }
@@ -18,16 +17,16 @@
       color: #fff;
       font-family: "Inter Tight", "DM Sans", system-ui, sans-serif;
       min-height: 100vh;
-      padding: 40px 24px 80px;
+      padding: 32px 24px 80px;
       box-sizing: border-box;
     }
     h1 { font-weight: 600; font-size: 22px; letter-spacing: -0.02em; margin: 0 auto 8px; max-width: 1280px; }
-    p.lede { color: rgba(255,255,255,0.5); font-size: 14px; margin: 0 auto 40px; max-width: 1280px; line-height: 1.55; }
+    p.lede { color: rgba(255,255,255,0.55); font-size: 14px; margin: 0 auto 32px; max-width: 1280px; line-height: 1.55; }
 
     .grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 32px;
+      gap: 24px;
       max-width: 1280px;
       margin: 0 auto;
     }
@@ -43,7 +42,7 @@
     .stage {
       position: relative;
       width: 100%;
-      height: 420px;
+      height: 460px;
       overflow: hidden;
       border-radius: 12px;
       background: linear-gradient(180deg, #0e0e14 0%, #131318 100%);
@@ -54,11 +53,18 @@
     .hero-word {
       position: relative;
       z-index: 2;
-      font-size: 64px;
+      font-size: 96px;
       font-weight: 600;
-      letter-spacing: -0.04em;
-      color: rgba(255,255,255,0.35);
+      letter-spacing: -0.045em;
+      color: rgba(255,255,255,0.4);
       mix-blend-mode: difference;
+    }
+    .glow {
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      pointer-events: none;
     }
     .label-row {
       display: flex;
@@ -67,154 +73,86 @@
       gap: 12px;
     }
     .label { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.4); }
-    .name { font-size: 18px; font-weight: 500; }
-    .blurb { font-size: 13px; color: rgba(255,255,255,0.55); line-height: 1.55; }
+    .name { font-size: 16px; font-weight: 500; }
+    .blurb { font-size: 13px; color: rgba(255,255,255,0.55); line-height: 1.55; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-    /* prism mask shared — data URL of the myndlab-prism path data */
-    .prism-mask {
-      -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1733 1887'><path d='M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z' fill='%23000'/><path d='M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z' fill='%23000'/><path d='M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z' fill='%23000'/><path d='M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z' fill='%23000'/><path d='M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z' fill='%23000'/><path d='M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z' fill='%23000'/></svg>");
-      mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1733 1887'><path d='M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z' fill='%23000'/><path d='M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z' fill='%23000'/><path d='M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z' fill='%23000'/><path d='M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z' fill='%23000'/><path d='M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z' fill='%23000'/><path d='M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z' fill='%23000'/></svg>");
-      -webkit-mask-size: contain;
-      mask-size: contain;
-      -webkit-mask-position: center;
-      mask-position: center;
-      -webkit-mask-repeat: no-repeat;
-      mask-repeat: no-repeat;
-    }
-
-    /* ==== Variant A — Prism conic gradient ==== */
-    .v-a .glow {
-      position: absolute;
-      width: 500px;
-      height: 500px;
-      background: conic-gradient(from 0deg,
-        var(--cyan) 0deg,
-        var(--magenta) 120deg,
-        var(--yellow) 240deg,
-        var(--cyan) 360deg);
+    /* ==== Original (for reference) ==== */
+    .v-original .glow {
+      background: radial-gradient(circle, #F97316 0%, #7C3AED 60%, transparent 100%);
       opacity: 0.4;
       filter: blur(120px);
     }
 
-    /* ==== Variant B — Three radial spots inside prism ==== */
-    .v-b .glow {
-      position: absolute;
-      width: 500px;
-      height: 500px;
-      background:
-        radial-gradient(circle at 30% 25%, var(--cyan)    0%, transparent 45%),
-        radial-gradient(circle at 75% 35%, var(--magenta) 0%, transparent 45%),
-        radial-gradient(circle at 55% 80%, var(--yellow)  0%, transparent 50%);
-      opacity: 0.45;
+    /* ==== A — Even thirds (cyan / magenta / yellow) ==== */
+    .v-a .glow {
+      background: radial-gradient(circle, var(--cyan) 0%, var(--magenta) 50%, var(--yellow) 85%, transparent 100%);
+      opacity: 0.4;
       filter: blur(120px);
     }
 
-    /* ==== Variant C — Solid white prism + stacked colored drop-shadows ==== */
+    /* ==== B — Cyan-dominant (subtle — yellow only in halo) ==== */
+    .v-b .glow {
+      background: radial-gradient(circle, var(--cyan) 0%, var(--magenta) 65%, var(--yellow) 95%, transparent 100%);
+      opacity: 0.4;
+      filter: blur(120px);
+    }
+
+    /* ==== C — Yellow-dominant (warm core) ==== */
     .v-c .glow {
-      position: absolute;
-      width: 500px;
-      height: 500px;
-      background: #fff;
+      background: radial-gradient(circle, var(--yellow) 0%, var(--magenta) 50%, var(--cyan) 95%, transparent 100%);
       opacity: 0.35;
-      filter:
-        blur(60px)
-        drop-shadow(0 0 80px var(--cyan))
-        drop-shadow(0 0 80px var(--magenta))
-        drop-shadow(0 0 80px var(--yellow));
+      filter: blur(120px);
     }
-
-    /* ==== Variant D — Three colored lobes emanating from prism vertices ==== */
-    .v-d {
-      position: relative;
-    }
-    .v-d .lobe {
-      position: absolute;
-      width: 380px;
-      height: 380px;
-      border-radius: 50%;
-      opacity: 0.35;
-      filter: blur(110px);
-    }
-    .v-d .lobe-cyan    { background: var(--cyan);    top: 30px;  left: calc(50% - 230px); }
-    .v-d .lobe-magenta { background: var(--magenta); top: 30px;  left: calc(50% - 150px); }
-    .v-d .lobe-yellow  { background: var(--yellow);  top: 180px; left: calc(50% - 190px); }
-    .v-d .prism-frame {
-      position: absolute;
-      width: 500px;
-      height: 500px;
-      background: rgba(255,255,255,0.08);
-      mix-blend-mode: overlay;
-    }
-
-    .winner {
-      max-width: 1280px;
-      margin: 48px auto 0;
-      padding: 16px 20px;
-      border-radius: 10px;
-      border: 1px solid rgba(0,213,216,0.3);
-      background: rgba(0,213,216,0.06);
-      font-size: 13px;
-      color: rgba(255,255,255,0.75);
-      line-height: 1.6;
-    }
-    .winner strong { color: var(--cyan); font-weight: 500; }
-    .winner em { color: rgba(255,255,255,0.5); font-style: normal; }
   </style>
 </head>
 <body>
-  <h1>Myndlab hero glow — pick one</h1>
+  <h1>Hero glow — same shape, brand tri-color</h1>
   <p class="lede">
-    Same dimensions as the current Build-hero gradient sphere (500×500, opacity 0.4, blur 120px). Tinted with the brand tri-color. <em>The grey "Build" word is just a placeholder so you can see how each glow reads behind hero copy.</em>
+    Same recipe as the current sphere: <code>500×500 · rounded-full · opacity-40 · blur-[120px]</code>. Only the radial-gradient stops change. Top-left is the current orange→purple for reference; the other three try cyan/magenta/yellow at different distributions.
   </p>
 
   <div class="grid">
 
+    <!-- ORIGINAL -->
+    <div class="card v-original">
+      <div class="stage">
+        <div class="glow"></div>
+        <div class="hero-word">Build</div>
+      </div>
+      <div class="label-row"><span class="label">Current (reference)</span><span class="name">Orange → Violet</span></div>
+      <p class="blurb">radial-gradient(circle, #F97316 0%, #7C3AED 60%, transparent 100%)</p>
+    </div>
+
     <!-- A -->
     <div class="card v-a">
       <div class="stage">
-        <div class="glow prism-mask"></div>
+        <div class="glow"></div>
         <div class="hero-word">Build</div>
       </div>
-      <div class="label-row"><span class="label">Variant A</span><span class="name">Prism conic</span></div>
-      <p class="blurb">Conic gradient cyan→magenta→yellow→cyan, masked by the prism shape, blurred 120px. All three brand colors visible at once, soft halo bleeds beyond the prism edge.</p>
+      <div class="label-row"><span class="label">Variant A</span><span class="name">Even thirds</span></div>
+      <p class="blurb">cyan 0% → magenta 50% → yellow 85% → transparent</p>
     </div>
 
     <!-- B -->
     <div class="card v-b">
       <div class="stage">
-        <div class="glow prism-mask"></div>
+        <div class="glow"></div>
         <div class="hero-word">Build</div>
       </div>
-      <div class="label-row"><span class="label">Variant B</span><span class="name">Three radial spots</span></div>
-      <p class="blurb">Three soft radial spots (cyan top-left, magenta top-right, yellow bottom) inside the prism mask. More organic blend, feels like prismatic refraction.</p>
+      <div class="label-row"><span class="label">Variant B</span><span class="name">Cyan-dominant (subtle)</span></div>
+      <p class="blurb">cyan 0% → magenta 65% → yellow 95% → transparent</p>
     </div>
 
     <!-- C -->
     <div class="card v-c">
       <div class="stage">
-        <div class="glow prism-mask"></div>
+        <div class="glow"></div>
         <div class="hero-word">Build</div>
       </div>
-      <div class="label-row"><span class="label">Variant C</span><span class="name">White prism + tri-shadow</span></div>
-      <p class="blurb">Solid white prism mask, blurred, with three stacked colored drop-shadows (cyan/magenta/yellow). Prism reads cleanly; color is in the halo around it.</p>
+      <div class="label-row"><span class="label">Variant C</span><span class="name">Yellow-dominant (warm core)</span></div>
+      <p class="blurb">yellow 0% → magenta 50% → cyan 95% → transparent · opacity 0.35</p>
     </div>
 
-    <!-- D -->
-    <div class="card v-d">
-      <div class="stage">
-        <div class="lobe lobe-cyan"></div>
-        <div class="lobe lobe-magenta"></div>
-        <div class="lobe lobe-yellow"></div>
-        <div class="hero-word">Build</div>
-      </div>
-      <div class="label-row"><span class="label">Variant D</span><span class="name">Tri-color lobes (no mask)</span></div>
-      <p class="blurb">Three big colored circles, positioned as if at the prism's vertices, all blurred 110px. No prism mask — pure ambient color. Closest to the current glow's vibe, just multi-color.</p>
-    </div>
-
-  </div>
-
-  <div class="winner">
-    My pick: <strong>Variant B — Three radial spots inside prism.</strong> Carries the brand prism silhouette into the glow (subtle but present at this blur), all three colors bleed cleanly, halo extends past the edges like the current orange/purple glow. <em>A is more saturated; C feels too "icon" not "ambient"; D loses the prism identity entirely.</em>
   </div>
 </body>
 </html>
