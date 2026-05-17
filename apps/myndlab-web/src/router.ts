@@ -110,6 +110,24 @@ const FaqPage = lazy(() =>
 const SupportPage = lazy(() =>
   import("./app/routes/marketing/SupportPage").then(m => ({ default: m.SupportPage })),
 );
+const FeaturesPage = lazy(() =>
+  import("./app/routes/marketing/FeaturesPage").then(m => ({ default: m.FeaturesPage })),
+);
+const SolutionsPage = lazy(() =>
+  import("./app/routes/marketing/SolutionsPage").then(m => ({ default: m.SolutionsPage })),
+);
+const MarketingPricingPage = lazy(() =>
+  import("./app/routes/marketing/PricingPage").then(m => ({ default: m.PricingPage })),
+);
+const GuidePage = lazy(() =>
+  import("./app/routes/marketing/GuidePage").then(m => ({ default: m.GuidePage })),
+);
+const EnterprisePage = lazy(() =>
+  import("./app/routes/marketing/EnterprisePage").then(m => ({ default: m.EnterprisePage })),
+);
+const AboutPage = lazy(() =>
+  import("./app/routes/marketing/AboutPage").then(m => ({ default: m.AboutPage })),
+);
 
 // BEO-805: /dev/v2-components is gated at runtime. In DEV it always opens.
 // In production it opens when localStorage "beomz:devMode" === "true" (set in
@@ -185,15 +203,42 @@ const planRoute = createRoute({
   }),
 });
 
-// /pricing is now served by a global modal (usePricingModal()), so the route
-// redirects to home. The PricingModal component is mounted in RootLayout.
+// /pricing now has its own scaffold page (BEO-825 MN2).
+// The global PricingModal on RootLayout still exists for modal flows.
 const pricingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/pricing",
-  beforeLoad: () => {
-    throw redirect({ to: "/" });
-  },
-  component: () => null,
+  component: withSuspense(MarketingPricingPage),
+});
+
+const featuresRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/features",
+  component: withSuspense(FeaturesPage),
+});
+
+const solutionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/solutions",
+  component: withSuspense(SolutionsPage),
+});
+
+const guideRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/guide",
+  component: withSuspense(GuidePage),
+});
+
+const enterpriseRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/enterprise",
+  component: withSuspense(EnterprisePage),
+});
+
+const aboutRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/about",
+  component: withSuspense(AboutPage),
 });
 
 const authLoginRoute = createRoute({
@@ -413,6 +458,11 @@ const routeTree = rootRoute.addChildren([
   maintenanceRoute,
   planRoute,
   pricingRoute,
+  featuresRoute,
+  solutionsRoute,
+  guideRoute,
+  enterpriseRoute,
+  aboutRoute,
   signupRedirectRoute,
   publicAppRoute,
   authLoginRoute,

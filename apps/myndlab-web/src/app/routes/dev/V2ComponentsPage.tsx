@@ -1,13 +1,16 @@
 /**
- * V2ComponentsPage — BEO-804 / BEO-805 / BEO-808
+ * V2ComponentsPage — BEO-804 / BEO-805 / BEO-808 / BEO-825
  *
- * DEV-ONLY preview route for v2 chat-panel components.
+ * DEV-ONLY preview route for v2 chat-panel components + marketing shell.
  * Accessible at /dev/v2-components in development builds, or in production
  * when localStorage "beomz:devMode" === "true" (BEO-805 gate).
  */
 import { useReducer, useState, useEffect, useRef } from "react";
 import { ListChecks, Sparkles, Paperclip, Mic, SlidersHorizontal, Palette, Loader2 } from "lucide-react";
 import { cn } from "../../../lib/cn";
+import { MarketingNav } from "../../../components/marketing/MarketingNav";
+import { FinalCtaBanner } from "../../../components/marketing/FinalCtaBanner";
+import { MarketingFooter } from "../../../components/marketing/MarketingFooter";
 import {
   EXAMPLE_BUILD_COMPLETE,
   EXAMPLE_TURN_COMPLETE,
@@ -843,6 +846,9 @@ export function V2ComponentsPage() {
             />
           </div>
         </section>
+        {/* ── Marketing shell — BEO-825 ── */}
+        <MarketingShellSection />
+
         {/* ── Landing toolbar — BEO-823 ── */}
         <LandingToolbarSection />
 
@@ -885,6 +891,90 @@ if (status.features?.chatV2) setChatV2Enabled(true);
         )}
       </div>
     </div>
+  );
+}
+
+// ── BEO-825: Marketing shell dev-preview ──────────────────────────────────────
+
+function MarketingShellSection() {
+  return (
+    <section id="marketing-shell" className="mt-14 space-y-10">
+      <div>
+        <h2 className="mb-1 text-[14px] font-semibold leading-tight tracking-[-0.015em] text-[#111]">
+          Marketing shell
+        </h2>
+        <p className="mb-6 text-[12px] leading-[1.4] tracking-[-0.005em] text-zinc-500">
+          BEO-825 · 5 sample states — MarketingNav (closed · Features open · Solutions open) · FinalCtaBanner · MarketingFooter
+        </p>
+      </div>
+
+      {/* Sample 1: MarketingNav — default closed state */}
+      <div>
+        <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[0.05em] text-zinc-400">
+          1 · MarketingNav — default closed
+        </p>
+        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-[#131313]" style={{ minHeight: 80 }}>
+          <MarketingNav
+            onSignInClick={() => console.log("[dev] sign in clicked")}
+            onGetStartedClick={() => console.log("[dev] get started clicked")}
+          />
+        </div>
+      </div>
+
+      {/* Sample 2: MarketingNav — Features mega open */}
+      <div>
+        <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[0.05em] text-zinc-400">
+          2 · MarketingNav — Features mega open
+        </p>
+        <div
+          className="overflow-hidden rounded-xl border border-zinc-200 bg-[#131313]"
+          style={{ minHeight: 480, position: "relative" }}
+        >
+          <MarketingNav
+            forceOpen="features"
+            onSignInClick={() => console.log("[dev] sign in clicked")}
+            onGetStartedClick={() => console.log("[dev] get started clicked")}
+          />
+        </div>
+      </div>
+
+      {/* Sample 3: MarketingNav — Solutions mega open */}
+      <div>
+        <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[0.05em] text-zinc-400">
+          3 · MarketingNav — Solutions mega open
+        </p>
+        <div
+          className="overflow-hidden rounded-xl border border-zinc-200 bg-[#131313]"
+          style={{ minHeight: 420, position: "relative" }}
+        >
+          <MarketingNav
+            forceOpen="solutions"
+            onSignInClick={() => console.log("[dev] sign in clicked")}
+            onGetStartedClick={() => console.log("[dev] get started clicked")}
+          />
+        </div>
+      </div>
+
+      {/* Sample 4: FinalCtaBanner — standalone */}
+      <div>
+        <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[0.05em] text-zinc-400">
+          4 · FinalCtaBanner — standalone
+        </p>
+        <div className="overflow-hidden rounded-xl border border-zinc-200">
+          <FinalCtaBanner onGetStartedClick={() => console.log("[dev] cta get started")} />
+        </div>
+      </div>
+
+      {/* Sample 5: MarketingFooter — standalone */}
+      <div>
+        <p className="mb-2 text-[11px] font-medium uppercase leading-[1.4] tracking-[0.05em] text-zinc-400">
+          5 · MarketingFooter — standalone
+        </p>
+        <div className="overflow-hidden rounded-xl border border-zinc-200">
+          <MarketingFooter />
+        </div>
+      </div>
+    </section>
   );
 }
 

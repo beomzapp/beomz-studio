@@ -1,15 +1,32 @@
-import { Link } from "@tanstack/react-router";
-import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
+import { MarketingPageLayout } from "../../../components/marketing/MarketingPageLayout";
 
 export function TermsPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-bg px-4 text-center">
-      <MyndlabLogo className="mb-8 h-7 w-auto text-white" />
-      <h1 className="text-2xl font-bold text-white">Terms of Service</h1>
-      <p className="mt-3 text-sm text-white/40">Coming soon</p>
-      <Link to="/" className="mt-8 text-sm text-white/30 transition-colors hover:text-white/60">
-        ← Back to home
-      </Link>
-    </div>
+    <MarketingPageLayout>
+      <section
+        style={{
+          minHeight: "60vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+          padding: "96px 40px",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: 40,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+            color: "#fff",
+            marginBottom: 16,
+          }}
+        >
+          Terms of Service
+        </h1>
+        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)" }}>Coming soon</p>
+      </section>
+    </MarketingPageLayout>
   );
 }

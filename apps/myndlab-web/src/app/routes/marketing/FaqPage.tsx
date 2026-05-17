@@ -1,8 +1,7 @@
 import { useState, useMemo } from "react";
-import { Link } from "@tanstack/react-router";
 import { Search, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../../../lib/cn";
-import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
+import { MarketingPageLayout } from "../../../components/marketing/MarketingPageLayout";
 
 // ── Data ────────────────────────────────────────────────────────
 
@@ -223,50 +222,37 @@ export function FaqPage() {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: "#faf9f6" }}>
-      {/* Top bar */}
-      <header className="sticky top-0 z-10 border-b border-[#e5e5e5] bg-white/90 px-6 py-3 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <MyndlabLogo className="h-6 w-auto text-[#1a1a1a]" />
-          </Link>
-          <Link
-            to="/"
-            className="text-sm text-[#6b7280] transition-colors hover:text-[#1a1a1a]"
-          >
-            ← Back to home
-          </Link>
-        </div>
-      </header>
+    <MarketingPageLayout hideCta>
+    <div className="min-h-screen" style={{ background: "#0e0e10" }}>
 
       {/* Hero */}
-      <section className="px-6 pb-8 pt-12 text-center">
+      <section className="px-6 pb-8 pt-16 text-center">
         <h1
-          className="text-4xl font-bold text-[#1a1a1a]"
+          className="text-4xl font-bold text-white"
           style={{ fontFamily: "DM Sans, sans-serif" }}
         >
           Frequently asked questions
         </h1>
-        <p className="mx-auto mt-3 max-w-md text-[#6b7280]">
+        <p className="mx-auto mt-3 max-w-md text-white/50">
           Everything you need to know about Myndlab.
         </p>
       </section>
 
       {/* Search + filters */}
-      <div className="sticky top-[57px] z-10 border-b border-[#e5e5e5] bg-white/90 px-6 py-4 backdrop-blur-sm">
+      <div className="sticky top-[76px] z-10 border-b border-white/10 bg-[#0e0e10]/90 px-6 py-4 backdrop-blur-sm">
         <div className="mx-auto max-w-3xl space-y-3">
           {/* Search */}
           <div className="relative">
             <Search
               size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9ca3af]"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30"
             />
             <input
               type="text"
               placeholder="Search questions…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border border-[#e5e5e5] bg-white py-2.5 pl-9 pr-4 text-sm text-[#1a1a1a] outline-none placeholder:text-[#9ca3af] focus:border-[#00D5D8] focus:ring-2 focus:ring-[#00D5D8]/20 transition-all"
+              className="w-full rounded-xl border border-white/10 bg-white/5 py-2.5 pl-9 pr-4 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#00D5D8] focus:ring-2 focus:ring-[#00D5D8]/20 transition-all"
             />
           </div>
 
@@ -279,8 +265,8 @@ export function FaqPage() {
                 className={cn(
                   "rounded-full px-3.5 py-1 text-xs font-medium transition-all",
                   activeCategory === cat
-                    ? "bg-[#00D5D8] text-white shadow-sm"
-                    : "border border-[#e5e5e5] bg-white text-[#6b7280] hover:border-[#00D5D8]/40 hover:text-[#00D5D8]"
+                    ? "bg-[#00D5D8] text-[#131313] shadow-sm"
+                    : "border border-white/10 bg-white/5 text-white/50 hover:border-[#00D5D8]/40 hover:text-[#00D5D8]"
                 )}
               >
                 {cat}
@@ -294,7 +280,7 @@ export function FaqPage() {
       <main className="mx-auto max-w-3xl px-6 py-10">
         {filtered.length === 0 ? (
           <div className="py-16 text-center">
-            <p className="text-[#9ca3af]">No results for "{search}".</p>
+            <p className="text-white/40">No results for &ldquo;{search}&rdquo;.</p>
             <button
               onClick={() => { setSearch(""); setActiveCategory("All"); }}
               className="mt-3 text-sm text-[#00D5D8] hover:underline"
@@ -311,32 +297,32 @@ export function FaqPage() {
                   <span className="text-xs font-semibold uppercase tracking-widest text-[#00D5D8]">
                     {category}
                   </span>
-                  <div className="h-px flex-1 bg-[#e5e5e5]" />
+                  <div className="h-px flex-1 bg-white/10" />
                 </div>
 
                 {/* Accordion */}
-                <div className="overflow-hidden rounded-2xl border border-[#e5e5e5] bg-white">
+                <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
                   {items.map((item, idx) => {
                     const isOpen = openId === item.id;
                     const isLast = idx === items.length - 1;
                     return (
                       <div
                         key={item.id}
-                        className={cn(!isLast && "border-b border-[#e5e5e5]")}
+                        className={cn(!isLast && "border-b border-white/10")}
                       >
                         <button
                           onClick={() => toggle(item.id)}
-                          className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-[#faf9f6]"
+                          className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-white/[0.03]"
                         >
                           <span
                             className={cn(
                               "text-sm font-medium leading-snug transition-colors",
-                              isOpen ? "text-[#00D5D8]" : "text-[#1a1a1a]"
+                              isOpen ? "text-[#00D5D8]" : "text-white"
                             )}
                           >
                             {item.question}
                           </span>
-                          <span className="mt-0.5 flex-none text-[#9ca3af]">
+                          <span className="mt-0.5 flex-none text-white/30">
                             {isOpen ? (
                               <ChevronUp size={16} />
                             ) : (
@@ -346,8 +332,8 @@ export function FaqPage() {
                         </button>
 
                         {isOpen && (
-                          <div className="border-t border-[#f0eeeb] bg-[#faf9f6] px-5 py-4">
-                            <p className="text-sm leading-relaxed text-[#374151]">
+                          <div className="border-t border-white/10 bg-white/[0.02] px-5 py-4">
+                            <p className="text-sm leading-relaxed text-white/60">
                               {item.answer}
                             </p>
                           </div>
@@ -362,12 +348,12 @@ export function FaqPage() {
         )}
 
         {/* Footer CTA */}
-        <div className="mt-14 rounded-2xl border border-[#e5e5e5] bg-white px-6 py-8 text-center">
-          <p className="text-sm font-medium text-[#1a1a1a]">
+        <div className="mt-14 rounded-2xl border border-white/10 bg-white/5 px-6 py-8 text-center">
+          <p className="text-sm font-medium text-white">
             Still have questions?
           </p>
-          <p className="mt-1 text-sm text-[#6b7280]">
-            We're here to help.{" "}
+          <p className="mt-1 text-sm text-white/50">
+            We&apos;re here to help.{" "}
             <a
               href="mailto:support@beomz.com"
               className="font-medium text-[#00D5D8] underline-offset-2 hover:underline"
@@ -378,5 +364,6 @@ export function FaqPage() {
         </div>
       </main>
     </div>
+    </MarketingPageLayout>
   );
 }

@@ -18,6 +18,7 @@ import { AuthModal } from "../../../components/auth/AuthModal";
 import { usePricingModal } from "../../../contexts/PricingModalContext";
 import MyndlabLogo from "../../../assets/myndlab-logo.svg?react";
 import { enhancePrompt } from "../../../lib/api";
+import { MarketingNav } from "../../../components/marketing/MarketingNav";
 
 const MAX_ATTACHMENTS = 3;
 
@@ -110,7 +111,7 @@ function formatEnhancedAsParagraphs(text: string, sentencesPerParagraph = 3): st
 }
 
 export function LandingPage() {
-  const { openPricingModal } = usePricingModal();
+  usePricingModal();
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const [sphereScale, setSphereScale] = useState(1);
   const [fontSize, setFontSize] = useState(72);
@@ -378,50 +379,34 @@ export function LandingPage() {
   }, [optionsOpen]);
 
   return (
-    <div className="h-screen bg-bg">
-      <div className="relative h-screen">
-        {/* Top nav */}
+    <div className="bg-bg" style={{ minHeight: "100vh" }}>
+      {/* Marketing nav — replaces the old inline nav. Auth modal state is
+          still managed here so Sign in / Get started callbacks keep working.
+          Signed-in users see Dashboard + GlobalNav inside the sticky bar. */}
+      {session ? (
         <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
           <MyndlabLogo className="h-6 w-auto text-white" />
           <div className="flex items-center gap-6">
-            {!session && (
-              <button
-                type="button"
-                onClick={openPricingModal}
-                className="text-sm text-white/50 transition-colors hover:text-white/80"
-              >
-                Pricing
-              </button>
-            )}
-            {session ? (
-              <>
-                <Link
-                  to="/studio/home"
-                  className="text-sm text-white/50 transition-colors hover:text-white/80"
-                >
-                  Dashboard
-                </Link>
-                <GlobalNav variant="light" />
-              </>
-            ) : (
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
-                  className="text-sm text-white/50 transition-colors hover:text-white/80"
-                >
-                  Sign in
-                </button>
-                <button
-                  onClick={() => { setAuthModalMode("signup"); setShowAuthModal(true); }}
-                  className="rounded-full px-3 py-1.5 text-sm text-[#00D5D8] transition-all hover:bg-[#00D5D8]/15"
-                >
-                  Get started
-                </button>
-              </div>
-            )}
+            <Link
+              to="/studio/home"
+              className="text-sm text-white/50 transition-colors hover:text-white/80"
+            >
+              Dashboard
+            </Link>
+            <GlobalNav variant="light" />
           </div>
         </nav>
+      ) : (
+        <MarketingNav
+          onSignInClick={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
+          onGetStartedClick={() => { setAuthModalMode("signup"); setShowAuthModal(true); }}
+        />
+      )}
+      {/* Hero fills viewport minus nav height. When signed in the nav is
+          absolute so the hero stays 100vh; when signed out the sticky nav
+          consumes ~76px so the hero is adjusted to keep the Build prompt
+          visually centred in the remaining space. */}
+      <div className="relative" style={{ height: session ? "100vh" : "calc(100vh - 76px)" }}>
 
         {/* Hero section — children absolutely positioned so Build + glow can
             both sit at exact 50%/50% independent of one another. */}
