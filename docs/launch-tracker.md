@@ -26,6 +26,70 @@ Single source of truth for the audit-2026-05 rollout. Every audit ticket gets lo
 
 ---
 
+## 🔁 Handover snapshot — 2026-05-17 (Myndlab playground — full session push)
+
+### What shipped today
+
+**`apps/myndlab-web` is live at https://myndlab-dev.beomz.ai** — a separate UI playground forked from `apps/web` to prototype the Myndlab (Permus' Rust-based AI product) frontend before porting to the real Rust app. Droplet HEAD: **`abc9772`** "Myndlab landing: theme system, signed-in nav, mega polish, fixes". HTTP 200. Maintenance bypass code (shared with beomz.ai): `544054`.
+
+**Linear tickets closed in this session:**
+- ✅ **BEO-821 (M1)** — Myndlab brand rebrand (orange → Aqua Cyan `#00D5D8`, Beomz → Myndlab everywhere, logo + prism SVG swap)
+- ✅ **BEO-822 (M2)** — Hero polish (absolute centered Build placeholder, breathing cyan glow, glass-morphic toolbar with 5 pills + submit ↑, suggestions row at `bottom-[15%]`)
+- ✅ **BEO-823 (M3)** — Footer (social icons + "Powered by Permus" wordmark, fixed bottom, no gap)
+- ✅ **BEO-824 (MN1)** — Mega-menu marketing nav (Features / Solutions / Pricing / Enterprise / About — full-width drawer, brand-tinted bg, ICONS + ILLUSTRATIONS maps, AI-generated enterprise image)
+- ✅ **BEO-825 (MN2)** — Theme system + signed-in nav + nav config + 6 route scaffolds
+
+### Architecture notes for the next session
+
+**Theme system:** `apps/myndlab-web/src/lib/theme.tsx` exposes `theme` (`'dark'|'light'`) + `lang` (`'en'|'ar'`) + setters, reflects state to `document.documentElement` (class="light", `data-theme`, `lang`, `dir="rtl"`) + localStorage. ThemeProvider wraps `<AppGate />` in `main.tsx`.
+
+**Light/dark swap pattern:** CSS variables in `src/index.css` (`--myndlab-surface`, `--myndlab-fg-muted`, `--myndlab-fg-hover`, `--myndlab-glow`, etc.) swap on `html.light`. Dark-hardcoded Tailwind classes (`text-white/X`, `bg-black/X`) are overridden inside `.marketing-surface` scope rather than refactored everywhere. **Don't change this pattern without reading `src/index.css` first.**
+
+**Brand palette (binding — see `reference_myndlab_brand.md`):**
+- Aqua Cyan `#00D5D8` primary · Ultra Violet `#7C3AED` secondary · Charcoal `#131313` dark
+- Hot Magenta `#FF2FB3` for Enterprise (visible on cream)
+- Yellow strictly subtle accent
+
+**Locked visual sources of truth (do not regenerate):**
+- `apps/myndlab-web/public/megamenu-samples.html` — mega menu reference
+- `apps/myndlab-web/public/drilldown-samples.html` — interaction patterns
+- `apps/myndlab-web/src/assets/enterprise-illustration.jpg` — AI-generated Dubai glass prism, 1024×1024
+
+**Local dev:**
+- Server: `pnpm --filter @myndlab/web dev` → http://localhost:5189
+- Vite proxy: `/api → https://beomz.ai` (bypasses CORS for local sign-in)
+- Env: `apps/myndlab-web/.env.local` sets `VITE_API_BASE_URL=/api` — **Vite priority means `.env.local` overrides `.env`, edit both when changing**
+- Supabase redirect URL allowlist (project `srflynvdrsdazxvcxmzb`) now includes `http://localhost:5189/**` — needed for Google OAuth back to localhost
+- TanStack Router strict typed-route escape hatch: `as "/"` cast (used for `/studio/templates`, `/admin`, `/studio/invite`)
+
+**Background dev server task ID:** `bcs5wb1ou` (Vite dev on :5189). Still running at session end — may need restart in new session.
+
+### What's NOT done — deferred backlog
+
+- **MN3+ content fill** — the 6 marketing routes scaffolded by BEO-825 are stubs. Need real content for `/features`, `/solutions`, `/pricing`, `/enterprise`, `/about`, `/changelog`. No Linear ticket yet — draft when ready.
+- **MN8 — Arabic i18n** — `lang` toggle in ThemeContext is wired (sets `dir="rtl"` on html), but no copy is translated. Placeholder only.
+- **Real Rust port** — this is a playground. Once UI is locked, port to the live Myndlab Rust frontend (Azure DevOps repo, access expected this week).
+- **Beomz Studio Sprint 9 P2.5** — BEO-818 / BEO-819 still drafted, not fired. Site still in maintenance mode. Untouched in this session.
+
+### Bug fixes captured in `abc9772`
+
+- `process is not defined` ReferenceError in Vite dev → switched maintenance bypass to `import.meta.env.VITE_MAINTENANCE_CODE`
+- `Invalid URL` on `getCredits()` → `getApiBaseUrl()` now prepends `window.location.origin` when base is relative
+- PRO badge hidden on light variant → removed `if (isLight) return null;` in `GlobalNav.tsx::PlanBadge`
+- Credit progress bar orange → `bg-[#00D5D8]`
+- Google OAuth redirecting to beomz.ai instead of localhost → Supabase redirect allowlist updated (manual, Omar did it)
+- Three TS errors on untyped routes → `as "/"` cast
+
+### Immediate next-actions for new Claude session
+
+1. **Read this snapshot + `reference_myndlab_brand.md` + `feedback_beomz_studio_orchestration.md`** before touching myndlab-web.
+2. **Check the live URL** with bypass `544054` to confirm HEAD `abc9772` is what Omar sees.
+3. **If continuing Myndlab work:** draft MN3 (content fill) tickets per-route. Don't batch — one route per Cursor ticket.
+4. **If pivoting back to Beomz Studio:** prior 2026-05-16 snapshot is still accurate. BEO-820 / BEO-806 still need Linear → Done, BEO-818 / BEO-819 still drafted.
+5. **Rule 16 still binding** — update Linear + this tracker + memory after every meaningful action.
+
+---
+
 ## 🔁 Handover snapshot — 2026-05-16 (returning from 12-day IronCastle detour)
 
 ### Where we are
