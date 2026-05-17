@@ -6,7 +6,7 @@
   --color-bg-card: #0d0d1f;
   --color-bg-sidebar: #0a0a1a;
   --color-orange: #00D5D8;
-  --color-purple: #a855f7;
+  --color-purple: #7C3AED;
   --color-border: #1e1e3a;
   --color-cream: #faf9f6;
   --color-cream-text: #1a1a1a;
@@ -14,6 +14,101 @@
   --color-success: #22c55e;
   --color-surface-highlight: rgba(0, 213, 216, 0.08);
   --color-thinking: rgba(0, 213, 216, 0.5);
+}
+
+/* ─── Myndlab brand-locked palette (per brand book) ───
+   Aqua Cyan        #00D5D8   primary brand accent
+   Ultra Violet     #7C3AED   secondary accent
+   Hot Magenta      #FF2FB3   subtle accent
+   Neon Yellow      #FFF500   subtle accent (Enterprise)
+   Deep Charcoal    #131313   dark surface
+   Soft Light Gray  #F5F5F5   light surface
+*/
+
+/* ─── Marketing theme variables (dark default, light override) ─── */
+:root {
+  --myndlab-surface: #131313;
+  --myndlab-surface-elevated: #1c1c22;
+  --myndlab-surface-hover: rgba(255,255,255,0.04);
+  --myndlab-surface-pill: rgba(255,255,255,0.05);
+  --myndlab-popover-bg: rgba(10,10,10,0.92);
+  --myndlab-tooltip-bg: rgba(26,26,26,0.95);
+  --myndlab-fg: #ffffff;
+  --myndlab-fg-strong: rgba(255,255,255,0.80);
+  --myndlab-fg-muted: rgba(255,255,255,0.50);
+  --myndlab-fg-subtle: rgba(255,255,255,0.40);
+  --myndlab-fg-placeholder: rgba(255,255,255,0.30);
+  --myndlab-fg-hover: rgba(255,255,255,0.80);
+  --myndlab-border: rgba(255,255,255,0.10);
+  --myndlab-border-strong: rgba(255,255,255,0.20);
+  /* Hero glow: cyan single-stop on dark (brand-faithful, Variant B) */
+  --myndlab-glow: radial-gradient(circle, #00D5D8 0%, transparent 100%);
+}
+
+html.light {
+  --myndlab-surface: #F5F5F5;
+  --myndlab-surface-elevated: #ffffff;
+  --myndlab-surface-hover: rgba(19,19,19,0.04);
+  --myndlab-surface-pill: rgba(19,19,19,0.04);
+  --myndlab-popover-bg: rgba(255,255,255,0.96);
+  --myndlab-tooltip-bg: rgba(19,19,19,0.92);
+  --myndlab-fg: #131313;
+  --myndlab-fg-strong: rgba(19,19,19,0.85);
+  --myndlab-fg-muted: rgba(19,19,19,0.55);
+  --myndlab-fg-subtle: rgba(19,19,19,0.40);
+  --myndlab-fg-placeholder: rgba(19,19,19,0.30);
+  --myndlab-fg-hover: rgba(19,19,19,0.85);
+  --myndlab-border: rgba(19,19,19,0.12);
+  --myndlab-border-strong: rgba(19,19,19,0.22);
+  /* Hero glow on light: Aqua Cyan dominant — strong solid core extending out,
+     graduated fade through transparent. Stronger than dark variant because
+     cyan on cream needs more density to register visually. */
+  --myndlab-glow: radial-gradient(circle, #00D5D8 0%, #00D5D8 20%, rgba(0,213,216,0.6) 45%, rgba(0,213,216,0.18) 75%, transparent 100%);
+}
+
+/* ─── Light-theme: kill dark drop-shadows that turn into grey blotches ─── */
+/* Wildcard matches any arbitrary shadow utility (Tailwind 4 generates
+   varied class names). Standard shadow-* utilities handled separately. */
+html.light .marketing-surface [class*="shadow-["] {
+  box-shadow: none !important;
+}
+html.light .marketing-surface .shadow-2xl {
+  box-shadow: 0 16px 40px rgba(19,19,19,0.07) !important;
+}
+html.light .marketing-surface .shadow-xl {
+  box-shadow: 0 12px 28px rgba(19,19,19,0.05) !important;
+}
+html.light .marketing-surface .shadow-lg {
+  box-shadow: 0 8px 20px rgba(19,19,19,0.04) !important;
+}
+
+/* ─── Mega panel — brand-tinted background ───
+   Soft cyan radial in the top-right (tying it to the brand) + vertical
+   gradient for depth. Light theme uses a softer cyan tint on cream. */
+.mega-panel-bg {
+  background:
+    radial-gradient(ellipse 900px 360px at 92% -20%, rgba(0,213,216,0.06) 0%, transparent 60%),
+    linear-gradient(180deg, #17171c 0%, #131316 100%);
+}
+html.light .mega-panel-bg {
+  background:
+    radial-gradient(ellipse 900px 360px at 92% -20%, rgba(0,213,216,0.07) 0%, transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #f8f8f8 100%);
+}
+
+/* ─── Mega illustration — pulse rings for the voice featured card ─── */
+@keyframes mega-pulse {
+  0%   { transform: scale(0.85); opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+.mega-pulse {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: mega-pulse 2.6s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mega-pulse { animation: none; opacity: 0.5; }
 }
 
 html,
@@ -178,6 +273,61 @@ body {
     background: none;
     color: #6b7280;
   }
+}
+
+/* ─── Light-theme overrides for dark-hardcoded Tailwind classes ───
+   Scoped to .marketing-surface so the studio interior (which uses the same
+   white/X opacity utilities on dark) isn't affected. */
+html.light .marketing-surface .text-white,
+html.light .marketing-surface .text-white\/90 {
+  color: var(--myndlab-fg);
+}
+html.light .marketing-surface .text-white\/80,
+html.light .marketing-surface .text-white\/70,
+html.light .marketing-surface .text-white\/60 {
+  color: var(--myndlab-fg-strong);
+}
+html.light .marketing-surface .text-white\/50 {
+  color: var(--myndlab-fg-muted);
+}
+html.light .marketing-surface .text-white\/40 {
+  color: var(--myndlab-fg-subtle);
+}
+html.light .marketing-surface .text-white\/30,
+html.light .marketing-surface .text-white\/20 {
+  color: var(--myndlab-fg-placeholder);
+}
+html.light .marketing-surface .before\:text-white\/30::before {
+  color: var(--myndlab-fg-placeholder) !important;
+}
+
+html.light .marketing-surface .bg-white\/5,
+html.light .marketing-surface .bg-white\/\[0\.04\] {
+  background-color: var(--myndlab-surface-pill);
+}
+html.light .marketing-surface .bg-white\/10,
+html.light .marketing-surface .bg-white\/\[0\.08\] {
+  background-color: rgba(19,19,19,0.08);
+}
+html.light .marketing-surface .hover\:bg-white\/\[0\.08\]:hover {
+  background-color: rgba(19,19,19,0.08);
+}
+
+html.light .marketing-surface .border-white\/10,
+html.light .marketing-surface .border-border {
+  border-color: var(--myndlab-border);
+}
+html.light .marketing-surface .border-white\/20,
+html.light .marketing-surface .hover\:border-white\/20:hover {
+  border-color: var(--myndlab-border-strong);
+}
+
+/* Glassmorphic popovers/tooltips — flip surface in light mode */
+html.light .marketing-surface .bg-\[\#0a0a0a\]\/90 {
+  background-color: var(--myndlab-popover-bg);
+}
+html.light .marketing-surface .bg-\[\#1a1a1a\]\/95 {
+  background-color: var(--myndlab-tooltip-bg);
 }
 
 /* Subtle breathing pulse for the landing hero glow when the user hasn't

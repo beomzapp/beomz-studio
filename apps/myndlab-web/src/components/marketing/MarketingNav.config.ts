@@ -1,7 +1,6 @@
-import type { ReactNode } from "react";
-
 export interface MegaItem {
-  icon: ReactNode;
+  /** Key into the ICONS map in MarketingNav.tsx (e.g. "mic", "palette"). */
+  icon: string;
   title: string;
   blurb: string;
   href: string;
@@ -11,6 +10,8 @@ export interface MegaFeatured {
   badge: string;
   title: string;
   blurb: string;
+  /** Key into the ILLUSTRATIONS map in MarketingNav.tsx (e.g. "voice", "enterprise"). */
+  illustration?: string;
   primaryCta: { label: string; href: string };
   secondaryCta?: { label: string; href: string };
 }
@@ -82,6 +83,7 @@ export const FEATURES_MEGA: MegaConfig = {
     title: "Voice Brainstorming, hands free.",
     blurb:
       "Talk through your idea like you're describing it to a colleague. Myndlab listens, asks the right follow-ups, and turns it into a build prompt automatically.",
+    illustration: "voice",
     primaryCta: { label: "Try voice", href: "/features#voice-brainstorming" },
     secondaryCta: { label: "Watch demo", href: "/features#demo" },
   },
@@ -135,6 +137,7 @@ export const SOLUTIONS_MEGA: MegaConfig = {
     title: "Built for regulated industries.",
     blurb:
       "GCC sovereign infrastructure, ISO 9001 + 27001 certified, custom deployment options. The platform regulated industries can build on.",
+    illustration: "enterprise",
     primaryCta: { label: "Book a demo", href: "/enterprise" },
     secondaryCta: { label: "Read case study", href: "/enterprise#case-study" },
   },

@@ -142,7 +142,14 @@ function toLoggedError(error: unknown): { message: string; name: string } {
 }
 
 export function getApiBaseUrl(): string {
-  return (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
+  const base = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
+  // If VITE_API_BASE_URL is relative (e.g. "/api" for the dev Vite proxy),
+  // prepend the current origin so callers that use `new URL(...)` don't blow
+  // up with "Invalid URL". Vite still proxies /api/* to beomz.ai server-side.
+  if (typeof window !== "undefined" && base.startsWith("/")) {
+    return `${window.location.origin}${base}`;
+  }
+  return base;
 }
 
 export async function getAccessToken(): Promise<string> {

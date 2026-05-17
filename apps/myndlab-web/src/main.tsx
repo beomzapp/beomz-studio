@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { MaintenancePage } from "./app/maintenance/page";
+import { ThemeProvider } from "./lib/theme";
 import "./index.css";
 
 // BEO-580: hide the inline app shell once React paints. Done in two steps so
@@ -62,7 +63,9 @@ window.__VITE_MAINTENANCE_MODE__ = true;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AppGate />
+    <ThemeProvider>
+      <AppGate />
+    </ThemeProvider>
   </StrictMode>,
 );
 // Wait one frame so the first React paint has committed before fading the

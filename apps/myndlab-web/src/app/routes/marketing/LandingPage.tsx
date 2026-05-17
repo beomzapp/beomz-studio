@@ -9,7 +9,13 @@ import {
   Mic,
   SlidersHorizontal,
   Palette,
+  ArrowUp,
+  Gift,
+  Globe,
+  Sun,
+  Moon,
 } from "lucide-react";
+import { useTheme } from "../../../lib/theme";
 import { cn } from "../../../lib/cn";
 import { useAuth } from "../../../lib/useAuth";
 import { saveProjectLaunchIntent } from "../../../lib/projectLaunchIntent";
@@ -108,6 +114,100 @@ function formatEnhancedAsParagraphs(text: string, sentencesPerParagraph = 3): st
     paragraphs.push(sentences.slice(i, i + sentencesPerParagraph).join("").trim());
   }
   return paragraphs.join("\n\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SignedInNav — mirrors MarketingNav exactly: same positioning, gaps, spacing,
+// text vocab, theme awareness. Only the menu links and right-cluster items
+// differ (Projects/Templates/etc. + Invite + credits/avatar via GlobalNav).
+// ─────────────────────────────────────────────────────────────────────────────
+function SignedInNav() {
+  const { theme, toggleTheme, lang, toggleLang } = useTheme();
+
+  const linkStyle = { color: "var(--myndlab-fg-muted)" } as const;
+  const onLinkEnter = (e: React.MouseEvent<HTMLElement>) => {
+    (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-hover)";
+  };
+  const onLinkLeave = (e: React.MouseEvent<HTMLElement>) => {
+    (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-muted)";
+  };
+
+  return (
+    <nav className="absolute left-0 right-0 top-0 z-20">
+      <div className="flex items-center gap-8 px-6 py-4">
+        {/* Logo — left */}
+        <Link to="/" className="flex items-center" style={{ color: "var(--myndlab-fg)" }}>
+          <MyndlabLogo className="h-6 w-auto" />
+        </Link>
+
+        {/* Studio nav — left, immediately after logo */}
+        <div className="flex items-center gap-6">
+          <Link to="/studio/home" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
+            Projects
+          </Link>
+          <Link to={"/studio/templates" as "/"} className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
+            Templates
+          </Link>
+          <Link to="/pricing" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
+            Pricing
+          </Link>
+          <Link to="/guide" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
+            Guide
+          </Link>
+          <Link to="/faq" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
+            FAQs
+          </Link>
+          <Link to={"/admin" as "/"} className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
+            Admin
+          </Link>
+        </div>
+
+        {/* Right cluster — Invite, language, theme, Credits+Avatar (GlobalNav) */}
+        <div className="ml-auto flex items-center gap-3">
+          <Link
+            to={"/studio/invite" as "/"}
+            className="inline-flex items-center gap-1.5 text-sm transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            <Gift size={14} />
+            <span>Invite</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={toggleLang}
+            aria-label={lang === "en" ? "Switch to Arabic" : "Switch to English"}
+            title={lang === "en" ? "Switch to Arabic" : "Switch to English"}
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            <Globe size={14} />
+            <span className="font-medium tracking-wide">{lang === "en" ? "EN" : "ع"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            className="inline-flex items-center justify-center rounded-full p-2 transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+
+          {/* GlobalNav renders the plan badge + credit pill + user avatar dropdown */}
+          <GlobalNav variant="light" />
+        </div>
+      </div>
+    </nav>
+  );
 }
 
 export function LandingPage() {
@@ -379,23 +479,12 @@ export function LandingPage() {
   }, [optionsOpen]);
 
   return (
-    <div className="bg-bg" style={{ minHeight: "100vh" }}>
+    <div className="marketing-surface" style={{ minHeight: "100vh", background: "var(--myndlab-surface)", color: "var(--myndlab-fg)" }}>
       {/* Marketing nav — replaces the old inline nav. Auth modal state is
           still managed here so Sign in / Get started callbacks keep working.
           Signed-in users see Dashboard + GlobalNav inside the sticky bar. */}
       {session ? (
-        <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-6 py-4">
-          <MyndlabLogo className="h-6 w-auto text-white" />
-          <div className="flex items-center gap-6">
-            <Link
-              to="/studio/home"
-              className="text-sm text-white/50 transition-colors hover:text-white/80"
-            >
-              Dashboard
-            </Link>
-            <GlobalNav variant="light" />
-          </div>
-        </nav>
+        <SignedInNav />
       ) : (
         <MarketingNav
           onSignInClick={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
@@ -419,8 +508,7 @@ export function LandingPage() {
               hasText ? "opacity-40" : "hero-glow-breathing",
             )}
             style={{
-              background:
-                "radial-gradient(circle, #00D5D8 0%, transparent 100%)",
+              background: "var(--myndlab-glow)",
               transform: `translate(-50%, -50%) scale(${sphereScale})`,
             }}
           />
@@ -452,7 +540,7 @@ export function LandingPage() {
               so the visible text glyph centers on 50%, not the box center. */}
           <h1
             ref={h1Ref}
-            className="absolute left-1/2 top-1/2 z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
+            className="absolute left-1/2 top-1/2 z-10 w-full max-w-4xl overflow-hidden text-center font-sans"
             style={{
               fontSize: `${fontSize}px`,
               fontWeight: fontWeight,
@@ -648,6 +736,22 @@ export function LandingPage() {
                 </div>
               )}
             </div>
+
+            {/* Submit — solid cyan circular icon button, sends current prompt */}
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const text = editableRef.current?.textContent?.trim();
+                if (text) handleSubmitPrompt(text);
+              }}
+              disabled={!hasText}
+              aria-label="Submit prompt"
+              title="Submit (Enter)"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#00D5D8] text-[#131313] transition-all hover:bg-[#00BCC0] disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ArrowUp size={16} strokeWidth={2.4} />
+            </button>
           </div>
 
           {/* Suggestion strip + kbd hint — absolutely positioned ~80% down so
@@ -697,19 +801,67 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* Mini footer pinned to bottom of viewport */}
-        <div className="absolute bottom-0 left-0 right-0 z-10 px-6 py-3 text-center">
-          <p className="text-[11px] text-white/20">
-            <Link to="/terms" className="transition-colors hover:text-white/40">Terms of Service</Link>
-            {" · "}
-            <Link to="/privacy" className="transition-colors hover:text-white/40">Privacy Policy</Link>
-            {" · "}
-            <Link to="/faq" className="transition-colors hover:text-white/40">FAQ</Link>
-            {" · "}
-            <Link to="/support" className="transition-colors hover:text-white/40">Support</Link>
-            {" · "}
+        {/* Footer pinned flush to viewport bottom (fixed, not absolute, so it
+            hugs the true bottom edge regardless of hero wrapper height). */}
+        <div className="fixed bottom-0 left-0 right-0 z-10 flex items-center justify-between gap-4 px-6 pb-4 pt-3 text-[11px] text-white/30">
+          {/* Left — social icons */}
+          <div className="flex items-center gap-3">
+            <a href="https://reddit.com" target="_blank" rel="noopener noreferrer" aria-label="Reddit" className="transition-colors hover:text-white/70">
+              <svg className="h-[15px] w-[15px]" viewBox="0 0 24 24" fill="currentColor"><path d="M22 11.816c0-1.256-1.021-2.277-2.277-2.277-.593 0-1.122.24-1.526.613-1.481-.965-3.455-1.594-5.647-1.69l1.171-3.702 3.18.748-.011.15a1.78 1.78 0 0 0 1.776 1.776 1.78 1.78 0 0 0 1.776-1.776 1.78 1.78 0 0 0-1.776-1.776c-.749 0-1.392.469-1.65 1.131l-3.471-.817a.336.336 0 0 0-.391.224l-1.302 4.115c-2.246.075-4.272.708-5.781 1.685a2.276 2.276 0 0 0-1.526-.613A2.28 2.28 0 0 0 2 11.815c0 .894.518 1.665 1.27 2.038-.027.182-.043.366-.043.553 0 3.149 3.939 5.708 8.773 5.708s8.773-2.559 8.773-5.708c0-.181-.014-.36-.04-.536A2.276 2.276 0 0 0 22 11.816zm-3.776-5.99a1.07 1.07 0 0 1 0 2.141 1.07 1.07 0 0 1 0-2.141zM7.105 13.4a1.234 1.234 0 1 1 2.468.001 1.234 1.234 0 0 1-2.468-.001zM12 18.2c-1.564 0-2.823-.547-2.823-1.215 0-.222.179-.4.4-.4.087 0 .169.027.235.07.604.396 1.346.65 2.188.65.846 0 1.586-.254 2.19-.65a.434.434 0 0 1 .235-.07.4.4 0 0 1 .4.4c0 .668-1.26 1.215-2.825 1.215zm2.91-3.565a1.234 1.234 0 1 1 0-2.467 1.234 1.234 0 0 1 0 2.467z"/></svg>
+            </a>
+            <a href="https://discord.com" target="_blank" rel="noopener noreferrer" aria-label="Discord" className="transition-colors hover:text-white/70">
+              <svg className="h-[15px] w-[15px]" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+            </a>
+            <a href="https://x.com" target="_blank" rel="noopener noreferrer" aria-label="X / Twitter" className="transition-colors hover:text-white/70">
+              <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            </a>
+            <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" aria-label="YouTube" className="transition-colors hover:text-white/70">
+              <svg className="h-[15px] w-[15px]" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            </a>
+            <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" className="transition-colors hover:text-white/70">
+              <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.063 2.063 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            </a>
+            <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="transition-colors hover:text-white/70">
+              <svg className="h-[15px] w-[15px]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>
+            </a>
+          </div>
+
+          {/* Center — legal + copyright */}
+          <p className="flex items-center gap-2 text-[11px] text-white/30">
+            <Link to="/terms" className="transition-colors hover:text-white/60">Terms of Service</Link>
+            <span>·</span>
+            <Link to="/privacy" className="transition-colors hover:text-white/60">Privacy Policy</Link>
+            <span>·</span>
+            <Link to="/faq" className="transition-colors hover:text-white/60">FAQ</Link>
+            <span>·</span>
+            <Link to="/support" className="transition-colors hover:text-white/60">Support</Link>
+            <span>·</span>
             <span>&copy; Myndlab 2026</span>
           </p>
+
+          {/* Right — Powered by Permus (icon-only SVG + text, both inherit
+              currentColor from the parent link so they match the footer). */}
+          <a
+            href="https://permus.io"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 transition-colors hover:text-white/70"
+          >
+            <span className="text-[11px]">Powered by</span>
+            <svg
+              viewBox="0 0 145 155"
+              fill="currentColor"
+              aria-label="Permus"
+              className="h-3.5 w-auto"
+            >
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M24.8767 70.5108L88.9781 24.251L95.0601 19.8594C95.7313 19.3742 96.0938 18.6668 96.0938 17.8436C96.0938 17.0204 95.7313 16.313 95.0601 15.8278L88.9781 11.4394L75.3769 1.62336L73.7887 0.477742C72.8937 -0.16706 71.7339 -0.16706 70.8421 0.477742L69.2538 1.62336L1.03367 50.86C0.362438 51.3451 0 52.0526 0 52.8758V107.631C0 108.592 0.507294 109.415 1.36769 109.85C2.22808 110.285 3.19856 110.21 3.98007 109.647L10.4467 104.98L104.171 37.341C105.066 36.6963 106.225 36.6963 107.117 37.341C113.864 42.2116 120.612 47.0788 127.356 51.9493L130.094 53.9244L10.4499 140.269L1.03367 147.064C0.362438 147.549 0 148.256 0 149.08V152.513C0 153.884 1.12507 155.002 2.50528 155.002H40.2931C40.8445 155.002 41.3204 154.849 41.7679 154.526L55.4919 144.622L69.8746 134.243L130.203 90.7064C130.986 90.1429 131.954 90.0678 132.816 90.5029C133.677 90.9379 134.183 91.7612 134.183 92.722V152.51C134.183 153.881 135.31 154.999 136.689 154.999H142.125C143.507 154.999 144.631 153.881 144.631 152.51V72.3701C144.631 71.4093 144.122 70.586 143.262 70.1508C142.404 69.7157 141.432 69.791 140.651 70.3543L134.183 75.0213L114.863 88.966L38.4022 144.143C37.9547 144.466 37.482 144.619 36.9274 144.619H29.8841C28.7781 144.619 27.842 143.943 27.4987 142.898C27.1583 141.855 27.5144 140.76 28.4093 140.112L134.183 63.7779L143.6 56.9825C144.272 56.4974 144.633 55.7899 144.633 54.9667V52.8665C144.633 52.0432 144.272 51.3357 143.6 50.8507L138.97 47.5108C130.821 41.6294 122.668 35.7478 114.52 29.8663L107.117 24.5264C106.222 23.8816 105.063 23.8816 104.171 24.5264L96.7682 29.8663L14.43 89.2914C13.6485 89.855 12.681 89.93 11.8176 89.495C10.9572 89.0599 10.4499 88.2367 10.4499 87.2756V58.1407C10.4499 57.3175 10.8122 56.61 11.4834 56.1249L70.8421 13.2924C71.7371 12.6476 72.8967 12.6476 73.7887 13.2924L77.3117 15.8341C77.983 16.3192 78.3454 17.0266 78.3454 17.8467C78.3454 18.6668 77.983 19.3773 77.3117 19.8625L21.9301 59.8309C21.2589 60.3162 20.8965 61.0234 20.8965 61.8467V68.5013C20.8965 69.4622 21.404 70.2854 22.2642 70.7204C23.1246 71.1557 24.0952 71.0804 24.8767 70.5171V70.5108ZM113.284 131.852V136.938C113.284 137.761 112.922 138.469 112.251 138.954L104.395 144.622L96.2545 150.498C95.3596 151.142 95.0035 152.238 95.3439 153.284C95.6841 154.326 96.6233 155.005 97.7293 155.005H106.95C107.502 155.005 107.978 154.852 108.425 154.529L122.146 144.626L122.7 144.225C123.372 143.74 123.733 143.032 123.733 142.209V111.506C123.733 110.545 123.227 109.722 122.366 109.287C121.506 108.851 120.536 108.927 119.753 109.49L71.069 144.622L62.929 150.498C62.0341 151.142 61.678 152.238 62.0184 153.284C62.3588 154.326 63.2978 155.005 64.4009 155.005H73.6184C74.17 155.005 74.6457 154.852 75.0932 154.529L88.8174 144.626L109.304 129.842C110.086 129.279 111.053 129.204 111.917 129.639C112.777 130.074 113.284 130.897 113.284 131.858V131.852ZM10.4499 116.217L1.03367 123.012C0.362438 123.497 0 124.205 0 125.028V131.683C0 132.643 0.507294 133.467 1.36769 133.902C2.22808 134.337 3.19856 134.262 3.98007 133.698L10.4499 129.031L110.637 56.7289C111.308 56.2438 111.671 55.5363 111.671 54.7131C111.671 53.8899 111.308 53.1826 110.637 52.7005L106.027 49.3732C105.132 48.7284 103.972 48.7284 103.08 49.3732L10.4499 116.217Z"
+              />
+            </svg>
+            <span className="text-[11px] font-semibold tracking-wide">Permus</span>
+          </a>
         </div>
       </div>
       {/* Auth modal overlay */}

@@ -180,13 +180,13 @@ interface PlanBadgeProps {
   onUpgrade: () => void;
 }
 
-function PlanBadge({ plan, isLight, onUpgrade }: PlanBadgeProps) {
+function PlanBadge({ plan, onUpgrade }: PlanBadgeProps) {
   const isFree = plan === "free";
   const label = PLAN_LABELS[plan] ?? plan;
-  if (isLight) return null;
   return (
     <div className="flex items-center gap-1.5">
-      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${isFree ? "bg-[#fff7ed] text-[#00D5D8]" : "bg-[#f3f4f6] text-[#6b7280]"}`}>
+      <span className="inline-flex items-center gap-1 rounded-full bg-[#00D5D8]/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[#00D5D8]">
+        <Zap size={11} strokeWidth={2} className="-ml-0.5" />
         {label}
       </span>
       {isFree && (
@@ -265,7 +265,7 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
         {/* Simple remaining bar — matches dashboard Credits card */}
         <div className="h-1.5 w-16 overflow-hidden rounded-full bg-zinc-200">
           <div
-            className="h-full rounded-full bg-orange-500 transition-all duration-300"
+            className="h-full rounded-full bg-[#00D5D8] transition-all duration-300"
             style={{ width: `${remainingPct}%` }}
           />
         </div>
@@ -294,7 +294,7 @@ function CreditPill({ credits, isLight, onUpgrade }: CreditPillProps) {
         <div className="mt-3">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
             <div
-              className="h-full rounded-full bg-orange-500 transition-all duration-500"
+              className="h-full rounded-full bg-[#00D5D8] transition-all duration-500"
               style={{ width: `${remainingPct}%` }}
             />
           </div>

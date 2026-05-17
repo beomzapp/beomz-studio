@@ -1,289 +1,318 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import MyndlabLogo from "../../assets/myndlab-logo.svg?react";
+import enterpriseIllustration from "../../assets/enterprise-illustration.jpg";
 import { FEATURES_MEGA, SOLUTIONS_MEGA, type MegaConfig } from "./MarketingNav.config";
-
-// Monoline SVG icons matching megamenu-samples.html exactly
-const ICONS: Record<string, string> = {
-  lightning: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.09 12.97a1 1 0 00.78 1.63h6.45L10 22l8.91-10.97a1 1 0 00-.78-1.63h-6.45L13 2z"/></svg>`,
-  mic: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 00-3 3v6a3 3 0 006 0V5a3 3 0 00-3-3zM19 10v1a7 7 0 01-14 0v-1M12 18v4M8 22h8"/></svg>`,
-  palette: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor"/><path d="M12 2a10 10 0 1010 10c0-5-7-3-7-6s5-1 5-4-5-5-10-5z"/></svg>`,
-  history: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9M3 4v5h5M12 7v5l3 3"/></svg>`,
-  stack: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16zM3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></svg>`,
-  globe: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>`,
-  export: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5l5.5-5.5 4 4 6-6"/><path d="M15 9h5v5"/></svg>`,
-  saas: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l6-6 4 4 6-6M14 6h6v6"/></svg>`,
-  tools: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 13h4"/></svg>`,
-  agency: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7l-8 4-8-4 8-4 8 4z"/><path d="M4 7v6l8 4 8-4V7"/></svg>`,
-  education: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5-10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
-  prototype: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6L3 22h18L15 8V2M9 2h6M8 14h8"/></svg>`,
-  arrow: `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h8M7 3l4 4-4 4"/></svg>`,
-  arrowSm: `<svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h8M7 3l4 4-4 4"/></svg>`,
-};
+import { useTheme } from "../../lib/theme";
 
 type MegaKey = "features" | "solutions";
 
-interface MegaPanelProps {
-  config: MegaConfig;
-  onClose: () => void;
-}
+// Slim chevron — rotates 180° when its menu is open
+const ChevronDown = ({ open }: { open: boolean }) => (
+  <svg
+    viewBox="0 0 12 12"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.5}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={`ml-1 inline-block h-[9px] w-[9px] transition-transform duration-200 ${
+      open ? "rotate-180" : ""
+    }`}
+  >
+    <path d="M3 5L6 8L9 5" />
+  </svg>
+);
 
-function MegaPanel({ config, onClose }: MegaPanelProps) {
+const SunIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+  </svg>
+);
+
+const MoonIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+  </svg>
+);
+
+const GlobeIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </svg>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mega-item icons — thin monoline (1.4px stroke), 18px box, currentColor.
+// Themes via the parent .group-hover (cyan tint on hover).
+// ─────────────────────────────────────────────────────────────────────────────
+const ICONS: Record<string, ReactNode> = {
+  lightning: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M13 2L4.09 12.97a1 1 0 00.78 1.63h6.45L10 22l8.91-10.97a1 1 0 00-.78-1.63h-6.45L13 2z" />
+    </svg>
+  ),
+  mic: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M19 11v1a7 7 0 0 1-14 0v-1M12 19v3M8 22h8" />
+    </svg>
+  ),
+  palette: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M12 22a10 10 0 1 1 0-20 8 8 0 0 1 8 8c0 2-1 3-3 3h-2a2 2 0 0 0-2 2c0 1 1 2 1 3 0 2-1 4-2 4z" />
+      <circle cx="7.5" cy="10.5" r="1" fill="currentColor" />
+      <circle cx="12" cy="7.5" r="1" fill="currentColor" />
+      <circle cx="16.5" cy="10.5" r="1" fill="currentColor" />
+    </svg>
+  ),
+  history: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-7 3.5" />
+      <path d="M3 4v4h4M12 7v5l3 3" />
+    </svg>
+  ),
+  stack: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M12 2 2 7l10 5 10-5-10-5z" />
+      <path d="M2 12l10 5 10-5M2 17l10 5 10-5" />
+    </svg>
+  ),
+  globe: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20M12 2a15 15 0 0 1 4 10 15 15 0 0 1-4 10 15 15 0 0 1-4-10 15 15 0 0 1 4-10z" />
+    </svg>
+  ),
+  export: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M12 16V4M7 9l5-5 5 5" />
+      <path d="M4 20h16" />
+    </svg>
+  ),
+  saas: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M4 18a3 3 0 1 1-3-3M9 8l4-4 7 7-4 4z" />
+      <path d="M14.5 6.5l3 3M9 14l-3 3 3 3M5 16l3 3" />
+    </svg>
+  ),
+  tools: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M9 13h8M9 16h5" />
+      <circle cx="6.5" cy="13" r="0.5" fill="currentColor" />
+      <circle cx="6.5" cy="16" r="0.5" fill="currentColor" />
+    </svg>
+  ),
+  agency: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18" />
+    </svg>
+  ),
+  education: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M22 10L12 5 2 10l10 5 10-5z" />
+      <path d="M6 12v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5M22 10v6" />
+    </svg>
+  ),
+  prototype: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+      <path d="M9 3v6L5 21h14L15 9V3M9 3h6M9 14h6" />
+    </svg>
+  ),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Featured-card illustrations — larger SVG visuals, brand-tinted.
+// ─────────────────────────────────────────────────────────────────────────────
+const ILLUSTRATIONS: Record<string, ReactNode> = {
+  voice: (
+    <svg viewBox="0 0 160 110" fill="none" className="h-full w-full">
+      {/* Outer pulse rings — animated via index.css class */}
+      <circle cx="80" cy="55" r="48" stroke="#00D5D8" strokeWidth="1" strokeOpacity="0.15" className="mega-pulse" style={{ animationDelay: "0s" }} />
+      <circle cx="80" cy="55" r="36" stroke="#00D5D8" strokeWidth="1" strokeOpacity="0.25" className="mega-pulse" style={{ animationDelay: "0.4s" }} />
+      <circle cx="80" cy="55" r="26" stroke="#00D5D8" strokeWidth="1" strokeOpacity="0.4" className="mega-pulse" style={{ animationDelay: "0.8s" }} />
+      {/* Mic body */}
+      <rect x="72" y="38" width="16" height="26" rx="8" fill="none" stroke="#00D5D8" strokeWidth="1.4" />
+      <path d="M64 55a16 16 0 0 0 32 0M80 71v6M73 77h14" stroke="#00D5D8" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+      {/* Tiny waveform bars off to the right */}
+      <g stroke="#00D5D8" strokeWidth="1.4" strokeLinecap="round">
+        <path d="M110 50v10" strokeOpacity="0.5" />
+        <path d="M116 46v18" strokeOpacity="0.7" />
+        <path d="M122 42v26" />
+        <path d="M128 48v14" strokeOpacity="0.6" />
+        <path d="M134 52v6" strokeOpacity="0.4" />
+      </g>
+    </svg>
+  ),
+  enterprise: (
+    <div className="relative h-full w-full overflow-hidden rounded-xl">
+      <img
+        src={enterpriseIllustration}
+        alt="Myndlab enterprise — glass prism over Dubai skyline"
+        className="h-full w-full object-cover"
+        loading="lazy"
+      />
+      {/* Subtle bottom gradient so the badge/title text below stays readable */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/30 to-transparent" />
+    </div>
+  ),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-width mega panel — brand-tinted background, monoline icons, illustration.
+// ─────────────────────────────────────────────────────────────────────────────
+function MegaPanel({ config, onClose }: { config: MegaConfig; onClose: () => void }) {
   return (
-    <div className="mega-inner" style={{ maxWidth: 1440, margin: "0 auto", padding: "48px 40px 32px" }}>
-      {/* Main grid: 2/3 features + 1/3 featured card */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr)",
-          gap: 56,
-          paddingBottom: 32,
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
-        }}
-      >
-        {/* Left: items */}
-        <div>
+    <div
+      className="border-t mega-panel-bg"
+      style={{
+        borderTopColor: "var(--myndlab-border)",
+      }}
+    >
+      <div className="mx-auto max-w-[1440px] px-10 pb-7 pt-10">
+        {/* Main row: feature list + featured card */}
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-12 border-b pb-7" style={{ borderBottomColor: "var(--myndlab-border)" }}>
+          {/* Left — feature list with monoline icons */}
+          <div>
+            <div
+              className="mb-5 text-[10px] font-medium uppercase tracking-[0.16em]"
+              style={{ color: "var(--myndlab-fg-subtle)" }}
+            >
+              {config.eyebrow}
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+              {config.items.map((item) => (
+                <Link
+                  key={item.href}
+                  to={item.href as "/"}
+                  onClick={onClose}
+                  className="group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors"
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--myndlab-surface-hover)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                >
+                  <span
+                    className="mt-px shrink-0 transition-colors group-hover:text-[#00D5D8]"
+                    style={{ color: "var(--myndlab-fg-subtle)" }}
+                  >
+                    {ICONS[item.icon] ?? null}
+                  </span>
+                  <span className="flex flex-col gap-0.5">
+                    <span
+                      className="text-sm font-medium whitespace-nowrap"
+                      style={{ color: "var(--myndlab-fg-strong)" }}
+                    >
+                      {item.title}
+                    </span>
+                    <span
+                      className="text-[12px] leading-snug"
+                      style={{ color: "var(--myndlab-fg-subtle)" }}
+                    >
+                      {item.blurb}
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* Right — featured card with illustration */}
           <div
+            className="relative overflow-hidden rounded-2xl border p-6"
             style={{
-              fontSize: 11,
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-              color: "rgba(255,255,255,0.4)",
-              marginBottom: 24,
+              borderColor: "var(--myndlab-border)",
+              background:
+                "radial-gradient(ellipse at top right, rgba(0,213,216,0.10) 0%, transparent 60%), var(--myndlab-surface-hover)",
             }}
           >
-            {config.eyebrow}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-            {config.items.map((item) => (
+            {/* Illustration band — top of card */}
+            {config.featured.illustration && (
+              <div className="mb-4 flex h-24 w-full items-center justify-center">
+                {ILLUSTRATIONS[config.featured.illustration]}
+              </div>
+            )}
+
+            <div className="mb-3 inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[#00D5D8]">
+              <span className="h-1 w-1 rounded-full bg-[#00D5D8]" />
+              {config.featured.badge}
+            </div>
+            <div
+              className="mb-2 text-base font-medium"
+              style={{ color: "var(--myndlab-fg)" }}
+            >
+              {config.featured.title}
+            </div>
+            <div
+              className="mb-5 text-[13px] leading-relaxed"
+              style={{ color: "var(--myndlab-fg-muted)" }}
+            >
+              {config.featured.blurb}
+            </div>
+            <div className="flex items-center gap-4">
               <Link
-                key={item.href}
-                to={item.href as "/"}
+                to={config.featured.primaryCta.href as "/"}
                 onClick={onClose}
-                className="feature-row group"
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 14,
-                  padding: "14px 16px",
-                  borderRadius: 12,
-                  cursor: "pointer",
-                  transition: "background 0.15s ease",
-                  textDecoration: "none",
-                  color: "inherit",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
-                  const icon = (e.currentTarget as HTMLElement).querySelector(".feature-icon") as HTMLElement | null;
-                  if (icon) {
-                    icon.style.background = "rgba(0,213,216,0.12)";
-                    icon.style.color = "#00D5D8";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.background = "transparent";
-                  const icon = (e.currentTarget as HTMLElement).querySelector(".feature-icon") as HTMLElement | null;
-                  if (icon) {
-                    icon.style.background = "rgba(255,255,255,0.05)";
-                    icon.style.color = "rgba(255,255,255,0.8)";
-                  }
-                }}
+                className="rounded-full px-3 py-1.5 text-sm text-[#00D5D8] transition-all hover:bg-[#00D5D8]/15"
               >
-                <div
-                  className="feature-icon"
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    background: "rgba(255,255,255,0.05)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    color: "rgba(255,255,255,0.8)",
-                    transition: "background 0.15s ease, color 0.15s ease",
-                  }}
-                  dangerouslySetInnerHTML={{ __html: ICONS[item.icon as string] ?? "" }}
-                />
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "#fff", marginBottom: 4 }}>
-                    {item.title}
-                  </div>
-                  <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>
-                    {item.blurb}
-                  </div>
-                </div>
+                {config.featured.primaryCta.label}
+              </Link>
+              {config.featured.secondaryCta && (
+                <Link
+                  to={config.featured.secondaryCta.href as "/"}
+                  onClick={onClose}
+                  className="text-sm transition-colors"
+                  style={{ color: "var(--myndlab-fg-muted)" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-hover)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-muted)"; }}
+                >
+                  {config.featured.secondaryCta.label}
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom action strip */}
+        <div className="flex items-center justify-between gap-6 pt-5">
+          <div className="flex items-center gap-6">
+            {config.bottomLinks.map((link) => (
+              <Link
+                key={link.href}
+                to={link.href as "/"}
+                onClick={onClose}
+                className="text-sm transition-colors"
+                style={{ color: "var(--myndlab-fg-muted)" }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-hover)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-muted)"; }}
+              >
+                {link.label}
               </Link>
             ))}
           </div>
-        </div>
-
-        {/* Right: featured card */}
-        <div
-          style={{
-            background: "linear-gradient(160deg, rgba(0,213,216,0.08) 0%, rgba(0,213,216,0.02) 50%, transparent 100%)",
-            border: "1px solid rgba(0,213,216,0.18)",
-            borderRadius: 16,
-            padding: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 14,
-            height: "100%",
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
-          {/* Radial glow blob */}
-          <div
-            style={{
-              position: "absolute",
-              top: "-40%",
-              right: "-40%",
-              width: 240,
-              height: 240,
-              background: "radial-gradient(circle, rgba(0,213,216,0.15) 0%, transparent 70%)",
-              pointerEvents: "none",
-            }}
-          />
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 10,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "#00D5D8",
-              fontWeight: 600,
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                background: "#00D5D8",
-                borderRadius: "50%",
-                boxShadow: "0 0 8px #00D5D8",
-              }}
-            />
-            {config.featured.badge}
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-            {config.featured.title}
-          </div>
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", lineHeight: 1.55, flex: 1 }}>
-            {config.featured.blurb}
-          </div>
-          <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-            <Link
-              to={config.featured.primaryCta.href as "/"}
-              onClick={onClose}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "9px 16px",
-                background: "#00D5D8",
-                color: "#131313",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                transition: "background 0.15s ease",
-                textDecoration: "none",
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#00BCC0"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "#00D5D8"; }}
-            >
-              {config.featured.primaryCta.label}
-              <span dangerouslySetInnerHTML={{ __html: ICONS.arrow }} />
-            </Link>
-            {config.featured.secondaryCta && (
+          {config.bottomNote && (
+            <div className="text-[12.5px]" style={{ color: "var(--myndlab-fg-subtle)" }}>
+              {config.bottomNote.text}{" "}
               <Link
-                to={config.featured.secondaryCta.href as "/"}
+                to={config.bottomNote.cta.href as "/"}
                 onClick={onClose}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "9px 14px",
-                  color: "rgba(255,255,255,0.75)",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  textDecoration: "none",
-                  transition: "color 0.15s ease",
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#00D5D8"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.75)"; }}
+                className="text-[#00D5D8] transition-colors hover:opacity-80"
               >
-                {config.featured.secondaryCta.label}
+                {config.bottomNote.cta.label}
               </Link>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      </div>
-
-      {/* Bottom action strip */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingTop: 24,
-          gap: 24,
-        }}
-      >
-        <div style={{ display: "flex", gap: 28, alignItems: "center" }}>
-          {config.bottomLinks.map((link, i) => (
-            <span key={link.href} style={{ display: "inline-flex", alignItems: "center", gap: 28 }}>
-              {i > 0 && (
-                <span
-                  style={{
-                    width: 4,
-                    height: 4,
-                    borderRadius: "50%",
-                    background: "rgba(255,255,255,0.2)",
-                    marginRight: -14,
-                  }}
-                />
-              )}
-              <Link
-                to={link.href as "/"}
-                onClick={onClose}
-                style={{
-                  fontSize: 13,
-                  color: "rgba(255,255,255,0.55)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition: "color 0.15s ease",
-                  textDecoration: "none",
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#00D5D8"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.55)"; }}
-              >
-                {link.label}
-                {i === 0 && <span dangerouslySetInnerHTML={{ __html: ICONS.arrowSm }} />}
-              </Link>
-            </span>
-          ))}
-        </div>
-        {config.bottomNote && (
-          <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.4)" }}>
-            {config.bottomNote.text}{" "}
-            <Link
-              to={config.bottomNote.cta.href as "/"}
-              onClick={onClose}
-              style={{ color: "#00D5D8", marginLeft: 6, textDecoration: "none" }}
-            >
-              {config.bottomNote.cta.label}
-            </Link>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MarketingNav — absolute over the hero, transparent, minimal.
+// ─────────────────────────────────────────────────────────────────────────────
 export interface MarketingNavProps {
   onSignInClick?: () => void;
   onGetStartedClick?: () => void;
@@ -293,38 +322,30 @@ export interface MarketingNavProps {
 
 export function MarketingNav({ onSignInClick, onGetStartedClick, forceOpen }: MarketingNavProps) {
   const [openMega, setOpenMega] = useState<MegaKey | null>(forceOpen ?? null);
-  const navRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const { theme, toggleTheme, lang, toggleLang } = useTheme();
 
   const closeMega = useCallback(() => setOpenMega(null), []);
+  const toggleMega = useCallback((key: MegaKey) => {
+    setOpenMega((prev) => (prev === key ? null : key));
+  }, []);
 
-  const toggleMega = useCallback(
-    (key: MegaKey) => {
-      setOpenMega((prev) => (prev === key ? null : key));
-    },
-    [],
-  );
-
-  // ESC closes
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMega();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMega(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [closeMega]);
 
-  // Click-outside closes
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const onClick = (e: MouseEvent) => {
       if (!navRef.current) return;
       if (navRef.current.contains(e.target as Node)) return;
       closeMega();
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
   }, [closeMega]);
 
-  // Sync forceOpen prop (dev preview)
   useEffect(() => {
     if (forceOpen !== undefined) setOpenMega(forceOpen);
   }, [forceOpen]);
@@ -334,241 +355,115 @@ export function MarketingNav({ onSignInClick, onGetStartedClick, forceOpen }: Ma
     solutions: SOLUTIONS_MEGA,
   };
 
+  const linkStyle = { color: "var(--myndlab-fg-muted)" } as const;
+  const onLinkEnter = (e: React.MouseEvent<HTMLElement>) => {
+    (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-hover)";
+  };
+  const onLinkLeave = (e: React.MouseEvent<HTMLElement>) => {
+    (e.currentTarget as HTMLElement).style.color = "var(--myndlab-fg-muted)";
+  };
+
   return (
-    <div
+    <nav
       ref={navRef}
-      style={{
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-        background: "rgba(19,19,19,0.85)",
-        backdropFilter: "blur(24px)",
-        WebkitBackdropFilter: "blur(24px)",
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-      }}
+      className="absolute left-0 right-0 top-0 z-20"
     >
       {/* Nav bar */}
-      <nav
-        style={{
-          maxWidth: 1440,
-          margin: "0 auto",
-          display: "flex",
-          alignItems: "center",
-          padding: "18px 40px",
-          gap: 48,
-        }}
-      >
-        {/* Logo */}
-        <Link
-          to="/"
-          style={{
-            fontSize: 17,
-            fontWeight: 600,
-            letterSpacing: "-0.02em",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flexShrink: 0,
-            color: "#fff",
-            textDecoration: "none",
-          }}
-        >
-          <MyndlabLogo style={{ width: 18, height: 20 }} />
-          MYNDLAB
+      <div className="flex items-center gap-8 px-6 py-4">
+        {/* Logo — left */}
+        <Link to="/" className="flex items-center" style={{ color: "var(--myndlab-fg)" }}>
+          <MyndlabLogo className="h-6 w-auto" />
         </Link>
 
-        {/* Center nav items */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-          {(["features", "solutions"] as MegaKey[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => toggleMega(key)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "8px 14px",
-                borderRadius: 8,
-                color: openMega === key ? "#00D5D8" : "rgba(255,255,255,0.7)",
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: "pointer",
-                background: "transparent",
-                border: 0,
-                fontFamily: "inherit",
-                transition: "color 0.15s ease",
-              }}
-              onMouseEnter={(e) => {
-                if (openMega !== key) (e.currentTarget as HTMLElement).style.color = "#fff";
-              }}
-              onMouseLeave={(e) => {
-                if (openMega !== key) (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.7)";
-              }}
-            >
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-              {/* Slim 12×12 chevron — 1.5px stroke, rotates on active */}
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{
-                  transition: "transform 0.2s ease",
-                  transform: openMega === key ? "rotate(180deg)" : "rotate(0deg)",
-                  opacity: openMega === key ? 1 : 0.6,
-                }}
-              >
-                <path d="M3 5L6 8L9 5" />
-              </svg>
-            </button>
-          ))}
-          <Link
-            to="/pricing"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "8px 14px",
-              borderRadius: 8,
-              color: "rgba(255,255,255,0.7)",
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-              transition: "color 0.15s ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.7)"; }}
-          >
-            Pricing
-          </Link>
-          <Link
-            to="/guide"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "8px 14px",
-              borderRadius: 8,
-              color: "rgba(255,255,255,0.7)",
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-              transition: "color 0.15s ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.7)"; }}
-          >
-            Guide
-          </Link>
-          <Link
-            to="/enterprise"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "8px 14px",
-              borderRadius: 8,
-              color: "#00D5D8",
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-            }}
-          >
-            Enterprise
-          </Link>
-          <Link
-            to="/about"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "8px 14px",
-              borderRadius: 8,
-              color: "rgba(255,255,255,0.7)",
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: "none",
-              transition: "color 0.15s ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.7)"; }}
-          >
+        {/* Nav items — left, immediately after logo */}
+        <div className="flex items-center gap-6">
+          <Link to="/about" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>
             About
+          </Link>
+          <button
+            type="button"
+            onClick={() => toggleMega("features")}
+            className="text-sm inline-flex items-center transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            Features
+            <ChevronDown open={openMega === "features"} />
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleMega("solutions")}
+            className="text-sm inline-flex items-center transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            Solutions
+            <ChevronDown open={openMega === "solutions"} />
+          </button>
+          <Link to="/pricing" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>Pricing</Link>
+          <Link to="/guide" className="text-sm transition-colors" style={linkStyle} onMouseEnter={onLinkEnter} onMouseLeave={onLinkLeave}>Guide</Link>
+          <Link to="/enterprise" className="text-sm text-[#FF2FB3] transition-colors hover:opacity-80">
+            Enterprise
           </Link>
         </div>
 
-        {/* Right: Sign in + Get started */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>
+        {/* Right cluster — language, theme, auth */}
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleLang}
+            aria-label={lang === "en" ? "Switch to Arabic" : "Switch to English"}
+            title={lang === "en" ? "Switch to Arabic" : "Switch to English"}
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            <GlobeIcon />
+            <span className="font-medium tracking-wide">{lang === "en" ? "EN" : "ع"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            className="inline-flex items-center justify-center rounded-full p-2 transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
+          >
+            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+          </button>
+
           <button
             type="button"
             onClick={onSignInClick}
-            style={{
-              color: "rgba(255,255,255,0.7)",
-              fontSize: 14,
-              padding: "8px 14px",
-              background: "transparent",
-              border: 0,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              transition: "color 0.15s ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#fff"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "rgba(255,255,255,0.7)"; }}
+            className="text-sm transition-colors"
+            style={linkStyle}
+            onMouseEnter={onLinkEnter}
+            onMouseLeave={onLinkLeave}
           >
             Sign in
           </button>
           <button
             type="button"
             onClick={onGetStartedClick}
-            style={{
-              background: "#00D5D8",
-              color: "#131313",
-              padding: "9px 18px",
-              borderRadius: 9,
-              fontSize: 14,
-              fontWeight: 600,
-              border: 0,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              transition: "background 0.15s ease",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "#00BCC0"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "#00D5D8"; }}
+            className="rounded-full px-3 py-1.5 text-sm text-[#00D5D8] transition-all hover:bg-[#00D5D8]/15"
           >
             Get started
           </button>
         </div>
-      </nav>
+      </div>
 
-      {/* Mega panels — render both, toggle visibility via opacity/pointer-events */}
-      {(["features", "solutions"] as MegaKey[]).map((key) => {
-        const isOpen = openMega === key;
-        return (
-          <div
-            key={key}
-            style={{
-              position: "absolute",
-              top: "100%",
-              left: 0,
-              right: 0,
-              width: "100vw",
-              background: "linear-gradient(180deg, rgba(17,17,20,0.98) 0%, rgba(13,13,15,0.98) 100%)",
-              backdropFilter: "blur(28px)",
-              WebkitBackdropFilter: "blur(28px)",
-              borderBottom: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
-              transform: isOpen ? "translateY(0)" : "translateY(-12px)",
-              opacity: isOpen ? 1 : 0,
-              pointerEvents: isOpen ? "auto" : "none",
-              transition: "opacity 0.25s cubic-bezier(0.4,0,0.2,1), transform 0.25s cubic-bezier(0.4,0,0.2,1)",
-              zIndex: 95,
-            }}
-          >
-            <MegaPanel config={MEGA_MAP[key]} onClose={closeMega} />
-          </div>
-        );
-      })}
-    </div>
+      {/* Full-width mega panel — anchored below nav, spans 100vw */}
+      {openMega && (
+        <div className="absolute left-0 right-0 top-full">
+          <MegaPanel config={MEGA_MAP[openMega]} onClose={closeMega} />
+        </div>
+      )}
+    </nav>
   );
 }
