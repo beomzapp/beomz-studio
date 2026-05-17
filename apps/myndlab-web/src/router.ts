@@ -158,6 +158,21 @@ const devV2ComponentsRoute = createRoute({
     : () => null,
 });
 
+// BEO-827: /dev/marketing-sections — Section Kit v2 component preview.
+const devMarketingSectionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dev/marketing-sections",
+  component: isDevPreviewEnabled()
+    ? withSuspense(
+        lazy(() =>
+          import("./app/routes/dev/MarketingSectionsPage").then((m) => ({
+            default: m.MarketingSectionsPage,
+          })),
+        ),
+      )
+    : () => null,
+});
+
 /**
  * BEO-580: while a lazy chunk loads, show a transparent placeholder. The
  * inline app shell in index.html is still on screen for the very first
@@ -454,6 +469,7 @@ const versionPreviewRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   devV2ComponentsRoute,
+  devMarketingSectionsRoute,
   landingRoute,
   maintenanceRoute,
   planRoute,
