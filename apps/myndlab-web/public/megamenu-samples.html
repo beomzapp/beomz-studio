@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Myndlab — Mega Menu Sample</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --cyan:    #00D5D8;
+      --magenta: #FF2FB3;
+      --yellow:  #FFF500;
+      --violet:  #7C3AED;
+      --charcoal:#131313;
+      --surface: #1a1a1f;
+      --border:  rgba(255,255,255,0.10);
+    }
+    html, body { margin:0; padding:0; }
+    body {
+      background: var(--charcoal);
+      color: #fff;
+      font-family: "Inter Tight", "DM Sans", system-ui, sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ============ TOP NAV ============ */
+    .nav-wrap {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(19,19,19,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      gap: 32px;
+    }
+    .logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-prism {
+      display: inline-block;
+      width: 18px; height: 20px;
+    }
+    .nav-items {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 1;
+      justify-content: center;
+    }
+    .nav-item {
+      position: relative;
+    }
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      color: rgba(255,255,255,0.75);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      background: transparent;
+      border: 0;
+      font-family: inherit;
+    }
+    .nav-link:hover {
+      color: #fff;
+      background: rgba(255,255,255,0.06);
+    }
+    .nav-link.active {
+      color: var(--cyan);
+      background: rgba(0,213,216,0.08);
+    }
+    .nav-link.enterprise {
+      color: var(--cyan);
+      border: 1px solid rgba(0,213,216,0.3);
+    }
+    .nav-link.enterprise:hover {
+      background: rgba(0,213,216,0.1);
+    }
+    .nav-caret {
+      font-size: 9px;
+      opacity: 0.5;
+      transition: transform 0.2s ease;
+    }
+    .nav-link.active .nav-caret { transform: rotate(180deg); opacity: 1; }
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-signin {
+      color: rgba(255,255,255,0.65);
+      font-size: 14px;
+      text-decoration: none;
+      padding: 8px 14px;
+    }
+    .btn-signin:hover { color: #fff; }
+    .btn-getstarted {
+      background: var(--cyan);
+      color: #131313;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+    .btn-getstarted:hover { background: #00BCC0; }
+
+    /* ============ MEGA MENU PANEL ============ */
+    .mega-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      backdrop-filter: blur(2px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      z-index: 90;
+    }
+    .mega-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .mega {
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translate(-50%, -8px);
+      width: 720px;
+      max-width: calc(100vw - 64px);
+      background: rgba(20,20,24,0.95);
+      backdrop-filter: blur(24px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,213,216,0.05);
+      padding: 24px;
+      margin-top: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 95;
+    }
+    .mega.open {
+      opacity: 1;
+      transform: translate(-50%, 0);
+      pointer-events: auto;
+    }
+    .mega-pricing { width: 780px; }
+
+    .mega-grid {
+      display: grid;
+      gap: 24px;
+    }
+    .mega-grid.two-col { grid-template-columns: 1fr 0.8fr; }
+    .mega-grid.solutions { grid-template-columns: 1fr 1fr; }
+    .mega-section-label {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 14px;
+    }
+    .mega-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .mega-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.12s ease;
+      text-decoration: none;
+      color: inherit;
+    }
+    .mega-item:hover { background: rgba(0,213,216,0.06); }
+    .mega-item-icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.06);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    .mega-item:hover .mega-item-icon {
+      background: rgba(0,213,216,0.15);
+      color: var(--cyan);
+    }
+    .mega-item-text { flex: 1; min-width: 0; }
+    .mega-item-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      margin-bottom: 2px;
+    }
+    .mega-item-blurb {
+      font-size: 12px;
+      color: rgba(255,255,255,0.5);
+      line-height: 1.4;
+    }
+
+    .mega-featured {
+      background: linear-gradient(180deg, rgba(0,213,216,0.06) 0%, rgba(0,213,216,0.02) 100%);
+      border: 1px solid rgba(0,213,216,0.15);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .mega-featured-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(0,213,216,0.15);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--cyan);
+      font-size: 18px;
+    }
+    .mega-featured-title { font-size: 14px; font-weight: 600; }
+    .mega-featured-blurb { font-size: 12px; color: rgba(255,255,255,0.6); line-height: 1.5; }
+    .mega-cta {
+      font-size: 12px;
+      color: var(--cyan);
+      text-decoration: none;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .mega-cta:hover { gap: 8px; }
+
+    /* === Pricing mega — 3 tier cards === */
+    .mega-tiers { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .tier-card {
+      padding: 16px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      text-decoration: none;
+      color: inherit;
+      transition: all 0.15s ease;
+    }
+    .tier-card:hover { border-color: rgba(0,213,216,0.3); background: rgba(0,213,216,0.04); }
+    .tier-card.popular {
+      border-color: rgba(0,213,216,0.4);
+      background: rgba(0,213,216,0.06);
+    }
+    .tier-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tier-badge {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--cyan);
+      color: #131313;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .tier-price {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .tier-price .unit { font-size: 12px; color: rgba(255,255,255,0.4); font-weight: 400; }
+    .tier-bullets {
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: rgba(255,255,255,0.6);
+      line-height: 1.6;
+    }
+    .tier-bullets li::before { content: "✓ "; color: var(--cyan); }
+    .tier-cta {
+      margin-top: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: rgba(0,213,216,0.12);
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 600;
+      text-align: center;
+    }
+    .tier-card.popular .tier-cta {
+      background: var(--cyan);
+      color: #131313;
+    }
+
+    /* ============ HERO STUB (so the page isn't empty) ============ */
+    .hero {
+      min-height: calc(100vh - 64px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 24px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 14px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.4);
+      font-weight: 500;
+      margin: 0 0 20px;
+    }
+    .hero h2 {
+      font-size: 56px;
+      letter-spacing: -0.025em;
+      line-height: 1.1;
+      max-width: 800px;
+      margin: 0 0 16px;
+      font-weight: 600;
+    }
+    .hero h2 .my-cyan { color: var(--cyan); }
+    .hero p { color: rgba(255,255,255,0.55); max-width: 600px; font-size: 14px; line-height: 1.6; }
+    .hero-hint {
+      margin-top: 32px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.35);
+      letter-spacing: 0.08em;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="nav-wrap">
+    <nav class="nav">
+      <a href="#" class="logo" onclick="event.preventDefault()">
+        <svg class="logo-prism" viewBox="0 0 1733 1887" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1230.44 708.8L868.73 904.46L921.4 0L1230.44 708.8Z" fill="currentColor"/>
+          <path d="M480.69 634.72L658.57 746.48L919.23 0.149902L480.69 634.72Z" fill="currentColor"/>
+          <path d="M653.52 753.86L537.44 1066.63L0 1358.15L475.19 639.61L653.52 753.86Z" fill="currentColor"/>
+          <path d="M819.8 1263.59L791.62 1610.3L3.85986 1377.27L550.88 1079.37L819.8 1263.59Z" fill="currentColor"/>
+          <path d="M1728.91 1886.38L800.15 1612.06L828.69 1268.21L1728.91 1886.38Z" fill="currentColor"/>
+          <path d="M1732.59 1878.32L872.46 916.19L1236.9 719.08L1242.41 731.7L1732.59 1878.32Z" fill="currentColor"/>
+        </svg>
+        MYNDLAB
+      </a>
+
+      <div class="nav-items">
+        <div class="nav-item">
+          <button class="nav-link" data-mega="features">Features <span class="nav-caret">▼</span></button>
+          <div class="mega" id="mega-features">
+            <div class="mega-grid two-col">
+              <div>
+                <div class="mega-section-label">Every feature</div>
+                <div class="mega-list">
+                  <a class="mega-item" href="#"><span class="mega-item-icon">⚡</span><div class="mega-item-text"><div class="mega-item-title">AI Code Generation</div><div class="mega-item-blurb">Full stack from a single prompt</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🎙️</span><div class="mega-item-text"><div class="mega-item-title">Voice Brainstorming</div><div class="mega-item-blurb">Talk it out — AI builds the prompt</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🎨</span><div class="mega-item-text"><div class="mega-item-title">Design DNA</div><div class="mega-item-blurb">Set brand once, every app inherits</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">↺</span><div class="mega-item-text"><div class="mega-item-title">Version History</div><div class="mega-item-blurb">Every prompt a snapshot, one-click restore</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">📦</span><div class="mega-item-text"><div class="mega-item-title">Full Stack Output</div><div class="mega-item-blurb">10+ frontend × backend combos</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🌍</span><div class="mega-item-text"><div class="mega-item-title">GCC &amp; Arabic-First</div><div class="mega-item-blurb">Sovereign infra, native RTL</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🚀</span><div class="mega-item-text"><div class="mega-item-title">Export &amp; Deploy</div><div class="mega-item-blurb">Your code, your servers, no lock-in</div></div></a>
+                </div>
+              </div>
+              <div>
+                <div class="mega-section-label">Popular</div>
+                <div class="mega-featured">
+                  <div class="mega-featured-icon">🎙️</div>
+                  <div class="mega-featured-title">Voice Brainstorming</div>
+                  <div class="mega-featured-blurb">Describe your app naturally. AI asks the right follow-ups and turns it into a build prompt. Hands-Free mode keeps it touchless.</div>
+                  <a href="#" class="mega-cta">Try it now →</a>
+                </div>
+                <a href="#" class="mega-cta" style="margin-top:6px">See all features →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nav-item">
+          <button class="nav-link" data-mega="solutions">Solutions <span class="nav-caret">▼</span></button>
+          <div class="mega" id="mega-solutions">
+            <div class="mega-grid solutions">
+              <div>
+                <div class="mega-section-label">By use case</div>
+                <div class="mega-list">
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🚀</span><div class="mega-item-text"><div class="mega-item-title">SaaS MVP</div><div class="mega-item-blurb">Investor-ready demo in hours</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🛠️</span><div class="mega-item-text"><div class="mega-item-title">Internal Tools</div><div class="mega-item-blurb">Admin panels, dashboards, ops flows</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🎨</span><div class="mega-item-text"><div class="mega-item-title">Agencies &amp; Freelancers</div><div class="mega-item-blurb">Working prototype before the meeting ends</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">📚</span><div class="mega-item-text"><div class="mega-item-title">Learning &amp; Education</div><div class="mega-item-blurb">Learn by building real apps</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🧪</span><div class="mega-item-text"><div class="mega-item-title">Rapid Prototyping</div><div class="mega-item-blurb">Five versions of an idea in an afternoon</div></div></a>
+                </div>
+              </div>
+              <div>
+                <div class="mega-section-label">By audience</div>
+                <div class="mega-list">
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🏢</span><div class="mega-item-text"><div class="mega-item-title">Enterprise</div><div class="mega-item-blurb">GCC sovereign, ISO certified, custom</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">💼</span><div class="mega-item-text"><div class="mega-item-title">Startups</div><div class="mega-item-blurb">Ship faster, raise faster</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🎓</span><div class="mega-item-text"><div class="mega-item-title">Education</div><div class="mega-item-blurb">Teach development by building</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🏗️</span><div class="mega-item-text"><div class="mega-item-title">Agencies</div><div class="mega-item-blurb">Deliver more, charge smarter</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🌍</span><div class="mega-item-text"><div class="mega-item-title">GCC &amp; Government</div><div class="mega-item-blurb">Data residency, sovereign cloud</div></div></a>
+                </div>
+                <a href="#" class="mega-cta" style="margin-top:10px;display:block;text-align:right">Book a demo →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nav-item">
+          <button class="nav-link" data-mega="pricing">Pricing <span class="nav-caret">▼</span></button>
+          <div class="mega mega-pricing" id="mega-pricing">
+            <div class="mega-section-label">Choose your plan</div>
+            <div class="mega-tiers">
+              <a class="tier-card" href="#">
+                <div class="tier-name">Free</div>
+                <div class="tier-price">$0<span class="unit"> /mo</span></div>
+                <ul class="tier-bullets">
+                  <li>30 credits / month</li>
+                  <li>1 project</li>
+                  <li>Single-arch apps</li>
+                  <li>Community support</li>
+                </ul>
+                <div class="tier-cta">Start free</div>
+              </a>
+              <a class="tier-card popular" href="#">
+                <div class="tier-name">Pro <span class="tier-badge">Popular</span></div>
+                <div class="tier-price">$29<span class="unit"> /mo</span></div>
+                <ul class="tier-bullets">
+                  <li>200 credits / month</li>
+                  <li>Unlimited projects</li>
+                  <li>Multi-arch + code export</li>
+                  <li>Top-up credit packs</li>
+                  <li>Voice chat with AI</li>
+                </ul>
+                <div class="tier-cta">Upgrade to Pro</div>
+              </a>
+              <a class="tier-card" href="#">
+                <div class="tier-name">Enterprise</div>
+                <div class="tier-price"><span style="font-size:22px">Custom</span></div>
+                <ul class="tier-bullets">
+                  <li>Volume credit pricing</li>
+                  <li>GCC sovereign &amp; ISO</li>
+                  <li>Dedicated support</li>
+                  <li>Audit logs &amp; controls</li>
+                  <li>Custom connectors</li>
+                </ul>
+                <div class="tier-cta">Book a demo</div>
+              </a>
+            </div>
+            <a href="#" class="mega-cta" style="margin-top:14px">See full pricing &amp; credit packs →</a>
+          </div>
+        </div>
+
+        <div class="nav-item">
+          <button class="nav-link" data-mega="guide">Guide <span class="nav-caret">▼</span></button>
+          <div class="mega" id="mega-guide">
+            <div class="mega-grid two-col">
+              <div>
+                <div class="mega-section-label">Learn</div>
+                <div class="mega-list">
+                  <a class="mega-item" href="#"><span class="mega-item-icon">📖</span><div class="mega-item-text"><div class="mega-item-title">Prompting Guide</div><div class="mega-item-blurb">Write better prompts, ship better apps</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">✨</span><div class="mega-item-text"><div class="mega-item-title">Examples</div><div class="mega-item-blurb">Weak vs strong prompts side-by-side</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🔄</span><div class="mega-item-text"><div class="mega-item-title">Plan vs Build mode</div><div class="mega-item-blurb">Shape the idea before generating</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🎯</span><div class="mega-item-text"><div class="mega-item-title">Iteration tips</div><div class="mega-item-blurb">Refine like a pro, page by page</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">❓</span><div class="mega-item-text"><div class="mega-item-title">FAQ</div><div class="mega-item-blurb">Common questions about Myndlab</div></div></a>
+                </div>
+              </div>
+              <div>
+                <div class="mega-section-label">Community</div>
+                <div class="mega-list">
+                  <a class="mega-item" href="#"><span class="mega-item-icon">💬</span><div class="mega-item-text"><div class="mega-item-title">Discord</div><div class="mega-item-blurb">Chat with builders and the team</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">𝕏</span><div class="mega-item-text"><div class="mega-item-title">X / Twitter</div><div class="mega-item-blurb">Product updates &amp; launches</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🤖</span><div class="mega-item-text"><div class="mega-item-title">Reddit</div><div class="mega-item-blurb">r/myndlab community</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">📨</span><div class="mega-item-text"><div class="mega-item-title">Newsletter</div><div class="mega-item-blurb">Monthly tips &amp; new features</div></div></a>
+                  <a class="mega-item" href="#"><span class="mega-item-icon">🆘</span><div class="mega-item-text"><div class="mega-item-title">Support</div><div class="mega-item-blurb">hello@myndlab.ai</div></div></a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nav-item">
+          <a href="#" class="nav-link enterprise">Enterprise</a>
+        </div>
+
+        <div class="nav-item">
+          <a href="#" class="nav-link">About</a>
+        </div>
+      </div>
+
+      <div class="nav-right">
+        <a href="#" class="btn-signin">Sign in</a>
+        <a href="#" class="btn-getstarted">Get started</a>
+      </div>
+    </nav>
+  </div>
+
+  <div class="mega-overlay" id="mega-overlay"></div>
+
+  <main class="hero">
+    <h1>Mega menu — sample</h1>
+    <h2>Click any nav item with <span class="my-cyan">▼</span> to open its mega menu</h2>
+    <p>Features · Solutions · Pricing · Guide each get a glassmorphic dropdown. Enterprise is a single highlighted link (no dropdown — direct CTA path for B2B). About is a plain link. Click outside, press ESC, or click the same item again to close.</p>
+    <div class="hero-hint">Designed to feel like Linear / Stripe / Vercel — restrained, premium, brand-faithful.</div>
+  </main>
+
+<script>
+  const overlay = document.getElementById('mega-overlay');
+  const triggers = document.querySelectorAll('.nav-link[data-mega]');
+  let currentOpen = null;
+
+  function closeAll() {
+    document.querySelectorAll('.mega.open').forEach(m => m.classList.remove('open'));
+    document.querySelectorAll('.nav-link.active').forEach(b => b.classList.remove('active'));
+    overlay.classList.remove('open');
+    currentOpen = null;
+  }
+
+  triggers.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const target = btn.getAttribute('data-mega');
+      if (currentOpen === target) {
+        closeAll();
+        return;
+      }
+      closeAll();
+      const mega = document.getElementById('mega-' + target);
+      if (!mega) return;
+      mega.classList.add('open');
+      btn.classList.add('active');
+      overlay.classList.add('open');
+      currentOpen = target;
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.mega') || e.target.closest('.nav-link[data-mega]')) return;
+    closeAll();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAll();
+  });
+</script>
+</body>
+</html>
