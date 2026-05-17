@@ -37,4 +37,17 @@ export default defineConfig({
       output: { manualChunks },
     },
   },
+  // Local dev: proxy /api/* to the shared Beomz backend so the browser
+  // sees a same-origin request and CORS preflight isn't required.
+  // Set VITE_API_BASE_URL=/api in apps/myndlab-web/.env to route fetches
+  // through this proxy. Production builds keep the absolute URL.
+  server: {
+    proxy: {
+      "/api": {
+        target: "https://beomz.ai",
+        changeOrigin: true,
+        secure: true,
+      },
+    },
+  },
 });

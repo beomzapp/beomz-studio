@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from "react";
 import { useNavigate, Link } from "@tanstack/react-router";
 import {
   ListChecks,
@@ -96,6 +96,19 @@ function placeCursorAtEnd(el: HTMLElement) {
   sel?.addRange(range);
 }
 
+// Break a long enhance response into paragraphs of N sentences each so it
+// renders as readable blocks instead of a wall of text. Frontend-only —
+// shared /api/enhance backend is unchanged.
+function formatEnhancedAsParagraphs(text: string, sentencesPerParagraph = 3): string {
+  const sentences = text.match(/[^.!?]+[.!?]+\s*/g);
+  if (!sentences || sentences.length <= sentencesPerParagraph) return text.trim();
+  const paragraphs: string[] = [];
+  for (let i = 0; i < sentences.length; i += sentencesPerParagraph) {
+    paragraphs.push(sentences.slice(i, i + sentencesPerParagraph).join("").trim());
+  }
+  return paragraphs.join("\n\n");
+}
+
 export function LandingPage() {
   const { openPricingModal } = usePricingModal();
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
@@ -105,18 +118,33 @@ export function LandingPage() {
   const [hasText, setHasText] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   const [enhancing, setEnhancing] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const [enhanceError, setEnhanceError] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [architecture, setArchitecture] = useState<"single" | "multi">("single");
+  const [h1Height, setH1Height] = useState(0);
 
   const editableRef = useRef<HTMLSpanElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingPromptRef = useRef<string | null>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
   const optionsTriggerRef = useRef<HTMLButtonElement>(null);
+  const h1Ref = useRef<HTMLHeadingElement>(null);
+
+  // Track the h1's rendered height so the toolbar can sit just below it
+  // regardless of how many lines the typed text wraps to. Measure after
+  // every layout commit — useLayoutEffect runs synchronously before paint,
+  // so the toolbar's position lands in the same frame.
+  useLayoutEffect(() => {
+    if (!h1Ref.current) return;
+    const newHeight = h1Ref.current.getBoundingClientRect().height;
+    if (Math.abs(newHeight - h1Height) > 0.5) {
+      setH1Height(newHeight);
+    }
+  });
 
   // Pick 3 random suggestions from the pool on each page mount
   const SUGGESTIONS = useMemo(() => {
@@ -263,10 +291,12 @@ export function LandingPage() {
 
     try {
       const enhanced = await enhancePrompt(promptText);
+      const formatted = formatEnhancedAsParagraphs(enhanced);
 
       el.textContent = "";
       updateFontSize();
-      const words = enhanced.split(" ");
+      setIsTyping(true);
+      const words = formatted.split(" ");
       let i = 0;
       const interval = setInterval(() => {
         if (i < words.length) {
@@ -276,6 +306,7 @@ export function LandingPage() {
         } else {
           clearInterval(interval);
           setEnhancing(false);
+          setIsTyping(false);
           placeCursorAtEnd(el);
           el.focus();
         }
@@ -383,7 +414,7 @@ export function LandingPage() {
                 </button>
                 <button
                   onClick={() => { setAuthModalMode("signup"); setShowAuthModal(true); }}
-                  className="text-sm text-white/30 transition-colors hover:text-white/50"
+                  className="rounded-full px-3 py-1.5 text-sm text-[#00D5D8] transition-all hover:bg-[#00D5D8]/15"
                 >
                   Get started
                 </button>
@@ -392,21 +423,34 @@ export function LandingPage() {
           </div>
         </nav>
 
-        {/* Hero section */}
-        <section className="relative flex h-full flex-col items-center justify-center overflow-x-hidden overflow-y-auto px-4 py-20">
-          {/* Gradient sphere */}
+        {/* Hero section — children absolutely positioned so Build + glow can
+            both sit at exact 50%/50% independent of one another. */}
+        <section className="relative h-full overflow-x-hidden overflow-y-auto px-4 py-20">
+          {/* Gradient sphere — exact section center. Subtle breathing pulse
+              when the prompt is empty; steady once the user starts typing. */}
           <div
-            className="pointer-events-none absolute h-[500px] w-[500px] rounded-full opacity-40 blur-[120px] transition-transform duration-150"
+            className={cn(
+              "pointer-events-none absolute left-1/2 top-1/2 h-[500px] w-[500px] rounded-full blur-[120px] transition-transform duration-150",
+              hasText ? "opacity-40" : "hero-glow-breathing",
+            )}
             style={{
               background:
-                "radial-gradient(circle, #00D5D8 0%, #FF2FB3 65%, #FFF500 95%, transparent 100%)",
-              transform: `scale(${sphereScale})`,
+                "radial-gradient(circle, #00D5D8 0%, transparent 100%)",
+              transform: `translate(-50%, -50%) scale(${sphereScale})`,
             }}
           />
 
-          {/* Attachment pills */}
+          {/* Attachment pills — absolute, anchored to h1's top edge (16px gap
+              above). translateY(-100%) flips the anchor so `top` represents
+              the pills' BOTTOM edge. flex-nowrap keeps them on one row. */}
           {attachedFiles.length > 0 && (
-            <div className="relative z-10 mb-4 flex max-w-2xl flex-wrap justify-center gap-2">
+            <div
+              className="absolute left-1/2 z-10 flex max-w-[90vw] flex-nowrap justify-center gap-2 overflow-x-auto"
+              style={{
+                top: `calc(50% - ${h1Height / 2 - fontSize * 0.25 + 16}px)`,
+                transform: "translate(-50%, -100%)",
+              }}
+            >
               {attachedFiles.map((file, i) => (
                 <AttachmentPill
                   key={i}
@@ -417,15 +461,20 @@ export function LandingPage() {
             </div>
           )}
 
-          {/* Prompt headline — fully editable */}
+          {/* Prompt headline — fully editable. Anchored at exact section
+              midpoint. translateY compensates for the asymmetric paddingBottom
+              on the inner span (= fontSize * 0.25, half the 0.5em padding)
+              so the visible text glyph centers on 50%, not the box center. */}
           <h1
-            className="relative z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
+            ref={h1Ref}
+            className="absolute left-1/2 top-1/2 z-10 w-full max-w-4xl overflow-hidden text-center font-sans text-white"
             style={{
               fontSize: `${fontSize}px`,
               fontWeight: fontWeight,
               lineHeight: 1.4,
               maxHeight: "60vh",
-              transition: "font-size 0.15s ease",
+              transition: "font-size 0.15s ease, transform 0.15s ease",
+              transform: `translate(-50%, calc(-50% + ${fontSize * 0.25}px))`,
             }}
           >
             <span
@@ -441,17 +490,25 @@ export function LandingPage() {
                 !hasText &&
                   "before:content-[attr(data-placeholder)] before:text-white/30",
               )}
-              style={{ paddingBottom: "0.5em", lineHeight: 1.4 }}
+              style={{ paddingBottom: "0.5em", lineHeight: 1.4, whiteSpace: "pre-wrap" }}
             />
           </h1>
 
-          {/* Typing toolbar */}
+          {/* Typing toolbar — absolute. Toolbar's top tracks the h1's actual
+              rendered bottom so it doesn't overlap multi-line text. Hidden
+              while the enhance typewriter runs (h1 grows faster than the
+              toolbar can track at 40ms/word). */}
           <div
             className={cn(
-              "relative mt-4 flex items-center gap-3 transition-opacity duration-200",
+              "absolute left-1/2 -translate-x-1/2 flex items-center gap-3 transition-opacity duration-700 ease-in-out",
               optionsOpen ? "z-[60]" : "z-10",
-              hasText ? "opacity-100" : "pointer-events-none opacity-0",
+              hasText && !isTyping ? "opacity-100" : "pointer-events-none opacity-0",
             )}
+            style={{
+              // h1 box bottom (relative to 50%) = h1Height/2 + fontSize*0.25.
+              // Add 16px gap below.
+              top: `calc(50% + ${h1Height / 2 + fontSize * 0.25 + 16}px)`,
+            }}
           >
             {/* Plan mode toggle */}
             <button
@@ -608,8 +665,11 @@ export function LandingPage() {
             </div>
           </div>
 
-          {/* Suggestion strip */}
-          <div className="relative z-10 mt-4 flex flex-wrap justify-center gap-3">
+          {/* Suggestion strip + kbd hint — absolutely positioned ~80% down so
+              the Build text + toolbar stay vertically centered without these
+              pushing the centered stack up. */}
+          <div className="absolute bottom-[15%] left-0 right-0 z-10 flex flex-col items-center px-4">
+          <div className="flex flex-wrap justify-center gap-3">
             {SUGGESTIONS.map((s, i) => (
               <button
                 key={s}
@@ -639,7 +699,7 @@ export function LandingPage() {
             ))}
           </div>
 
-          <p className="relative z-10 mt-4 text-sm text-white/30">
+          <p className="mt-4 text-sm text-white/30">
             <kbd className="rounded border border-border px-1.5 py-0.5 text-xs text-white/50">
               Tab
             </kbd>{" "}
@@ -649,6 +709,7 @@ export function LandingPage() {
             </kbd>{" "}
             to build
           </p>
+          </div>
         </section>
 
         {/* Mini footer pinned to bottom of viewport */}

@@ -1,15 +1,11 @@
-"use client";
-
-declare const process: {
-  env?: {
-    NEXT_PUBLIC_MAINTENANCE_CODE?: string;
-  };
-};
-
 import { useEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent } from "react";
 import MyndlabLogo from "../../assets/myndlab-logo.svg?react";
 
-const ACCESS_CODE = process.env?.NEXT_PUBLIC_MAINTENANCE_CODE || "544054";
+// Vite inlines `import.meta.env.VITE_*` at build time. `process.env.*` is a
+// Next.js convention that doesn't exist at runtime in a Vite browser bundle
+// and throws ReferenceError in dev (where esbuild doesn't dead-code-eliminate
+// the access). To rotate, set VITE_MAINTENANCE_CODE in apps/myndlab-web/.env.
+const ACCESS_CODE = (import.meta.env.VITE_MAINTENANCE_CODE as string | undefined) || "544054";
 
 export function MaintenancePage() {
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);

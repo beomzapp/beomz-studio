@@ -179,3 +179,17 @@ body {
     color: #6b7280;
   }
 }
+
+/* Subtle breathing pulse for the landing hero glow when the user hasn't
+   started typing. Animates opacity gently so it composes cleanly with
+   the inline transform (translate + cursor-reactive scale) on the glow. */
+@keyframes hero-glow-breathe {
+  0%, 100% { opacity: 0.34; }
+  50%      { opacity: 0.52; }
+}
+.hero-glow-breathing {
+  animation: hero-glow-breathe 4.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow-breathing { animation: none; }
+}
