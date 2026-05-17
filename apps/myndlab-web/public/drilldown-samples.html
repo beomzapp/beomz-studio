@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Myndlab — Drilldown Patterns</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --cyan:    #00D5D8;
+      --magenta: #FF2FB3;
+      --yellow:  #FFF500;
+      --violet:  #7C3AED;
+      --charcoal:#131313;
+      --surface: #1a1a1f;
+      --border:  rgba(255,255,255,0.10);
+    }
+    html, body { margin:0; padding:0; }
+    body {
+      background: var(--charcoal);
+      color: #fff;
+      font-family: "Inter Tight", "DM Sans", system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 32px 24px 80px;
+      box-sizing: border-box;
+    }
+    h1 { font-weight: 600; font-size: 24px; letter-spacing: -0.02em; margin: 0 auto 8px; max-width: 1400px; }
+    p.lede { color: rgba(255,255,255,0.55); font-size: 14px; margin: 0 auto 32px; max-width: 1400px; line-height: 1.6; }
+    .panel-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .panel {
+      background: #0a0a0a;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      position: relative;
+      overflow: hidden;
+      min-height: 540px;
+    }
+    .panel-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .label { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.4); }
+    .name { font-size: 18px; font-weight: 500; }
+    .pitch { font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.55; }
+    .pitch strong { color: var(--cyan); font-weight: 500; }
+    .stage {
+      position: relative;
+      flex: 1;
+      background: linear-gradient(180deg, #0e0e14 0%, #131318 100%);
+      border-radius: 12px;
+      overflow: hidden;
+      padding: 24px;
+      min-height: 340px;
+    }
+    .my-cyan { color: var(--cyan); }
+
+    /* ===== Shared card style ===== */
+    .feature-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .feature-card:hover {
+      background: rgba(0,213,216,0.06);
+      border-color: rgba(0,213,216,0.4);
+      transform: translateY(-2px);
+    }
+    .feature-card .icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      background: rgba(0,213,216,0.15);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--cyan);
+      font-size: 14px;
+      margin-bottom: 10px;
+    }
+    .feature-card .title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+    .feature-card .blurb { font-size: 12px; color: rgba(255,255,255,0.55); line-height: 1.5; }
+
+    /* ===== Pattern A — Drawer ===== */
+    .pattern-a .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .pattern-a .drawer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 70%;
+      height: 100%;
+      background: rgba(15,15,18,0.96);
+      backdrop-filter: blur(16px);
+      border-left: 1px solid rgba(0,213,216,0.25);
+      padding: 24px;
+      box-shadow: -16px 0 48px rgba(0,0,0,0.5);
+      transform: translateX(100%);
+      transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow-y: auto;
+    }
+    .pattern-a .drawer.open { transform: translateX(0); }
+    .pattern-a .drawer-close {
+      position: absolute; top: 16px; right: 16px;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pattern-a .drawer h3 { color: var(--cyan); font-size: 18px; margin: 0 0 12px; }
+    .pattern-a .drawer p { font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.75); }
+    .pattern-a .drawer ul { font-size: 13px; padding-left: 20px; color: rgba(255,255,255,0.65); line-height: 1.7; }
+
+    /* ===== Pattern B — Sub-route (faked as full-screen swap) ===== */
+    .pattern-b .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .pattern-b .deep {
+      position: absolute;
+      inset: 0;
+      background: #0e0e14;
+      padding: 32px 24px;
+      transform: translateY(100%);
+      transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow-y: auto;
+    }
+    .pattern-b .deep.open { transform: translateY(0); }
+    .pattern-b .breadcrumb {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .pattern-b .breadcrumb:hover { color: var(--cyan); }
+    .pattern-b .deep h3 { color: var(--cyan); font-size: 22px; margin: 0 0 12px; }
+    .pattern-b .deep p { font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.75); }
+    .pattern-b .deep ul { font-size: 13px; padding-left: 20px; color: rgba(255,255,255,0.65); line-height: 1.7; }
+    .pattern-b .url-mock {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: rgba(0,213,216,0.7);
+      margin-bottom: 14px;
+    }
+
+    /* ===== Pattern C — Tabs ===== */
+    .pattern-c .tab-strip {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 14px;
+      overflow-x: auto;
+    }
+    .pattern-c .tab {
+      flex: 1;
+      padding: 8px 12px;
+      border: 0;
+      background: transparent;
+      color: rgba(255,255,255,0.55);
+      font-size: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .pattern-c .tab.active {
+      background: rgba(0,213,216,0.15);
+      color: var(--cyan);
+    }
+    .pattern-c .tab-content {
+      padding: 16px;
+    }
+    .pattern-c .tab-content .icon-big {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(0,213,216,0.15);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--cyan);
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+    .pattern-c h3 { color: var(--cyan); font-size: 18px; margin: 0 0 10px; }
+    .pattern-c p { font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.75); margin: 0 0 12px; }
+    .pattern-c ul { font-size: 13px; padding-left: 20px; color: rgba(255,255,255,0.65); line-height: 1.7; margin: 0; }
+
+    /* ===== Pattern D — Carousel ===== */
+    .pattern-d .carousel {
+      position: relative;
+      height: 100%;
+    }
+    .pattern-d .slides {
+      display: flex;
+      transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+      height: 100%;
+    }
+    .pattern-d .slide {
+      min-width: 100%;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .pattern-d .icon-big {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      background: rgba(0,213,216,0.15);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--cyan);
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+    .pattern-d h3 { color: var(--cyan); font-size: 18px; margin: 0 0 10px; }
+    .pattern-d p { font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.75); margin: 0 0 12px; }
+    .pattern-d ul { font-size: 13px; padding-left: 20px; color: rgba(255,255,255,0.65); line-height: 1.7; margin: 0; }
+    .pattern-d .nav-row {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .pattern-d .arrow {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      color: #fff;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+    .pattern-d .arrow:hover {
+      background: rgba(0,213,216,0.15);
+      border-color: rgba(0,213,216,0.4);
+    }
+    .pattern-d .dots {
+      display: flex;
+      gap: 6px;
+    }
+    .pattern-d .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.2);
+      transition: all 0.2s ease;
+    }
+    .pattern-d .dot.active {
+      background: var(--cyan);
+      width: 18px;
+      border-radius: 3px;
+    }
+    .pattern-d .counter {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 0.1em;
+    }
+
+    .winner {
+      max-width: 1400px;
+      margin: 40px auto 0;
+      padding: 18px 22px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,213,216,0.3);
+      background: rgba(0,213,216,0.06);
+      font-size: 13px;
+      color: rgba(255,255,255,0.75);
+      line-height: 1.6;
+    }
+    .winner strong { color: var(--cyan); font-weight: 500; }
+    .winner em { color: rgba(255,255,255,0.5); font-style: normal; }
+  </style>
+</head>
+<body>
+  <h1>Drilldown patterns for /features &amp; /solutions</h1>
+  <p class="lede">
+    Each pattern below shows the same four Myndlab features (AI Code Gen, Voice Brainstorming, Design DNA, Version History) rendered with a different interaction. Click cards / tabs / arrows to test feel. All four are fixed-screen — no scrolling for the user.
+  </p>
+
+  <div class="panel-grid">
+
+    <!-- PATTERN A — Drawer -->
+    <div class="panel pattern-a">
+      <div class="panel-header">
+        <div>
+          <div class="label">Pattern A</div>
+          <div class="name">Card grid + side drawer</div>
+        </div>
+        <div class="my-cyan" style="font-size:12px">Recommended</div>
+      </div>
+      <p class="pitch"><strong>Click any card.</strong> Drawer slides in from the right with the deep-dive. ESC or × closes it back to the grid. Best for 4-8 items where you want fast comparison without losing context.</p>
+      <div class="stage" id="stage-a">
+        <div class="grid">
+          <div class="feature-card" onclick="openDrawer('ai-gen')">
+            <div class="icon">⚡</div>
+            <div class="title">AI Code Generation</div>
+            <div class="blurb">Frontend, backend, DB schema — all generated together.</div>
+          </div>
+          <div class="feature-card" onclick="openDrawer('voice')">
+            <div class="icon">🎙️</div>
+            <div class="title">Voice Brainstorming</div>
+            <div class="blurb">Talk your idea out loud. AI summarises into a prompt.</div>
+          </div>
+          <div class="feature-card" onclick="openDrawer('dna')">
+            <div class="icon">🎨</div>
+            <div class="title">Design DNA</div>
+            <div class="blurb">Set brand once. Every app inherits your style.</div>
+          </div>
+          <div class="feature-card" onclick="openDrawer('versions')">
+            <div class="icon">↺</div>
+            <div class="title">Version History</div>
+            <div class="blurb">Every prompt is a snapshot. Restore in one click.</div>
+          </div>
+        </div>
+        <div class="drawer" id="drawer-a">
+          <button class="drawer-close" onclick="closeDrawer()">×</button>
+          <div id="drawer-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PATTERN B — Sub-route -->
+    <div class="panel pattern-b">
+      <div class="panel-header">
+        <div>
+          <div class="label">Pattern B</div>
+          <div class="name">Card grid + sub-routes</div>
+        </div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.4)">URL per item</div>
+      </div>
+      <p class="pitch"><strong>Click a card.</strong> Full-screen swap (in real app: navigates to <code style="color:var(--cyan)">/features/&lt;slug&gt;</code>). Each deep-dive gets its own URL — better SEO, shareable. Back button returns to grid.</p>
+      <div class="stage" id="stage-b">
+        <div class="grid">
+          <div class="feature-card" onclick="openDeep('ai-gen')">
+            <div class="icon">⚡</div>
+            <div class="title">AI Code Generation</div>
+            <div class="blurb">/features/ai-generation →</div>
+          </div>
+          <div class="feature-card" onclick="openDeep('voice')">
+            <div class="icon">🎙️</div>
+            <div class="title">Voice Brainstorming</div>
+            <div class="blurb">/features/voice →</div>
+          </div>
+          <div class="feature-card" onclick="openDeep('dna')">
+            <div class="icon">🎨</div>
+            <div class="title">Design DNA</div>
+            <div class="blurb">/features/design-dna →</div>
+          </div>
+          <div class="feature-card" onclick="openDeep('versions')">
+            <div class="icon">↺</div>
+            <div class="title">Version History</div>
+            <div class="blurb">/features/version-history →</div>
+          </div>
+        </div>
+        <div class="deep" id="deep-b">
+          <div class="breadcrumb" onclick="closeDeep()">← Features</div>
+          <div class="url-mock" id="deep-url">myndlab.ai/features/...</div>
+          <div id="deep-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PATTERN C — Tabs -->
+    <div class="panel pattern-c">
+      <div class="panel-header">
+        <div>
+          <div class="label">Pattern C</div>
+          <div class="name">Tabs at the top</div>
+        </div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.4)">~5 items max</div>
+      </div>
+      <p class="pitch"><strong>Click a tab.</strong> Content swaps below, no overlay. Always visible, no extra click. Caps at ~5-6 items before tabs scroll horizontally.</p>
+      <div class="stage">
+        <div class="tab-strip">
+          <button class="tab active" onclick="switchTab(0)">AI Code Gen</button>
+          <button class="tab" onclick="switchTab(1)">Voice</button>
+          <button class="tab" onclick="switchTab(2)">Design DNA</button>
+          <button class="tab" onclick="switchTab(3)">Versions</button>
+        </div>
+        <div class="tab-content" id="tab-content"></div>
+      </div>
+    </div>
+
+    <!-- PATTERN D — Carousel -->
+    <div class="panel pattern-d">
+      <div class="panel-header">
+        <div>
+          <div class="label">Pattern D</div>
+          <div class="name">Carousel / slider</div>
+        </div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.4)">One at a time</div>
+      </div>
+      <p class="pitch"><strong>Arrow keys / buttons / swipe.</strong> One full deep-dive at a time. Most fixed-screen-pure, but slower to scan — user can't see all options at once.</p>
+      <div class="stage">
+        <div class="carousel">
+          <div class="slides" id="slides">
+            <!-- slides injected -->
+          </div>
+          <div class="nav-row">
+            <button class="arrow" onclick="slidePrev()">←</button>
+            <div class="dots" id="dots"></div>
+            <div class="counter" id="counter">1 / 4</div>
+            <button class="arrow" onclick="slideNext()">→</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="winner">
+    My pick: <strong>Pattern A — Card grid + side drawer.</strong> Best fit for /features (7 items) and /solutions (5 items): user sees the full lineup at a glance, drilling into any item is one click and one ESC away. Pattern B is the better long-term play if you want individual URLs for SEO (worth doing later, when porting to the real Rust repo). Pattern C caps at 5 items so it limits Features. Pattern D is most "fixed-screen" but worst for scanning.
+  </div>
+
+<script>
+  const FEATURES = {
+    'ai-gen': {
+      icon: '⚡',
+      title: 'AI Code Generation',
+      tagline: 'From prompt to working app in minutes.',
+      body: 'Describe your app in plain English. Myndlab generates a complete, structured full-stack application — frontend, API, database schema, auth — all in one shot. Clean TypeScript, zero boilerplate.',
+      bullets: [
+        'Generates frontend + backend simultaneously',
+        'React, Next.js, Vue, Angular + 10 more stacks',
+        'Auto-wires routing, state, and API calls',
+        'Runs & previews instantly — no setup required',
+      ],
+    },
+    'voice': {
+      icon: '🎙️',
+      title: 'Voice Brainstorming',
+      tagline: 'Think out loud. Build instantly.',
+      body: 'Describe your app naturally in conversation. Our AI listens, asks smart follow-up questions, then summarises your idea into a build prompt. Hands-Free mode keeps it completely touchless.',
+      bullets: [
+        'Real-time speech transcription',
+        'AI asks clarifying questions',
+        'Automatic build summary generation',
+        'Hands-Free continuous listening mode',
+      ],
+    },
+    'dna': {
+      icon: '🎨',
+      title: 'Design DNA',
+      tagline: 'Your style, always consistent.',
+      body: 'Set your visual preferences once — colour palette, typography, spacing, and animation style. Every app you build automatically inherits your design language.',
+      bullets: [
+        'Saved colour palettes and custom brand colours',
+        'Typography presets and custom font pairings',
+        'Spacing and layout density preferences',
+        'Micro-interaction and animation styles',
+      ],
+    },
+    'versions': {
+      icon: '↺',
+      title: 'Version History',
+      tagline: 'Every change saved. Always recoverable.',
+      body: 'Every prompt creates a new version. Browse the full history, preview any snapshot, and restore with one click. Experiment as boldly as you like — nothing is ever lost.',
+      bullets: [
+        'Automatic version snapshot after every build',
+        'Side-by-side visual diff comparison',
+        'One-click restore to any previous state',
+        'Version labels and descriptive notes',
+      ],
+    },
+  };
+
+  const SLUG_TO_URL = {
+    'ai-gen': '/features/ai-generation',
+    'voice': '/features/voice',
+    'dna': '/features/design-dna',
+    'versions': '/features/version-history',
+  };
+
+  function renderFeature(f) {
+    return `
+      <h3>${f.title}</h3>
+      <p style="color:rgba(255,255,255,0.55);font-style:italic;margin-top:-6px;margin-bottom:14px">${f.tagline}</p>
+      <p>${f.body}</p>
+      <ul>${f.bullets.map(b => `<li>${b}</li>`).join('')}</ul>
+    `;
+  }
+
+  // === Pattern A — Drawer ===
+  function openDrawer(slug) {
+    const f = FEATURES[slug];
+    document.getElementById('drawer-content').innerHTML = renderFeature(f);
+    document.getElementById('drawer-a').classList.add('open');
+  }
+  function closeDrawer() {
+    document.getElementById('drawer-a').classList.remove('open');
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeDrawer(); closeDeep(); }
+  });
+
+  // === Pattern B — Sub-route fake ===
+  function openDeep(slug) {
+    const f = FEATURES[slug];
+    document.getElementById('deep-url').textContent = 'myndlab.ai' + SLUG_TO_URL[slug];
+    document.getElementById('deep-content').innerHTML = renderFeature(f);
+    document.getElementById('deep-b').classList.add('open');
+  }
+  function closeDeep() {
+    document.getElementById('deep-b').classList.remove('open');
+  }
+
+  // === Pattern C — Tabs ===
+  const TAB_SLUGS = ['ai-gen', 'voice', 'dna', 'versions'];
+  function switchTab(i) {
+    document.querySelectorAll('.pattern-c .tab').forEach((t, idx) => {
+      t.classList.toggle('active', idx === i);
+    });
+    const f = FEATURES[TAB_SLUGS[i]];
+    document.getElementById('tab-content').innerHTML = `
+      <div class="icon-big">${f.icon}</div>
+      ${renderFeature(f)}
+    `;
+  }
+  switchTab(0);
+
+  // === Pattern D — Carousel ===
+  const SLIDE_SLUGS = ['ai-gen', 'voice', 'dna', 'versions'];
+  let slideIdx = 0;
+  function renderSlides() {
+    document.getElementById('slides').innerHTML = SLIDE_SLUGS.map(slug => {
+      const f = FEATURES[slug];
+      return `<div class="slide">
+        <div class="icon-big">${f.icon}</div>
+        ${renderFeature(f)}
+      </div>`;
+    }).join('');
+    document.getElementById('dots').innerHTML = SLIDE_SLUGS.map((_, i) =>
+      `<div class="dot ${i === 0 ? 'active' : ''}"></div>`
+    ).join('');
+    updateSlide();
+  }
+  function updateSlide() {
+    document.getElementById('slides').style.transform = `translateX(-${slideIdx * 100}%)`;
+    document.querySelectorAll('.pattern-d .dot').forEach((d, i) =>
+      d.classList.toggle('active', i === slideIdx));
+    document.getElementById('counter').textContent = `${slideIdx + 1} / ${SLIDE_SLUGS.length}`;
+  }
+  function slideNext() { slideIdx = (slideIdx + 1) % SLIDE_SLUGS.length; updateSlide(); }
+  function slidePrev() { slideIdx = (slideIdx - 1 + SLIDE_SLUGS.length) % SLIDE_SLUGS.length; updateSlide(); }
+  renderSlides();
+</script>
+</body>
+</html>
