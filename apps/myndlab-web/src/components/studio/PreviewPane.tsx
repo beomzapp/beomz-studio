@@ -516,7 +516,7 @@ export function PreviewPane({
             sandbox="allow-downloads allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts"
             src={activeFrame.src}
             srcDoc={activeFrame.srcDoc}
-            title="Beomz Studio Preview"
+            title="Myndlab Preview"
           />
         )}
 

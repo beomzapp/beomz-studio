@@ -299,7 +299,7 @@ export function AuthModal({ open, onClose, onSuccess, pendingPrompt, initialMode
         <MyndlabLogo className="mx-auto mb-6 block h-7 w-auto text-[#1a1a1a]" />
 
         <h2 className="mb-1 text-center text-lg font-semibold text-[#1a1a1a]">
-          {mode === "signin" ? "Sign in to Beomz" : "Create your account"}
+          {mode === "signin" ? "Sign in to Myndlab" : "Create your account"}
         </h2>
         <p className="mb-6 text-center text-sm text-[#9ca3af]">
           {mode === "signin" ? "Welcome back." : "Start building for free."}

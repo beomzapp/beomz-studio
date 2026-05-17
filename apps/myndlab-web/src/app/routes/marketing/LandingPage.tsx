@@ -662,7 +662,7 @@ export function LandingPage() {
             {" · "}
             <Link to="/support" className="transition-colors hover:text-white/40">Support</Link>
             {" · "}
-            <span>&copy; Beomz 2026</span>
+            <span>&copy; Myndlab 2026</span>
           </p>
         </div>
       </div>

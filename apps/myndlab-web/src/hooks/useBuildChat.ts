@@ -2322,7 +2322,7 @@ export function useBuildChat(projectId: string, options: UseBuildChatOptions = {
   // ─── BEO-589: Report issue — mailto with project + prompt context ────────────
 
   const handleReportIssue = useCallback(() => {
-    const subject = encodeURIComponent("Beomz Build Issue");
+    const subject = encodeURIComponent("Myndlab Build Issue");
     const body = encodeURIComponent(
       `Project: ${resolvedProjectIdRef.current || "unknown"}\nPrompt: ${lastUserPromptRef.current}\nError: build failed`,
     );

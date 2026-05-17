@@ -41,7 +41,7 @@ const DREAM_STEPS = [
       { e: "🏆", l: "Scoreboard", s: "track winners" },
       { e: "👤", l: "User login", s: "who is who" },
       { e: "💬", l: "Comments", s: "let people talk" },
-      { e: "🎁", l: "Surprise me", s: "beomz decides" },
+      { e: "🎁", l: "Surprise me", s: "myndlab decides" },
     ],
   },
   {
@@ -120,7 +120,7 @@ export function DreamItScreen({ onBack }: DreamItScreenProps) {
         {/* Top bar */}
         <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4">
           <div className="text-lg font-bold text-[#1a1a1a]">
-            beomz<span className="text-[#e8580a]">.</span>
+            myndlab<span className="text-[#e8580a]">.</span>
           </div>
         </div>
 
@@ -158,7 +158,7 @@ export function DreamItScreen({ onBack }: DreamItScreenProps) {
       {/* Top bar */}
       <div className="flex items-center justify-between px-6 py-4">
         <div className="text-lg font-bold text-[#1a1a1a]">
-          beomz<span className="text-[#e8580a]">.</span>
+          myndlab<span className="text-[#e8580a]">.</span>
         </div>
         <span className="rounded-full border border-[#e8580a]/30 bg-[#e8580a]/5 px-3 py-1 text-xs font-medium text-[#e8580a]">
           ✦ dream it

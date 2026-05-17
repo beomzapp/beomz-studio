@@ -29,7 +29,7 @@ export function SettingsAIPersonalityPage() {
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-[#1a1a1a]">AI personality</h1>
-          <p className="mt-1 text-sm text-[#6b7280]">Choose how Beomz talks to you while building.</p>
+          <p className="mt-1 text-sm text-[#6b7280]">Choose how Myndlab talks to you while building.</p>
         </div>
 
         <section className="rounded-2xl border border-[#e5e5e5] bg-white p-6">

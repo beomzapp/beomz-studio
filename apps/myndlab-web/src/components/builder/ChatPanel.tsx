@@ -514,10 +514,10 @@ export function ChatPanel({
               onKeyDown={handleKeyDown}
               placeholder={
                 chatModeActive
-                  ? "Chat with Beomz…"
+                  ? "Chat with Myndlab…"
                   : !projectId
                     ? "What are we building today?"
-                    : "Ask Beomz to build or change..."
+                    : "Ask Myndlab to build or change..."
               }
               rows={1}
               className="max-h-[120px] w-full resize-none bg-transparent text-sm text-[#1a1a1a] outline-none placeholder:text-[#9ca3af]"

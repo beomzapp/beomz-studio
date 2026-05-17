@@ -25,16 +25,16 @@ const FAQ_ITEMS: FaqItem[] = [
   {
     id: "gs-1",
     category: "Getting Started",
-    question: "What is Beomz? How do I get started?",
+    question: "What is Myndlab? How do I get started?",
     answer:
-      "Beomz is an AI app builder — describe the app you want and Beomz generates a full working React application with a live preview instantly. To get started, sign up for free, type your idea into the prompt box, and click Build. No coding required.",
+      "Myndlab is an AI app builder — describe the app you want and Myndlab generates a full working React application with a live preview instantly. To get started, sign up for free, type your idea into the prompt box, and click Build. No coding required.",
   },
   {
     id: "gs-2",
     category: "Getting Started",
-    question: "What can I build with Beomz?",
+    question: "What can I build with Myndlab?",
     answer:
-      "Anything that runs in a browser: SaaS dashboards, landing pages, CRMs, task managers, e-commerce stores, booking systems, portfolio sites, internal tools, and more. If you can describe it, Beomz can build it.",
+      "Anything that runs in a browser: SaaS dashboards, landing pages, CRMs, task managers, e-commerce stores, booking systems, portfolio sites, internal tools, and more. If you can describe it, Myndlab can build it.",
   },
   {
     id: "gs-3",
@@ -93,21 +93,21 @@ const FAQ_ITEMS: FaqItem[] = [
     category: "Building Apps",
     question: "What kind of apps can I build?",
     answer:
-      "Beomz generates full React apps — single-page apps, multi-page apps, apps with databases, apps with authentication, dashboards, forms, e-commerce flows, and more. You can iterate with follow-up prompts to extend, redesign, or add features.",
+      "Myndlab generates full React apps — single-page apps, multi-page apps, apps with databases, apps with authentication, dashboards, forms, e-commerce flows, and more. You can iterate with follow-up prompts to extend, redesign, or add features.",
   },
   {
     id: "ba-2",
     category: "Building Apps",
     question: "Can I add a database to my app?",
     answer:
-      "Yes — Beomz provides a built-in database, or you can connect your own Supabase project. Just describe the data model you need and Beomz handles the schema, queries, and UI.",
+      "Yes — Myndlab provides a built-in database, or you can connect your own Supabase project. Just describe the data model you need and Myndlab handles the schema, queries, and UI.",
   },
   {
     id: "ba-3",
     category: "Building Apps",
     question: "Can I add authentication or login to my app?",
     answer:
-      "Yes — just ask Beomz to add it. Auth adapts to whichever database you have connected: mock auth for quick demos, full JWT auth for Neon databases, or native Supabase Auth for BYO Supabase projects.",
+      "Yes — just ask Myndlab to add it. Auth adapts to whichever database you have connected: mock auth for quick demos, full JWT auth for Neon databases, or native Supabase Auth for BYO Supabase projects.",
   },
   {
     id: "ba-4",
@@ -121,7 +121,7 @@ const FAQ_ITEMS: FaqItem[] = [
     category: "Building Apps",
     question: "Can I use a custom domain?",
     answer:
-      "Yes — on all plans. Go to Publish › Custom domain and point your domain's DNS to Beomz. Free SSL is included.",
+      "Yes — on all plans. Go to Publish › Custom domain and point your domain's DNS to Myndlab. Free SSL is included.",
   },
   {
     id: "ba-6",
@@ -248,7 +248,7 @@ export function FaqPage() {
           Frequently asked questions
         </h1>
         <p className="mx-auto mt-3 max-w-md text-[#6b7280]">
-          Everything you need to know about Beomz.
+          Everything you need to know about Myndlab.
         </p>
       </section>
 

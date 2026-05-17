@@ -182,7 +182,7 @@ export function SettingsPage() {
             <h2 className="text-base font-semibold">Chat Personality</h2>
           </div>
           <p className="mb-5 text-sm text-[#6b7280]">
-            Choose how Beomz talks to you while building.
+            Choose how Myndlab talks to you while building.
           </p>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

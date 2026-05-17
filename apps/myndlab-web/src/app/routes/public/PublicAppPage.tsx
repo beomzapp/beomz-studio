@@ -25,7 +25,7 @@ const BADGE = (
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
       <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
-    Built with Beomz
+    Built with Myndlab
   </a>
 );
 
@@ -84,7 +84,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
       if (cancelled) return;
 
       setProjectName(data.projectName);
-      document.title = `${data.projectName} — Built with Beomz`;
+      document.title = `${data.projectName} — Built with Myndlab`;
 
       // Prevent double-boot on StrictMode
       if (bootedRef.current) return;
@@ -203,7 +203,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
               <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <span className="text-lg font-semibold text-[#1a1a1a]" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-              Beomz
+              Myndlab
             </span>
           </div>
 
@@ -245,7 +245,7 @@ export function PublicAppPage({ slug: routerSlug }: { slug: string }) {
             href="https://beomz.ai"
             className="mt-3 rounded-lg bg-[#00D5D8] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#ea6c0e]"
           >
-            Go to Beomz
+            Go to Myndlab
           </a>
         </div>
         {BADGE}

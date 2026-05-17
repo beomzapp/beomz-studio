@@ -278,7 +278,7 @@ function Step1({ creditBalance, onNext, onSkip, isSkipping }: Step1Props) {
         <span className="text-2xl">👋</span>
       </div>
       <h2 className="mt-4 text-xl font-bold text-[#1a1a1a]" style={{ fontFamily: "DM Sans, sans-serif" }}>
-        Welcome to Beomz!
+        Welcome to Myndlab!
       </h2>
       <p className="mt-1 text-sm text-[#6b7280]">
         You have{" "}

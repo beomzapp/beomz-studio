@@ -1069,7 +1069,7 @@ export function DatabasePanel({
           <>
             <ConnectedHeader
               kind="managed"
-              label={`Beomz database · ${shortProjectId(projectId)}`}
+              label={`Myndlab database · ${shortProjectId(projectId)}`}
               onUpgradeClick={() => {
                 setUpgradeOpen(true);
                 setUpgradeError(null);
@@ -1115,7 +1115,7 @@ export function DatabasePanel({
                 Included in plan
               </span>
             </div>
-            <h3 className="text-base font-semibold text-[#1a1a1a]">Beomz database</h3>
+            <h3 className="text-base font-semibold text-[#1a1a1a]">Myndlab database</h3>
             <p className="mt-1 text-sm text-[#6b7280]">Instant Postgres — provisioned in seconds</p>
             <p className="mt-3 text-xs text-[#9ca3af]">Isolated · Auto-scaling · Backed up daily</p>
             <div className="flex-1" />
@@ -1202,7 +1202,7 @@ export function DatabasePanel({
                     Connect your Supabase project
                   </h2>
                   <p className="mt-0.5 text-xs text-[#6b7280]">
-                    Authorize Beomz to access your Supabase account.
+                    Authorize Myndlab to access your Supabase account.
                   </p>
                 </div>
               </div>
@@ -1228,7 +1228,7 @@ export function DatabasePanel({
                 {popupOpening ? "Waiting for authorization…" : "Continue with Supabase"}
               </button>
               <p className="mt-2 text-center text-[11px] text-[#9ca3af]">
-                You'll be asked to authorize Beomz in a popup
+                You'll be asked to authorize Myndlab in a popup
               </p>
 
               {popupClosedError && (
@@ -1577,7 +1577,7 @@ export function DatabasePanel({
               <h2 className="text-lg font-semibold text-[#1a1a1a]">Upgrade to your own database</h2>
               <p className="mt-3 text-sm leading-relaxed text-[#6b7280]">
                 We'll migrate all your data to your Supabase project, then permanently delete your
-                Beomz managed database. This frees up your database slot for another project. This
+                Myndlab managed database. This frees up your database slot for another project. This
                 cannot be undone.
               </p>
 
@@ -1745,7 +1745,7 @@ export function DatabasePanel({
         {!schemaLoading && schemaTables.length === 0 && !schemaError && (
           <div className="rounded-xl border border-dashed border-[#e5e7eb] bg-white p-8 text-center">
             <p className="text-sm font-medium text-[#6b7280]">No tables yet</p>
-            <p className="mt-1 text-xs text-[#9ca3af]">Ask Beomz to create tables in the chat panel.</p>
+            <p className="mt-1 text-xs text-[#9ca3af]">Ask Myndlab to create tables in the chat panel.</p>
           </div>
         )}
 
@@ -2239,7 +2239,7 @@ function ConnectedHeader({
       </span>
       <div className="flex min-w-0 items-center gap-2">
         <span className="truncate text-sm font-semibold text-[#1a1a1a]">
-          {kind === "managed" ? "Beomz database" : `Supabase · ${label}`}
+          {kind === "managed" ? "Myndlab database" : `Supabase · ${label}`}
         </span>
         {kind === "managed" && label.split("· ")[1] && (
           <span className="truncate font-mono text-[11px] text-[#9ca3af]">

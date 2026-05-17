@@ -334,7 +334,7 @@ function FloatingCommandBar({
               ? "Describe what to change…"
               : pickMode
               ? "Click any section to select it..."
-              : "Ask Beomz to change anything… or click a section"
+              : "Ask Myndlab to change anything… or click a section"
           }
           disabled={isGenerating}
           className="flex-1 bg-transparent text-[13px] text-[#1a1a1a] placeholder-[#9ca3af] outline-none min-w-0"

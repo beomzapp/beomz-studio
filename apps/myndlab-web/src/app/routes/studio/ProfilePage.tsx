@@ -118,7 +118,7 @@ export function ProfilePage() {
             <h2 className="text-lg font-semibold" style={{ fontFamily: "DM Sans, sans-serif" }}>Chat Personality</h2>
           </div>
           <p className="mb-5 text-sm text-[#9ca3af]">
-            Choose how Beomz talks to you while building.
+            Choose how Myndlab talks to you while building.
           </p>
 
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">

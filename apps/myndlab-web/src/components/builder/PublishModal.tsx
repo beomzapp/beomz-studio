@@ -228,7 +228,7 @@ export function PublishModal({
         {view === "choose" && (
           <>
             <h2 className="mb-1 text-lg font-semibold text-[#1a1a1a]">Publish your app</h2>
-            <p className="mb-5 text-sm text-[#6b7280]">Deploy to Beomz hosting or export your project.</p>
+            <p className="mb-5 text-sm text-[#6b7280]">Deploy to Myndlab hosting or export your project.</p>
 
             <div className="flex flex-col gap-3">
               <button
