@@ -46,6 +46,15 @@ function AppGate() {
     setHasAccess(hasMaintenanceAccess());
   }, []);
 
+  // Dismiss the inline app shell from index.html once React has committed
+  // its first paint. Running this from a useEffect (vs requestAnimationFrame
+  // after createRoot.render) ensures the loader fades AFTER the route chunk
+  // mounts, not before — otherwise the loader visibly overlaps content for
+  // 1-3s on lazy-loaded routes (e.g. /faq, /privacy).
+  useEffect(() => {
+    hideAppShell();
+  }, []);
+
   if (window.__VITE_MAINTENANCE_MODE__ && !hasAccess) {
     return <MaintenancePage />;
   }
@@ -68,6 +77,3 @@ createRoot(document.getElementById("root")!).render(
     </ThemeProvider>
   </StrictMode>,
 );
-// Wait one frame so the first React paint has committed before fading the
-// shell — prevents a flash of unstyled / empty content.
-requestAnimationFrame(() => requestAnimationFrame(hideAppShell));
