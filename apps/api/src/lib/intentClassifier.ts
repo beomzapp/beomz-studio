@@ -37,6 +37,13 @@ const typeKnownPattern = /\b(website|site|app|dashboard|platform|store|shop|mark
 const featureKnownPattern = /\b(landing page|shop|buy|sell|products|grooming|blog|contact|pricing|accounts|login|signup|auth|dashboard|checkout|booking|appointments|inventory|tasks|todos|notes)\b/i;
 const styleKnownPattern = /\b(dark|minimal|playful|colorful|colourful|kid|kid-centric|kids|modern|clean|luxury|premium|bold|sleek|vibrant|retro|elegant)\b/i;
 const simpleAppPattern = /\b(todo|to-do|task manager|notes app|calculator|timer|weather app|kanban)\b/i;
+const BUILD_TRIGGER_PATTERNS: readonly RegExp[] = [
+  /^\s*build\s+(a|an|the|me|us)\s+/i,
+  /^\s*create\s+(a|an|the|me|us)\s+/i,
+  /^\s*make\s+(a|an|the|me|us)\s+/i,
+  /^\s*build\s+(a\s+)?(complete|full[-\s]?stack)\s+/i,
+  /^\s*create\s+(a\s+)?(complete|full[-\s]?stack)\s+/i,
+];
 
 const classifierResponseSchema = z.object({
   confidence: z.number().min(0).max(1),
@@ -232,6 +239,15 @@ export async function classifyIntent(
       intent: "greeting",
       confidence: 0.99,
       reason: "Hard-coded greeting acknowledgement rule.",
+    };
+  }
+
+  if (BUILD_TRIGGER_PATTERNS.some((pattern) => pattern.test(message))) {
+    return {
+      intent: "build_new",
+      confidence: 0.95,
+      reason: "Hard-coded build-trigger override.",
+      accumulatedContext: trimmed,
     };
   }
 

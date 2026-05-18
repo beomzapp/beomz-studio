@@ -62,7 +62,7 @@ test("classifyIntent fallback detects research from URL-like content", async () 
 });
 
 test("classifyIntent fallback detects question wording", async () => {
-  const result = await classifyIntent("what does this app do", false, false);
+  const result = await classifyIntent("how do i add a database", false, false);
 
   assert.equal(result.intent, "question");
 });
@@ -83,7 +83,7 @@ test("classifyIntent fallback prefers build_new when no files exist", async () =
   const result = await classifyIntent("build a todo app", false, false);
 
   assert.equal(result.intent, "build_new");
-  assert.equal(result.confidence, 0.85);
+  assert.equal(result.confidence, 0.95);
 });
 
 test("classifyIntent fallback scores store website briefs around 0.65", async () => {
@@ -102,6 +102,29 @@ test("classifyIntent fallback keeps vague build requests low confidence", async 
 
   assert.equal(result.intent, "build_new");
   assert.equal(result.confidence, 0.3);
+});
+
+test("classifyIntent hard-overrides long explicit build triggers before Anthropic", async () => {
+  const priorFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    throw new Error("Anthropic should not be called for hard build triggers.");
+  }) as typeof fetch;
+
+  const prompt = `   Build a full-stack Nexus SaaS with multi-tenant workspaces ${"with advanced collaboration, billing, analytics, and admin controls. ".repeat(120)}`;
+
+  try {
+    const result = await classifyIntent(prompt, false, false);
+
+    assert.equal(result.intent, "build_new");
+    assert.equal(result.confidence, 0.95);
+    assert.equal(result.reason, "Hard-coded build-trigger override.");
+    assert.equal(result.accumulatedContext, prompt.trim());
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = priorFetch;
+  }
 });
 
 test("intentClassifier prompt includes the more generous rubric examples", async () => {
