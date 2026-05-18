@@ -4,5 +4,6 @@ export { Eyebrow } from "./Eyebrow";
 export { CheckList } from "./CheckList";
 export { SectionRow } from "./SectionRow";
 export { BentoGrid } from "./BentoGrid";
+export type { Tile, BentoVariant, IconAccent } from "./BentoGrid";
 export { CodeMock } from "./CodeMock";
 export { FinalCtaSection } from "./FinalCtaSection";

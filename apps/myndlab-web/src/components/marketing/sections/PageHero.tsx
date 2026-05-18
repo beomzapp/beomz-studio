@@ -65,7 +65,7 @@ export function PageHero({
       <section
         style={{
           position: "relative",
-          minHeight: "calc(100vh - 80px)",
+          minHeight: "100vh",
           maxWidth: 1280,
           margin: "0 auto",
           padding: "0 24px",

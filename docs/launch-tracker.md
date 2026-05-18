@@ -26,6 +26,49 @@ Single source of truth for the audit-2026-05 rollout. Every audit ticket gets lo
 
 ---
 
+## 🔁 Handover snapshot — 2026-05-18 (Myndlab Design System v2 + MN3 + MN4 shipped)
+
+### What shipped this session
+
+**Live at https://myndlab-dev.beomz.ai** — droplet HEAD will be updated to MN4 final commit after orchestrator pushes.
+
+**Linear tickets closed:**
+- ✅ **BEO-826 (MN3)** — `/faq` refilled with myndlab.ai homepage's 6 verbatim Q&As; stale Beomz-era 22 Q&As removed. Hero copy updated to "Everything you need to know." Single accordion (no category pills). Commit `8836851`. Deployed to droplet (commit `048090d` also dropped the persistent app-shell loader bug — fade now triggers from `useEffect` after React paint).
+- ✅ **BEO-827 (MN4)** — Section Kit v2 components + `/features` page port. 8 new components in `apps/myndlab-web/src/components/marketing/sections/`: `PrismBeams`, `PageHero`, `Eyebrow`, `CheckList`, `SectionRow`, `BentoGrid` (with 4 variants + `iconAccent` for dark tiles), `CodeMock`, `FinalCtaSection`. Cursor delivered the foundation in `cc23e5c`; orchestrator added 3 follow-up tweaks (commit landed in this session): (a) hero `min-height: calc(100vh - 80px)` → `100vh` per Omar visual review, (b) `BentoGrid` rewrite with `variant: "dark"|"cyan"|"magenta"|"yellow"` + `iconAccent` props, (c) `/features` `BENTO_TILES` switched from emoji to Lucide thin-line icons (`Zap`, `Mic`, `Palette`, `Layers`, `History`, `ArrowUpRight`).
+
+### Design System v2 (LOCKED 2026-05-18)
+
+- **Visual SoT:** `apps/myndlab-web/public/mockup-pages-final.html` (committed `bcabec4`). All inner-page work (MN5+) builds against this.
+- **Brand bindings** (from `Myndlab Brand colors.pdf`, section 2.1 + 2.5): Aqua Cyan `#00D5D8` primary, Ultra Violet `#7C3AED` secondary, Hot Magenta `#FF2FB3` reserved for /enterprise, Neon Yellow `#FFF500` for "New" pills + accent icons only, Charcoal `#131313` surface. Cyan/magenta/yellow backgrounds → charcoal text (white fails contrast).
+- **Prism beams** (signature visual): 6 vertical blurred columns refracting upward from the bottom of the hero. Variants: cyan (default for /features /pricing /about /solutions /guide), magenta (reserved for /enterprise). Full multi-color prism was rejected by Omar — variant dropped from spec.
+- **Hero treatment:** `min-height: 100vh`, flex centered, scroll cue at bottom (absolute), prism beams behind.
+- **Bento grid** (used on /features): 3×2 equal-tile grid, no wide tile. Per-tile `variant`: cyan / magenta / yellow banded tiles (3) interspersed with dark/glass tiles (3) carrying colored Lucide icons. Each brand color appears twice across the grid (once as band, once as icon).
+- **Pages NOT touched:** homepage (`LandingPage.tsx`), `MarketingNav.tsx`, `MarketingFooter.tsx`, `FaqPage.tsx` (shipped in MN3). All inner-page work composes via the Section Kit, no new layout surgery.
+
+### Memory rules established this session
+
+- `feedback_small_fixes_direct.md` — single-file ≤10-line deterministic fixes: edit directly, no permission, no ticket
+- `feedback_dev_server_first.md` — for ALL UI changes: run local dev server + screenshot + visual sign-off BEFORE pushing/deploying
+- `reference_myndlab_design_system_v2.md` — Section Kit components, color rules per page, what's locked, mockup SoT
+
+### What's NOT done — queued for next sessions
+
+- **MN5** — `/solutions` (reuses kit, verbatim port of live myndlab.ai/solutions 5 use cases)
+- **MN6** — `/pricing` (reuses kit + new `PricingColumns` component, port of live 3 tiers + credit packs + voice)
+- **MN7** — `/enterprise` (magenta variant — Enterprise tier features + GCC Sovereign + Arabic-First pillars)
+- **MN8** — `/about` (cyan variant — Permus story + ISO + 6 principles + community)
+- **MN9** — `/guide` (cyan variant + interactive Prompt Builder widget — non-trivial sub-component)
+- **/dev/marketing-sections** — kit dev preview at `/dev/marketing-sections` (gated on `import.meta.env.DEV` or `localStorage.beomz:devMode`), updated this session to include the new bento variants
+- **Local repo drift:** `CLAUDE.md`, `CODEX.md`, `CURSOR.md`, `.claude/commands/`, `docs/chat-panel-v2-design.md`, intermediate mockups (`mockup-bento.html`, `mockup-home.html`, `mockup-pages.html`, `prism-mockup.html`) still untracked — orchestrator scaffolding + design exploration. Decide to commit or formalise later.
+
+### Immediate next-actions for new Claude session
+
+1. Read `reference_myndlab_design_system_v2.md` + `feedback_dev_server_first.md` + `feedback_small_fixes_direct.md` before touching inner pages.
+2. Check live URL https://myndlab-dev.beomz.ai/features — should show the bento grid with banded tiles (cyan AI Code · yellow Design DNA · magenta Version History) + 3 dark tiles with colored Lucide icons.
+3. Continue MN5 (`/solutions`) — much smaller ticket since the kit is built. Pattern: copy /features file → swap content + variants.
+
+---
+
 ## 🔁 Handover snapshot — 2026-05-17 (Myndlab playground — full session push)
 
 ### What shipped today

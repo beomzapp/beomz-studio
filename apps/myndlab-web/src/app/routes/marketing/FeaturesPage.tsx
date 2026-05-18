@@ -1,46 +1,61 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { ArrowUpRight, History, Layers, Mic, Palette, Zap } from "lucide-react";
 import { MarketingPageLayout } from "../../../components/marketing/MarketingPageLayout";
 import {
   PageHero,
   BentoGrid,
+  type Tile,
   SectionRow,
   CodeMock,
   FinalCtaSection,
 } from "../../../components/marketing/sections";
 import { AuthModal } from "../../../components/auth/AuthModal";
 
-const BENTO_TILES = [
+const ICON_PROPS = { size: 22, strokeWidth: 1.5 } as const;
+
+// Tile order matches the locked mockup (apps/myndlab-web/public/mockup-bento.html):
+// Row 1: [AI Code CYAN] [Voice dark/cyan-icon] [Design DNA YELLOW]
+// Row 2: [Full Stack dark/magenta-icon] [Version History MAGENTA] [Export dark/yellow-icon]
+const BENTO_TILES: Tile[] = [
   {
-    icon: "⚡",
+    icon: <Zap {...ICON_PROPS} />,
     title: "AI Code Generation",
     body: "Describe your app in plain English. Myndlab generates the complete full-stack application — frontend, API, database schema, auth — all in one shot.",
-    wide: true,
+    variant: "cyan",
   },
   {
-    icon: "🎙",
+    icon: <Mic {...ICON_PROPS} />,
     title: "Voice Brainstorming",
-    body: "Talk through your idea — Myndlab shapes the build prompt.",
+    body: "Talk through your idea — Myndlab listens, asks the right follow-ups, and shapes the prompt.",
+    variant: "dark",
+    iconAccent: "cyan",
   },
   {
-    icon: "🎨",
+    icon: <Palette {...ICON_PROPS} />,
     title: "Design DNA",
-    body: "Set brand once. Every app inherits the system.",
+    body: "Set your brand once — every app inherits the system.",
+    variant: "yellow",
   },
   {
-    icon: "⟲",
+    icon: <Layers {...ICON_PROPS} />,
+    title: "Full Stack Output",
+    body: "10+ frontend × backend stack combinations. Frontend, API, DB schema, auth — all generated together.",
+    variant: "dark",
+    iconAccent: "magenta",
+  },
+  {
+    icon: <History {...ICON_PROPS} />,
     title: "Version History",
     body: "Every prompt is a snapshot. Restore anytime.",
+    variant: "magenta",
   },
   {
-    icon: "▦",
-    title: "Full Stack Output",
-    body: "10+ frontend × backend stack combinations.",
-  },
-  {
-    icon: "↗",
+    icon: <ArrowUpRight {...ICON_PROPS} />,
     title: "Export & Deploy",
     body: "Your code, your repo, any server. Zero lock-in.",
+    variant: "dark",
+    iconAccent: "yellow",
   },
 ];
 

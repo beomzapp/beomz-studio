@@ -6,6 +6,7 @@
  * production when localStorage "beomz:devMode" === "true".
  */
 
+import { ArrowUpRight, History, Layers, Mic, Palette, Zap } from "lucide-react";
 import {
   PrismBeams,
   PageHero,
@@ -13,9 +14,12 @@ import {
   CheckList,
   SectionRow,
   BentoGrid,
+  type Tile,
   CodeMock,
   FinalCtaSection,
 } from "../../../components/marketing/sections";
+
+const BENTO_ICON_PROPS = { size: 22, strokeWidth: 1.5 } as const;
 
 function isDevPreviewEnabled(): boolean {
   if (import.meta.env.DEV) return true;
@@ -99,18 +103,13 @@ const DEMO_CODE_LINES = [
   { ln: 12, tokens: [{ kind: "txt" as const, text: "  " }, { kind: "kw" as const, text: "return" }, { kind: "txt" as const, text: " <Dashboard data={contacts} />;" }] },
 ];
 
-const BENTO_TILES = [
-  {
-    icon: "⚡",
-    title: "AI Code Generation",
-    body: "Describe your app in plain English. Myndlab generates the complete full-stack application — frontend, API, database schema, auth — all in one shot.",
-    wide: true,
-  },
-  { icon: "🎙", title: "Voice Brainstorming", body: "Talk through your idea — Myndlab shapes the build prompt." },
-  { icon: "🎨", title: "Design DNA", body: "Set brand once. Every app inherits the system." },
-  { icon: "⟲", title: "Version History", body: "Every prompt is a snapshot. Restore anytime." },
-  { icon: "▦", title: "Full Stack Output", body: "10+ frontend × backend stack combinations." },
-  { icon: "↗", title: "Export & Deploy", body: "Your code, your repo, any server. Zero lock-in." },
+const BENTO_TILES: Tile[] = [
+  { icon: <Zap          {...BENTO_ICON_PROPS} />, title: "AI Code Generation",   body: "Describe your app in plain English. Myndlab generates the complete full-stack application — frontend, API, database schema, auth — all in one shot.", variant: "cyan" },
+  { icon: <Mic          {...BENTO_ICON_PROPS} />, title: "Voice Brainstorming",  body: "Talk through your idea — Myndlab listens, asks the right follow-ups, and shapes the prompt.", variant: "dark", iconAccent: "cyan" },
+  { icon: <Palette      {...BENTO_ICON_PROPS} />, title: "Design DNA",           body: "Set your brand once — every app inherits the system.", variant: "yellow" },
+  { icon: <Layers       {...BENTO_ICON_PROPS} />, title: "Full Stack Output",    body: "10+ frontend × backend stack combinations. Frontend, API, DB schema, auth — all generated together.", variant: "dark", iconAccent: "magenta" },
+  { icon: <History      {...BENTO_ICON_PROPS} />, title: "Version History",      body: "Every prompt is a snapshot. Restore anytime.", variant: "magenta" },
+  { icon: <ArrowUpRight {...BENTO_ICON_PROPS} />, title: "Export & Deploy",      body: "Your code, your repo, any server. Zero lock-in.", variant: "dark", iconAccent: "yellow" },
 ];
 
 const PLACEHOLDER_VISUAL = (
