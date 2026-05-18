@@ -17,6 +17,8 @@ import {
   type Tile,
   CodeMock,
   FinalCtaSection,
+  PricingColumns,
+  type PriceTier,
 } from "../../../components/marketing/sections";
 
 const BENTO_ICON_PROPS = { size: 22, strokeWidth: 1.5 } as const;
@@ -112,6 +114,58 @@ const BENTO_TILES: Tile[] = [
   { icon: <ArrowUpRight {...BENTO_ICON_PROPS} />, title: "Export & Deploy",      body: "Your code, your repo, any server. Zero lock-in.", variant: "dark", iconAccent: "yellow" },
 ];
 
+const DEMO_TIERS: PriceTier[] = [
+  {
+    name: "Basic",
+    amount: "$0",
+    unit: " /mo",
+    description: "Start building with AI — no credit card needed.",
+    features: [
+      { text: "30 free credits on signup (5/day cap)" },
+      { text: "1 project" },
+      { text: "Single-arch apps (frontend only)" },
+      { text: "All templates included" },
+      { text: "Community support" },
+      { text: "Voice chat with AI", included: false },
+      { text: "Code export & download", included: false },
+      { text: "GitHub sync & publish", included: false },
+    ],
+    cta: { label: "Start free", variant: "outline" },
+  },
+  {
+    name: "Pro",
+    amount: "$29",
+    unit: " /mo",
+    description: "For builders and teams shipping consistently.",
+    featured: true,
+    features: [
+      { text: "200 credits/month (no daily cap)" },
+      { text: "Unlimited projects" },
+      { text: "Multi-arch apps (frontend + backend)" },
+      { text: "Code editor access" },
+      { text: "Code export & download" },
+      { text: "GitHub sync & publish" },
+      { text: "Voice chat with AI" },
+      { text: "Priority build queue" },
+    ],
+    cta: { label: "Upgrade to Pro", variant: "cyan" },
+  },
+  {
+    name: "Enterprise",
+    nameColor: "magenta",
+    amount: "Custom",
+    description: "Custom solutions for organisations at scale.",
+    features: [
+      { text: "All Pro features, plus:" },
+      { text: "Volume-based credit pricing" },
+      { text: "Dedicated support & onboarding" },
+      { text: "Custom connectors" },
+      { text: "Audit logs + advanced analytics" },
+    ],
+    cta: { label: "Book a demo", variant: "magenta-outline" },
+  },
+];
+
 const PLACEHOLDER_VISUAL = (
   <div
     style={{
@@ -174,6 +228,7 @@ export function MarketingSectionsPage() {
           "#bento-grid",
           "#code-mock",
           "#final-cta",
+          "#pricing-columns",
         ].map((href) => (
           <a
             key={href}
@@ -206,7 +261,7 @@ export function MarketingSectionsPage() {
             Section Kit v2 — dev preview
           </h1>
           <p style={{ fontSize: 14, color: "rgba(255,255,255,0.50)" }}>
-            BEO-827 · 8 components · All states
+            BEO-827 · BEO-831 · 9 components · All states
           </p>
         </div>
 
@@ -387,6 +442,29 @@ export function MarketingSectionsPage() {
               />
             </div>
           </PreviewBlock>
+        </section>
+
+        {/* ── 9. PricingColumns ───────────────────────────────────── */}
+        <section id="pricing-columns" style={{ marginBottom: 64 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, letterSpacing: "-0.01em" }}>
+            9 · PricingColumns
+          </h2>
+          <div
+            style={{
+              background: "#131313",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 12,
+              overflow: "hidden",
+              paddingTop: 48,
+              paddingBottom: 64,
+            }}
+          >
+            <SectionLabel name="3-tier grid · Basic / Pro (featured) / Enterprise" />
+            <PricingColumns
+              tiers={DEMO_TIERS}
+              footnote="Auto-fix attempts never count against your credits. You only pay for what you ask for."
+            />
+          </div>
         </section>
 
         {/* ── 8. FinalCtaSection ──────────────────────────────────── */}

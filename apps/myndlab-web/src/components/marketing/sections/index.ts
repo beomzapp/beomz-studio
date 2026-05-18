@@ -7,3 +7,5 @@ export { BentoGrid } from "./BentoGrid";
 export type { Tile, BentoVariant, IconAccent } from "./BentoGrid";
 export { CodeMock } from "./CodeMock";
 export { FinalCtaSection } from "./FinalCtaSection";
+export { PricingColumns } from "./PricingColumns";
+export type { PriceFeature, PriceCta, PriceTier } from "./PricingColumns";
