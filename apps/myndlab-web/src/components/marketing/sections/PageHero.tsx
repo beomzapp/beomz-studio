@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { PrismBeams } from "./PrismBeams";
+import { Eyebrow } from "./Eyebrow";
 import type { PrismVariant } from "./PrismBeams";
 
 interface PillConfig {
@@ -7,6 +8,11 @@ interface PillConfig {
   badge: string;
   text: string;
   arrow?: boolean;
+}
+
+interface EyebrowConfig {
+  variant?: PrismVariant;
+  label: string;
 }
 
 interface CtaConfig {
@@ -21,6 +27,7 @@ interface MetricConfig {
 
 export interface PageHeroProps {
   variant: PrismVariant;
+  eyebrow?: EyebrowConfig;
   pill?: PillConfig;
   h1: ReactNode;
   sub: string;
@@ -32,6 +39,7 @@ export interface PageHeroProps {
 
 export function PageHero({
   variant,
+  eyebrow,
   pill,
   h1,
   sub,
@@ -87,6 +95,11 @@ export function PageHero({
             padding: "40px 0",
           }}
         >
+          {/* Eyebrow */}
+          {eyebrow && (
+            <Eyebrow variant={eyebrow.variant}>{eyebrow.label}</Eyebrow>
+          )}
+
           {/* Pill */}
           {pill && (
             <div
